@@ -1,0 +1,37 @@
+name: Go
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        go: [ "1.21", "1.22", "1.23", "1.24" ]
+    name: build & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Go Build
+        run: go build -v ./...
+
+      - name: Go Vet
+        run: go vet ./...
+
+      - name: Go Test
+        run: go test -v -coverprofile=coverage.out -covermode=atomic -race ./...
+
+      - name: Upload coverage to Codecov
+        run: bash <(curl -s https://codecov.io/bash)

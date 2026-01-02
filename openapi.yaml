@@ -1,0 +1,44 @@
+# Generated with protoc-gen-openapi
+# https://github.com/google/gnostic/tree/master/cmd/protoc-gen-openapi
+
+openapi: 3.0.3
+info:
+    title: Auth API
+    version: 0.0.1
+paths:
+    /v1/user/auth/login:
+        post:
+            tags:
+                - Auth
+            operationId: Auth_Login
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.LoginReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.LoginRes'
+components:
+    schemas:
+        api.user.v1.LoginReq:
+            type: object
+            properties:
+                username:
+                    type: string
+                password:
+                    type: string
+        api.user.v1.LoginRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                jwtToken:
+                    type: string
+tags:
+    - name: Auth

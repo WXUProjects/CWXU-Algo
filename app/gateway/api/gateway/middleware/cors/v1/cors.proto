@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package gateway.middleware.cors.v1;
+
+option go_package = "github.com/go-kratos/gateway/api/gateway/middleware/cors/v1";
+
+import "google/protobuf/duration.proto";
+
+// Cors middleware config.
+message Cors {
+    bool allow_credentials = 1;
+    repeated string allow_origins = 2;
+    repeated string allow_methods = 3;
+    repeated string allow_headers = 4;
+    repeated string expose_headers = 5;
+    google.protobuf.Duration max_age = 6;
+    bool allow_private_network = 7;
+}

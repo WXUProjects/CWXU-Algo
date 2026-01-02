@@ -1,0 +1,11 @@
+# This is a gateway config.
+name: helloworld
+version: v1
+endpoints:
+  - path: /v1/user/*
+    timeout: 1s
+    protocol: HTTP
+    backends:
+#      - target: '127.0.0.1:8001'
+      - target: 'discovery:///user'
+#          stripPrefix: /bbs

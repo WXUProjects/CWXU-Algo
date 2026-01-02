@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package gateway.config.v1;
+
+option go_package = "github.com/go-kratos/gateway/api/gateway/config/v1";
+
+import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
+
+message Gateway {
+    string name = 1;
+    string version = 2;
+    repeated string hosts = 3 [deprecated = true];
+    repeated Endpoint endpoints = 4;
+    repeated Middleware middlewares = 5;
+    map<string, TLS> tls_store = 6;
+}
+
+message TLS {
+    bool insecure = 1;
+    string cacert = 2;
+    string cert = 3;
+    string key = 4;
+    string server_name = 5;
+}
+
+message PriorityConfig {
+    string name = 1;
+    string version = 2;
+    repeated Endpoint endpoints = 3;
+}
+
+message Endpoint {
+    string path = 1;
+    string method = 2;
+    string description = 3;
+    Protocol protocol = 4;
+    google.protobuf.Duration timeout = 5;
+    repeated Middleware middlewares = 6;
+    repeated Backend backends = 7;
+    Retry retry = 8;
+    map<string, string> metadata = 9;
+    string host = 10;
+    // stream endpoints are used to support bidirectional request/response like websocket or grpc stream.
+    bool stream = 11;
+}
+
+message Middleware {
+    string name = 1;
+    google.protobuf.Any options = 2;
+    bool required = 3;
+}
+
+message Backend {
+    // localhost
+    // 127.0.0.1:8000
+    // discovery:///service_name
+    string target = 1;
+    optional int64 weight = 2;
+    HealthCheck health_check = 3;
+    bool tls = 4;
+    string tls_config_name = 5;
+    map<string, string> metadata = 6;
+}
+
+enum Protocol {
+    UNSPECIFIED = 0;
+    HTTP = 1;
+    GRPC = 2;
+}
+
+message HealthCheck {}
+
+message Retry {
+    // default attempts is 1
+    uint32 attempts = 1;
+    google.protobuf.Duration per_try_timeout = 2;
+    repeated Condition conditions = 3;
+    // primary,secondary
+    repeated string priorities = 4;
+}
+
+message Condition {
+    message header {
+        string name = 1;
+        string value = 2;
+    }
+    oneof condition {
+        // "500-599", "429"
+        string by_status_code = 1;
+        // {"name": "grpc-status", "value": "14"}
+        header by_header = 2;
+    }
+}

@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package api.user.v1;
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/user/v1;v1";
+option java_multiple_files = true;
+option java_package = "api.user.v1";
+
+service Auth {
+  rpc Login (LoginReq) returns (LoginRes) {
+    option (google.api.http) = {
+      post: "/v1/user/auth/login",
+      body: "*"
+    };
+  }
+}
+
+message LoginReq {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginRes {
+  bool success = 1;
+  string jwtToken = 2;
+}
