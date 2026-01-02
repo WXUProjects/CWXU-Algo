@@ -4,6 +4,7 @@
 openapi: 3.0.3
 info:
     title: Auth API
+    description: Auth 认证服务
     version: 0.0.1
 paths:
     /v1/user/auth/login:
@@ -24,6 +25,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.LoginRes'
+    /v1/user/auth/register:
+        post:
+            tags:
+                - Auth
+            operationId: Auth_Register
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.RegisterReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.RegisterRes'
 components:
     schemas:
         api.user.v1.LoginReq:
@@ -38,7 +57,29 @@ components:
             properties:
                 success:
                     type: boolean
+                message:
+                    type: string
                 jwtToken:
+                    type: string
+        api.user.v1.RegisterReq:
+            type: object
+            properties:
+                username:
+                    type: string
+                password:
+                    type: string
+                name:
+                    type: string
+                email:
+                    type: string
+                groupId:
+                    type: string
+        api.user.v1.RegisterRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
                     type: string
 tags:
     - name: Auth

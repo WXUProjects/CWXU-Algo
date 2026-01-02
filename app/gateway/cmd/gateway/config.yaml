@@ -1,5 +1,5 @@
 # This is a gateway config.
-name: helloworld
+name: cwxu-algo
 version: v1
 endpoints:
   - path: /v1/user/*

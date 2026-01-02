@@ -5,12 +5,18 @@ import "google/api/annotations.proto";
 option go_package = "cwxu-algo/api/user/v1;v1";
 option java_multiple_files = true;
 option java_package = "api.user.v1";
-
+// Auth 认证服务
 service Auth {
   rpc Login (LoginReq) returns (LoginRes) {
     option (google.api.http) = {
       post: "/v1/user/auth/login",
       body: "*"
+    };
+  }
+  rpc Register (RegisterReq) returns (RegisterRes) {
+    option (google.api.http) = {
+      post: "/v1/user/auth/register",
+      body:"*"
     };
   }
 }
@@ -22,5 +28,18 @@ message LoginReq {
 
 message LoginRes {
   bool success = 1;
+  string message = 3;
   string jwtToken = 2;
+}
+
+message RegisterReq {
+  string username = 1;
+  string password = 2;
+  string name = 3;
+  string email = 4;
+  int64 groupId = 5;
+}
+message RegisterRes {
+  bool success = 1;
+  string message = 2;
 }

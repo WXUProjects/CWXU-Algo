@@ -9,6 +9,7 @@ package main
 import (
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/user/internal/conf"
+	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/server"
 	"cwxu-algo/app/user/internal/service"
 	"github.com/go-kratos/kratos/v2"
@@ -22,12 +23,17 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, data *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
 	grpcServer := server.NewGRPCServer(confServer, logger)
-	authService := service.NewAuthService()
+	dataData, cleanup, err := data.NewData(confData)
+	if err != nil {
+		return nil, nil, err
+	}
+	authService := service.NewAuthService(dataData)
 	httpServer := server.NewHTTPServer(confServer, authService, logger)
-	registerRegister := discovery.NewConsulRegister()
-	app := newApp(logger, grpcServer, httpServer, registerRegister)
+	register := discovery.NewConsulRegister()
+	app := newApp(logger, grpcServer, httpServer, register)
 	return app, func() {
+		cleanup()
 	}, nil
 }

@@ -2,6 +2,7 @@ package gorm
 
 import (
 	"cwxu-algo/app/user/internal/conf"
+	"cwxu-algo/app/user/internal/data/gorm/model"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -11,7 +12,7 @@ import (
 func InitGorm(conf *conf.Data) *gorm.DB {
 	var db *gorm.DB
 	var err error
-	switch conf.Database.Source {
+	switch conf.Database.Driver {
 	case "postgres":
 		db, err = gorm.Open(postgres.Open(conf.Database.Source))
 		if err != nil {
@@ -26,7 +27,9 @@ func InitGorm(conf *conf.Data) *gorm.DB {
 
 // migrateModels 合并
 func migrateModels(db *gorm.DB) {
-	err := db.AutoMigrate()
+	err := db.AutoMigrate(
+		&model.User{},
+	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
 	}
