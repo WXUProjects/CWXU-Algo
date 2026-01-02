@@ -1,51 +1,37 @@
-# Kratos Project Template
+# 无锡学院-算法协会网站开发规划
+## 技术栈选型
+### 后端
+- golang
+- kratos 微服务框架
+- redis 缓存
+- rabbitMQ 消息队列
+- mysql
+- ent orm框架
+- consul 注册中心
+- casbin ACL权限控制
 
-## Install Kratos
-```
-go install github.com/go-kratos/kratos/cmd/kratos/v2@latest
-```
-## Create a service
-```
-# Create a template project
-kratos new server
+### 前端
+- 缺失
+### 移动端 仅用于教练管理
+- kotlin
+- jetpack compose
 
-cd server
-# Add a proto template
-kratos proto add api/server/server.proto
-# Generate the proto code
-kratos proto client api/server/server.proto
-# Generate the source code of service by proto file
-kratos proto server api/server/server.proto -t internal/service
+## 功能需求
+### 学生端
+- [ ] 学生自主上报做题情况
+    - 包括 OJ网站，题目名称，涉及算法，备注
+- [ ] 绑定相关做题网站，允许去爬取相关做题记录
+    - 尝试适配 cf nowcoder atcoder leetcode?
+- [ ] 论坛讨论功能计划单独拆开来做，直接跳转到Flarum
+- [ ] 做题排行榜功能
+- [ ] 每场比赛排行榜功能
+- [ ] 色块墙
+- [ ] 做题统计
 
-go generate ./...
-go build -o ./bin/ ./...
-./bin/server -conf ./configs
-```
-## Generate other auxiliary files by Makefile
-```
-# Download and update dependencies
-make init
-# Generate API files (include: pb.go, http, grpc, validate, swagger) by proto file
-make api
-# Generate all files
-make all
-```
-## Automated Initialization (wire)
-```
-# install wire
-go get github.com/google/wire/cmd/wire
+### 教练/管理web端
+- [ ] 分组功能，ACM集训队和算法协会俩组做隔离
+- [ ] 监测学生做题情况，可以认为就是一个不具备上报功能的学生
+- [ ] 允许教练看到题目类型统计
 
-# generate wire
-cd cmd/server
-wire
-```
-
-## Docker
-```bash
-# build
-docker build -t <your-docker-image-name> .
-
-# run
-docker run --rm -p 8000:8000 -p 9000:9000 -v </path/to/your/configs>:/data/conf <your-docker-image-name>
-```
-
+### 教练安卓端
+- 与上方类似
