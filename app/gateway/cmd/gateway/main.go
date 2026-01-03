@@ -23,6 +23,7 @@ import (
 	_ "github.com/go-kratos/gateway/middleware/bbr"
 	"github.com/go-kratos/gateway/middleware/circuitbreaker"
 	_ "github.com/go-kratos/gateway/middleware/cors"
+	_ "github.com/go-kratos/gateway/middleware/jwt"
 	_ "github.com/go-kratos/gateway/middleware/logging"
 	_ "github.com/go-kratos/gateway/middleware/rewrite"
 	_ "github.com/go-kratos/gateway/middleware/streamrecorder"

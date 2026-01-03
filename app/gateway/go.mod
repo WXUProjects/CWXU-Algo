@@ -9,6 +9,7 @@ require (
 	github.com/go-kratos/feature v0.0.0-20230724160043-79ea0633def6
 	github.com/go-kratos/kratos/contrib/registry/consul/v2 v2.0.0-20220318065833-e66a2905ab70
 	github.com/go-kratos/kratos/v2 v2.9.1
+	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/consul/api v1.12.0

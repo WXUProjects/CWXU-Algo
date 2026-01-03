@@ -45,7 +45,7 @@ func FetchSubmitLog(userId int64, username string, needAll bool) (res []model.Su
 		"https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions?user=%s&from_second=%d",
 		username, int(t.Unix()),
 	)
-	// 发起get请求
+	// 发起 Get 请求
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("发起http请求失败: %s", err.Error())

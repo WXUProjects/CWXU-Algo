@@ -45,8 +45,8 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 		"name":     u.Name,
 		"email":    u.Email,
 		"roleIds":  u.RoleIDs,
-		"exp":      expire,
-		"nbf":      time.Now(),
+		"exp":      expire.Unix(),
+		"nbf":      time.Now().Unix(),
 	}).SignedString([]byte(_const.JWTSecret))
 	if err != nil {
 		res.Success = false
