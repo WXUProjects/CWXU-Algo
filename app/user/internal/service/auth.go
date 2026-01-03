@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"time"
 
+	"github.com/go-kratos/kratos/v2/log"
 	"github.com/golang-jwt/jwt/v5"
 
 	pb "cwxu-algo/api/user/v1"
@@ -55,6 +56,7 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 	res.Success = true
 	res.Message = "登录成功"
 	res.JwtToken = jwtToken
+	log.Info(u.Model.CreatedAt)
 	return res, nil
 }
 
