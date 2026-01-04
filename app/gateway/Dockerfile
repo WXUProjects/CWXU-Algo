@@ -11,8 +11,8 @@ USER appuser
 WORKDIR /app
 
 # 从构建上下文复制二进制（GoReleaser 会自动放在这里）
-COPY linux/amd64/gateway .
+COPY server .
 EXPOSE 8080
 EXPOSE 7070
 # 启动命令
-ENTRYPOINT ["./gateway"]
+ENTRYPOINT ["./server"]
