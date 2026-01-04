@@ -36,3 +36,5 @@ bin/
 .vscode/
 .idea/
 *.swp
+# Added by goreleaser init:
+dist/
