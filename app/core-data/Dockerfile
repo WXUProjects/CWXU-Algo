@@ -1,24 +1,19 @@
-FROM golang:1.19 AS builder
 
-COPY . /src
-WORKDIR /src
+# 使用轻量级 alpine 基础镜像
+FROM alpine:latest
 
-RUN GOPROXY=https://goproxy.cn make build
+# 安装必要依赖（如 CA 证书、时区）
+RUN apk --no-cache add ca-certificates tzdata
 
-FROM debian:stable-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-		ca-certificates  \
-        netbase \
-        && rm -rf /var/lib/apt/lists/ \
-        && apt-get autoremove -y && apt-get autoclean -y
-
-COPY --from=builder /src/bin /app
+# 创建非 root 用户（安全最佳实践）
+RUN adduser -D -s /bin/sh appuser
+USER appuser
 
 WORKDIR /app
 
-EXPOSE 8000
-EXPOSE 9000
-VOLUME /data/conf
-
-CMD ["./server", "-conf", "/data/conf"]
+# 从构建上下文复制二进制（GoReleaser 会自动放在这里）
+COPY linux/amd64/server .
+EXPOSE 8001
+EXPOSE 9001
+# 启动命令
+ENTRYPOINT ["./server"]

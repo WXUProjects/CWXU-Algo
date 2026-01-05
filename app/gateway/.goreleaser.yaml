@@ -22,11 +22,11 @@ builds:
       - linux
     goarch:
       - amd64
-    main: ./cmd/core-data/
+    main: ./cmd/gateway/
     binary: server
 dockers_v2:
   - images:
-      - "sanenchen/cwxu-algo-core-data"     # 基础镜像名（不含 tag）
+    - "sanenchen/cwxu-algo-gateway"     # 基础镜像名（不含 tag）
     tags:
       - "{{ .Version }}"
       - "latest"

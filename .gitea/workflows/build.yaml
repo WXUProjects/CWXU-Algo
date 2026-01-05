@@ -1,0 +1,36 @@
+name: Build Dev
+on:
+  push:
+    tags:
+      - '*'  # 通配符匹配所有标签
+jobs:
+  build-go:
+    runs-on: debian
+    steps:
+      # 步骤1：检出仓库代码
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5 # 插件版本（可升级，对应GitHub仓库最新版本）
+        with:
+          go-version: '1.25.5' # 你需要的Go版本（支持1.18+、latest等格式）
+          cache: true # 缓存go mod依赖，提升构建速度
+      # 步骤2：临时提交 go.sum/go.mod 的变更（CI 内临时提交，不推送远程）
+      - name: Commit go.sum changes (CI only)
+        run: |
+          go mod tidy
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add .
+          git commit -m "ci: temp commit go.mod/go.sum for clean Goreleaser build" || echo "No changes to commit"
+          # 注意：|| echo ... 用于避免无变更时 commit 命令失败导致流程中断
+      # 步骤3：执行Go构建/测试（验证环境配置成功）
+      - name: docker login
+        run:  docker login -u ${{ vars.DOCKER_USERNAME }} -p ${{ vars.DOCKER_PASSWORD }}
+      - name: Build & Test Go App
+        run: |
+          go install github.com/goreleaser/goreleaser/v2@latest
+          export GITEA_TOKEN=${{ secrets.GITEA_TOKEN }}
+          cd app/gateway && goreleaser release --clean 
+          cd ../core-data && goreleaser release --clean
+          cd ../user && goreleaser release --clean
