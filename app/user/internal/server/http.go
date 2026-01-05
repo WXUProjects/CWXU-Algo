@@ -2,7 +2,7 @@ package server
 
 import (
 	v1 "cwxu-algo/api/user/v1"
-	"cwxu-algo/app/user/internal/conf"
+	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/user/internal/service"
 
 	"github.com/go-kratos/kratos/v2/log"

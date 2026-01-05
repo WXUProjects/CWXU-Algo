@@ -5,6 +5,7 @@ server:
   grpc:
     addr: 0.0.0.0:9001
     timeout: 1s
+  reg_dsn: 192.168.1.7:8500
 data:
   database:
     driver: postgres

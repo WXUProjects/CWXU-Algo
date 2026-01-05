@@ -7,8 +7,8 @@
 package main
 
 import (
+	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
-	"cwxu-algo/app/user/internal/conf"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/server"
 	"cwxu-algo/app/user/internal/service"
@@ -31,7 +31,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	}
 	authService := service.NewAuthService(dataData)
 	httpServer := server.NewHTTPServer(confServer, authService, logger)
-	register := discovery.NewConsulRegister()
+	register := discovery.NewConsulRegister(confServer)
 	app := newApp(logger, grpcServer, httpServer, register)
 	return app, func() {
 		cleanup()

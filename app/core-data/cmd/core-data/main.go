@@ -5,7 +5,7 @@ import (
 	"flag"
 	"os"
 
-	"cwxu-algo/app/core-data/internal/conf"
+	"cwxu-algo/app/common/conf"
 
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/config"

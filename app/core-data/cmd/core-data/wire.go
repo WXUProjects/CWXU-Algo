@@ -6,8 +6,8 @@
 package main
 
 import (
+	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
-	"cwxu-algo/app/core-data/internal/conf"
 	"cwxu-algo/app/core-data/internal/server"
 
 	"github.com/go-kratos/kratos/v2"

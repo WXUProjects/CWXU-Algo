@@ -6,8 +6,8 @@
 package main
 
 import (
+	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
-	"cwxu-algo/app/user/internal/conf"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/server"
 	"cwxu-algo/app/user/internal/service"

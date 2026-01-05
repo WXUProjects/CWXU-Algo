@@ -23,6 +23,7 @@ message Server {
   }
   HTTP http = 1;
   GRPC grpc = 2;
+  string reg_dsn = 3;
 }
 
 message Data {

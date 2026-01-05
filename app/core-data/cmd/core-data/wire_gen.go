@@ -7,8 +7,8 @@
 package main
 
 import (
+	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
-	"cwxu-algo/app/core-data/internal/conf"
 	"cwxu-algo/app/core-data/internal/server"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
@@ -24,7 +24,7 @@ import (
 func wireApp(confServer *conf.Server, data *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
 	grpcServer := server.NewGRPCServer(confServer, logger)
 	httpServer := server.NewHTTPServer(confServer, logger)
-	register := discovery.NewConsulRegister()
+	register := discovery.NewConsulRegister(confServer)
 	app := newApp(logger, grpcServer, httpServer, register)
 	return app, func() {
 	}, nil
