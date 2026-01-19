@@ -9,23 +9,32 @@ package main
 import (
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/core_data/internal/biz/service"
+	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/server"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
 )
 
 import (
+	_ "cwxu-algo/app/core_data/internal/spider/platform"
 	_ "go.uber.org/automaxprocs"
 )
 
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, data *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
 	grpcServer := server.NewGRPCServer(confServer, logger)
 	httpServer := server.NewHTTPServer(confServer, logger)
 	register := discovery.NewConsulRegister(confServer)
-	app := newApp(logger, grpcServer, httpServer, register)
+	dataData, cleanup, err := data.NewData(confData)
+	if err != nil {
+		return nil, nil, err
+	}
+	spiderUseCase := service.NewSpiderUseCase(dataData)
+	app := newApp(logger, grpcServer, httpServer, register, spiderUseCase)
 	return app, func() {
+		cleanup()
 	}, nil
 }
