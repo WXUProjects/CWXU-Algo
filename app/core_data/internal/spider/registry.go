@@ -4,6 +4,10 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 )
 
+var (
+	NowCoder = "NowCoder"
+	AtCoder  = "AtCoder"
+)
 var registry = map[string]Provider{}
 
 // Register 注册 provider

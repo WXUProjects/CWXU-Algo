@@ -16,6 +16,8 @@ import (
 	"github.com/go-kratos/kratos/v2/transport/http"
 
 	_ "go.uber.org/automaxprocs"
+
+	_ "cwxu-algo/app/core_data/internal/spider/platform"
 )
 
 // go build -ldflags "-X main.Version=x.y.z"
