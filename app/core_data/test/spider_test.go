@@ -12,7 +12,7 @@ func TestSpider(t *testing.T) {
 		t.Run(pm, func(t *testing.T) {
 			if p, ok := spider.Get(pm); ok {
 				if slf, ok := p.(spider.SubmitLogFetcher); ok {
-					r, err := slf.FetchSubmitLog(0, "941786556", true)
+					r, err := slf.FetchSubmitLog(0, "731215097", true)
 					if err != nil {
 						t.Errorf("测试出错 %s", err.Error())
 					}

@@ -14,15 +14,15 @@ var ProviderSet = wire.NewSet(NewData)
 
 // Data .
 type Data struct {
-	db *gorm.DB
+	DB *gorm.DB
 }
 
 // NewData .
 func NewData(c *conf.Data) (*Data, func(), error) {
-	data := &Data{db: gorm2.InitGorm(c)}
+	data := &Data{DB: gorm2.InitGorm(c)}
 	cleanup := func() {
 		log.Info("closing the data resources")
-		sql, _ := data.db.DB()
+		sql, _ := data.DB.DB()
 		sql.Close()
 	}
 	return data, cleanup, nil

@@ -2,6 +2,7 @@ package gorm
 
 import (
 	"cwxu-algo/app/common/conf"
+	"cwxu-algo/app/core_data/internal/data/gorm/model"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -28,7 +29,7 @@ func InitGorm(conf *conf.Data) *gorm.DB {
 
 // migrateModels 合并
 func migrateModels(db *gorm.DB) {
-	err := db.AutoMigrate()
+	err := db.AutoMigrate(&model.SubmitLog{}, &model.Platform{})
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
 	}
