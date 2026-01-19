@@ -32,5 +32,5 @@ jobs:
           go install github.com/goreleaser/goreleaser/v2@latest
           export GITEA_TOKEN=${{ secrets.GITEA_TOKEN }}
           cd app/gateway && goreleaser release --clean 
-          cd ../core-data && goreleaser release --clean
+          cd ../core_data && goreleaser release --clean
           cd ../user && goreleaser release --clean
