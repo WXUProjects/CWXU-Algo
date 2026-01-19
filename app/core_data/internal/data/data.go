@@ -1,8 +1,8 @@
 package data
 
 import (
-	"cwxu-algo/app/core-data/internal/conf"
-	gorm2 "cwxu-algo/app/core-data/internal/data/gorm"
+	"cwxu-algo/app/common/conf"
+	gorm2 "cwxu-algo/app/core_data/internal/data/gorm"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/wire"

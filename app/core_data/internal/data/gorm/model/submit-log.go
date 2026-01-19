@@ -4,6 +4,7 @@ import "time"
 
 type SubmitLog struct {
 	ID       uint      `gorm:"comment:ID"`
+	Platform string    `gorm:"comment:平台"`
 	UserID   int64     `gorm:"comment:用户ID"`
 	SubmitID string    `gorm:"comment:提交ID"`
 	Contest  string    `gorm:"comment:比赛名称"`

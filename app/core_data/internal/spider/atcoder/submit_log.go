@@ -1,7 +1,8 @@
 package atcoder
 
 import (
-	"cwxu-algo/app/core-data/internal/data/gorm/model"
+	"cwxu-algo/app/core_data/internal/data/gorm/model"
+	"cwxu-algo/app/core_data/internal/spider"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"time"
 )
 
+type NewProvider struct{}
 type atcJson struct {
 	ID            int    `json:"id"`
 	EpochSecond   int64  `json:"epoch_second"` // Unix 时间戳（秒）
@@ -34,7 +36,7 @@ type atcJson struct {
 //
 // 注意：
 //   - 有错误要及时return nil, err
-func FetchSubmitLog(userId int64, username string, needAll bool) (res []model.SubmitLog, err error) {
+func (p NewProvider) FetchSubmitLog(userId int64, username string, needAll bool) (res []model.SubmitLog, err error) {
 	// 比如这里的needAll 如果为true 那么second就为0，表示从头到尾所有数据
 	// 如果为false 那么就获取最近一天的数据
 	t := time.Unix(0, 0)
@@ -68,6 +70,7 @@ func FetchSubmitLog(userId int64, username string, needAll bool) (res []model.Su
 	for _, v := range atc {
 		tmp := model.SubmitLog{
 			UserID:   userId,
+			Platform: "AtCoder",
 			SubmitID: strconv.Itoa(v.ID),
 			Contest:  v.ContestID,
 			Problem:  v.ProblemID,
@@ -78,4 +81,11 @@ func FetchSubmitLog(userId int64, username string, needAll bool) (res []model.Su
 		res = append(res, tmp)
 	}
 	return res, nil
+}
+func (p NewProvider) Name() string {
+	return "AtCoder"
+}
+func init() {
+	// 注册到注册中心
+	spider.Register(NewProvider{})
 }

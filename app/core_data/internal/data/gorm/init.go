@@ -1,7 +1,7 @@
 package gorm
 
 import (
-	"cwxu-algo/app/core-data/internal/conf"
+	"cwxu-algo/app/common/conf"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
