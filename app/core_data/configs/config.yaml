@@ -6,6 +6,7 @@ server:
     addr: 0.0.0.0:9001
     timeout: 1s
   reg_dsn: 192.168.1.7:8500
+  amqp_dsn: amqp://cwxu-algo:cwxu-algo@192.168.1.7:5672/algo
 data:
   database:
     driver: postgres

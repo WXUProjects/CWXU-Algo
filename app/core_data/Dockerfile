@@ -15,5 +15,6 @@ WORKDIR /app
 COPY linux/amd64/server .
 EXPOSE 8001
 EXPOSE 9001
+
 # 启动命令
 ENTRYPOINT ["./server"]

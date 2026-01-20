@@ -29,13 +29,18 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool) error {
 		// 爬取数据
 		if p, ok := spider.Get(plat.Platform); ok {
 			if sbFetch, ok := p.(spider.SubmitLogFetcher); ok {
-				log.Infof("爬取%s %s中", plat.Platform, plat.Username)
 				tmp, err := sbFetch.FetchSubmitLog(userId, plat.Username, needAll)
 				if err != nil {
-					log.Error("爬取失败", err.Error())
+					log.Errorf("Spider: %s %s爬取失败", plat.Platform, plat.Username)
+					break
 				}
+				log.Infof("Spider: %s %s爬取成功", plat.Platform, plat.Username)
 				submitLog = append(submitLog, tmp...)
+			} else {
+				log.Errorf("Spider: %s 平台没有实现 SubmitLogFetcher", p.Name())
 			}
+		} else {
+			log.Errorf("Spider: %s 平台对应的插件", p.Name())
 		}
 	}
 	uc.data.DB.Clauses(clause.OnConflict{

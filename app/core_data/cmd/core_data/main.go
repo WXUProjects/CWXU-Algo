@@ -3,6 +3,7 @@ package main
 import (
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/core_data/internal/biz/service"
+	"cwxu-algo/app/core_data/task"
 	"flag"
 	"os"
 
@@ -38,9 +39,9 @@ func init() {
 	flag.StringVar(&flagconf, "conf", "./configs", "config path, eg: -conf config.yaml")
 }
 
-func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, spiderUseCase *service.SpiderUseCase) *kratos.App {
-	// spiderUseCase.LoadData(0, true)
-	// spiderUseCase.LoadData(1, true)
+func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, cm *service.Consumer, cron *task.CronTask) *kratos.App {
+	go cm.Consume()
+	go cron.Do()
 	return kratos.New(
 		kratos.ID(id),
 		kratos.Name(Name),

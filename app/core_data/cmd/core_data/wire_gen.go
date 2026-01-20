@@ -9,9 +9,11 @@ package main
 import (
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/event"
 	"cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/server"
+	"cwxu-algo/app/core_data/task"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
 )
@@ -28,13 +30,22 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	grpcServer := server.NewGRPCServer(confServer, logger)
 	httpServer := server.NewHTTPServer(confServer, logger)
 	register := discovery.NewConsulRegister(confServer)
-	dataData, cleanup, err := data.NewData(confData)
+	rabbitMQ, cleanup, err := event.NewRabbitMQ(confServer)
 	if err != nil {
 		return nil, nil, err
 	}
+	dataData, cleanup2, err := data.NewData(confData)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
 	spiderUseCase := service.NewSpiderUseCase(dataData)
-	app := newApp(logger, grpcServer, httpServer, register, spiderUseCase)
+	consumer := service.NewConsumer(rabbitMQ, spiderUseCase)
+	spiderTask := task.NewSpiderTask(rabbitMQ)
+	cronTask := task.NewCronTask(spiderTask)
+	app := newApp(logger, grpcServer, httpServer, register, consumer, cronTask)
 	return app, func() {
+		cleanup2()
 		cleanup()
 	}, nil
 }
