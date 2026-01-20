@@ -19,7 +19,7 @@ func NewCronTask(spider *SpiderTask) *CronTask {
 func (t *CronTask) Do() {
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 	cr := cron.New(cron.WithLocation(loc))
-	_, _ = cr.AddFunc("* 1 * * *", func() {
+	_, _ = cr.AddFunc("0 * * * *", func() {
 		// 增量查询
 		t.spider.Do(0, false)
 		t.spider.Do(1, false)

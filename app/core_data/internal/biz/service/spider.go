@@ -32,7 +32,7 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool) error {
 				tmp, err := sbFetch.FetchSubmitLog(userId, plat.Username, needAll)
 				if err != nil {
 					log.Errorf("Spider: %s %s爬取失败", plat.Platform, plat.Username)
-					break
+					continue
 				}
 				log.Infof("Spider: %s %s爬取成功", plat.Platform, plat.Username)
 				submitLog = append(submitLog, tmp...)
