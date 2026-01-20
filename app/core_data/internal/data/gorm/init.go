@@ -16,7 +16,7 @@ func InitGorm(conf *conf.Data) *gorm.DB {
 	case "postgres":
 		db, err = gorm.Open(postgres.Open(conf.Database.Source))
 		if err != nil {
-			panic("数据库：postgres数据库连接失败")
+			panic("数据库：postgres数据库连接失败" + err.Error())
 		}
 	}
 	if db != nil {

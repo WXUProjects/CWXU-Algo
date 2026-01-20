@@ -16,7 +16,7 @@ func TestNewRabbitMQ(t *testing.T) {
 	ch, _ := conn.Channel()
 	defer ch.Close()
 	q, _ := ch.QueueDeclare("spider", true, false, false, false, nil)
-	e := SpiderEvent{UserId: 0, NeedAll: true}
+	e := SpiderEvent{UserId: 1, NeedAll: true}
 	body, _ := json.Marshal(e)
 	_ = ch.Publish("", q.Name, false, false, amqp.Publishing{
 		ContentType: "application/json",
