@@ -2,7 +2,6 @@ package dal
 
 import (
 	"context"
-	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/gorm/model"
 	"errors"
@@ -21,29 +20,16 @@ func NewProfileDal(data *data.Data) *ProfileDal {
 	return &ProfileDal{db: data.DB, rdb: data.RDB}
 }
 
-func (d *ProfileDal) GetProfileById(userId int64) (*model.User, error) {
-	ctx := context.Background()
+func (d *ProfileDal) GetProfileById(ctx context.Context, userId int64) (*model.User, error) {
 	cacheKey := fmt.Sprintf("user:%d:profile", userId)
-	// 尝试去查找 key
-	res := d.rdb.Get(ctx, cacheKey)
-	rVal, err := res.Result()
-	profile := model.User{}
-	if err != nil {
-		err := d.db.Where("id = ?", userId).First(&profile).Error
-		if err != nil {
-			return nil, fmt.Errorf("没有找到对应用户信息")
+	profile, _, err := GetCacheDal[model.User](ctx, d.rdb, cacheKey, func(data *model.User) error {
+		err := d.db.Where("id = ?", userId).First(data).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("没有找到相关用户信息")
+		} else if err != nil {
+			return fmt.Errorf("未知错误 %s", err.Error())
 		}
-		b, err := utils.GobEncoder(&profile)
-		if err != nil {
-			return nil, errors.New("gob编码失败")
-		}
-		d.rdb.Set(ctx, cacheKey, b, 0)
-		return &profile, nil
-	}
-	err = utils.GobDecoder([]byte(rVal), &profile)
-	if err != nil {
-		err = fmt.Errorf("缓存解析出错 %s", err.Error())
-		return nil, err
-	}
-	return &profile, nil
+		return nil
+	})
+	return profile, err
 }
