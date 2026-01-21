@@ -37,4 +37,3 @@ bin/
 .idea/
 *.swp
 dist/
-go.sum
