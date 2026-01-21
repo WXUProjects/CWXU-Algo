@@ -10,6 +10,7 @@ import (
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/user/internal/data"
+	"cwxu-algo/app/user/internal/data/dal"
 	"cwxu-algo/app/user/internal/server"
 	"cwxu-algo/app/user/internal/service"
 	"github.com/go-kratos/kratos/v2"
@@ -30,7 +31,8 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 		return nil, nil, err
 	}
 	authService := service.NewAuthService(dataData)
-	profileService := service.NewProfileService(dataData)
+	profileDal := dal.NewProfileDal(dataData)
+	profileService := service.NewProfileService(profileDal)
 	httpServer := server.NewHTTPServer(confServer, authService, profileService, logger)
 	register := discovery.NewConsulRegister(confServer)
 	app := newApp(logger, grpcServer, httpServer, register)

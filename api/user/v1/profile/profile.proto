@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package api.user.v1;
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/user/v1/profile;profile";
+option java_multiple_files = true;
+option java_package = "api.user.v1";
+
+service Profile {
+  rpc GetById (GetByIdReq) returns (GetByIdRes) {
+    option (google.api.http) = {
+      get: "/v1/user/profile/get-by-id"
+    };
+  }
+}
+
+message GetByIdReq {
+  int64 userId = 1;
+}
+
+message GetByIdRes {
+  uint64 userId = 1;
+  string username = 2;
+  string name = 3;
+  string email = 4;
+  int64 groupId = 5;
+  string avatar = 6;
+}

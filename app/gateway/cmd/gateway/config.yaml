@@ -1,8 +1,8 @@
 # This is a gateway config.
 name: cwxu-algo
 version: v1
-middlewares:
-  - name: jwt
+#middlewares:
+#  - name: jwt
 endpoints:
   - path: /v1/user/*
     timeout: 1s

@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v6.33.1
-// source: conf.proto
+// source: app/common/conf/conf.proto
 
 package conf
 
@@ -32,7 +32,7 @@ type Bootstrap struct {
 
 func (x *Bootstrap) Reset() {
 	*x = Bootstrap{}
-	mi := &file_conf_proto_msgTypes[0]
+	mi := &file_app_common_conf_conf_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -44,7 +44,7 @@ func (x *Bootstrap) String() string {
 func (*Bootstrap) ProtoMessage() {}
 
 func (x *Bootstrap) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_proto_msgTypes[0]
+	mi := &file_app_common_conf_conf_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -57,7 +57,7 @@ func (x *Bootstrap) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Bootstrap.ProtoReflect.Descriptor instead.
 func (*Bootstrap) Descriptor() ([]byte, []int) {
-	return file_conf_proto_rawDescGZIP(), []int{0}
+	return file_app_common_conf_conf_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Bootstrap) GetServer() *Server {
@@ -86,7 +86,7 @@ type Server struct {
 
 func (x *Server) Reset() {
 	*x = Server{}
-	mi := &file_conf_proto_msgTypes[1]
+	mi := &file_app_common_conf_conf_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -98,7 +98,7 @@ func (x *Server) String() string {
 func (*Server) ProtoMessage() {}
 
 func (x *Server) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_proto_msgTypes[1]
+	mi := &file_app_common_conf_conf_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -111,7 +111,7 @@ func (x *Server) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Server.ProtoReflect.Descriptor instead.
 func (*Server) Descriptor() ([]byte, []int) {
-	return file_conf_proto_rawDescGZIP(), []int{1}
+	return file_app_common_conf_conf_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Server) GetHttp() *Server_HTTP {
@@ -152,7 +152,7 @@ type Data struct {
 
 func (x *Data) Reset() {
 	*x = Data{}
-	mi := &file_conf_proto_msgTypes[2]
+	mi := &file_app_common_conf_conf_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -164,7 +164,7 @@ func (x *Data) String() string {
 func (*Data) ProtoMessage() {}
 
 func (x *Data) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_proto_msgTypes[2]
+	mi := &file_app_common_conf_conf_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -177,7 +177,7 @@ func (x *Data) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Data.ProtoReflect.Descriptor instead.
 func (*Data) Descriptor() ([]byte, []int) {
-	return file_conf_proto_rawDescGZIP(), []int{2}
+	return file_app_common_conf_conf_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Data) GetDatabase() *Data_Database {
@@ -205,7 +205,7 @@ type Server_HTTP struct {
 
 func (x *Server_HTTP) Reset() {
 	*x = Server_HTTP{}
-	mi := &file_conf_proto_msgTypes[3]
+	mi := &file_app_common_conf_conf_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -217,7 +217,7 @@ func (x *Server_HTTP) String() string {
 func (*Server_HTTP) ProtoMessage() {}
 
 func (x *Server_HTTP) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_proto_msgTypes[3]
+	mi := &file_app_common_conf_conf_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -230,7 +230,7 @@ func (x *Server_HTTP) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Server_HTTP.ProtoReflect.Descriptor instead.
 func (*Server_HTTP) Descriptor() ([]byte, []int) {
-	return file_conf_proto_rawDescGZIP(), []int{1, 0}
+	return file_app_common_conf_conf_proto_rawDescGZIP(), []int{1, 0}
 }
 
 func (x *Server_HTTP) GetNetwork() string {
@@ -265,7 +265,7 @@ type Server_GRPC struct {
 
 func (x *Server_GRPC) Reset() {
 	*x = Server_GRPC{}
-	mi := &file_conf_proto_msgTypes[4]
+	mi := &file_app_common_conf_conf_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -277,7 +277,7 @@ func (x *Server_GRPC) String() string {
 func (*Server_GRPC) ProtoMessage() {}
 
 func (x *Server_GRPC) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_proto_msgTypes[4]
+	mi := &file_app_common_conf_conf_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -290,7 +290,7 @@ func (x *Server_GRPC) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Server_GRPC.ProtoReflect.Descriptor instead.
 func (*Server_GRPC) Descriptor() ([]byte, []int) {
-	return file_conf_proto_rawDescGZIP(), []int{1, 1}
+	return file_app_common_conf_conf_proto_rawDescGZIP(), []int{1, 1}
 }
 
 func (x *Server_GRPC) GetNetwork() string {
@@ -324,7 +324,7 @@ type Data_Database struct {
 
 func (x *Data_Database) Reset() {
 	*x = Data_Database{}
-	mi := &file_conf_proto_msgTypes[5]
+	mi := &file_app_common_conf_conf_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -336,7 +336,7 @@ func (x *Data_Database) String() string {
 func (*Data_Database) ProtoMessage() {}
 
 func (x *Data_Database) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_proto_msgTypes[5]
+	mi := &file_app_common_conf_conf_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -349,7 +349,7 @@ func (x *Data_Database) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Data_Database.ProtoReflect.Descriptor instead.
 func (*Data_Database) Descriptor() ([]byte, []int) {
-	return file_conf_proto_rawDescGZIP(), []int{2, 0}
+	return file_app_common_conf_conf_proto_rawDescGZIP(), []int{2, 0}
 }
 
 func (x *Data_Database) GetDriver() string {
@@ -370,6 +370,7 @@ type Data_Redis struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Network       string                 `protobuf:"bytes,1,opt,name=network,proto3" json:"network,omitempty"`
 	Addr          string                 `protobuf:"bytes,2,opt,name=addr,proto3" json:"addr,omitempty"`
+	Password      string                 `protobuf:"bytes,5,opt,name=password,proto3" json:"password,omitempty"`
 	ReadTimeout   *durationpb.Duration   `protobuf:"bytes,3,opt,name=read_timeout,json=readTimeout,proto3" json:"read_timeout,omitempty"`
 	WriteTimeout  *durationpb.Duration   `protobuf:"bytes,4,opt,name=write_timeout,json=writeTimeout,proto3" json:"write_timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -378,7 +379,7 @@ type Data_Redis struct {
 
 func (x *Data_Redis) Reset() {
 	*x = Data_Redis{}
-	mi := &file_conf_proto_msgTypes[6]
+	mi := &file_app_common_conf_conf_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -390,7 +391,7 @@ func (x *Data_Redis) String() string {
 func (*Data_Redis) ProtoMessage() {}
 
 func (x *Data_Redis) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_proto_msgTypes[6]
+	mi := &file_app_common_conf_conf_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -403,7 +404,7 @@ func (x *Data_Redis) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Data_Redis.ProtoReflect.Descriptor instead.
 func (*Data_Redis) Descriptor() ([]byte, []int) {
-	return file_conf_proto_rawDescGZIP(), []int{2, 1}
+	return file_app_common_conf_conf_proto_rawDescGZIP(), []int{2, 1}
 }
 
 func (x *Data_Redis) GetNetwork() string {
@@ -416,6 +417,13 @@ func (x *Data_Redis) GetNetwork() string {
 func (x *Data_Redis) GetAddr() string {
 	if x != nil {
 		return x.Addr
+	}
+	return ""
+}
+
+func (x *Data_Redis) GetPassword() string {
+	if x != nil {
+		return x.Password
 	}
 	return ""
 }
@@ -434,12 +442,11 @@ func (x *Data_Redis) GetWriteTimeout() *durationpb.Duration {
 	return nil
 }
 
-var File_conf_proto protoreflect.FileDescriptor
+var File_app_common_conf_conf_proto protoreflect.FileDescriptor
 
-const file_conf_proto_rawDesc = "" +
+const file_app_common_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"\n" +
-	"conf.proto\x12\n" +
+	"\x1aapp/common/conf/conf.proto\x12\n" +
 	"kratos.api\x1a\x1egoogle/protobuf/duration.proto\"]\n" +
 	"\tBootstrap\x12*\n" +
 	"\x06server\x18\x01 \x01(\v2\x12.kratos.api.ServerR\x06server\x12$\n" +
@@ -456,33 +463,34 @@ const file_conf_proto_rawDesc = "" +
 	"\x04GRPC\x12\x18\n" +
 	"\anetwork\x18\x01 \x01(\tR\anetwork\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x123\n" +
-	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"\xdd\x02\n" +
+	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"\xf9\x02\n" +
 	"\x04Data\x125\n" +
 	"\bdatabase\x18\x01 \x01(\v2\x19.kratos.api.Data.DatabaseR\bdatabase\x12,\n" +
 	"\x05redis\x18\x02 \x01(\v2\x16.kratos.api.Data.RedisR\x05redis\x1a:\n" +
 	"\bDatabase\x12\x16\n" +
 	"\x06driver\x18\x01 \x01(\tR\x06driver\x12\x16\n" +
-	"\x06source\x18\x02 \x01(\tR\x06source\x1a\xb3\x01\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x1a\xcf\x01\n" +
 	"\x05Redis\x12\x18\n" +
 	"\anetwork\x18\x01 \x01(\tR\anetwork\x12\x12\n" +
-	"\x04addr\x18\x02 \x01(\tR\x04addr\x12<\n" +
+	"\x04addr\x18\x02 \x01(\tR\x04addr\x12\x1a\n" +
+	"\bpassword\x18\x05 \x01(\tR\bpassword\x12<\n" +
 	"\fread_timeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\vreadTimeout\x12>\n" +
 	"\rwrite_timeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\fwriteTimeoutB'Z%cwxu-algo/app/user/internal/conf;confb\x06proto3"
 
 var (
-	file_conf_proto_rawDescOnce sync.Once
-	file_conf_proto_rawDescData []byte
+	file_app_common_conf_conf_proto_rawDescOnce sync.Once
+	file_app_common_conf_conf_proto_rawDescData []byte
 )
 
-func file_conf_proto_rawDescGZIP() []byte {
-	file_conf_proto_rawDescOnce.Do(func() {
-		file_conf_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_conf_proto_rawDesc), len(file_conf_proto_rawDesc)))
+func file_app_common_conf_conf_proto_rawDescGZIP() []byte {
+	file_app_common_conf_conf_proto_rawDescOnce.Do(func() {
+		file_app_common_conf_conf_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_app_common_conf_conf_proto_rawDesc), len(file_app_common_conf_conf_proto_rawDesc)))
 	})
-	return file_conf_proto_rawDescData
+	return file_app_common_conf_conf_proto_rawDescData
 }
 
-var file_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
-var file_conf_proto_goTypes = []any{
+var file_app_common_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_app_common_conf_conf_proto_goTypes = []any{
 	(*Bootstrap)(nil),           // 0: kratos.api.Bootstrap
 	(*Server)(nil),              // 1: kratos.api.Server
 	(*Data)(nil),                // 2: kratos.api.Data
@@ -492,7 +500,7 @@ var file_conf_proto_goTypes = []any{
 	(*Data_Redis)(nil),          // 6: kratos.api.Data.Redis
 	(*durationpb.Duration)(nil), // 7: google.protobuf.Duration
 }
-var file_conf_proto_depIdxs = []int32{
+var file_app_common_conf_conf_proto_depIdxs = []int32{
 	1,  // 0: kratos.api.Bootstrap.server:type_name -> kratos.api.Server
 	2,  // 1: kratos.api.Bootstrap.data:type_name -> kratos.api.Data
 	3,  // 2: kratos.api.Server.http:type_name -> kratos.api.Server.HTTP
@@ -510,26 +518,26 @@ var file_conf_proto_depIdxs = []int32{
 	0,  // [0:10] is the sub-list for field type_name
 }
 
-func init() { file_conf_proto_init() }
-func file_conf_proto_init() {
-	if File_conf_proto != nil {
+func init() { file_app_common_conf_conf_proto_init() }
+func file_app_common_conf_conf_proto_init() {
+	if File_app_common_conf_conf_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conf_proto_rawDesc), len(file_conf_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_app_common_conf_conf_proto_rawDesc), len(file_app_common_conf_conf_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_conf_proto_goTypes,
-		DependencyIndexes: file_conf_proto_depIdxs,
-		MessageInfos:      file_conf_proto_msgTypes,
+		GoTypes:           file_app_common_conf_conf_proto_goTypes,
+		DependencyIndexes: file_app_common_conf_conf_proto_depIdxs,
+		MessageInfos:      file_app_common_conf_conf_proto_msgTypes,
 	}.Build()
-	File_conf_proto = out.File
-	file_conf_proto_goTypes = nil
-	file_conf_proto_depIdxs = nil
+	File_app_common_conf_conf_proto = out.File
+	file_app_common_conf_conf_proto_goTypes = nil
+	file_app_common_conf_conf_proto_depIdxs = nil
 }

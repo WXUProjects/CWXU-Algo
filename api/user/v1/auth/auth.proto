@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package api.user.v1;
 import "google/api/annotations.proto";
-option go_package = "cwxu-algo/api/user/v1;v1";
+option go_package = "cwxu-algo/api/user/v1/auth;auth";
 option java_multiple_files = true;
 option java_package = "api.user.v1";
 // Auth 认证服务

@@ -9,6 +9,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/wire v0.6.0
 	github.com/hashicorp/consul/api v1.33.0
+	github.com/redis/go-redis/v9 v9.17.2
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/streadway/amqp v1.1.0
 	go.uber.org/automaxprocs v1.5.1
@@ -26,6 +27,7 @@ require (
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/fatih/color v1.16.0 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-kratos/aegis v0.2.1-0.20230616030432-99110a3f05f4 // indirect

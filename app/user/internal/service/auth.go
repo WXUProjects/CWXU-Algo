@@ -75,12 +75,12 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 	}
 	// 尝试去注册
 	newUser := &model.User{
-		Username: &req.Username,
-		Password: &req.Password,
-		Avatar:   nil,
-		Name:     &req.Name,
-		Email:    &req.Email,
-		GroupId:  &req.GroupId,
+		Username: req.Username,
+		Password: req.Password,
+		Avatar:   "",
+		Name:     req.Name,
+		Email:    req.Email,
+		GroupId:  req.GroupId,
 		RoleIDs:  nil,
 	}
 	r := s.db.Create(&newUser)
