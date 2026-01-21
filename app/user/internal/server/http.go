@@ -1,20 +1,50 @@
 package server
 
 import (
-	v1 "cwxu-algo/api/user/v1"
+	"context"
+	"cwxu-algo/api/user/v1/auth"
+	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/conf"
+	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/user/internal/service"
 
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/go-kratos/kratos/v2/middleware/auth/jwt"
 	"github.com/go-kratos/kratos/v2/middleware/recovery"
+	"github.com/go-kratos/kratos/v2/middleware/selector"
 	"github.com/go-kratos/kratos/v2/transport/http"
+	jwt2 "github.com/golang-jwt/jwt/v5"
 )
 
+func NewWhiteListMatcher() selector.MatchFunc {
+	whiteList := map[string]string{
+		"/api.user.v1.Auth/Login":      "",
+		"/api.user.v1.Auth/Register":   "",
+		"/api.user.v1.Profile/GetById": "",
+	}
+	return func(ctx context.Context, operation string) bool {
+		// log.Info(operation)
+		if _, ok := whiteList[operation]; ok {
+			return false
+		}
+		return true
+	}
+}
+
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, authService *service.AuthService, logger log.Logger) *http.Server {
+func NewHTTPServer(
+	c *conf.Server,
+	authService *service.AuthService,
+	profileService *service.ProfileService,
+	logger log.Logger,
+
+) *http.Server {
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
+			selector.Server(jwt.Server(func(token *jwt2.Token) (interface{}, error) {
+				return []byte(_const.JWTSecret), nil
+			})).Match(NewWhiteListMatcher()).Build(),
 		),
 	}
 	if c.Http.Network != "" {
@@ -27,6 +57,7 @@ func NewHTTPServer(c *conf.Server, authService *service.AuthService, logger log.
 		opts = append(opts, http.Timeout(c.Http.Timeout.AsDuration()))
 	}
 	srv := http.NewServer(opts...)
-	v1.RegisterAuthHTTPServer(srv, authService)
+	auth.RegisterAuthHTTPServer(srv, authService)
+	profile.RegisterProfileHTTPServer(srv, profileService)
 	return srv
 }

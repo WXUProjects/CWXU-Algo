@@ -5,12 +5,13 @@ server:
   grpc:
     addr: 0.0.0.0:9000
     timeout: 1s
-  reg_dsn: 127.0.0.1:8500
+  reg_dsn: 192.168.1.7:8500
 data:
   database:
     driver: postgres
-    source: host=192.168.1.7 user=cwxu password=cwxu dbname=cwxu-algo-user port=5432 sslmode=disable TimeZone=Asia/Shanghai
+    source: host=192.168.1.7 user=cwxu password=cwxu dbname=algo_user port=5432 sslmode=disable TimeZone=Asia/Shanghai
   redis:
-    addr: 127.0.0.1:6379
+    addr: 192.168.1.7:6379
+    password: cwxu
     read_timeout: 0.2s
     write_timeout: 0.2s

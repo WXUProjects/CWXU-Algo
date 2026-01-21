@@ -30,7 +30,8 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 		return nil, nil, err
 	}
 	authService := service.NewAuthService(dataData)
-	httpServer := server.NewHTTPServer(confServer, authService, logger)
+	profileService := service.NewProfileService(dataData)
+	httpServer := server.NewHTTPServer(confServer, authService, profileService, logger)
 	register := discovery.NewConsulRegister(confServer)
 	app := newApp(logger, grpcServer, httpServer, register)
 	return app, func() {

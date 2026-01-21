@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	pb "cwxu-algo/api/user/v1/auth"
 	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/gorm/model"
@@ -11,8 +12,6 @@ import (
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/golang-jwt/jwt/v5"
-
-	pb "cwxu-algo/api/user/v1"
 
 	"gorm.io/gorm"
 )
@@ -38,7 +37,7 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 		res.Message = "用户名或密码错误"
 		return res, nil
 	}
-	// 制作jwt token
+	// 签发 JWT Token
 	expire := time.Now().Add(12 * time.Hour) // 过期时间12小时
 	jwtToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"username": u.Username,
