@@ -12,6 +12,12 @@ service Profile {
       get: "/v1/user/profile/get-by-id"
     };
   }
+  rpc Update (UpdateReq) returns (UpdateRes) {
+    option (google.api.http) = {
+      post: "/v1/user/profile/update",
+      body: "*",
+    };
+  }
 }
 
 message GetByIdReq {
@@ -25,4 +31,16 @@ message GetByIdRes {
   string email = 4;
   int64 groupId = 5;
   string avatar = 6;
+}
+
+message UpdateReq {
+  uint64 userId = 1;
+  string name = 3;
+  string email = 4;
+  string avatar = 6;
+}
+
+message UpdateRes {
+  int64 code = 1;
+  string message = 2;
 }

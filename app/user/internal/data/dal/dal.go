@@ -13,7 +13,7 @@ import (
 
 var ProviderSet = wire.NewSet(NewProfileDal)
 
-// GetCacheDal 通用带Redis缓存的Dal操作层
+// GetCacheDal 通用带Redis缓存的Dal查询操作层
 //
 // 泛型参数:
 //   - T any 一般要传入一个model结构体
@@ -57,4 +57,29 @@ func GetCacheDal[T any](
 		return nil, false, err
 	}
 	return &data, true, nil
+}
+
+// UpdateCacheDal 通用带Redis缓存的Dal更新操作层
+//
+// 参数:
+//   - ctx context 上下文
+//   - rdb *redis.Client Redis客户端
+//   - cacheKey string Redis缓存键
+//   - dbFunc 数据库更新策略
+//
+// 返回值:
+//   - error 错误信息
+func UpdateCacheDal(
+	ctx context.Context,
+	rdb *redis.Client,
+	cacheKey string,
+	dbFunc func() error,
+) error {
+	err := dbFunc()
+	if err != nil {
+		return err
+	}
+	// 更新成功后把Redis缓存删了
+	_ = rdb.Del(ctx, cacheKey)
+	return nil
 }

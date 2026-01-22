@@ -10,7 +10,6 @@ import (
 	"os/user"
 	"time"
 
-	"github.com/go-kratos/kratos/v2/log"
 	"github.com/golang-jwt/jwt/v5"
 
 	"gorm.io/gorm"
@@ -40,6 +39,7 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 	// 签发 JWT Token
 	expire := time.Now().Add(12 * time.Hour) // 过期时间12小时
 	jwtToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"userId":   u.ID,
 		"username": u.Username,
 		"name":     u.Name,
 		"email":    u.Email,
@@ -55,7 +55,6 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 	res.Success = true
 	res.Message = "登录成功"
 	res.JwtToken = jwtToken
-	log.Info(u.Model.CreatedAt)
 	return res, nil
 }
 

@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	Profile_GetById_FullMethodName = "/api.user.v1.Profile/GetById"
+	Profile_Update_FullMethodName  = "/api.user.v1.Profile/Update"
 )
 
 // ProfileClient is the client API for Profile service.
@@ -27,6 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ProfileClient interface {
 	GetById(ctx context.Context, in *GetByIdReq, opts ...grpc.CallOption) (*GetByIdRes, error)
+	Update(ctx context.Context, in *UpdateReq, opts ...grpc.CallOption) (*UpdateRes, error)
 }
 
 type profileClient struct {
@@ -47,11 +49,22 @@ func (c *profileClient) GetById(ctx context.Context, in *GetByIdReq, opts ...grp
 	return out, nil
 }
 
+func (c *profileClient) Update(ctx context.Context, in *UpdateReq, opts ...grpc.CallOption) (*UpdateRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateRes)
+	err := c.cc.Invoke(ctx, Profile_Update_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProfileServer is the server API for Profile service.
 // All implementations must embed UnimplementedProfileServer
 // for forward compatibility.
 type ProfileServer interface {
 	GetById(context.Context, *GetByIdReq) (*GetByIdRes, error)
+	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 	mustEmbedUnimplementedProfileServer()
 }
 
@@ -64,6 +77,9 @@ type UnimplementedProfileServer struct{}
 
 func (UnimplementedProfileServer) GetById(context.Context, *GetByIdReq) (*GetByIdRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetById not implemented")
+}
+func (UnimplementedProfileServer) Update(context.Context, *UpdateReq) (*UpdateRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Update not implemented")
 }
 func (UnimplementedProfileServer) mustEmbedUnimplementedProfileServer() {}
 func (UnimplementedProfileServer) testEmbeddedByValue()                 {}
@@ -104,6 +120,24 @@ func _Profile_GetById_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Profile_Update_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).Update(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_Update_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).Update(ctx, req.(*UpdateReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Profile_ServiceDesc is the grpc.ServiceDesc for Profile service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -114,6 +148,10 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetById",
 			Handler:    _Profile_GetById_Handler,
+		},
+		{
+			MethodName: "Update",
+			Handler:    _Profile_Update_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

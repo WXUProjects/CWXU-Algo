@@ -20,7 +20,8 @@ func NewProfileDal(data *data.Data) *ProfileDal {
 	return &ProfileDal{db: data.DB, rdb: data.RDB}
 }
 
-func (d *ProfileDal) GetProfileById(ctx context.Context, userId int64) (*model.User, error) {
+// GetById 根据Id获取用户详细信息
+func (d *ProfileDal) GetById(ctx context.Context, userId int64) (*model.User, error) {
 	cacheKey := fmt.Sprintf("user:%d:profile", userId)
 	profile, _, err := GetCacheDal[model.User](ctx, d.rdb, cacheKey, func(data *model.User) error {
 		err := d.db.Where("id = ?", userId).First(data).Error
@@ -32,4 +33,17 @@ func (d *ProfileDal) GetProfileById(ctx context.Context, userId int64) (*model.U
 		return nil
 	})
 	return profile, err
+}
+
+func (d *ProfileDal) Update(ctx context.Context, profile model.User) error {
+	cacheKey := fmt.Sprintf("user:%d:profile", profile.ID)
+	err := UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
+		d.db.Model(&model.User{}).Where("id = ?", profile.ID).Updates(map[string]interface{}{
+			"avatar": profile.Avatar,
+			"email":  profile.Email,
+			"name":   profile.Name,
+		})
+		return nil
+	})
+	return err
 }
