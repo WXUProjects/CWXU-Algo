@@ -1,7 +1,7 @@
 package platform
 
 import (
-	"cwxu-algo/app/core_data/internal/data/gorm/model"
+	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
 	"fmt"
 	"io"

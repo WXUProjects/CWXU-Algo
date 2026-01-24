@@ -5,7 +5,7 @@ import (
 	pb "cwxu-algo/api/user/v1/auth"
 	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/user/internal/data"
-	"cwxu-algo/app/user/internal/data/gorm/model"
+	"cwxu-algo/app/user/internal/data/model"
 	"errors"
 	"os/user"
 	"time"

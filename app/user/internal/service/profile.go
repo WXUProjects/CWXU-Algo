@@ -5,7 +5,7 @@ import (
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data/dal"
-	"cwxu-algo/app/user/internal/data/gorm/model"
+	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"gorm.io/gorm"

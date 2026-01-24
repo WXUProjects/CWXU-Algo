@@ -12,6 +12,7 @@ data:
     driver: postgres
     source: host=192.168.1.7 user=cwxu password=cwxu dbname=algo_core_data port=5432 sslmode=disable TimeZone=Asia/Shanghai
   redis:
-    addr: 127.0.0.1:6379
+    addr: 192.168.1.7:6379
+    password: cwxu
     read_timeout: 0.2s
     write_timeout: 0.2s

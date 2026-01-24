@@ -1,6 +1,6 @@
 package spider
 
-import "cwxu-algo/app/core_data/internal/data/gorm/model"
+import "cwxu-algo/app/core_data/internal/data/model"
 
 // Provider 做题记录提供器
 type Provider interface {

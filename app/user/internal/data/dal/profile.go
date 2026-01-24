@@ -3,7 +3,7 @@ package dal
 import (
 	"context"
 	"cwxu-algo/app/user/internal/data"
-	"cwxu-algo/app/user/internal/data/gorm/model"
+	"cwxu-algo/app/user/internal/data/model"
 	"errors"
 	"fmt"
 

@@ -2,8 +2,9 @@ package data
 
 import (
 	"cwxu-algo/app/common/conf"
-	gorm2 "cwxu-algo/app/user/internal/data/gorm"
-	redis2 "cwxu-algo/app/user/internal/data/redis"
+	gorm2 "cwxu-algo/app/common/data/gorm"
+	redis2 "cwxu-algo/app/common/data/redis"
+	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/wire"
@@ -23,6 +24,7 @@ type Data struct {
 // NewData .
 func NewData(c *conf.Data) (*Data, func(), error) {
 	data := &Data{DB: gorm2.InitGorm(c), RDB: redis2.InitRedis(c)}
+	migrateModels(data.DB)
 	cleanup := func() {
 		log.Info("closing the data resources")
 		sql, _ := data.DB.DB()
@@ -30,4 +32,14 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 		data.RDB.Close()
 	}
 	return data, cleanup, nil
+}
+
+// migrateModels 合并
+func migrateModels(db *gorm.DB) {
+	err := db.AutoMigrate(
+		&model.User{},
+	)
+	if err != nil {
+		panic("数据库：数据库自动合并失败")
+	}
 }
