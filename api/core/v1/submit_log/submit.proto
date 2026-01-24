@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package api.core.v1.submit_log;
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/core/v1/submit_log;submit_log";
+option java_multiple_files = true;
+option java_package = "api.core.v1.submit_log";
+
+service Submit {
+  rpc GetSubmitLog (GetSubmitLogReq) returns (GetSubmitLogRes) {
+    option (google.api.http) = {
+      get: "/v1/core/submit-log/get-by-id"
+    };
+  }
+}
+
+message SubmitLog {
+  uint32 id = 1;                           // ID
+  string platform = 2;                     // 平台
+  int64 user_id = 3;                       // 用户ID
+  string submit_id = 4;                    // 提交ID
+  string contest = 5;                      // 比赛名称
+  string problem = 6;                      // 问题
+  string lang = 7;                         // 语言
+  string status = 8;                       // 状态
+  int64 time = 9;                          // 提交时间
+}
+message GetSubmitLogReq {
+  int64 user_id = 1;
+  int64 limit = 2;
+  int64 cursor = 3;
+}
+message GetSubmitLogRes {
+  repeated SubmitLog data = 1;
+}

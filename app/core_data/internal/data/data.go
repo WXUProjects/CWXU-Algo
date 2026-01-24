@@ -3,6 +3,7 @@ package data
 import (
 	"cwxu-algo/app/common/conf"
 	gorm2 "cwxu-algo/app/common/data/gorm"
+	redis2 "cwxu-algo/app/common/data/redis"
 	"cwxu-algo/app/core_data/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -22,7 +23,7 @@ type Data struct {
 
 // NewData .
 func NewData(c *conf.Data) (*Data, func(), error) {
-	data := &Data{DB: gorm2.InitGorm(c)}
+	data := &Data{DB: gorm2.InitGorm(c), RDB: redis2.InitRedis(c)}
 	migrateModels(data.DB)
 	cleanup := func() {
 		log.Info("closing the data resources")

@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package api.core.v1.spider;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/core/v1/spider;spider";
+option java_multiple_files = true;
+option java_package = "api.core.v1.spider";
+
+service Spider {
+  rpc SetSpider (SetSpiderReq) returns (SetSpiderRep) {
+    option (google.api.http) = {
+      post: "/v1/core/spider/set",
+      body: "*"
+    };
+  }
+  rpc GetSpider (GetSpiderReq) returns (GetSpiderRep) {
+    option (google.api.http) = {
+      get: "/v1/core/spider/get-by-id",
+    };
+  }
+}
+
+message SetSpiderReq {
+  int64 userId = 1;
+  string platform = 2;
+  string username = 3;
+}
+
+message SetSpiderRep {
+  int32 code = 1;
+  string message = 2;
+}
+
+message GetSpiderReq {
+  int64 userId = 1;
+}
+
+message GetSpiderRep {
+  message Data {
+    string platform = 1;
+    string username = 2;
+  }
+  repeated Data data = 1;
+}

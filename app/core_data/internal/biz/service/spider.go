@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
+	"fmt"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"gorm.io/gorm/clause"
@@ -49,5 +51,7 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool) error {
 		},
 		DoNothing: true,
 	}).Save(&submitLog)
+	// 使得缓存失效
+	uc.data.RDB.Del(context.Background(), fmt.Sprintf("core:submit_log:user:%d", userId))
 	return nil
 }

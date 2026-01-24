@@ -10,9 +10,11 @@ import (
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
-	"cwxu-algo/app/core_data/internal/biz/service"
+	service2 "cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/internal/data"
+	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/server"
+	"cwxu-algo/app/core_data/internal/service"
 	"cwxu-algo/app/core_data/task"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
@@ -28,21 +30,24 @@ import (
 // wireApp init kratos application.
 func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
 	grpcServer := server.NewGRPCServer(confServer, logger)
-	httpServer := server.NewHTTPServer(confServer, logger)
-	register := discovery.NewConsulRegister(confServer)
-	rabbitMQ, cleanup, err := event.NewRabbitMQ(confServer)
+	dataData, cleanup, err := data.NewData(confData)
 	if err != nil {
 		return nil, nil, err
 	}
-	dataData, cleanup2, err := data.NewData(confData)
+	spiderDal := dal.NewSpiderDal(dataData)
+	submitLogService := service.NewSubmitLogService(spiderDal)
+	rabbitMQ, cleanup2, err := event.NewRabbitMQ(confServer)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
 	}
-	spiderUseCase := service.NewSpiderUseCase(dataData)
-	consumer := service.NewConsumer(rabbitMQ, spiderUseCase)
 	spiderTask := task.NewSpiderTask(rabbitMQ)
-	cronTask := task.NewCronTask(spiderTask)
+	spiderService := service.NewSpiderService(dataData, spiderTask)
+	httpServer := server.NewHTTPServer(confServer, logger, submitLogService, spiderService)
+	register := discovery.NewConsulRegister(confServer)
+	spiderUseCase := service2.NewSpiderUseCase(dataData)
+	consumer := service2.NewConsumer(rabbitMQ, spiderUseCase)
+	cronTask := task.NewCronTask(spiderTask, dataData)
 	app := newApp(logger, grpcServer, httpServer, register, consumer, cronTask)
 	return app, func() {
 		cleanup2()
