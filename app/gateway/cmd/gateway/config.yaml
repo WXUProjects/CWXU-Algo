@@ -11,3 +11,8 @@ endpoints:
 #      - target: '127.0.0.1:8001'
       - target: 'discovery:///user'
 #          stripPrefix: /bbs
+  - path: /v1/core/*
+    timeout: 1s
+    protocol: HTTP
+    backends:
+      - target: 'discovery:///core-data'
