@@ -43,7 +43,7 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.
 	go cm.Consume()
 	go cron.Do()
 	return kratos.New(
-		kratos.ID(id),
+		kratos.ID(Name+"-"+id),
 		kratos.Name(Name),
 		kratos.Version(Version),
 		kratos.Metadata(map[string]string{}),
