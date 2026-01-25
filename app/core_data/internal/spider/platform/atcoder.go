@@ -31,7 +31,7 @@ func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) 
 		t = time.Now().Add(-(24 * time.Hour))
 	}
 	url := fmt.Sprintf(
-		"https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions?user=%s&from_second=%d",
+		"https://atc.luckysan.top/atcoder/atcoder-api/v3/user/submissions?user=%s&from_second=%d",
 		username, int(t.Unix()),
 	)
 	// 发起 Get 请求
