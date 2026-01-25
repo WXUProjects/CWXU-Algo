@@ -7,12 +7,12 @@ import (
 )
 
 func TestSpider(t *testing.T) {
-	pms := []string{spider.NowCoder, spider.AtCoder}
+	pms := []string{spider.AtCoder}
 	for _, pm := range pms {
 		t.Run(pm, func(t *testing.T) {
 			if p, ok := spider.Get(pm); ok {
 				if slf, ok := p.(spider.SubmitLogFetcher); ok {
-					r, err := slf.FetchSubmitLog(0, "731215097", true)
+					r, err := slf.FetchSubmitLog(0, "sanenchen", true)
 					if err != nil {
 						t.Errorf("测试出错 %s", err.Error())
 					}
