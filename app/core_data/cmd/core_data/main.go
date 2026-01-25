@@ -5,6 +5,7 @@ import (
 	"cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/task"
 	"flag"
+	"fmt"
 	"os"
 
 	"cwxu-algo/app/common/conf"
@@ -43,7 +44,7 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.
 	go cm.Consume()
 	go cron.Do()
 	return kratos.New(
-		kratos.ID(Name+"-"+id),
+		kratos.ID(fmt.Sprintf("%s-%s-%s", id, Name, Version)),
 		kratos.Name(Name),
 		kratos.Version(Version),
 		kratos.Metadata(map[string]string{}),

@@ -4,6 +4,7 @@ import (
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
 	"flag"
+	"fmt"
 	"os"
 
 	"github.com/go-kratos/kratos/v2"
@@ -36,7 +37,7 @@ func init() {
 
 func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register) *kratos.App {
 	return kratos.New(
-		kratos.ID(Name+"-"+id),
+		kratos.ID(fmt.Sprintf("%s-%s-%s", id, Name, Version)),
 		kratos.Name(Name),
 		kratos.Version(Version),
 		kratos.Metadata(map[string]string{}),
