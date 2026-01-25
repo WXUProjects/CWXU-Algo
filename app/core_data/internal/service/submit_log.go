@@ -22,6 +22,7 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 		r = append(r, &submit_log.SubmitLog{
 			Id:       uint32(v.ID),
 			UserId:   v.UserID,
+			Platform: v.Platform,
 			SubmitId: v.SubmitID,
 			Contest:  v.Contest,
 			Problem:  v.Problem,
