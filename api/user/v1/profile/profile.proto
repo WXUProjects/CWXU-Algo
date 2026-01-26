@@ -55,6 +55,7 @@ message GetListRes {
     string name = 3;
     int64 groupId = 5;
     string avatar = 6;
+    string lastSubmit = 7;
   }
   repeated List list = 1;
 }

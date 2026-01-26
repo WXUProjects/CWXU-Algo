@@ -12,6 +12,7 @@ service Submit {
       get: "/v1/core/submit-log/get-by-id"
     };
   }
+  rpc LastSubmitTime (LastSubmitTimeReq) returns (LastSubmitTimeRes) {}
 }
 
 message SubmitLog {
@@ -32,6 +33,14 @@ message GetSubmitLogReq {
 }
 message GetSubmitLogRes {
   repeated SubmitLog data = 1;
+}
+
+message LastSubmitTimeReq {
+  repeated int64 userIds = 1;
+}
+
+message LastSubmitTimeRes {
+  bytes timeMap = 1;
 }
 
 

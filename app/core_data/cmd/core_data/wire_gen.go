@@ -40,9 +40,9 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	}
 	spiderTask := task.NewSpiderTask(rabbitMQ)
 	spiderService := service.NewSpiderService(dataData, spiderTask)
-	grpcServer := server.NewGRPCServer(confServer, logger, spiderService)
 	spiderDal := dal.NewSpiderDal(dataData)
-	submitLogService := service.NewSubmitLogService(spiderDal)
+	submitLogService := service.NewSubmitLogService(spiderDal, dataData)
+	grpcServer := server.NewGRPCServer(confServer, logger, spiderService, submitLogService)
 	httpServer := server.NewHTTPServer(confServer, logger, submitLogService, spiderService)
 	register := discovery.NewConsulRegister(confServer)
 	spiderUseCase := service2.NewSpiderUseCase(dataData)

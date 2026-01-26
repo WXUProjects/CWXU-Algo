@@ -433,6 +433,7 @@ type GetListRes_List struct {
 	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	GroupId       int64                  `protobuf:"varint,5,opt,name=groupId,proto3" json:"groupId,omitempty"`
 	Avatar        string                 `protobuf:"bytes,6,opt,name=avatar,proto3" json:"avatar,omitempty"`
+	LastSubmit    string                 `protobuf:"bytes,7,opt,name=lastSubmit,proto3" json:"lastSubmit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -502,6 +503,13 @@ func (x *GetListRes_List) GetAvatar() string {
 	return ""
 }
 
+func (x *GetListRes_List) GetLastSubmit() string {
+	if x != nil {
+		return x.LastSubmit
+	}
+	return ""
+}
+
 var File_api_user_v1_profile_profile_proto protoreflect.FileDescriptor
 
 const file_api_user_v1_profile_profile_proto_rawDesc = "" +
@@ -525,16 +533,19 @@ const file_api_user_v1_profile_profile_proto_rawDesc = "" +
 	"\n" +
 	"GetListReq\x12\x1a\n" +
 	"\bpageSize\x18\x01 \x01(\x03R\bpageSize\x12\x18\n" +
-	"\apageNum\x18\x02 \x01(\x03R\apageNum\"\xc1\x01\n" +
+	"\apageNum\x18\x02 \x01(\x03R\apageNum\"\xe1\x01\n" +
 	"\n" +
 	"GetListRes\x120\n" +
-	"\x04list\x18\x01 \x03(\v2\x1c.api.user.v1.GetListRes.ListR\x04list\x1a\x80\x01\n" +
+	"\x04list\x18\x01 \x03(\v2\x1c.api.user.v1.GetListRes.ListR\x04list\x1a\xa0\x01\n" +
 	"\x04List\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x18\n" +
 	"\agroupId\x18\x05 \x01(\x03R\agroupId\x12\x16\n" +
-	"\x06avatar\x18\x06 \x01(\tR\x06avatar\"e\n" +
+	"\x06avatar\x18\x06 \x01(\tR\x06avatar\x12\x1e\n" +
+	"\n" +
+	"lastSubmit\x18\a \x01(\tR\n" +
+	"lastSubmit\"e\n" +
 	"\tUpdateReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +

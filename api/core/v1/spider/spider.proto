@@ -14,8 +14,7 @@ service Spider {
       body: "*"
     };
   }
-  rpc GetSpider (GetSpiderReq) returns (GetSpiderRep) {
-  }
+  rpc GetSpider (GetSpiderReq) returns (GetSpiderRep) {}
   rpc Update (UpdateReq) returns (UpdateRes) {
     option (google.api.http) = {
       post: "/v1/core/spider/update",

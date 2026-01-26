@@ -234,6 +234,94 @@ func (x *GetSubmitLogRes) GetData() []*SubmitLog {
 	return nil
 }
 
+type LastSubmitTimeReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserIds       []int64                `protobuf:"varint,1,rep,packed,name=userIds,proto3" json:"userIds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LastSubmitTimeReq) Reset() {
+	*x = LastSubmitTimeReq{}
+	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LastSubmitTimeReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LastSubmitTimeReq) ProtoMessage() {}
+
+func (x *LastSubmitTimeReq) ProtoReflect() protoreflect.Message {
+	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LastSubmitTimeReq.ProtoReflect.Descriptor instead.
+func (*LastSubmitTimeReq) Descriptor() ([]byte, []int) {
+	return file_api_core_v1_submit_log_submit_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *LastSubmitTimeReq) GetUserIds() []int64 {
+	if x != nil {
+		return x.UserIds
+	}
+	return nil
+}
+
+type LastSubmitTimeRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TimeMap       []byte                 `protobuf:"bytes,1,opt,name=timeMap,proto3" json:"timeMap,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LastSubmitTimeRes) Reset() {
+	*x = LastSubmitTimeRes{}
+	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LastSubmitTimeRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LastSubmitTimeRes) ProtoMessage() {}
+
+func (x *LastSubmitTimeRes) ProtoReflect() protoreflect.Message {
+	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LastSubmitTimeRes.ProtoReflect.Descriptor instead.
+func (*LastSubmitTimeRes) Descriptor() ([]byte, []int) {
+	return file_api_core_v1_submit_log_submit_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *LastSubmitTimeRes) GetTimeMap() []byte {
+	if x != nil {
+		return x.TimeMap
+	}
+	return nil
+}
+
 var File_api_core_v1_submit_log_submit_proto protoreflect.FileDescriptor
 
 const file_api_core_v1_submit_log_submit_proto_rawDesc = "" +
@@ -254,9 +342,14 @@ const file_api_core_v1_submit_log_submit_proto_rawDesc = "" +
 	"\x05limit\x18\x02 \x01(\x03R\x05limit\x12\x16\n" +
 	"\x06cursor\x18\x03 \x01(\x03R\x06cursor\"H\n" +
 	"\x0fGetSubmitLogRes\x125\n" +
-	"\x04data\x18\x01 \x03(\v2!.api.core.v1.submit_log.SubmitLogR\x04data2\x92\x01\n" +
+	"\x04data\x18\x01 \x03(\v2!.api.core.v1.submit_log.SubmitLogR\x04data\"-\n" +
+	"\x11LastSubmitTimeReq\x12\x18\n" +
+	"\auserIds\x18\x01 \x03(\x03R\auserIds\"-\n" +
+	"\x11LastSubmitTimeRes\x12\x18\n" +
+	"\atimeMap\x18\x01 \x01(\fR\atimeMap2\xfc\x01\n" +
 	"\x06Submit\x12\x87\x01\n" +
-	"\fGetSubmitLog\x12'.api.core.v1.submit_log.GetSubmitLogReq\x1a'.api.core.v1.submit_log.GetSubmitLogRes\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/core/submit-log/get-by-idBG\n" +
+	"\fGetSubmitLog\x12'.api.core.v1.submit_log.GetSubmitLogReq\x1a'.api.core.v1.submit_log.GetSubmitLogRes\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/core/submit-log/get-by-id\x12h\n" +
+	"\x0eLastSubmitTime\x12).api.core.v1.submit_log.LastSubmitTimeReq\x1a).api.core.v1.submit_log.LastSubmitTimeRes\"\x00BG\n" +
 	"\x16api.core.v1.submit_logP\x01Z+cwxu-algo/api/core/v1/submit_log;submit_logb\x06proto3"
 
 var (
@@ -271,18 +364,22 @@ func file_api_core_v1_submit_log_submit_proto_rawDescGZIP() []byte {
 	return file_api_core_v1_submit_log_submit_proto_rawDescData
 }
 
-var file_api_core_v1_submit_log_submit_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_api_core_v1_submit_log_submit_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_api_core_v1_submit_log_submit_proto_goTypes = []any{
-	(*SubmitLog)(nil),       // 0: api.core.v1.submit_log.SubmitLog
-	(*GetSubmitLogReq)(nil), // 1: api.core.v1.submit_log.GetSubmitLogReq
-	(*GetSubmitLogRes)(nil), // 2: api.core.v1.submit_log.GetSubmitLogRes
+	(*SubmitLog)(nil),         // 0: api.core.v1.submit_log.SubmitLog
+	(*GetSubmitLogReq)(nil),   // 1: api.core.v1.submit_log.GetSubmitLogReq
+	(*GetSubmitLogRes)(nil),   // 2: api.core.v1.submit_log.GetSubmitLogRes
+	(*LastSubmitTimeReq)(nil), // 3: api.core.v1.submit_log.LastSubmitTimeReq
+	(*LastSubmitTimeRes)(nil), // 4: api.core.v1.submit_log.LastSubmitTimeRes
 }
 var file_api_core_v1_submit_log_submit_proto_depIdxs = []int32{
 	0, // 0: api.core.v1.submit_log.GetSubmitLogRes.data:type_name -> api.core.v1.submit_log.SubmitLog
 	1, // 1: api.core.v1.submit_log.Submit.GetSubmitLog:input_type -> api.core.v1.submit_log.GetSubmitLogReq
-	2, // 2: api.core.v1.submit_log.Submit.GetSubmitLog:output_type -> api.core.v1.submit_log.GetSubmitLogRes
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
+	3, // 2: api.core.v1.submit_log.Submit.LastSubmitTime:input_type -> api.core.v1.submit_log.LastSubmitTimeReq
+	2, // 3: api.core.v1.submit_log.Submit.GetSubmitLog:output_type -> api.core.v1.submit_log.GetSubmitLogRes
+	4, // 4: api.core.v1.submit_log.Submit.LastSubmitTime:output_type -> api.core.v1.submit_log.LastSubmitTimeRes
+	3, // [3:5] is the sub-list for method output_type
+	1, // [1:3] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -299,7 +396,7 @@ func file_api_core_v1_submit_log_submit_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_core_v1_submit_log_submit_proto_rawDesc), len(file_api_core_v1_submit_log_submit_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

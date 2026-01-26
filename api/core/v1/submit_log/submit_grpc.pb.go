@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Submit_GetSubmitLog_FullMethodName = "/api.core.v1.submit_log.Submit/GetSubmitLog"
+	Submit_GetSubmitLog_FullMethodName   = "/api.core.v1.submit_log.Submit/GetSubmitLog"
+	Submit_LastSubmitTime_FullMethodName = "/api.core.v1.submit_log.Submit/LastSubmitTime"
 )
 
 // SubmitClient is the client API for Submit service.
@@ -27,6 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SubmitClient interface {
 	GetSubmitLog(ctx context.Context, in *GetSubmitLogReq, opts ...grpc.CallOption) (*GetSubmitLogRes, error)
+	LastSubmitTime(ctx context.Context, in *LastSubmitTimeReq, opts ...grpc.CallOption) (*LastSubmitTimeRes, error)
 }
 
 type submitClient struct {
@@ -47,11 +49,22 @@ func (c *submitClient) GetSubmitLog(ctx context.Context, in *GetSubmitLogReq, op
 	return out, nil
 }
 
+func (c *submitClient) LastSubmitTime(ctx context.Context, in *LastSubmitTimeReq, opts ...grpc.CallOption) (*LastSubmitTimeRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LastSubmitTimeRes)
+	err := c.cc.Invoke(ctx, Submit_LastSubmitTime_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SubmitServer is the server API for Submit service.
 // All implementations must embed UnimplementedSubmitServer
 // for forward compatibility.
 type SubmitServer interface {
 	GetSubmitLog(context.Context, *GetSubmitLogReq) (*GetSubmitLogRes, error)
+	LastSubmitTime(context.Context, *LastSubmitTimeReq) (*LastSubmitTimeRes, error)
 	mustEmbedUnimplementedSubmitServer()
 }
 
@@ -64,6 +77,9 @@ type UnimplementedSubmitServer struct{}
 
 func (UnimplementedSubmitServer) GetSubmitLog(context.Context, *GetSubmitLogReq) (*GetSubmitLogRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSubmitLog not implemented")
+}
+func (UnimplementedSubmitServer) LastSubmitTime(context.Context, *LastSubmitTimeReq) (*LastSubmitTimeRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method LastSubmitTime not implemented")
 }
 func (UnimplementedSubmitServer) mustEmbedUnimplementedSubmitServer() {}
 func (UnimplementedSubmitServer) testEmbeddedByValue()                {}
@@ -104,6 +120,24 @@ func _Submit_GetSubmitLog_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Submit_LastSubmitTime_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LastSubmitTimeReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SubmitServer).LastSubmitTime(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Submit_LastSubmitTime_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SubmitServer).LastSubmitTime(ctx, req.(*LastSubmitTimeReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Submit_ServiceDesc is the grpc.ServiceDesc for Submit service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -114,6 +148,10 @@ var Submit_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSubmitLog",
 			Handler:    _Submit_GetSubmitLog_Handler,
+		},
+		{
+			MethodName: "LastSubmitTime",
+			Handler:    _Submit_LastSubmitTime_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
