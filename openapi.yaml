@@ -3,64 +3,38 @@
 
 openapi: 3.0.3
 info:
-    title: Profile API
+    title: Spider API
     version: 0.0.1
 paths:
-    /v1/user/profile/get-by-id:
-        get:
-            tags:
-                - Profile
-            operationId: Profile_GetById
-            parameters:
-                - name: userId
-                  in: query
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/GetByIdRes'
-                default:
-                    description: Default error response
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Status'
-    /v1/user/profile/list:
-        get:
-            tags:
-                - Profile
-            operationId: Profile_GetList
-            parameters:
-                - name: pageSize
-                  in: query
-                  schema:
-                    type: string
-                - name: pageNum
-                  in: query
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/GetListRes'
-                default:
-                    description: Default error response
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Status'
-    /v1/user/profile/update:
+    /v1/core/spider/set:
         post:
             tags:
-                - Profile
-            operationId: Profile_Update
+                - Spider
+            operationId: Spider_SetSpider
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SetSpiderReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SetSpiderRep'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/core/spider/update:
+        post:
+            tags:
+                - Spider
+            operationId: Spider_Update
             requestBody:
                 content:
                     application/json:
@@ -82,52 +56,6 @@ paths:
                                 $ref: '#/components/schemas/Status'
 components:
     schemas:
-        GetByIdRes:
-            type: object
-            properties:
-                userId:
-                    type: string
-                username:
-                    type: string
-                name:
-                    type: string
-                email:
-                    type: string
-                groupId:
-                    type: string
-                avatar:
-                    type: string
-                spiders:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/GetByIdRes_Spiders'
-        GetByIdRes_Spiders:
-            type: object
-            properties:
-                platform:
-                    type: string
-                username:
-                    type: string
-        GetListRes:
-            type: object
-            properties:
-                list:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/GetListRes_List'
-        GetListRes_List:
-            type: object
-            properties:
-                userId:
-                    type: string
-                username:
-                    type: string
-                name:
-                    type: string
-                groupId:
-                    type: string
-                avatar:
-                    type: string
         GoogleProtobufAny:
             type: object
             properties:
@@ -136,6 +64,23 @@ components:
                     description: The type of the serialized message.
             additionalProperties: true
             description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message.
+        SetSpiderRep:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+        SetSpiderReq:
+            type: object
+            properties:
+                userId:
+                    type: string
+                platform:
+                    type: string
+                username:
+                    type: string
         Status:
             type: object
             properties:
@@ -157,12 +102,6 @@ components:
             properties:
                 userId:
                     type: string
-                name:
-                    type: string
-                email:
-                    type: string
-                avatar:
-                    type: string
         UpdateRes:
             type: object
             properties:
@@ -171,4 +110,4 @@ components:
                 message:
                     type: string
 tags:
-    - name: Profile
+    - name: Spider

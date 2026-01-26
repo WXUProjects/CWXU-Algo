@@ -16,6 +16,12 @@ service Spider {
   }
   rpc GetSpider (GetSpiderReq) returns (GetSpiderRep) {
   }
+  rpc Update (UpdateReq) returns (UpdateRes) {
+    option (google.api.http) = {
+      post: "/v1/core/spider/update",
+      body: "*"
+    };
+  }
 }
 
 message SetSpiderReq {
@@ -40,3 +46,13 @@ message GetSpiderRep {
   }
   repeated Data data = 1;
 }
+
+message UpdateReq {
+  int64 user_id = 1;
+}
+
+message UpdateRes {
+  int64 code = 1;
+  string message = 2;
+}
+

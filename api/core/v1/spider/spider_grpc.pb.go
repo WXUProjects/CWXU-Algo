@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	Spider_SetSpider_FullMethodName = "/api.core.v1.spider.Spider/SetSpider"
 	Spider_GetSpider_FullMethodName = "/api.core.v1.spider.Spider/GetSpider"
+	Spider_Update_FullMethodName    = "/api.core.v1.spider.Spider/Update"
 )
 
 // SpiderClient is the client API for Spider service.
@@ -29,6 +30,7 @@ const (
 type SpiderClient interface {
 	SetSpider(ctx context.Context, in *SetSpiderReq, opts ...grpc.CallOption) (*SetSpiderRep, error)
 	GetSpider(ctx context.Context, in *GetSpiderReq, opts ...grpc.CallOption) (*GetSpiderRep, error)
+	Update(ctx context.Context, in *UpdateReq, opts ...grpc.CallOption) (*UpdateRes, error)
 }
 
 type spiderClient struct {
@@ -59,12 +61,23 @@ func (c *spiderClient) GetSpider(ctx context.Context, in *GetSpiderReq, opts ...
 	return out, nil
 }
 
+func (c *spiderClient) Update(ctx context.Context, in *UpdateReq, opts ...grpc.CallOption) (*UpdateRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateRes)
+	err := c.cc.Invoke(ctx, Spider_Update_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SpiderServer is the server API for Spider service.
 // All implementations must embed UnimplementedSpiderServer
 // for forward compatibility.
 type SpiderServer interface {
 	SetSpider(context.Context, *SetSpiderReq) (*SetSpiderRep, error)
 	GetSpider(context.Context, *GetSpiderReq) (*GetSpiderRep, error)
+	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 	mustEmbedUnimplementedSpiderServer()
 }
 
@@ -80,6 +93,9 @@ func (UnimplementedSpiderServer) SetSpider(context.Context, *SetSpiderReq) (*Set
 }
 func (UnimplementedSpiderServer) GetSpider(context.Context, *GetSpiderReq) (*GetSpiderRep, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSpider not implemented")
+}
+func (UnimplementedSpiderServer) Update(context.Context, *UpdateReq) (*UpdateRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Update not implemented")
 }
 func (UnimplementedSpiderServer) mustEmbedUnimplementedSpiderServer() {}
 func (UnimplementedSpiderServer) testEmbeddedByValue()                {}
@@ -138,6 +154,24 @@ func _Spider_GetSpider_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Spider_Update_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).Update(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_Update_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).Update(ctx, req.(*UpdateReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Spider_ServiceDesc is the grpc.ServiceDesc for Spider service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -152,6 +186,10 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSpider",
 			Handler:    _Spider_GetSpider_Handler,
+		},
+		{
+			MethodName: "Update",
+			Handler:    _Spider_Update_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

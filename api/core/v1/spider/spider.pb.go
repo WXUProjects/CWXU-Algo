@@ -222,6 +222,102 @@ func (x *GetSpiderRep) GetData() []*GetSpiderRep_Data {
 	return nil
 }
 
+type UpdateReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateReq) Reset() {
+	*x = UpdateReq{}
+	mi := &file_api_core_v1_spider_spider_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateReq) ProtoMessage() {}
+
+func (x *UpdateReq) ProtoReflect() protoreflect.Message {
+	mi := &file_api_core_v1_spider_spider_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateReq.ProtoReflect.Descriptor instead.
+func (*UpdateReq) Descriptor() ([]byte, []int) {
+	return file_api_core_v1_spider_spider_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *UpdateReq) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+type UpdateRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateRes) Reset() {
+	*x = UpdateRes{}
+	mi := &file_api_core_v1_spider_spider_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateRes) ProtoMessage() {}
+
+func (x *UpdateRes) ProtoReflect() protoreflect.Message {
+	mi := &file_api_core_v1_spider_spider_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateRes.ProtoReflect.Descriptor instead.
+func (*UpdateRes) Descriptor() ([]byte, []int) {
+	return file_api_core_v1_spider_spider_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *UpdateRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *UpdateRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 type GetSpiderRep_Data struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Platform      string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
@@ -232,7 +328,7 @@ type GetSpiderRep_Data struct {
 
 func (x *GetSpiderRep_Data) Reset() {
 	*x = GetSpiderRep_Data{}
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[4]
+	mi := &file_api_core_v1_spider_spider_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -244,7 +340,7 @@ func (x *GetSpiderRep_Data) String() string {
 func (*GetSpiderRep_Data) ProtoMessage() {}
 
 func (x *GetSpiderRep_Data) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[4]
+	mi := &file_api_core_v1_spider_spider_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -292,10 +388,16 @@ const file_api_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x04data\x18\x01 \x03(\v2%.api.core.v1.spider.GetSpiderRep.DataR\x04data\x1a>\n" +
 	"\x04Data\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1a\n" +
-	"\busername\x18\x02 \x01(\tR\busername2\xcc\x01\n" +
+	"\busername\x18\x02 \x01(\tR\busername\"$\n" +
+	"\tUpdateReq\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\x03R\x06userId\"9\n" +
+	"\tUpdateRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\xb7\x02\n" +
 	"\x06Spider\x12o\n" +
 	"\tSetSpider\x12 .api.core.v1.spider.SetSpiderReq\x1a .api.core.v1.spider.SetSpiderRep\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/v1/core/spider/set\x12Q\n" +
-	"\tGetSpider\x12 .api.core.v1.spider.GetSpiderReq\x1a .api.core.v1.spider.GetSpiderRep\"\x00B;\n" +
+	"\tGetSpider\x12 .api.core.v1.spider.GetSpiderReq\x1a .api.core.v1.spider.GetSpiderRep\"\x00\x12i\n" +
+	"\x06Update\x12\x1d.api.core.v1.spider.UpdateReq\x1a\x1d.api.core.v1.spider.UpdateRes\"!\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/v1/core/spider/updateB;\n" +
 	"\x12api.core.v1.spiderP\x01Z#cwxu-algo/api/core/v1/spider;spiderb\x06proto3"
 
 var (
@@ -310,22 +412,26 @@ func file_api_core_v1_spider_spider_proto_rawDescGZIP() []byte {
 	return file_api_core_v1_spider_spider_proto_rawDescData
 }
 
-var file_api_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_api_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_api_core_v1_spider_spider_proto_goTypes = []any{
 	(*SetSpiderReq)(nil),      // 0: api.core.v1.spider.SetSpiderReq
 	(*SetSpiderRep)(nil),      // 1: api.core.v1.spider.SetSpiderRep
 	(*GetSpiderReq)(nil),      // 2: api.core.v1.spider.GetSpiderReq
 	(*GetSpiderRep)(nil),      // 3: api.core.v1.spider.GetSpiderRep
-	(*GetSpiderRep_Data)(nil), // 4: api.core.v1.spider.GetSpiderRep.Data
+	(*UpdateReq)(nil),         // 4: api.core.v1.spider.UpdateReq
+	(*UpdateRes)(nil),         // 5: api.core.v1.spider.UpdateRes
+	(*GetSpiderRep_Data)(nil), // 6: api.core.v1.spider.GetSpiderRep.Data
 }
 var file_api_core_v1_spider_spider_proto_depIdxs = []int32{
-	4, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
+	6, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
 	0, // 1: api.core.v1.spider.Spider.SetSpider:input_type -> api.core.v1.spider.SetSpiderReq
 	2, // 2: api.core.v1.spider.Spider.GetSpider:input_type -> api.core.v1.spider.GetSpiderReq
-	1, // 3: api.core.v1.spider.Spider.SetSpider:output_type -> api.core.v1.spider.SetSpiderRep
-	3, // 4: api.core.v1.spider.Spider.GetSpider:output_type -> api.core.v1.spider.GetSpiderRep
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
+	4, // 3: api.core.v1.spider.Spider.Update:input_type -> api.core.v1.spider.UpdateReq
+	1, // 4: api.core.v1.spider.Spider.SetSpider:output_type -> api.core.v1.spider.SetSpiderRep
+	3, // 5: api.core.v1.spider.Spider.GetSpider:output_type -> api.core.v1.spider.GetSpiderRep
+	5, // 6: api.core.v1.spider.Spider.Update:output_type -> api.core.v1.spider.UpdateRes
+	4, // [4:7] is the sub-list for method output_type
+	1, // [1:4] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -342,7 +448,7 @@ func file_api_core_v1_spider_spider_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_core_v1_spider_spider_proto_rawDesc), len(file_api_core_v1_spider_spider_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

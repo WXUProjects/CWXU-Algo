@@ -16,8 +16,9 @@ import (
 )
 
 var (
-	SetForbidden  = errors.Forbidden("权限错误", "权限不允许，设置失败")
-	InternalError = errors.InternalServer("内部错误", "内部错误，操作失败")
+	SetForbidden    = errors.Forbidden("权限错误", "权限不允许，设置失败")
+	InternalError   = errors.InternalServer("内部错误", "内部错误，操作失败")
+	UpdateForbidden = errors.Forbidden("权限错误", "权限不允许，不允许手动申请全量更新他人数据")
 )
 
 type SpiderService struct {
@@ -25,6 +26,17 @@ type SpiderService struct {
 	db     *gorm.DB
 	rdb    *redis.Client
 	spider *task.SpiderTask
+}
+
+func (s SpiderService) Update(ctx context.Context, req *spider.UpdateReq) (*spider.UpdateRes, error) {
+	if !auth.VerifyById(ctx, uint(req.UserId)) {
+		return nil, UpdateForbidden
+	}
+	s.spider.Do(req.UserId, true) // 全量更新
+	return &spider.UpdateRes{
+		Code:    0,
+		Message: "更新成功，请稍等片刻，您的全量OJ数据正在更新",
+	}, nil
 }
 
 func (s SpiderService) GetSpider(ctx context.Context, req *spider.GetSpiderReq) (*spider.GetSpiderRep, error) {

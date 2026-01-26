@@ -33,3 +33,5 @@ message GetSubmitLogReq {
 message GetSubmitLogRes {
   repeated SubmitLog data = 1;
 }
+
+
