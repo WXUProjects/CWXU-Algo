@@ -25,16 +25,16 @@ import (
 
 // wireApp init kratos application.
 func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
-	grpcServer := server.NewGRPCServer(confServer, logger)
 	dataData, cleanup, err := data.NewData(confData)
 	if err != nil {
 		return nil, nil, err
 	}
-	authService := service.NewAuthService(dataData)
 	profileDal := dal.NewProfileDal(dataData)
-	profileService := service.NewProfileService(profileDal)
-	httpServer := server.NewHTTPServer(confServer, authService, profileService, logger)
 	register := discovery.NewConsulRegister(confServer)
+	profileService := service.NewProfileService(profileDal, register)
+	grpcServer := server.NewGRPCServer(confServer, logger, profileService)
+	authService := service.NewAuthService(dataData)
+	httpServer := server.NewHTTPServer(confServer, authService, profileService, logger)
 	app := newApp(logger, grpcServer, httpServer, register)
 	return app, func() {
 		cleanup()

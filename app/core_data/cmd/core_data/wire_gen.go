@@ -29,13 +29,10 @@ import (
 
 // wireApp init kratos application.
 func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
-	grpcServer := server.NewGRPCServer(confServer, logger)
 	dataData, cleanup, err := data.NewData(confData)
 	if err != nil {
 		return nil, nil, err
 	}
-	spiderDal := dal.NewSpiderDal(dataData)
-	submitLogService := service.NewSubmitLogService(spiderDal)
 	rabbitMQ, cleanup2, err := event.NewRabbitMQ(confServer)
 	if err != nil {
 		cleanup()
@@ -43,6 +40,9 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	}
 	spiderTask := task.NewSpiderTask(rabbitMQ)
 	spiderService := service.NewSpiderService(dataData, spiderTask)
+	grpcServer := server.NewGRPCServer(confServer, logger, spiderService)
+	spiderDal := dal.NewSpiderDal(dataData)
+	submitLogService := service.NewSubmitLogService(spiderDal)
 	httpServer := server.NewHTTPServer(confServer, logger, submitLogService, spiderService)
 	register := discovery.NewConsulRegister(confServer)
 	spiderUseCase := service2.NewSpiderUseCase(dataData)

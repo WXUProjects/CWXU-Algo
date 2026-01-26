@@ -15,9 +15,6 @@ service Spider {
     };
   }
   rpc GetSpider (GetSpiderReq) returns (GetSpiderRep) {
-    option (google.api.http) = {
-      get: "/v1/core/spider/get-by-id",
-    };
   }
 }
 

@@ -19,18 +19,15 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
-const OperationSpiderGetSpider = "/api.core.v1.spider.Spider/GetSpider"
 const OperationSpiderSetSpider = "/api.core.v1.spider.Spider/SetSpider"
 
 type SpiderHTTPServer interface {
-	GetSpider(context.Context, *GetSpiderReq) (*GetSpiderRep, error)
 	SetSpider(context.Context, *SetSpiderReq) (*SetSpiderRep, error)
 }
 
 func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
 	r := s.Route("/")
 	r.POST("/v1/core/spider/set", _Spider_SetSpider0_HTTP_Handler(srv))
-	r.GET("/v1/core/spider/get-by-id", _Spider_GetSpider0_HTTP_Handler(srv))
 }
 
 func _Spider_SetSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
@@ -55,27 +52,7 @@ func _Spider_SetSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context
 	}
 }
 
-func _Spider_GetSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
-	return func(ctx http.Context) error {
-		var in GetSpiderReq
-		if err := ctx.BindQuery(&in); err != nil {
-			return err
-		}
-		http.SetOperation(ctx, OperationSpiderGetSpider)
-		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
-			return srv.GetSpider(ctx, req.(*GetSpiderReq))
-		})
-		out, err := h(ctx, &in)
-		if err != nil {
-			return err
-		}
-		reply := out.(*GetSpiderRep)
-		return ctx.Result(200, reply)
-	}
-}
-
 type SpiderHTTPClient interface {
-	GetSpider(ctx context.Context, req *GetSpiderReq, opts ...http.CallOption) (rsp *GetSpiderRep, err error)
 	SetSpider(ctx context.Context, req *SetSpiderReq, opts ...http.CallOption) (rsp *SetSpiderRep, err error)
 }
 
@@ -85,19 +62,6 @@ type SpiderHTTPClientImpl struct {
 
 func NewSpiderHTTPClient(client *http.Client) SpiderHTTPClient {
 	return &SpiderHTTPClientImpl{client}
-}
-
-func (c *SpiderHTTPClientImpl) GetSpider(ctx context.Context, in *GetSpiderReq, opts ...http.CallOption) (*GetSpiderRep, error) {
-	var out GetSpiderRep
-	pattern := "/v1/core/spider/get-by-id"
-	path := binding.EncodeURL(pattern, in, true)
-	opts = append(opts, http.Operation(OperationSpiderGetSpider))
-	opts = append(opts, http.PathTemplate(pattern))
-	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return &out, nil
 }
 
 func (c *SpiderHTTPClientImpl) SetSpider(ctx context.Context, in *SetSpiderReq, opts ...http.CallOption) (*SetSpiderRep, error) {

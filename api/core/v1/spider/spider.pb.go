@@ -292,10 +292,10 @@ const file_api_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x04data\x18\x01 \x03(\v2%.api.core.v1.spider.GetSpiderRep.DataR\x04data\x1a>\n" +
 	"\x04Data\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1a\n" +
-	"\busername\x18\x02 \x01(\tR\busername2\xed\x01\n" +
+	"\busername\x18\x02 \x01(\tR\busername2\xcc\x01\n" +
 	"\x06Spider\x12o\n" +
-	"\tSetSpider\x12 .api.core.v1.spider.SetSpiderReq\x1a .api.core.v1.spider.SetSpiderRep\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/v1/core/spider/set\x12r\n" +
-	"\tGetSpider\x12 .api.core.v1.spider.GetSpiderReq\x1a .api.core.v1.spider.GetSpiderRep\"!\x82\xd3\xe4\x93\x02\x1b\x12\x19/v1/core/spider/get-by-idB;\n" +
+	"\tSetSpider\x12 .api.core.v1.spider.SetSpiderReq\x1a .api.core.v1.spider.SetSpiderRep\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/v1/core/spider/set\x12Q\n" +
+	"\tGetSpider\x12 .api.core.v1.spider.GetSpiderReq\x1a .api.core.v1.spider.GetSpiderRep\"\x00B;\n" +
 	"\x12api.core.v1.spiderP\x01Z#cwxu-algo/api/core/v1/spider;spiderb\x06proto3"
 
 var (

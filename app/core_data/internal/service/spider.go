@@ -21,6 +21,7 @@ var (
 )
 
 type SpiderService struct {
+	spider.UnimplementedSpiderServer
 	db     *gorm.DB
 	rdb    *redis.Client
 	spider *task.SpiderTask

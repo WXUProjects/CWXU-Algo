@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"cwxu-algo/api/core/v1/spider"
 	"cwxu-algo/api/user/v1/profile"
+	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data/dal"
 	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/errors"
+	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"gorm.io/gorm"
 )
 
@@ -16,6 +20,8 @@ var (
 )
 
 type ProfileService struct {
+	profile.UnimplementedProfileServer
+	reg        *discovery.Register
 	profileDal *dal.ProfileDal
 }
 
@@ -47,6 +53,24 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
+	// 获取 platform spider 信息
+	conn, err := grpc.DialInsecure(
+		context.Background(),
+		grpc.WithEndpoint("discovery:///core-data"),
+		grpc.WithDiscovery(p.reg.Reg.(registry.Discovery)),
+	)
+	s := spider.NewSpiderClient(conn)
+	sp, err := s.GetSpider(ctx, &spider.GetSpiderReq{UserId: req.UserId})
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	spiders := make([]*profile.GetByIdRes_Spiders, 0)
+	for _, v := range sp.Data {
+		spiders = append(spiders, &profile.GetByIdRes_Spiders{
+			Platform: v.Platform,
+			Username: v.Username,
+		})
+	}
 	return &profile.GetByIdRes{
 		UserId:   uint64(pf.ID),
 		Username: pf.Username,
@@ -54,11 +78,13 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 		Email:    pf.Email,
 		Avatar:   pf.Avatar,
 		GroupId:  pf.GroupId,
+		Spiders:  spiders,
 	}, nil
 }
 
-func NewProfileService(profileDal *dal.ProfileDal) *ProfileService {
+func NewProfileService(profileDal *dal.ProfileDal, reg *discovery.Register) *ProfileService {
 	return &ProfileService{
 		profileDal: profileDal,
+		reg:        reg,
 	}
 }

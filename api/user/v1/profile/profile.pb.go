@@ -74,6 +74,7 @@ type GetByIdRes struct {
 	Email         string                 `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
 	GroupId       int64                  `protobuf:"varint,5,opt,name=groupId,proto3" json:"groupId,omitempty"`
 	Avatar        string                 `protobuf:"bytes,6,opt,name=avatar,proto3" json:"avatar,omitempty"`
+	Spiders       []*GetByIdRes_Spiders  `protobuf:"bytes,7,rep,name=spiders,proto3" json:"spiders,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -148,6 +149,13 @@ func (x *GetByIdRes) GetAvatar() string {
 		return x.Avatar
 	}
 	return ""
+}
+
+func (x *GetByIdRes) GetSpiders() []*GetByIdRes_Spiders {
+	if x != nil {
+		return x.Spiders
+	}
+	return nil
 }
 
 type UpdateReq struct {
@@ -270,6 +278,58 @@ func (x *UpdateRes) GetMessage() string {
 	return ""
 }
 
+type GetByIdRes_Spiders struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Platform      string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetByIdRes_Spiders) Reset() {
+	*x = GetByIdRes_Spiders{}
+	mi := &file_api_user_v1_profile_profile_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetByIdRes_Spiders) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetByIdRes_Spiders) ProtoMessage() {}
+
+func (x *GetByIdRes_Spiders) ProtoReflect() protoreflect.Message {
+	mi := &file_api_user_v1_profile_profile_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetByIdRes_Spiders.ProtoReflect.Descriptor instead.
+func (*GetByIdRes_Spiders) Descriptor() ([]byte, []int) {
+	return file_api_user_v1_profile_profile_proto_rawDescGZIP(), []int{1, 0}
+}
+
+func (x *GetByIdRes_Spiders) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *GetByIdRes_Spiders) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
 var File_api_user_v1_profile_profile_proto protoreflect.FileDescriptor
 
 const file_api_user_v1_profile_profile_proto_rawDesc = "" +
@@ -277,7 +337,7 @@ const file_api_user_v1_profile_profile_proto_rawDesc = "" +
 	"!api/user/v1/profile/profile.proto\x12\vapi.user.v1\x1a\x1cgoogle/api/annotations.proto\"$\n" +
 	"\n" +
 	"GetByIdReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\x9c\x01\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\x9a\x02\n" +
 	"\n" +
 	"GetByIdRes\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x1a\n" +
@@ -285,7 +345,11 @@ const file_api_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
 	"\x05email\x18\x04 \x01(\tR\x05email\x12\x18\n" +
 	"\agroupId\x18\x05 \x01(\x03R\agroupId\x12\x16\n" +
-	"\x06avatar\x18\x06 \x01(\tR\x06avatar\"e\n" +
+	"\x06avatar\x18\x06 \x01(\tR\x06avatar\x129\n" +
+	"\aspiders\x18\a \x03(\v2\x1f.api.user.v1.GetByIdRes.SpidersR\aspiders\x1aA\n" +
+	"\aSpiders\x12\x1a\n" +
+	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\"e\n" +
 	"\tUpdateReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
@@ -311,23 +375,25 @@ func file_api_user_v1_profile_profile_proto_rawDescGZIP() []byte {
 	return file_api_user_v1_profile_profile_proto_rawDescData
 }
 
-var file_api_user_v1_profile_profile_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_api_user_v1_profile_profile_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_api_user_v1_profile_profile_proto_goTypes = []any{
-	(*GetByIdReq)(nil), // 0: api.user.v1.GetByIdReq
-	(*GetByIdRes)(nil), // 1: api.user.v1.GetByIdRes
-	(*UpdateReq)(nil),  // 2: api.user.v1.UpdateReq
-	(*UpdateRes)(nil),  // 3: api.user.v1.UpdateRes
+	(*GetByIdReq)(nil),         // 0: api.user.v1.GetByIdReq
+	(*GetByIdRes)(nil),         // 1: api.user.v1.GetByIdRes
+	(*UpdateReq)(nil),          // 2: api.user.v1.UpdateReq
+	(*UpdateRes)(nil),          // 3: api.user.v1.UpdateRes
+	(*GetByIdRes_Spiders)(nil), // 4: api.user.v1.GetByIdRes.Spiders
 }
 var file_api_user_v1_profile_profile_proto_depIdxs = []int32{
-	0, // 0: api.user.v1.Profile.GetById:input_type -> api.user.v1.GetByIdReq
-	2, // 1: api.user.v1.Profile.Update:input_type -> api.user.v1.UpdateReq
-	1, // 2: api.user.v1.Profile.GetById:output_type -> api.user.v1.GetByIdRes
-	3, // 3: api.user.v1.Profile.Update:output_type -> api.user.v1.UpdateRes
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	4, // 0: api.user.v1.GetByIdRes.spiders:type_name -> api.user.v1.GetByIdRes.Spiders
+	0, // 1: api.user.v1.Profile.GetById:input_type -> api.user.v1.GetByIdReq
+	2, // 2: api.user.v1.Profile.Update:input_type -> api.user.v1.UpdateReq
+	1, // 3: api.user.v1.Profile.GetById:output_type -> api.user.v1.GetByIdRes
+	3, // 4: api.user.v1.Profile.Update:output_type -> api.user.v1.UpdateRes
+	3, // [3:5] is the sub-list for method output_type
+	1, // [1:3] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_api_user_v1_profile_profile_proto_init() }
@@ -341,7 +407,7 @@ func file_api_user_v1_profile_profile_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_user_v1_profile_profile_proto_rawDesc), len(file_api_user_v1_profile_profile_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
