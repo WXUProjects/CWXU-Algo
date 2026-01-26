@@ -6,6 +6,7 @@ import (
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/utils/auth"
+	"cwxu-algo/app/user/internal/biz"
 	"cwxu-algo/app/user/internal/data/dal"
 	"cwxu-algo/app/user/internal/data/model"
 
@@ -17,12 +18,34 @@ import (
 
 var (
 	UpdateForbidden = errors.Forbidden("禁止访问", "您无权更新该用户资料")
+	InternalServer  = errors.InternalServer("内部错误", "内部错误")
 )
 
 type ProfileService struct {
 	profile.UnimplementedProfileServer
-	reg        *discovery.Register
-	profileDal *dal.ProfileDal
+	reg            *discovery.Register
+	profileDal     *dal.ProfileDal
+	profileUseCase *biz.ProfileUseCase
+}
+
+func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (*profile.GetListRes, error) {
+	pf, err := p.profileUseCase.GetList(ctx, req.PageSize, req.PageNum)
+	if err != nil {
+		return nil, InternalServer
+	}
+	res := &profile.GetListRes{
+		List: make([]*profile.GetListRes_List, 0),
+	}
+	for _, v := range pf {
+		res.List = append(res.List, &profile.GetListRes_List{
+			UserId:   uint64(v.ID),
+			Username: v.Username,
+			Name:     v.Name,
+			Avatar:   v.Avatar,
+			GroupId:  v.GroupId,
+		})
+	}
+	return res, nil
 }
 
 func (p *ProfileService) Update(ctx context.Context, req *profile.UpdateReq) (*profile.UpdateRes, error) {
@@ -82,9 +105,10 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 	}, nil
 }
 
-func NewProfileService(profileDal *dal.ProfileDal, reg *discovery.Register) *ProfileService {
+func NewProfileService(profileDal *dal.ProfileDal, reg *discovery.Register, profileUseCase *biz.ProfileUseCase) *ProfileService {
 	return &ProfileService{
-		profileDal: profileDal,
-		reg:        reg,
+		profileDal:     profileDal,
+		reg:            reg,
+		profileUseCase: profileUseCase,
 	}
 }

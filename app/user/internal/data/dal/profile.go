@@ -35,6 +35,7 @@ func (d *ProfileDal) GetById(ctx context.Context, userId int64) (*model.User, er
 	return profile, err
 }
 
+// Update 更新用户信息
 func (d *ProfileDal) Update(ctx context.Context, profile model.User) error {
 	cacheKey := fmt.Sprintf("user:%d:profile", profile.ID)
 	err := UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
@@ -46,4 +47,15 @@ func (d *ProfileDal) Update(ctx context.Context, profile model.User) error {
 		return nil
 	})
 	return err
+}
+
+func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64) ([]model.User, error) {
+	var list []model.User
+	err := d.db.Select("id", "username", "name", "groupId", "avatar").
+		Limit(int(pageSize)).Offset(int(pageNum-1) * int(pageSize)).
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
 }

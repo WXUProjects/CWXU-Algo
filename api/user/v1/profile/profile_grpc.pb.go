@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	Profile_GetById_FullMethodName = "/api.user.v1.Profile/GetById"
+	Profile_GetList_FullMethodName = "/api.user.v1.Profile/GetList"
 	Profile_Update_FullMethodName  = "/api.user.v1.Profile/Update"
 )
 
@@ -28,6 +29,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ProfileClient interface {
 	GetById(ctx context.Context, in *GetByIdReq, opts ...grpc.CallOption) (*GetByIdRes, error)
+	GetList(ctx context.Context, in *GetListReq, opts ...grpc.CallOption) (*GetListRes, error)
 	Update(ctx context.Context, in *UpdateReq, opts ...grpc.CallOption) (*UpdateRes, error)
 }
 
@@ -49,6 +51,16 @@ func (c *profileClient) GetById(ctx context.Context, in *GetByIdReq, opts ...grp
 	return out, nil
 }
 
+func (c *profileClient) GetList(ctx context.Context, in *GetListReq, opts ...grpc.CallOption) (*GetListRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetListRes)
+	err := c.cc.Invoke(ctx, Profile_GetList_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *profileClient) Update(ctx context.Context, in *UpdateReq, opts ...grpc.CallOption) (*UpdateRes, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateRes)
@@ -64,6 +76,7 @@ func (c *profileClient) Update(ctx context.Context, in *UpdateReq, opts ...grpc.
 // for forward compatibility.
 type ProfileServer interface {
 	GetById(context.Context, *GetByIdReq) (*GetByIdRes, error)
+	GetList(context.Context, *GetListReq) (*GetListRes, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 	mustEmbedUnimplementedProfileServer()
 }
@@ -77,6 +90,9 @@ type UnimplementedProfileServer struct{}
 
 func (UnimplementedProfileServer) GetById(context.Context, *GetByIdReq) (*GetByIdRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetById not implemented")
+}
+func (UnimplementedProfileServer) GetList(context.Context, *GetListReq) (*GetListRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetList not implemented")
 }
 func (UnimplementedProfileServer) Update(context.Context, *UpdateReq) (*UpdateRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Update not implemented")
@@ -120,6 +136,24 @@ func _Profile_GetById_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Profile_GetList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetListReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).GetList(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_GetList_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).GetList(ctx, req.(*GetListReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Profile_Update_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpdateReq)
 	if err := dec(in); err != nil {
@@ -148,6 +182,10 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetById",
 			Handler:    _Profile_GetById_Handler,
+		},
+		{
+			MethodName: "GetList",
+			Handler:    _Profile_GetList_Handler,
 		},
 		{
 			MethodName: "Update",

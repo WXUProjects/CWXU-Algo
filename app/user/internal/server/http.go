@@ -21,6 +21,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.user.v1.Auth/Login":      "",
 		"/api.user.v1.Auth/Register":   "",
 		"/api.user.v1.Profile/GetById": "",
+		"/api.user.v1.Profile/GetList": "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		// log.Info(operation)

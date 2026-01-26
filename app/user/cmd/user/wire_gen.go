@@ -9,6 +9,7 @@ package main
 import (
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/user/internal/biz"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/dal"
 	"cwxu-algo/app/user/internal/server"
@@ -31,7 +32,8 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	}
 	profileDal := dal.NewProfileDal(dataData)
 	register := discovery.NewConsulRegister(confServer)
-	profileService := service.NewProfileService(profileDal, register)
+	profileUseCase := biz.NewProfileUseCase(profileDal)
+	profileService := service.NewProfileService(profileDal, register, profileUseCase)
 	grpcServer := server.NewGRPCServer(confServer, logger, profileService)
 	authService := service.NewAuthService(dataData)
 	httpServer := server.NewHTTPServer(confServer, authService, profileService, logger)

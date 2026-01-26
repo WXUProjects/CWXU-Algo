@@ -20,16 +20,19 @@ var _ = binding.EncodeURL
 const _ = http.SupportPackageIsVersion1
 
 const OperationProfileGetById = "/api.user.v1.Profile/GetById"
+const OperationProfileGetList = "/api.user.v1.Profile/GetList"
 const OperationProfileUpdate = "/api.user.v1.Profile/Update"
 
 type ProfileHTTPServer interface {
 	GetById(context.Context, *GetByIdReq) (*GetByIdRes, error)
+	GetList(context.Context, *GetListReq) (*GetListRes, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 }
 
 func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r := s.Route("/")
 	r.GET("/v1/user/profile/get-by-id", _Profile_GetById0_HTTP_Handler(srv))
+	r.GET("/v1/user/profile/list", _Profile_GetList0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/update", _Profile_Update0_HTTP_Handler(srv))
 }
 
@@ -48,6 +51,25 @@ func _Profile_GetById0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context
 			return err
 		}
 		reply := out.(*GetByIdRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Profile_GetList0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetListReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileGetList)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetList(ctx, req.(*GetListReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetListRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -76,6 +98,7 @@ func _Profile_Update0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context)
 
 type ProfileHTTPClient interface {
 	GetById(ctx context.Context, req *GetByIdReq, opts ...http.CallOption) (rsp *GetByIdRes, err error)
+	GetList(ctx context.Context, req *GetListReq, opts ...http.CallOption) (rsp *GetListRes, err error)
 	Update(ctx context.Context, req *UpdateReq, opts ...http.CallOption) (rsp *UpdateRes, err error)
 }
 
@@ -92,6 +115,19 @@ func (c *ProfileHTTPClientImpl) GetById(ctx context.Context, in *GetByIdReq, opt
 	pattern := "/v1/user/profile/get-by-id"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationProfileGetById))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *ProfileHTTPClientImpl) GetList(ctx context.Context, in *GetListReq, opts ...http.CallOption) (*GetListRes, error) {
+	var out GetListRes
+	pattern := "/v1/user/profile/list"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProfileGetList))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {

@@ -29,6 +29,33 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
+    /v1/user/profile/list:
+        get:
+            tags:
+                - Profile
+            operationId: Profile_GetList
+            parameters:
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: string
+                - name: pageNum
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetListRes'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
     /v1/user/profile/update:
         post:
             tags:
@@ -80,6 +107,26 @@ components:
                 platform:
                     type: string
                 username:
+                    type: string
+        GetListRes:
+            type: object
+            properties:
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GetListRes_List'
+        GetListRes_List:
+            type: object
+            properties:
+                userId:
+                    type: string
+                username:
+                    type: string
+                name:
+                    type: string
+                groupId:
+                    type: string
+                avatar:
                     type: string
         GoogleProtobufAny:
             type: object
