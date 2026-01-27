@@ -5,8 +5,10 @@ import (
 )
 
 var (
-	NowCoder = "NowCoder"
-	AtCoder  = "AtCoder"
+	NowCoder   = "NowCoder"
+	AtCoder    = "AtCoder"
+	LuoGu      = "LuoGu"
+	CodeForces = "CodeForces"
 )
 var registry = map[string]Provider{}
 
