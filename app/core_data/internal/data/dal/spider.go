@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -66,7 +65,6 @@ func (s *SpiderDal) GetByUserId(ctx context.Context, userId int64, lastTimeUnix 
 	t := time.Unix(lastTimeUnix, 0)
 	err = s.db.Order("time DESC").Where("user_id = ? AND time < ?", userId, t).Limit(1).Find(&sbLog).Error
 	if err != nil || len(ids) < int(limit) || strconv.Itoa(int(sbLog[0].ID)) != ids[0] {
-		log.Info("降级")
 		return dbFunc()
 	}
 	// 到 Redis 的 Global 查这些ID

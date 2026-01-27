@@ -28,7 +28,7 @@ func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) 
 	// 如果为false 那么就获取最近一天的数据
 	t := time.Unix(0, 0)
 	if needAll == false {
-		t = time.Now().Add(-(24 * time.Hour))
+		t = time.Now().Add(-60 * (24 * time.Hour))
 	}
 	url := fmt.Sprintf(
 		"https://atc.luckysan.top/atcoder/atcoder-api/v3/user/submissions?user=%s&from_second=%d",
