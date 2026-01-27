@@ -6,7 +6,7 @@ info:
     title: Statistic API
     version: 0.0.1
 paths:
-    /api/core/v1/statistic/heatmap:
+    /v1/core/statistic/heatmap:
         get:
             tags:
                 - Statistic

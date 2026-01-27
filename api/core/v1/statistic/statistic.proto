@@ -9,7 +9,7 @@ option java_package = "api.core.v1.statistic";
 service Statistic {
   rpc Heatmap(HeatmapReq) returns (HeatmapResp) {
     option (google.api.http) = {
-      get: "/api/core/v1/statistic/heatmap"
+      get: "/v1/core/statistic/heatmap"
     };
   }
 }

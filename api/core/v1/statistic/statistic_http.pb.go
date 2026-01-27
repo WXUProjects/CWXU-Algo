@@ -27,7 +27,7 @@ type StatisticHTTPServer interface {
 
 func RegisterStatisticHTTPServer(s *http.Server, srv StatisticHTTPServer) {
 	r := s.Route("/")
-	r.GET("/api/core/v1/statistic/heatmap", _Statistic_Heatmap0_HTTP_Handler(srv))
+	r.GET("/v1/core/statistic/heatmap", _Statistic_Heatmap0_HTTP_Handler(srv))
 }
 
 func _Statistic_Heatmap0_HTTP_Handler(srv StatisticHTTPServer) func(ctx http.Context) error {
@@ -63,7 +63,7 @@ func NewStatisticHTTPClient(client *http.Client) StatisticHTTPClient {
 
 func (c *StatisticHTTPClientImpl) Heatmap(ctx context.Context, in *HeatmapReq, opts ...http.CallOption) (*HeatmapResp, error) {
 	var out HeatmapResp
-	pattern := "/api/core/v1/statistic/heatmap"
+	pattern := "/v1/core/statistic/heatmap"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationStatisticHeatmap))
 	opts = append(opts, http.PathTemplate(pattern))

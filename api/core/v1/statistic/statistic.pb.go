@@ -201,9 +201,9 @@ const file_api_core_v1_statistic_statistic_proto_rawDesc = "" +
 	"\x04data\x18\x02 \x03(\v2..api.core.v1.statistic.HeatmapResp.HeatmapItemR\x04data\x1a7\n" +
 	"\vHeatmapItem\x12\x12\n" +
 	"\x04date\x18\x01 \x01(\tR\x04date\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x03R\x05count2\x85\x01\n" +
-	"\tStatistic\x12x\n" +
-	"\aHeatmap\x12!.api.core.v1.statistic.HeatmapReq\x1a\".api.core.v1.statistic.HeatmapResp\"&\x82\xd3\xe4\x93\x02 \x12\x1e/api/core/v1/statistic/heatmapBD\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count2\x81\x01\n" +
+	"\tStatistic\x12t\n" +
+	"\aHeatmap\x12!.api.core.v1.statistic.HeatmapReq\x1a\".api.core.v1.statistic.HeatmapResp\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/core/statistic/heatmapBD\n" +
 	"\x15api.core.v1.statisticP\x01Z)cwxu-algo/api/core/v1/statistic;statisticb\x06proto3"
 
 var (
