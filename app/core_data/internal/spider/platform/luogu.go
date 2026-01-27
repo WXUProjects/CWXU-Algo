@@ -113,7 +113,7 @@ func login(username, password string) (*http.Client, error) {
 		}
 		// 没有 errorCode，说明成功
 		if ok {
-			log.Info("login success:", body)
+			// log.Info("login success:", body)
 			return client, err
 		}
 		log.Info(fmt.Sprintf("retry %d/%d, captcha=%s, resp=%s\n",
@@ -205,7 +205,6 @@ func (lg NewLuoGu) FetchSubmitLog(userId int64, username string, needAll bool) (
 			subs = append(subs, inj.CurrentData.Records.Result...)
 		}
 	}
-	fmt.Println(subs)
 	var res []model.SubmitLog
 	for _, sub := range subs {
 		var status, lang string

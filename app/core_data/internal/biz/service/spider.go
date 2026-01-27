@@ -64,9 +64,11 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 }
 
 func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, needAll bool) {
-	for {
+	for i := 0; i < 60; i++ {
 		err := uc.fetchAndSave(userId, plat, needAll)
 		if err == nil {
+			log.Infof("Spider: %s %s 成功", plat.Platform, plat.Username)
+			uc.invalidateCache(userId)
 			return
 		}
 		log.Errorf(
@@ -85,14 +87,32 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 }
 func (uc *SpiderUseCase) invalidateCache(userId int64) {
 	ctx := context.Background()
-	pipe := uc.data.RDB.Pipeline()
+	rdb := uc.data.RDB
 
-	pipe.Del(ctx, fmt.Sprintf("core:submit_log:user:%d", userId))
-	pipe.Del(ctx, fmt.Sprintf("user:%d:lastSubmitTime", userId))
-	pipe.Del(ctx, fmt.Sprintf("statistic:heatmap:%d:*", userId))
-	pipe.Del(ctx, "statistic:heatmap:0:*")
+	// log.Infof("清理缓存")
 
-	if _, err := pipe.Exec(ctx); err != nil {
-		log.Errorf("invalidate cache failed: %v", err)
+	// 1. 精确 key，直接删
+	_ = rdb.Del(
+		ctx,
+		fmt.Sprintf("core:submit_log:user:%d", userId),
+		fmt.Sprintf("user:%d:lastSubmitTime", userId),
+	).Err()
+
+	// 2. 模糊前缀，必须 SCAN
+	patterns := []string{
+		fmt.Sprintf("statistic:heatmap:%d:*:*:*", userId),
+		"statistic:heatmap:0:*:*:*",
+	}
+
+	for _, pattern := range patterns {
+		iter := rdb.Scan(ctx, 0, pattern, 200).Iterator()
+		for iter.Next(ctx) {
+			key := iter.Val()
+			// 用 UNLINK，异步删除，不阻塞
+			_ = rdb.Unlink(ctx, key).Err()
+		}
+		if err := iter.Err(); err != nil {
+			log.Errorf("scan pattern %s failed: %v", pattern, err)
+		}
 	}
 }

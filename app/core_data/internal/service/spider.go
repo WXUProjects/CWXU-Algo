@@ -29,9 +29,9 @@ type SpiderService struct {
 }
 
 func (s SpiderService) Update(ctx context.Context, req *spider.UpdateReq) (*spider.UpdateRes, error) {
-	if !auth.VerifyById(ctx, uint(req.UserId)) {
-		return nil, UpdateForbidden
-	}
+	//if !auth.VerifyById(ctx, uint(req.UserId)) {
+	//	return nil, UpdateForbidden
+	//}
 	s.spider.Do(req.UserId, true) // 全量更新
 	return &spider.UpdateRes{
 		Code:    0,
