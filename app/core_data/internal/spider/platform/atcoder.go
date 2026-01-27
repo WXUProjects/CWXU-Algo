@@ -23,17 +23,7 @@ type atcJson struct {
 	ExecutionTime int    `json:"execution_time"` // 执行时间（毫秒）
 }
 
-func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) (res []model.SubmitLog, err error) {
-	// 比如这里的needAll 如果为true 那么second就为0，表示从头到尾所有数据
-	// 如果为false 那么就获取最近一天的数据
-	t := time.Unix(0, 0)
-	if needAll == false {
-		t = time.Now().Add(-60 * (24 * time.Hour))
-	}
-	url := fmt.Sprintf(
-		"https://atc.luckysan.top/atcoder/atcoder-api/v3/user/submissions?user=%s&from_second=%d",
-		username, int(t.Unix()),
-	)
+func fetchLog(url string) ([]atcJson, error) {
 	// 发起 Get 请求
 	resp, err := http.Get(url)
 	if err != nil {
@@ -53,6 +43,21 @@ func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) 
 	if err := json.Unmarshal(body, &atc); err != nil {
 		return nil, fmt.Errorf("解析json错误：%s", err.Error())
 	}
+	return atc, nil
+}
+
+func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) (res []model.SubmitLog, err error) {
+	// 比如这里的needAll 如果为true 那么second就为0，表示从头到尾所有数据
+	// 如果为false 那么就获取最近一天的数据
+	t := time.Unix(0, 0)
+	if needAll == false {
+		t = time.Now().Add(-60 * (1 * time.Hour))
+	}
+	url := fmt.Sprintf(
+		"https://atc.luckysan.top/atcoder/atcoder-api/v3/user/submissions?user=%s&from_second=%d",
+		username, int(t.Unix()),
+	)
+	atc, err := fetchLog(url)
 	// 构建res
 	for _, v := range atc {
 		tmp := model.SubmitLog{
@@ -66,6 +71,26 @@ func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) 
 			Time:     time.Unix(v.EpochSecond, 0),
 		}
 		res = append(res, tmp)
+	}
+	for len(atc) == 500 {
+		url := fmt.Sprintf(
+			"https://atc.luckysan.top/atcoder/atcoder-api/v3/user/submissions?user=%s&from_second=%d",
+			username, atc[len(atc)-1].EpochSecond,
+		)
+		atc, err = fetchLog(url)
+		for _, v := range atc {
+			tmp := model.SubmitLog{
+				UserID:   userId,
+				Platform: "AtCoder",
+				SubmitID: strconv.Itoa(v.ID),
+				Contest:  v.ContestID,
+				Problem:  v.ProblemID,
+				Lang:     v.Language,
+				Status:   v.Result,
+				Time:     time.Unix(v.EpochSecond, 0),
+			}
+			res = append(res, tmp)
+		}
 	}
 	return res, nil
 }
