@@ -35,7 +35,7 @@ func (p NewCodeforces) FetchSubmitLog(userId int64, username string, needAll boo
 	if needAll == true {
 		need = 1000000
 	}
-	handle := "wanli_"
+	handle := username
 	last_commit := 1
 	url := fmt.Sprintf(
 		"https://codeforces.com/api/user.status?handle=%s&from=%d&count=%d",
