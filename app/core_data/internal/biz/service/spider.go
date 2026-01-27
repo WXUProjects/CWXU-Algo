@@ -53,8 +53,8 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool) error {
 	pipe := uc.data.RDB.Pipeline()
 	pipe.Del(context.Background(), fmt.Sprintf("core:submit_log:user:%d", userId))
 	pipe.Del(context.Background(), fmt.Sprintf("user:%d:lastSubmitTime", userId))
-	pipe.Del(context.Background(), fmt.Sprintf("statistic:heatmap:%d", userId))
-	pipe.Del(context.Background(), "statistic:heatmap:0")
+	pipe.Del(context.Background(), fmt.Sprintf("statistic:heatmap:%d:*", userId))
+	pipe.Del(context.Background(), "statistic:heatmap:0:*")
 	_, _ = pipe.Exec(context.Background())
 	return nil
 }
