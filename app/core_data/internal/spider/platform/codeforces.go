@@ -69,7 +69,7 @@ func (p NewCodeforces) FetchSubmitLog(userId int64, username string, needAll boo
 	for _, sub := range cfResp.Result {
 		t := model.SubmitLog{
 			UserID:   userId,
-			Platform: "CodeForces",
+			Platform: spider.CodeForces,
 			SubmitID: strconv.Itoa(sub.ID),
 			Contest:  strconv.Itoa(sub.ContestID),
 			Problem:  fmt.Sprintf("%s-%s", sub.Problem.Index, sub.Problem.Name),
