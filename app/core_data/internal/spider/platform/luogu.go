@@ -116,8 +116,8 @@ func login(username, password string) (*http.Client, error) {
 			log.Info("login success:", body)
 			return client, err
 		}
-		log.Info("retry %d/%d, captcha=%s, resp=%s\n",
-			attempt, maxRetry, code, body)
+		log.Info(fmt.Sprintf("retry %d/%d, captcha=%s, resp=%s\n",
+			attempt, maxRetry, code, body))
 	}
 	return nil, fmt.Errorf("login failed after %d retries", maxRetry)
 }
