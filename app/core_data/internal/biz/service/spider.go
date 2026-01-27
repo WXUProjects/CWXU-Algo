@@ -26,7 +26,6 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool) error {
 	// 根据userId 获取对应平台信息
 	platforms := make([]model.Platform, 0)
 	uc.data.DB.Where("user_id = ?", userId).Find(&platforms)
-	submitLog := make([]model.SubmitLog, 0)
 	for _, plat := range platforms {
 		// 爬取数据
 		if p, ok := spider.Get(plat.Platform); ok {
@@ -37,7 +36,12 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool) error {
 					continue
 				}
 				log.Infof("Spider: %s %s爬取成功", plat.Platform, plat.Username)
-				submitLog = append(submitLog, tmp...)
+				uc.data.DB.Clauses(clause.OnConflict{
+					Columns: []clause.Column{
+						{Name: "submit_id"},
+					},
+					DoNothing: true,
+				}).Save(&tmp)
 			} else {
 				log.Errorf("Spider: %s 平台没有实现 SubmitLogFetcher", p.Name())
 			}
@@ -45,12 +49,6 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool) error {
 			log.Errorf("Spider: 没有 %s 平台插件", plat.Platform)
 		}
 	}
-	uc.data.DB.Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "submit_id"},
-		},
-		DoNothing: true,
-	}).Save(&submitLog)
 	// 使得缓存失效
 	pipe := uc.data.RDB.Pipeline()
 	pipe.Del(context.Background(), fmt.Sprintf("core:submit_log:user:%d", userId))
