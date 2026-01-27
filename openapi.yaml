@@ -115,7 +115,7 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/GetListRes_List'
-                totalPage:
+                total:
                     type: string
         GetListRes_List:
             type: object

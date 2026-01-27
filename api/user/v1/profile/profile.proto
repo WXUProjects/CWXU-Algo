@@ -58,7 +58,7 @@ message GetListRes {
     string lastSubmit = 7;
   }
   repeated List list = 1;
-  int64 totalPage = 2;
+  int64 total = 2;
 }
 
 
