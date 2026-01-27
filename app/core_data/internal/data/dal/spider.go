@@ -103,9 +103,10 @@ func (s *SpiderDal) SetCache(ctx context.Context, log []model.SubmitLog) {
 		})
 		// 构建缓存key
 		cacheKey = fmt.Sprintf("core:submit_log:detail:%d", v.ID)
+		_ = pipe.Expire(ctx, cacheKey, 24*time.Hour)
 		// 缓存提交记录
 		vByte, _ := utils.GobEncoder(v)
-		_ = pipe.Set(ctx, cacheKey, vByte, 1*time.Hour)
+		_ = pipe.Set(ctx, cacheKey, vByte, 12*time.Hour)
 	}
 	_, _ = pipe.Exec(ctx)
 }
