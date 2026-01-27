@@ -3,43 +3,24 @@
 
 openapi: 3.0.3
 info:
-    title: Profile API
+    title: Statistic API
     version: 0.0.1
 paths:
-    /v1/user/profile/get-by-id:
+    /api/core/v1/statistic/heatmap:
         get:
             tags:
-                - Profile
-            operationId: Profile_GetById
+                - Statistic
+            operationId: Statistic_Heatmap
             parameters:
                 - name: userId
                   in: query
                   schema:
                     type: string
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/GetByIdRes'
-                default:
-                    description: Default error response
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Status'
-    /v1/user/profile/list:
-        get:
-            tags:
-                - Profile
-            operationId: Profile_GetList
-            parameters:
-                - name: pageSize
+                - name: startDate
                   in: query
                   schema:
                     type: string
-                - name: pageNum
+                - name: endDate
                   in: query
                   schema:
                     type: string
@@ -49,31 +30,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/GetListRes'
-                default:
-                    description: Default error response
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Status'
-    /v1/user/profile/update:
-        post:
-            tags:
-                - Profile
-            operationId: Profile_Update
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/UpdateReq'
-                required: true
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/UpdateRes'
+                                $ref: '#/components/schemas/HeatmapResp'
                 default:
                     description: Default error response
                     content:
@@ -82,54 +39,6 @@ paths:
                                 $ref: '#/components/schemas/Status'
 components:
     schemas:
-        GetByIdRes:
-            type: object
-            properties:
-                userId:
-                    type: string
-                username:
-                    type: string
-                name:
-                    type: string
-                email:
-                    type: string
-                groupId:
-                    type: string
-                avatar:
-                    type: string
-                spiders:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/GetByIdRes_Spiders'
-        GetByIdRes_Spiders:
-            type: object
-            properties:
-                platform:
-                    type: string
-                username:
-                    type: string
-        GetListRes:
-            type: object
-            properties:
-                list:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/GetListRes_List'
-        GetListRes_List:
-            type: object
-            properties:
-                userId:
-                    type: string
-                username:
-                    type: string
-                name:
-                    type: string
-                groupId:
-                    type: string
-                avatar:
-                    type: string
-                lastSubmit:
-                    type: string
         GoogleProtobufAny:
             type: object
             properties:
@@ -138,6 +47,22 @@ components:
                     description: The type of the serialized message.
             additionalProperties: true
             description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message.
+        HeatmapResp:
+            type: object
+            properties:
+                code:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/HeatmapResp_HeatmapItem'
+        HeatmapResp_HeatmapItem:
+            type: object
+            properties:
+                date:
+                    type: string
+                count:
+                    type: string
         Status:
             type: object
             properties:
@@ -154,23 +79,5 @@ components:
                         $ref: '#/components/schemas/GoogleProtobufAny'
                     description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
             description: 'The `Status` type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by [gRPC](https://github.com/grpc). Each `Status` message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the [API Design Guide](https://cloud.google.com/apis/design/errors).'
-        UpdateReq:
-            type: object
-            properties:
-                userId:
-                    type: string
-                name:
-                    type: string
-                email:
-                    type: string
-                avatar:
-                    type: string
-        UpdateRes:
-            type: object
-            properties:
-                code:
-                    type: string
-                message:
-                    type: string
 tags:
-    - name: Profile
+    - name: Statistic

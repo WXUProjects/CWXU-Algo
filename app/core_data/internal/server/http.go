@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"cwxu-algo/api/core/v1/spider"
+	statistic2 "cwxu-algo/api/core/v1/statistic"
 	"cwxu-algo/api/core/v1/submit_log"
 	"cwxu-algo/app/common/conf"
 	_const "cwxu-algo/app/common/const"
@@ -20,6 +21,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 	whiteList := map[string]string{
 		"/api.core.v1.submit_log.Submit/GetSubmitLog": "",
 		"/api.core.v1.spider.Spider/GetSpider":        "",
+		"/api.core.v1.statistic.Statistic/Heatmap":    "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		// log.Info(operation)
@@ -31,7 +33,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 }
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, logger log.Logger, submitService *service.SubmitLogService, spiderService *service.SpiderService) *http.Server {
+func NewHTTPServer(c *conf.Server, logger log.Logger, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService) *http.Server {
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
@@ -52,5 +54,6 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, submitService *service.Sub
 	srv := http.NewServer(opts...)
 	submit_log.RegisterSubmitHTTPServer(srv, submitService)
 	spider.RegisterSpiderHTTPServer(srv, spiderService)
+	statistic2.RegisterStatisticHTTPServer(srv, statisticService)
 	return srv
 }

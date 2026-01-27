@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package api.core.v1.statistic;
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/core/v1/statistic;statistic";
+option java_multiple_files = true;
+option java_package = "api.core.v1.statistic";
+
+service Statistic {
+  rpc Heatmap(HeatmapReq) returns (HeatmapResp) {
+    option (google.api.http) = {
+      get: "/api/core/v1/statistic/heatmap"
+    };
+  }
+}
+
+message HeatmapReq {
+  int64 userId = 1;
+  string startDate = 2;
+  string endDate = 3;
+}
+
+message HeatmapResp {
+  message  HeatmapItem {
+    string date = 1;
+    int64 count = 2;
+  }
+  int64 code = 1;
+  repeated HeatmapItem data = 2;
+}
