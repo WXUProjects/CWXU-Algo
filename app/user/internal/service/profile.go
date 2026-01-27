@@ -42,7 +42,7 @@ func (p *ProfileService) coreDataRPC() (*grpc2.ClientConn, error) {
 }
 
 func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (*profile.GetListRes, error) {
-	pf, err := p.profileUseCase.GetList(ctx, req.PageSize, req.PageNum)
+	pf, totalPage, err := p.profileUseCase.GetList(ctx, req.PageSize, req.PageNum)
 	if err != nil {
 		return nil, InternalServer
 	}
@@ -67,7 +67,8 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 	}
 
 	res := &profile.GetListRes{
-		List: make([]*profile.GetListRes_List, 0),
+		List:      make([]*profile.GetListRes_List, 0),
+		TotalPage: totalPage,
 	}
 	for _, v := range pf {
 		var t string

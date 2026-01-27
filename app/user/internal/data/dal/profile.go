@@ -50,13 +50,15 @@ func (d *ProfileDal) Update(ctx context.Context, profile model.User) error {
 	return err
 }
 
-func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64) ([]model.User, error) {
+func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64) ([]model.User, int64, error) {
 	var list []model.User
 	err := d.db.Select("id", "username", "name", "groupId", "avatar").
 		Limit(int(pageSize)).Offset(int(pageNum-1) * int(pageSize)).
 		Find(&list).Error
+	var total int64
+	err = d.db.Model(&model.User{}).Count(&total).Error
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return list, nil
+	return list, (total + pageSize - 1) / pageSize, nil
 }

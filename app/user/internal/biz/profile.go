@@ -16,6 +16,6 @@ func NewProfileUseCase(profileDal *dal.ProfileDal) *ProfileUseCase {
 	}
 }
 
-func (uc *ProfileUseCase) GetList(ctx context.Context, pageSize, pageNum int64) ([]model.User, error) {
+func (uc *ProfileUseCase) GetList(ctx context.Context, pageSize, pageNum int64) ([]model.User, int64, error) {
 	return uc.profileDal.GetList(ctx, pageSize, pageNum)
 }
