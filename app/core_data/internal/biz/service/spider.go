@@ -42,7 +42,7 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool) error {
 				log.Errorf("Spider: %s 平台没有实现 SubmitLogFetcher", p.Name())
 			}
 		} else {
-			log.Errorf("Spider: %s 平台对应的插件", p.Name())
+			log.Errorf("Spider: 没有 %s 平台插件", plat.Platform)
 		}
 	}
 	uc.data.DB.Clauses(clause.OnConflict{
