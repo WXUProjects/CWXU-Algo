@@ -27,6 +27,7 @@ type HeatmapReq struct {
 	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
 	StartDate     string                 `protobuf:"bytes,2,opt,name=startDate,proto3" json:"startDate,omitempty"`
 	EndDate       string                 `protobuf:"bytes,3,opt,name=endDate,proto3" json:"endDate,omitempty"`
+	IsAc          bool                   `protobuf:"varint,4,opt,name=isAc,proto3" json:"isAc,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -80,6 +81,13 @@ func (x *HeatmapReq) GetEndDate() string {
 		return x.EndDate
 	}
 	return ""
+}
+
+func (x *HeatmapReq) GetIsAc() bool {
+	if x != nil {
+		return x.IsAc
+	}
+	return false
 }
 
 type HeatmapResp struct {
@@ -190,12 +198,13 @@ var File_api_core_v1_statistic_statistic_proto protoreflect.FileDescriptor
 
 const file_api_core_v1_statistic_statistic_proto_rawDesc = "" +
 	"\n" +
-	"%api/core/v1/statistic/statistic.proto\x12\x15api.core.v1.statistic\x1a\x1cgoogle/api/annotations.proto\"\\\n" +
+	"%api/core/v1/statistic/statistic.proto\x12\x15api.core.v1.statistic\x1a\x1cgoogle/api/annotations.proto\"p\n" +
 	"\n" +
 	"HeatmapReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x1c\n" +
 	"\tstartDate\x18\x02 \x01(\tR\tstartDate\x12\x18\n" +
-	"\aendDate\x18\x03 \x01(\tR\aendDate\"\x9e\x01\n" +
+	"\aendDate\x18\x03 \x01(\tR\aendDate\x12\x12\n" +
+	"\x04isAc\x18\x04 \x01(\bR\x04isAc\"\x9e\x01\n" +
 	"\vHeatmapResp\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12B\n" +
 	"\x04data\x18\x02 \x03(\v2..api.core.v1.statistic.HeatmapResp.HeatmapItemR\x04data\x1a7\n" +

@@ -30,11 +30,14 @@ func (s StatisticService) Heatmap(ctx context.Context, req *statistic.HeatmapReq
 	if req.StartDate == "" || req.EndDate == "" {
 		return nil, errors.BadRequest("参数错误", "日期参数错误")
 	}
+	if req.IsAc {
+		sub = sub.Where("status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%")
+	}
 	if req.UserId != 0 {
 		sub = sub.Where("user_id = ?", req.UserId)
 	}
 	// Redis 缓存查询
-	cacheKey := fmt.Sprintf("statistic:heatmap:%d:%s:%s", req.UserId, req.StartDate, req.EndDate)
+	cacheKey := fmt.Sprintf("statistic:heatmap:%d:%s:%s:%t", req.UserId, req.StartDate, req.EndDate, req.IsAc)
 	res, _, err := data2.GetCacheDal[[]DailyCount](ctx, s.rdb, cacheKey, func(data *[]DailyCount) error {
 		err := db.
 			Table(

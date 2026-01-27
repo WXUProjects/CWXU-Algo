@@ -18,6 +18,7 @@ message HeatmapReq {
   int64 userId = 1;
   string startDate = 2;
   string endDate = 3;
+  bool isAc = 4;
 }
 
 message HeatmapResp {

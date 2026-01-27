@@ -24,6 +24,10 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: isAc
+                  in: query
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     description: OK
