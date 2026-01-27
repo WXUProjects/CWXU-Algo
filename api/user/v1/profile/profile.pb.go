@@ -213,7 +213,7 @@ func (x *GetListReq) GetPageNum() int64 {
 type GetListRes struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	List          []*GetListRes_List     `protobuf:"bytes,1,rep,name=list,proto3" json:"list,omitempty"`
-	TotalPage     int64                  `protobuf:"varint,2,opt,name=totalPage,proto3" json:"totalPage,omitempty"`
+	Total         int64                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -255,9 +255,9 @@ func (x *GetListRes) GetList() []*GetListRes_List {
 	return nil
 }
 
-func (x *GetListRes) GetTotalPage() int64 {
+func (x *GetListRes) GetTotal() int64 {
 	if x != nil {
-		return x.TotalPage
+		return x.Total
 	}
 	return 0
 }
@@ -541,11 +541,11 @@ const file_api_user_v1_profile_profile_proto_rawDesc = "" +
 	"\n" +
 	"GetListReq\x12\x1a\n" +
 	"\bpageSize\x18\x01 \x01(\x03R\bpageSize\x12\x18\n" +
-	"\apageNum\x18\x02 \x01(\x03R\apageNum\"\xff\x01\n" +
+	"\apageNum\x18\x02 \x01(\x03R\apageNum\"\xf7\x01\n" +
 	"\n" +
 	"GetListRes\x120\n" +
-	"\x04list\x18\x01 \x03(\v2\x1c.api.user.v1.GetListRes.ListR\x04list\x12\x1c\n" +
-	"\ttotalPage\x18\x02 \x01(\x03R\ttotalPage\x1a\xa0\x01\n" +
+	"\x04list\x18\x01 \x03(\v2\x1c.api.user.v1.GetListRes.ListR\x04list\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\x03R\x05total\x1a\xa0\x01\n" +
 	"\x04List\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +

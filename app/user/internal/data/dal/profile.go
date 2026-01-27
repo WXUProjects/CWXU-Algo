@@ -60,5 +60,5 @@ func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64) ([]mo
 	if err != nil {
 		return nil, 0, err
 	}
-	return list, (total + pageSize - 1) / pageSize, nil
+	return list, total, nil
 }
