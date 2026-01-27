@@ -31,7 +31,7 @@ func (s StatisticService) Heatmap(ctx context.Context, req *statistic.HeatmapReq
 		return nil, errors.BadRequest("参数错误", "日期参数错误")
 	}
 	if req.IsAc {
-		sub = sub.Where("status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%")
+		sub = sub.Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
 	}
 	if req.UserId != 0 {
 		sub = sub.Where("user_id = ?", req.UserId)
