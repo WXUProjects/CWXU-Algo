@@ -17,6 +17,7 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/go-kratos/kratos/v2/transport/grpc"
+	grpc2 "google.golang.org/grpc"
 	"gorm.io/gorm"
 )
 
@@ -32,6 +33,14 @@ type ProfileService struct {
 	profileUseCase *biz.ProfileUseCase
 }
 
+func (p *ProfileService) coreDataRPC() (*grpc2.ClientConn, error) {
+	return grpc.DialInsecure(
+		context.Background(),
+		grpc.WithEndpoint("discovery:///core-data"),
+		grpc.WithDiscovery(p.reg.Reg.(registry.Discovery)),
+	)
+}
+
 func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (*profile.GetListRes, error) {
 	pf, err := p.profileUseCase.GetList(ctx, req.PageSize, req.PageNum)
 	if err != nil {
@@ -42,11 +51,7 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		ids = append(ids, int64(v.ID))
 	}
 	// 获取 最后一次 提交时间
-	conn, err := grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///core-data"),
-		grpc.WithDiscovery(p.reg.Reg.(registry.Discovery)),
-	)
+	conn, err := p.coreDataRPC()
 	sb := submit_log.NewSubmitClient(conn)
 	sp, err := sb.LastSubmitTime(ctx, &submit_log.LastSubmitTimeReq{UserIds: ids})
 	if err != nil {
@@ -110,11 +115,7 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
 	// 获取 platform spider 信息
-	conn, err := grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///core-data"),
-		grpc.WithDiscovery(p.reg.Reg.(registry.Discovery)),
-	)
+	conn, err := p.coreDataRPC()
 	s := spider.NewSpiderClient(conn)
 	sp, err := s.GetSpider(ctx, &spider.GetSpiderReq{UserId: req.UserId})
 	if err != nil {

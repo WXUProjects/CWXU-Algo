@@ -2,6 +2,7 @@ package dal
 
 import (
 	"context"
+	data2 "cwxu-algo/app/common/data"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 	"errors"
@@ -23,7 +24,7 @@ func NewProfileDal(data *data.Data) *ProfileDal {
 // GetById 根据Id获取用户详细信息
 func (d *ProfileDal) GetById(ctx context.Context, userId int64) (*model.User, error) {
 	cacheKey := fmt.Sprintf("user:%d:profile", userId)
-	profile, _, err := GetCacheDal[model.User](ctx, d.rdb, cacheKey, func(data *model.User) error {
+	profile, _, err := data2.GetCacheDal[model.User](ctx, d.rdb, cacheKey, func(data *model.User) error {
 		err := d.db.Where("id = ?", userId).First(data).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("没有找到相关用户信息")
@@ -38,7 +39,7 @@ func (d *ProfileDal) GetById(ctx context.Context, userId int64) (*model.User, er
 // Update 更新用户信息
 func (d *ProfileDal) Update(ctx context.Context, profile model.User) error {
 	cacheKey := fmt.Sprintf("user:%d:profile", profile.ID)
-	err := UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
+	err := data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
 		d.db.Model(&model.User{}).Where("id = ?", profile.ID).Updates(map[string]interface{}{
 			"avatar": profile.Avatar,
 			"email":  profile.Email,

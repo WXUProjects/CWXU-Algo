@@ -52,6 +52,8 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool) error {
 		DoNothing: true,
 	}).Save(&submitLog)
 	// 使得缓存失效
-	uc.data.RDB.Del(context.Background(), fmt.Sprintf("core:submit_log:user:%d", userId))
+	pipe := uc.data.RDB.Pipeline()
+	pipe.Del(context.Background(), fmt.Sprintf("core:submit_log:user:%d", userId))
+	pipe.Del(context.Background(), fmt.Sprintf("user:%d:lastSubmitTime", userId))
 	return nil
 }
