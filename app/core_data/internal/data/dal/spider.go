@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -81,11 +82,14 @@ func (s *SpiderDal) GetByUserId(ctx context.Context, userId int64, lastTimeUnix 
 		return dbFunc()
 	}
 	// 命中，解析缓存
+	sbLog = make([]model.SubmitLog, 0)
 	for _, v := range rVal {
-		var log model.SubmitLog
-		_ = utils.GobDecoder([]byte(v.(string)), &log)
-		sbLog = append(sbLog, log)
+		var l model.SubmitLog
+		_ = utils.GobDecoder([]byte(v.(string)), &l)
+
+		sbLog = append(sbLog, l)
 	}
+	log.Info(sbLog)
 	return sbLog, nil
 }
 
