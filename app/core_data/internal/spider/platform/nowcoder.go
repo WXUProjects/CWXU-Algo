@@ -3,8 +3,10 @@ package platform
 import (
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
+	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -70,6 +72,115 @@ func analysisSubs(doc *goquery.Document) []Submission {
 	return subs
 }
 
+func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []model.SubmitLog {
+
+	// ===== record 定义（必须是命名类型）=====
+	type Record struct {
+		Problem struct {
+			QuestionNum string `json:"questionNum"`
+			Title       string `json:"title"`
+		} `json:"problem"`
+		Submission struct {
+			ID          int64 `json:"id"`
+			CreatedDate int64 `json:"createdDate"`
+		} `json:"submission"`
+		Language string `json:"language"`
+		Status   struct {
+			Desc string `json:"desc"`
+		} `json:"status"`
+	}
+
+	type Resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			TotalPage int      `json:"totalPage"`
+			Records   []Record `json:"records"`
+		} `json:"data"`
+	}
+
+	const api = "https://gw-c.nowcoder.com/api/sparta/user/question-training/submission-history"
+
+	pageSize := 50
+	limit := 150
+	if needAll {
+		limit = math.MaxInt
+	}
+
+	doReq := func(page int) (*Resp, error) {
+		body := fmt.Sprintf(`{"pageNo":%d,"pageSize":%d,"userId":%d}`, page, pageSize, userId)
+		req, err := http.NewRequest("POST", api, strings.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		bs, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		var r Resp
+		if err := json.Unmarshal(bs, &r); err != nil {
+			return nil, err
+		}
+		return &r, nil
+	}
+
+	result := make([]model.SubmitLog, 0)
+
+	handle := func(records []Record) bool {
+		for _, it := range records {
+			result = append(result, model.SubmitLog{
+				UserID:   userId,
+				Platform: spider.NowCoder,
+				SubmitID: strconv.FormatInt(it.Submission.ID, 10),
+				Contest:  "main|" + username,
+				Problem:  it.Problem.QuestionNum + " " + it.Problem.Title,
+				Lang:     it.Language,
+				Status:   it.Status.Desc,
+				Time:     time.UnixMilli(it.Submission.CreatedDate),
+			})
+			if len(result) >= limit {
+				return false
+			}
+		}
+		return true
+	}
+
+	// ===== 第 1 页 =====
+	first, err := doReq(1)
+	if err != nil {
+		return result
+	}
+
+	totalPage := first.Data.TotalPage
+	if !handle(first.Data.Records) {
+		return result
+	}
+
+	// ===== 后续分页 =====
+	for page := 2; page <= totalPage; page++ {
+		r, err := doReq(page)
+		if err != nil {
+			break
+		}
+		if len(r.Data.Records) == 0 {
+			break
+		}
+		if !handle(r.Data.Records) {
+			break
+		}
+	}
+
+	return result
+}
+
 func (nc NewNowCoder) FetchSubmitLog(userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
 	url := fmt.Sprintf(
 		"https://ac.nowcoder.com/acm/contest/profile/%s/practice-coding?pageSize=100&page=1",
@@ -122,6 +233,7 @@ func (nc NewNowCoder) FetchSubmitLog(userId int64, username string, needAll bool
 		}
 		res = append(res, tmp)
 	}
+	res = append(res, nc.fetchSub(userId, username, needAll)...)
 	return res, nil
 }
 
