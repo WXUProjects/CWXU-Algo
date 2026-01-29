@@ -73,7 +73,6 @@ func analysisSubs(doc *goquery.Document) []Submission {
 }
 
 func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []model.SubmitLog {
-
 	// ===== record 定义（必须是命名类型）=====
 	type Record struct {
 		Problem struct {
