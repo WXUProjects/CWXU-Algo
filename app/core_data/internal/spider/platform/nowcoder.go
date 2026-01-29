@@ -107,7 +107,7 @@ func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []mo
 	}
 
 	doReq := func(page int) (*Resp, error) {
-		body := fmt.Sprintf(`{"pageNo":%d,"pageSize":%d,"userId":%d}`, page, pageSize, userId)
+		body := fmt.Sprintf(`{"pageNo":%d,"pageSize":%d,"userId":%s}`, page, pageSize, username)
 		req, err := http.NewRequest("POST", api, strings.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -144,7 +144,7 @@ func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []mo
 				Problem:  it.Problem.QuestionNum + " " + it.Problem.Title,
 				Lang:     it.Language,
 				Status:   it.Status.Desc,
-				Time:     time.UnixMilli(it.Submission.CreatedDate),
+				Time:     time.Unix(it.Submission.CreatedDate/1000, 0),
 			})
 			if len(result) >= limit {
 				return false
