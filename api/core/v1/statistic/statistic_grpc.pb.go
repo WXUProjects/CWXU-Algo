@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v6.33.1
-// source: api/core/v1/statistic/statistic.proto
+// source: core/v1/statistic/statistic.proto
 
 package statistic
 
@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Statistic_Heatmap_FullMethodName = "/api.core.v1.statistic.Statistic/Heatmap"
+	Statistic_Heatmap_FullMethodName     = "/api.core.v1.statistic.Statistic/Heatmap"
+	Statistic_PeriodCount_FullMethodName = "/api.core.v1.statistic.Statistic/PeriodCount"
 )
 
 // StatisticClient is the client API for Statistic service.
@@ -27,6 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StatisticClient interface {
 	Heatmap(ctx context.Context, in *HeatmapReq, opts ...grpc.CallOption) (*HeatmapResp, error)
+	PeriodCount(ctx context.Context, in *PeriodCountReq, opts ...grpc.CallOption) (*PeriodCountResp, error)
 }
 
 type statisticClient struct {
@@ -47,11 +49,22 @@ func (c *statisticClient) Heatmap(ctx context.Context, in *HeatmapReq, opts ...g
 	return out, nil
 }
 
+func (c *statisticClient) PeriodCount(ctx context.Context, in *PeriodCountReq, opts ...grpc.CallOption) (*PeriodCountResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PeriodCountResp)
+	err := c.cc.Invoke(ctx, Statistic_PeriodCount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // StatisticServer is the server API for Statistic service.
 // All implementations must embed UnimplementedStatisticServer
 // for forward compatibility.
 type StatisticServer interface {
 	Heatmap(context.Context, *HeatmapReq) (*HeatmapResp, error)
+	PeriodCount(context.Context, *PeriodCountReq) (*PeriodCountResp, error)
 	mustEmbedUnimplementedStatisticServer()
 }
 
@@ -64,6 +77,9 @@ type UnimplementedStatisticServer struct{}
 
 func (UnimplementedStatisticServer) Heatmap(context.Context, *HeatmapReq) (*HeatmapResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method Heatmap not implemented")
+}
+func (UnimplementedStatisticServer) PeriodCount(context.Context, *PeriodCountReq) (*PeriodCountResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method PeriodCount not implemented")
 }
 func (UnimplementedStatisticServer) mustEmbedUnimplementedStatisticServer() {}
 func (UnimplementedStatisticServer) testEmbeddedByValue()                   {}
@@ -104,6 +120,24 @@ func _Statistic_Heatmap_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Statistic_PeriodCount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PeriodCountReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StatisticServer).PeriodCount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Statistic_PeriodCount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StatisticServer).PeriodCount(ctx, req.(*PeriodCountReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Statistic_ServiceDesc is the grpc.ServiceDesc for Statistic service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -115,7 +149,11 @@ var Statistic_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Heatmap",
 			Handler:    _Statistic_Heatmap_Handler,
 		},
+		{
+			MethodName: "PeriodCount",
+			Handler:    _Statistic_PeriodCount_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "api/core/v1/statistic/statistic.proto",
+	Metadata: "core/v1/statistic/statistic.proto",
 }

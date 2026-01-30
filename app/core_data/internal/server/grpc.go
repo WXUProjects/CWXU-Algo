@@ -2,6 +2,7 @@ package server
 
 import (
 	"cwxu-algo/api/core/v1/spider"
+	statistic2 "cwxu-algo/api/core/v1/statistic"
 	"cwxu-algo/api/core/v1/submit_log"
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/core_data/internal/service"
@@ -14,7 +15,7 @@ import (
 )
 
 // NewGRPCServer new a gRPC server.
-func NewGRPCServer(c *conf.Server, logger log.Logger, spiderService *service.SpiderService, submitLogService *service.SubmitLogService) *grpc.Server {
+func NewGRPCServer(c *conf.Server, logger log.Logger, spiderService *service.SpiderService, submitLogService *service.SubmitLogService, statisticService *service.StatisticService) *grpc.Server {
 	var opts = []grpc.ServerOption{
 		grpc.Middleware(
 			recovery.Recovery(),
@@ -33,5 +34,6 @@ func NewGRPCServer(c *conf.Server, logger log.Logger, spiderService *service.Spi
 	selector.SetGlobalSelector(wrr.NewBuilder())
 	spider.RegisterSpiderServer(srv, spiderService)
 	submit_log.RegisterSubmitServer(srv, submitLogService)
+	statistic2.RegisterStatisticServer(srv, statisticService)
 	return srv
 }

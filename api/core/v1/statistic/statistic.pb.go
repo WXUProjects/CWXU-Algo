@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v6.33.1
-// source: api/core/v1/statistic/statistic.proto
+// source: core/v1/statistic/statistic.proto
 
 package statistic
 
@@ -34,7 +34,7 @@ type HeatmapReq struct {
 
 func (x *HeatmapReq) Reset() {
 	*x = HeatmapReq{}
-	mi := &file_api_core_v1_statistic_statistic_proto_msgTypes[0]
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -46,7 +46,7 @@ func (x *HeatmapReq) String() string {
 func (*HeatmapReq) ProtoMessage() {}
 
 func (x *HeatmapReq) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_statistic_statistic_proto_msgTypes[0]
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -59,7 +59,7 @@ func (x *HeatmapReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeatmapReq.ProtoReflect.Descriptor instead.
 func (*HeatmapReq) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{0}
+	return file_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *HeatmapReq) GetUserId() int64 {
@@ -100,7 +100,7 @@ type HeatmapResp struct {
 
 func (x *HeatmapResp) Reset() {
 	*x = HeatmapResp{}
-	mi := &file_api_core_v1_statistic_statistic_proto_msgTypes[1]
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -112,7 +112,7 @@ func (x *HeatmapResp) String() string {
 func (*HeatmapResp) ProtoMessage() {}
 
 func (x *HeatmapResp) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_statistic_statistic_proto_msgTypes[1]
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -125,7 +125,7 @@ func (x *HeatmapResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeatmapResp.ProtoReflect.Descriptor instead.
 func (*HeatmapResp) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{1}
+	return file_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *HeatmapResp) GetCode() int64 {
@@ -142,6 +142,354 @@ func (x *HeatmapResp) GetData() []*HeatmapResp_HeatmapItem {
 	return nil
 }
 
+type PeriodCountReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeriodCountReq) Reset() {
+	*x = PeriodCountReq{}
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeriodCountReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeriodCountReq) ProtoMessage() {}
+
+func (x *PeriodCountReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeriodCountReq.ProtoReflect.Descriptor instead.
+func (*PeriodCountReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *PeriodCountReq) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+type PeriodCountResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Data          *PeriodData            `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeriodCountResp) Reset() {
+	*x = PeriodCountResp{}
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeriodCountResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeriodCountResp) ProtoMessage() {}
+
+func (x *PeriodCountResp) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeriodCountResp.ProtoReflect.Descriptor instead.
+func (*PeriodCountResp) Descriptor() ([]byte, []int) {
+	return file_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *PeriodCountResp) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *PeriodCountResp) GetData() *PeriodData {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type PeriodData struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Submit        *SubmitCount           `protobuf:"bytes,1,opt,name=submit,proto3" json:"submit,omitempty"`
+	Ac            *AcCount               `protobuf:"bytes,2,opt,name=ac,proto3" json:"ac,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeriodData) Reset() {
+	*x = PeriodData{}
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeriodData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeriodData) ProtoMessage() {}
+
+func (x *PeriodData) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeriodData.ProtoReflect.Descriptor instead.
+func (*PeriodData) Descriptor() ([]byte, []int) {
+	return file_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *PeriodData) GetSubmit() *SubmitCount {
+	if x != nil {
+		return x.Submit
+	}
+	return nil
+}
+
+func (x *PeriodData) GetAc() *AcCount {
+	if x != nil {
+		return x.Ac
+	}
+	return nil
+}
+
+type SubmitCount struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Today         int64                  `protobuf:"varint,1,opt,name=today,proto3" json:"today,omitempty"`
+	ThisWeek      int64                  `protobuf:"varint,2,opt,name=thisWeek,proto3" json:"thisWeek,omitempty"`
+	LastWeek      int64                  `protobuf:"varint,3,opt,name=lastWeek,proto3" json:"lastWeek,omitempty"`
+	ThisMonth     int64                  `protobuf:"varint,4,opt,name=thisMonth,proto3" json:"thisMonth,omitempty"`
+	LastMonth     int64                  `protobuf:"varint,5,opt,name=lastMonth,proto3" json:"lastMonth,omitempty"`
+	ThisYear      int64                  `protobuf:"varint,6,opt,name=thisYear,proto3" json:"thisYear,omitempty"`
+	LastYear      int64                  `protobuf:"varint,7,opt,name=lastYear,proto3" json:"lastYear,omitempty"`
+	Total         int64                  `protobuf:"varint,8,opt,name=total,proto3" json:"total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubmitCount) Reset() {
+	*x = SubmitCount{}
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitCount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitCount) ProtoMessage() {}
+
+func (x *SubmitCount) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitCount.ProtoReflect.Descriptor instead.
+func (*SubmitCount) Descriptor() ([]byte, []int) {
+	return file_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SubmitCount) GetToday() int64 {
+	if x != nil {
+		return x.Today
+	}
+	return 0
+}
+
+func (x *SubmitCount) GetThisWeek() int64 {
+	if x != nil {
+		return x.ThisWeek
+	}
+	return 0
+}
+
+func (x *SubmitCount) GetLastWeek() int64 {
+	if x != nil {
+		return x.LastWeek
+	}
+	return 0
+}
+
+func (x *SubmitCount) GetThisMonth() int64 {
+	if x != nil {
+		return x.ThisMonth
+	}
+	return 0
+}
+
+func (x *SubmitCount) GetLastMonth() int64 {
+	if x != nil {
+		return x.LastMonth
+	}
+	return 0
+}
+
+func (x *SubmitCount) GetThisYear() int64 {
+	if x != nil {
+		return x.ThisYear
+	}
+	return 0
+}
+
+func (x *SubmitCount) GetLastYear() int64 {
+	if x != nil {
+		return x.LastYear
+	}
+	return 0
+}
+
+func (x *SubmitCount) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+type AcCount struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Today         int64                  `protobuf:"varint,1,opt,name=today,proto3" json:"today,omitempty"`
+	ThisWeek      int64                  `protobuf:"varint,2,opt,name=thisWeek,proto3" json:"thisWeek,omitempty"`
+	LastWeek      int64                  `protobuf:"varint,3,opt,name=lastWeek,proto3" json:"lastWeek,omitempty"`
+	ThisMonth     int64                  `protobuf:"varint,4,opt,name=thisMonth,proto3" json:"thisMonth,omitempty"`
+	LastMonth     int64                  `protobuf:"varint,5,opt,name=lastMonth,proto3" json:"lastMonth,omitempty"`
+	ThisYear      int64                  `protobuf:"varint,6,opt,name=thisYear,proto3" json:"thisYear,omitempty"`
+	LastYear      int64                  `protobuf:"varint,7,opt,name=lastYear,proto3" json:"lastYear,omitempty"`
+	Total         int64                  `protobuf:"varint,8,opt,name=total,proto3" json:"total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcCount) Reset() {
+	*x = AcCount{}
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcCount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcCount) ProtoMessage() {}
+
+func (x *AcCount) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcCount.ProtoReflect.Descriptor instead.
+func (*AcCount) Descriptor() ([]byte, []int) {
+	return file_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *AcCount) GetToday() int64 {
+	if x != nil {
+		return x.Today
+	}
+	return 0
+}
+
+func (x *AcCount) GetThisWeek() int64 {
+	if x != nil {
+		return x.ThisWeek
+	}
+	return 0
+}
+
+func (x *AcCount) GetLastWeek() int64 {
+	if x != nil {
+		return x.LastWeek
+	}
+	return 0
+}
+
+func (x *AcCount) GetThisMonth() int64 {
+	if x != nil {
+		return x.ThisMonth
+	}
+	return 0
+}
+
+func (x *AcCount) GetLastMonth() int64 {
+	if x != nil {
+		return x.LastMonth
+	}
+	return 0
+}
+
+func (x *AcCount) GetThisYear() int64 {
+	if x != nil {
+		return x.ThisYear
+	}
+	return 0
+}
+
+func (x *AcCount) GetLastYear() int64 {
+	if x != nil {
+		return x.LastYear
+	}
+	return 0
+}
+
+func (x *AcCount) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
 type HeatmapResp_HeatmapItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Date          string                 `protobuf:"bytes,1,opt,name=date,proto3" json:"date,omitempty"`
@@ -152,7 +500,7 @@ type HeatmapResp_HeatmapItem struct {
 
 func (x *HeatmapResp_HeatmapItem) Reset() {
 	*x = HeatmapResp_HeatmapItem{}
-	mi := &file_api_core_v1_statistic_statistic_proto_msgTypes[2]
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -164,7 +512,7 @@ func (x *HeatmapResp_HeatmapItem) String() string {
 func (*HeatmapResp_HeatmapItem) ProtoMessage() {}
 
 func (x *HeatmapResp_HeatmapItem) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_statistic_statistic_proto_msgTypes[2]
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -177,7 +525,7 @@ func (x *HeatmapResp_HeatmapItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeatmapResp_HeatmapItem.ProtoReflect.Descriptor instead.
 func (*HeatmapResp_HeatmapItem) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{1, 0}
+	return file_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{1, 0}
 }
 
 func (x *HeatmapResp_HeatmapItem) GetDate() string {
@@ -194,11 +542,11 @@ func (x *HeatmapResp_HeatmapItem) GetCount() int64 {
 	return 0
 }
 
-var File_api_core_v1_statistic_statistic_proto protoreflect.FileDescriptor
+var File_core_v1_statistic_statistic_proto protoreflect.FileDescriptor
 
-const file_api_core_v1_statistic_statistic_proto_rawDesc = "" +
+const file_core_v1_statistic_statistic_proto_rawDesc = "" +
 	"\n" +
-	"%api/core/v1/statistic/statistic.proto\x12\x15api.core.v1.statistic\x1a\x1cgoogle/api/annotations.proto\"p\n" +
+	"!core/v1/statistic/statistic.proto\x12\x15api.core.v1.statistic\x1a\x1cgoogle/api/annotations.proto\"p\n" +
 	"\n" +
 	"HeatmapReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x1c\n" +
@@ -210,60 +558,98 @@ const file_api_core_v1_statistic_statistic_proto_rawDesc = "" +
 	"\x04data\x18\x02 \x03(\v2..api.core.v1.statistic.HeatmapResp.HeatmapItemR\x04data\x1a7\n" +
 	"\vHeatmapItem\x12\x12\n" +
 	"\x04date\x18\x01 \x01(\tR\x04date\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x03R\x05count2\x81\x01\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\"(\n" +
+	"\x0ePeriodCountReq\x12\x16\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\\\n" +
+	"\x0fPeriodCountResp\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x125\n" +
+	"\x04data\x18\x02 \x01(\v2!.api.core.v1.statistic.PeriodDataR\x04data\"x\n" +
+	"\n" +
+	"PeriodData\x12:\n" +
+	"\x06submit\x18\x01 \x01(\v2\".api.core.v1.statistic.SubmitCountR\x06submit\x12.\n" +
+	"\x02ac\x18\x02 \x01(\v2\x1e.api.core.v1.statistic.AcCountR\x02ac\"\xe5\x01\n" +
+	"\vSubmitCount\x12\x14\n" +
+	"\x05today\x18\x01 \x01(\x03R\x05today\x12\x1a\n" +
+	"\bthisWeek\x18\x02 \x01(\x03R\bthisWeek\x12\x1a\n" +
+	"\blastWeek\x18\x03 \x01(\x03R\blastWeek\x12\x1c\n" +
+	"\tthisMonth\x18\x04 \x01(\x03R\tthisMonth\x12\x1c\n" +
+	"\tlastMonth\x18\x05 \x01(\x03R\tlastMonth\x12\x1a\n" +
+	"\bthisYear\x18\x06 \x01(\x03R\bthisYear\x12\x1a\n" +
+	"\blastYear\x18\a \x01(\x03R\blastYear\x12\x14\n" +
+	"\x05total\x18\b \x01(\x03R\x05total\"\xe1\x01\n" +
+	"\aAcCount\x12\x14\n" +
+	"\x05today\x18\x01 \x01(\x03R\x05today\x12\x1a\n" +
+	"\bthisWeek\x18\x02 \x01(\x03R\bthisWeek\x12\x1a\n" +
+	"\blastWeek\x18\x03 \x01(\x03R\blastWeek\x12\x1c\n" +
+	"\tthisMonth\x18\x04 \x01(\x03R\tthisMonth\x12\x1c\n" +
+	"\tlastMonth\x18\x05 \x01(\x03R\tlastMonth\x12\x1a\n" +
+	"\bthisYear\x18\x06 \x01(\x03R\bthisYear\x12\x1a\n" +
+	"\blastYear\x18\a \x01(\x03R\blastYear\x12\x14\n" +
+	"\x05total\x18\b \x01(\x03R\x05total2\x82\x02\n" +
 	"\tStatistic\x12t\n" +
-	"\aHeatmap\x12!.api.core.v1.statistic.HeatmapReq\x1a\".api.core.v1.statistic.HeatmapResp\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/core/statistic/heatmapBD\n" +
+	"\aHeatmap\x12!.api.core.v1.statistic.HeatmapReq\x1a\".api.core.v1.statistic.HeatmapResp\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/core/statistic/heatmap\x12\x7f\n" +
+	"\vPeriodCount\x12%.api.core.v1.statistic.PeriodCountReq\x1a&.api.core.v1.statistic.PeriodCountResp\"!\x82\xd3\xe4\x93\x02\x1b\x12\x19/v1/core/statistic/periodBD\n" +
 	"\x15api.core.v1.statisticP\x01Z)cwxu-algo/api/core/v1/statistic;statisticb\x06proto3"
 
 var (
-	file_api_core_v1_statistic_statistic_proto_rawDescOnce sync.Once
-	file_api_core_v1_statistic_statistic_proto_rawDescData []byte
+	file_core_v1_statistic_statistic_proto_rawDescOnce sync.Once
+	file_core_v1_statistic_statistic_proto_rawDescData []byte
 )
 
-func file_api_core_v1_statistic_statistic_proto_rawDescGZIP() []byte {
-	file_api_core_v1_statistic_statistic_proto_rawDescOnce.Do(func() {
-		file_api_core_v1_statistic_statistic_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_api_core_v1_statistic_statistic_proto_rawDesc), len(file_api_core_v1_statistic_statistic_proto_rawDesc)))
+func file_core_v1_statistic_statistic_proto_rawDescGZIP() []byte {
+	file_core_v1_statistic_statistic_proto_rawDescOnce.Do(func() {
+		file_core_v1_statistic_statistic_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_v1_statistic_statistic_proto_rawDesc), len(file_core_v1_statistic_statistic_proto_rawDesc)))
 	})
-	return file_api_core_v1_statistic_statistic_proto_rawDescData
+	return file_core_v1_statistic_statistic_proto_rawDescData
 }
 
-var file_api_core_v1_statistic_statistic_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
-var file_api_core_v1_statistic_statistic_proto_goTypes = []any{
+var file_core_v1_statistic_statistic_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_core_v1_statistic_statistic_proto_goTypes = []any{
 	(*HeatmapReq)(nil),              // 0: api.core.v1.statistic.HeatmapReq
 	(*HeatmapResp)(nil),             // 1: api.core.v1.statistic.HeatmapResp
-	(*HeatmapResp_HeatmapItem)(nil), // 2: api.core.v1.statistic.HeatmapResp.HeatmapItem
+	(*PeriodCountReq)(nil),          // 2: api.core.v1.statistic.PeriodCountReq
+	(*PeriodCountResp)(nil),         // 3: api.core.v1.statistic.PeriodCountResp
+	(*PeriodData)(nil),              // 4: api.core.v1.statistic.PeriodData
+	(*SubmitCount)(nil),             // 5: api.core.v1.statistic.SubmitCount
+	(*AcCount)(nil),                 // 6: api.core.v1.statistic.AcCount
+	(*HeatmapResp_HeatmapItem)(nil), // 7: api.core.v1.statistic.HeatmapResp.HeatmapItem
 }
-var file_api_core_v1_statistic_statistic_proto_depIdxs = []int32{
-	2, // 0: api.core.v1.statistic.HeatmapResp.data:type_name -> api.core.v1.statistic.HeatmapResp.HeatmapItem
-	0, // 1: api.core.v1.statistic.Statistic.Heatmap:input_type -> api.core.v1.statistic.HeatmapReq
-	1, // 2: api.core.v1.statistic.Statistic.Heatmap:output_type -> api.core.v1.statistic.HeatmapResp
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+var file_core_v1_statistic_statistic_proto_depIdxs = []int32{
+	7, // 0: api.core.v1.statistic.HeatmapResp.data:type_name -> api.core.v1.statistic.HeatmapResp.HeatmapItem
+	4, // 1: api.core.v1.statistic.PeriodCountResp.data:type_name -> api.core.v1.statistic.PeriodData
+	5, // 2: api.core.v1.statistic.PeriodData.submit:type_name -> api.core.v1.statistic.SubmitCount
+	6, // 3: api.core.v1.statistic.PeriodData.ac:type_name -> api.core.v1.statistic.AcCount
+	0, // 4: api.core.v1.statistic.Statistic.Heatmap:input_type -> api.core.v1.statistic.HeatmapReq
+	2, // 5: api.core.v1.statistic.Statistic.PeriodCount:input_type -> api.core.v1.statistic.PeriodCountReq
+	1, // 6: api.core.v1.statistic.Statistic.Heatmap:output_type -> api.core.v1.statistic.HeatmapResp
+	3, // 7: api.core.v1.statistic.Statistic.PeriodCount:output_type -> api.core.v1.statistic.PeriodCountResp
+	6, // [6:8] is the sub-list for method output_type
+	4, // [4:6] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
-func init() { file_api_core_v1_statistic_statistic_proto_init() }
-func file_api_core_v1_statistic_statistic_proto_init() {
-	if File_api_core_v1_statistic_statistic_proto != nil {
+func init() { file_core_v1_statistic_statistic_proto_init() }
+func file_core_v1_statistic_statistic_proto_init() {
+	if File_core_v1_statistic_statistic_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_core_v1_statistic_statistic_proto_rawDesc), len(file_api_core_v1_statistic_statistic_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_statistic_statistic_proto_rawDesc), len(file_core_v1_statistic_statistic_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_api_core_v1_statistic_statistic_proto_goTypes,
-		DependencyIndexes: file_api_core_v1_statistic_statistic_proto_depIdxs,
-		MessageInfos:      file_api_core_v1_statistic_statistic_proto_msgTypes,
+		GoTypes:           file_core_v1_statistic_statistic_proto_goTypes,
+		DependencyIndexes: file_core_v1_statistic_statistic_proto_depIdxs,
+		MessageInfos:      file_core_v1_statistic_statistic_proto_msgTypes,
 	}.Build()
-	File_api_core_v1_statistic_statistic_proto = out.File
-	file_api_core_v1_statistic_statistic_proto_goTypes = nil
-	file_api_core_v1_statistic_statistic_proto_depIdxs = nil
+	File_core_v1_statistic_statistic_proto = out.File
+	file_core_v1_statistic_statistic_proto_goTypes = nil
+	file_core_v1_statistic_statistic_proto_depIdxs = nil
 }

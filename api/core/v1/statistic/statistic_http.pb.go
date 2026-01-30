@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-http v2.9.2
 // - protoc             v6.33.1
-// source: api/core/v1/statistic/statistic.proto
+// source: core/v1/statistic/statistic.proto
 
 package statistic
 
@@ -20,14 +20,17 @@ var _ = binding.EncodeURL
 const _ = http.SupportPackageIsVersion1
 
 const OperationStatisticHeatmap = "/api.core.v1.statistic.Statistic/Heatmap"
+const OperationStatisticPeriodCount = "/api.core.v1.statistic.Statistic/PeriodCount"
 
 type StatisticHTTPServer interface {
 	Heatmap(context.Context, *HeatmapReq) (*HeatmapResp, error)
+	PeriodCount(context.Context, *PeriodCountReq) (*PeriodCountResp, error)
 }
 
 func RegisterStatisticHTTPServer(s *http.Server, srv StatisticHTTPServer) {
 	r := s.Route("/")
 	r.GET("/v1/core/statistic/heatmap", _Statistic_Heatmap0_HTTP_Handler(srv))
+	r.GET("/v1/core/statistic/period", _Statistic_PeriodCount0_HTTP_Handler(srv))
 }
 
 func _Statistic_Heatmap0_HTTP_Handler(srv StatisticHTTPServer) func(ctx http.Context) error {
@@ -49,8 +52,28 @@ func _Statistic_Heatmap0_HTTP_Handler(srv StatisticHTTPServer) func(ctx http.Con
 	}
 }
 
+func _Statistic_PeriodCount0_HTTP_Handler(srv StatisticHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in PeriodCountReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationStatisticPeriodCount)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.PeriodCount(ctx, req.(*PeriodCountReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*PeriodCountResp)
+		return ctx.Result(200, reply)
+	}
+}
+
 type StatisticHTTPClient interface {
 	Heatmap(ctx context.Context, req *HeatmapReq, opts ...http.CallOption) (rsp *HeatmapResp, err error)
+	PeriodCount(ctx context.Context, req *PeriodCountReq, opts ...http.CallOption) (rsp *PeriodCountResp, err error)
 }
 
 type StatisticHTTPClientImpl struct {
@@ -66,6 +89,19 @@ func (c *StatisticHTTPClientImpl) Heatmap(ctx context.Context, in *HeatmapReq, o
 	pattern := "/v1/core/statistic/heatmap"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationStatisticHeatmap))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *StatisticHTTPClientImpl) PeriodCount(ctx context.Context, in *PeriodCountReq, opts ...http.CallOption) (*PeriodCountResp, error) {
+	var out PeriodCountResp
+	pattern := "/v1/core/statistic/period"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationStatisticPeriodCount))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {

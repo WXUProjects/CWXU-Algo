@@ -12,6 +12,11 @@ service Statistic {
       get: "/v1/core/statistic/heatmap"
     };
   }
+  rpc PeriodCount(PeriodCountReq) returns (PeriodCountResp) {
+    option (google.api.http) = {
+      get: "/v1/core/statistic/period"
+    };
+  }
 }
 
 message HeatmapReq {
@@ -28,4 +33,40 @@ message HeatmapResp {
   }
   int64 code = 1;
   repeated HeatmapItem data = 2;
+}
+
+message PeriodCountReq {
+  int64 userId = 1;
+}
+
+message PeriodCountResp {
+  int64 code = 1;
+  PeriodData data = 2;
+}
+
+message PeriodData {
+  SubmitCount submit = 1;
+  AcCount ac = 2;
+}
+
+message SubmitCount {
+  int64 today = 1;
+  int64 thisWeek = 2;
+  int64 lastWeek = 3;
+  int64 thisMonth = 4;
+  int64 lastMonth = 5;
+  int64 thisYear = 6;
+  int64 lastYear = 7;
+  int64 total = 8;
+}
+
+message AcCount {
+  int64 today = 1;
+  int64 thisWeek = 2;
+  int64 lastWeek = 3;
+  int64 thisMonth = 4;
+  int64 lastMonth = 5;
+  int64 thisYear = 6;
+  int64 lastYear = 7;
+  int64 total = 8;
 }

@@ -96,6 +96,8 @@ func (uc *SpiderUseCase) invalidateCache(userId int64) {
 		ctx,
 		fmt.Sprintf("core:submit_log:user:%d", userId),
 		fmt.Sprintf("user:%d:lastSubmitTime", userId),
+		fmt.Sprintf("statistic:period:%d", userId),  // 用户统计缓存
+		fmt.Sprintf("statistic:period:-1"),            // 全局统计缓存
 	).Err()
 
 	// 2. 模糊前缀，必须 SCAN
