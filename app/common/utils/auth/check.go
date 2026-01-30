@@ -27,7 +27,6 @@ func praseJwtToken(ctx context.Context) string {
 
 func VerifyById(ctx context.Context, userId uint) bool {
 	parts := strings.Split(praseJwtToken(ctx), ".")
-
 	if len(parts) != 3 {
 		return false
 	}
@@ -41,6 +40,9 @@ func VerifyById(ctx context.Context, userId uint) bool {
 	pd := JwtPayload{}
 	if err := json.Unmarshal(dst, &pd); err != nil {
 		return false
+	}
+	if len(pd.RoleIDs) != 0 && pd.RoleIDs[0] == 1 {
+		return true
 	}
 	if pd.UserID != userId {
 		return false

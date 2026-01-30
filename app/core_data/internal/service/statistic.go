@@ -114,14 +114,13 @@ func (s StatisticService) PeriodCount(ctx context.Context, req *statistic.Period
 		now := time.Now()
 
 		// 日期范围计算
-		todayStart := now.Truncate(24 * time.Hour)
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		thisWeekStart := getWeekStart(now)
 		lastWeekStart := thisWeekStart.Add(-7 * 24 * time.Hour)
 		thisMonthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 		lastMonthStart := thisMonthStart.AddDate(0, -1, 0)
 		thisYearStart := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
 		lastYearStart := thisYearStart.AddDate(-1, 0, 0)
-
 		// 提交次数统计
 		var submit SubmitCount
 		submit.Today = countQuery(s.db, req.UserId, todayStart, now)

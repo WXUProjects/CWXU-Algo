@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"gorm.io/datatypes"
 
 	"gorm.io/gorm"
 )
@@ -80,7 +81,7 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 		Name:     req.Name,
 		Email:    req.Email,
 		GroupId:  req.GroupId,
-		RoleIDs:  nil,
+		RoleIDs:  datatypes.JSON("[0]"),
 	}
 	r := s.db.Create(&newUser)
 	if r.Error != nil {
