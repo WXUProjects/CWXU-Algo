@@ -3,14 +3,19 @@ package service
 import (
 	"context"
 	"cwxu-algo/api/core/v1/spider"
+	"cwxu-algo/api/core/v1/submit_log"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/biz"
 	"cwxu-algo/app/user/internal/data/dal"
 	"cwxu-algo/app/user/internal/data/model"
+	"strconv"
+	"time"
 
 	"github.com/go-kratos/kratos/v2/errors"
+	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/go-kratos/kratos/v2/transport/grpc"
 	grpc2 "google.golang.org/grpc"
@@ -48,6 +53,7 @@ func (p *ProfileService) coreDataRPC() (*grpc2.ClientConn, error) {
 		context.Background(),
 		grpc.WithEndpoint("discovery:///core-data"),
 		grpc.WithDiscovery(p.reg.Reg.(registry.Discovery)),
+		grpc.WithTimeout(20*time.Second),
 	)
 }
 
@@ -61,20 +67,20 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		ids = append(ids, int64(v.ID))
 	}
 	// 获取 最后一次 提交时间
-	//conn, err := p.coreDataRPC()
-	//sb := submit_log.NewSubmitClient(conn)
-	//sp, err := sb.LastSubmitTime(ctx, &submit_log.LastSubmitTimeReq{UserIds: ids})
-	//if err != nil {
-	//	log.Info(err.Error())
-	//	return nil, InternalServer
-	//}
+	conn, err := p.coreDataRPC()
+	sb := submit_log.NewSubmitClient(conn)
+	sp, err := sb.LastSubmitTime(ctx, &submit_log.LastSubmitTimeReq{UserIds: ids})
+	if err != nil {
+		log.Info(err.Error())
+		return nil, InternalServer
+	}
 
-	//var timeMap map[int64]int64
-	//err = utils.GobDecoder(sp.TimeMap, &timeMap)
-	//if err != nil {
-	//	log.Info(err.Error())
-	//	return nil, InternalServer
-	//}
+	var timeMap map[int64]int64
+	err = utils.GobDecoder(sp.TimeMap, &timeMap)
+	if err != nil {
+		log.Info(err.Error())
+		return nil, InternalServer
+	}
 
 	res := &profile.GetListRes{
 		List:  make([]*profile.GetListRes_List, 0),
@@ -82,9 +88,9 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 	}
 	for _, v := range pf {
 		var t string
-		//if v, ok := timeMap[int64(v.ID)]; ok {
-		//	t = strconv.Itoa(int(v))
-		//}
+		if v, ok := timeMap[int64(v.ID)]; ok {
+			t = strconv.Itoa(int(v))
+		}
 		res.List = append(res.List, &profile.GetListRes_List{
 			UserId:     uint64(v.ID),
 			Username:   v.Username,
