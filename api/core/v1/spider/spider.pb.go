@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v6.33.1
-// source: api/core/v1/spider/spider.proto
+// source: core/v1/spider/spider.proto
 
 package spider
 
@@ -33,7 +33,7 @@ type SetSpiderReq struct {
 
 func (x *SetSpiderReq) Reset() {
 	*x = SetSpiderReq{}
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[0]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -45,7 +45,7 @@ func (x *SetSpiderReq) String() string {
 func (*SetSpiderReq) ProtoMessage() {}
 
 func (x *SetSpiderReq) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[0]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,7 +58,7 @@ func (x *SetSpiderReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSpiderReq.ProtoReflect.Descriptor instead.
 func (*SetSpiderReq) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_spider_spider_proto_rawDescGZIP(), []int{0}
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *SetSpiderReq) GetUserId() int64 {
@@ -92,7 +92,7 @@ type SetSpiderRep struct {
 
 func (x *SetSpiderRep) Reset() {
 	*x = SetSpiderRep{}
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[1]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -104,7 +104,7 @@ func (x *SetSpiderRep) String() string {
 func (*SetSpiderRep) ProtoMessage() {}
 
 func (x *SetSpiderRep) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[1]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -117,7 +117,7 @@ func (x *SetSpiderRep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSpiderRep.ProtoReflect.Descriptor instead.
 func (*SetSpiderRep) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_spider_spider_proto_rawDescGZIP(), []int{1}
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *SetSpiderRep) GetCode() int32 {
@@ -143,7 +143,7 @@ type GetSpiderReq struct {
 
 func (x *GetSpiderReq) Reset() {
 	*x = GetSpiderReq{}
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[2]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -155,7 +155,7 @@ func (x *GetSpiderReq) String() string {
 func (*GetSpiderReq) ProtoMessage() {}
 
 func (x *GetSpiderReq) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[2]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -168,7 +168,7 @@ func (x *GetSpiderReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSpiderReq.ProtoReflect.Descriptor instead.
 func (*GetSpiderReq) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_spider_spider_proto_rawDescGZIP(), []int{2}
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GetSpiderReq) GetUserId() int64 {
@@ -187,7 +187,7 @@ type GetSpiderRep struct {
 
 func (x *GetSpiderRep) Reset() {
 	*x = GetSpiderRep{}
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[3]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -199,7 +199,7 @@ func (x *GetSpiderRep) String() string {
 func (*GetSpiderRep) ProtoMessage() {}
 
 func (x *GetSpiderRep) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[3]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -212,7 +212,7 @@ func (x *GetSpiderRep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSpiderRep.ProtoReflect.Descriptor instead.
 func (*GetSpiderRep) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_spider_spider_proto_rawDescGZIP(), []int{3}
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GetSpiderRep) GetData() []*GetSpiderRep_Data {
@@ -231,7 +231,7 @@ type UpdateReq struct {
 
 func (x *UpdateReq) Reset() {
 	*x = UpdateReq{}
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[4]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -243,7 +243,7 @@ func (x *UpdateReq) String() string {
 func (*UpdateReq) ProtoMessage() {}
 
 func (x *UpdateReq) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[4]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -256,7 +256,7 @@ func (x *UpdateReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateReq.ProtoReflect.Descriptor instead.
 func (*UpdateReq) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_spider_spider_proto_rawDescGZIP(), []int{4}
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *UpdateReq) GetUserId() int64 {
@@ -276,7 +276,7 @@ type UpdateRes struct {
 
 func (x *UpdateRes) Reset() {
 	*x = UpdateRes{}
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[5]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -288,7 +288,7 @@ func (x *UpdateRes) String() string {
 func (*UpdateRes) ProtoMessage() {}
 
 func (x *UpdateRes) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[5]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -301,7 +301,7 @@ func (x *UpdateRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateRes.ProtoReflect.Descriptor instead.
 func (*UpdateRes) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_spider_spider_proto_rawDescGZIP(), []int{5}
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *UpdateRes) GetCode() int64 {
@@ -328,7 +328,7 @@ type GetSpiderRep_Data struct {
 
 func (x *GetSpiderRep_Data) Reset() {
 	*x = GetSpiderRep_Data{}
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[6]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -340,7 +340,7 @@ func (x *GetSpiderRep_Data) String() string {
 func (*GetSpiderRep_Data) ProtoMessage() {}
 
 func (x *GetSpiderRep_Data) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_spider_spider_proto_msgTypes[6]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -353,7 +353,7 @@ func (x *GetSpiderRep_Data) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSpiderRep_Data.ProtoReflect.Descriptor instead.
 func (*GetSpiderRep_Data) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_spider_spider_proto_rawDescGZIP(), []int{3, 0}
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{3, 0}
 }
 
 func (x *GetSpiderRep_Data) GetPlatform() string {
@@ -370,11 +370,11 @@ func (x *GetSpiderRep_Data) GetUsername() string {
 	return ""
 }
 
-var File_api_core_v1_spider_spider_proto protoreflect.FileDescriptor
+var File_core_v1_spider_spider_proto protoreflect.FileDescriptor
 
-const file_api_core_v1_spider_spider_proto_rawDesc = "" +
+const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\n" +
-	"\x1fapi/core/v1/spider/spider.proto\x12\x12api.core.v1.spider\x1a\x1cgoogle/api/annotations.proto\"^\n" +
+	"\x1bcore/v1/spider/spider.proto\x12\x12api.core.v1.spider\x1a\x1cgoogle/api/annotations.proto\"^\n" +
 	"\fSetSpiderReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x1a\n" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x1a\n" +
@@ -401,19 +401,19 @@ const file_api_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x12api.core.v1.spiderP\x01Z#cwxu-algo/api/core/v1/spider;spiderb\x06proto3"
 
 var (
-	file_api_core_v1_spider_spider_proto_rawDescOnce sync.Once
-	file_api_core_v1_spider_spider_proto_rawDescData []byte
+	file_core_v1_spider_spider_proto_rawDescOnce sync.Once
+	file_core_v1_spider_spider_proto_rawDescData []byte
 )
 
-func file_api_core_v1_spider_spider_proto_rawDescGZIP() []byte {
-	file_api_core_v1_spider_spider_proto_rawDescOnce.Do(func() {
-		file_api_core_v1_spider_spider_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_api_core_v1_spider_spider_proto_rawDesc), len(file_api_core_v1_spider_spider_proto_rawDesc)))
+func file_core_v1_spider_spider_proto_rawDescGZIP() []byte {
+	file_core_v1_spider_spider_proto_rawDescOnce.Do(func() {
+		file_core_v1_spider_spider_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_v1_spider_spider_proto_rawDesc), len(file_core_v1_spider_spider_proto_rawDesc)))
 	})
-	return file_api_core_v1_spider_spider_proto_rawDescData
+	return file_core_v1_spider_spider_proto_rawDescData
 }
 
-var file_api_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
-var file_api_core_v1_spider_spider_proto_goTypes = []any{
+var file_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_core_v1_spider_spider_proto_goTypes = []any{
 	(*SetSpiderReq)(nil),      // 0: api.core.v1.spider.SetSpiderReq
 	(*SetSpiderRep)(nil),      // 1: api.core.v1.spider.SetSpiderRep
 	(*GetSpiderReq)(nil),      // 2: api.core.v1.spider.GetSpiderReq
@@ -422,7 +422,7 @@ var file_api_core_v1_spider_spider_proto_goTypes = []any{
 	(*UpdateRes)(nil),         // 5: api.core.v1.spider.UpdateRes
 	(*GetSpiderRep_Data)(nil), // 6: api.core.v1.spider.GetSpiderRep.Data
 }
-var file_api_core_v1_spider_spider_proto_depIdxs = []int32{
+var file_core_v1_spider_spider_proto_depIdxs = []int32{
 	6, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
 	0, // 1: api.core.v1.spider.Spider.SetSpider:input_type -> api.core.v1.spider.SetSpiderReq
 	2, // 2: api.core.v1.spider.Spider.GetSpider:input_type -> api.core.v1.spider.GetSpiderReq
@@ -437,26 +437,26 @@ var file_api_core_v1_spider_spider_proto_depIdxs = []int32{
 	0, // [0:1] is the sub-list for field type_name
 }
 
-func init() { file_api_core_v1_spider_spider_proto_init() }
-func file_api_core_v1_spider_spider_proto_init() {
-	if File_api_core_v1_spider_spider_proto != nil {
+func init() { file_core_v1_spider_spider_proto_init() }
+func file_core_v1_spider_spider_proto_init() {
+	if File_core_v1_spider_spider_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_core_v1_spider_spider_proto_rawDesc), len(file_api_core_v1_spider_spider_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_spider_spider_proto_rawDesc), len(file_core_v1_spider_spider_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_api_core_v1_spider_spider_proto_goTypes,
-		DependencyIndexes: file_api_core_v1_spider_spider_proto_depIdxs,
-		MessageInfos:      file_api_core_v1_spider_spider_proto_msgTypes,
+		GoTypes:           file_core_v1_spider_spider_proto_goTypes,
+		DependencyIndexes: file_core_v1_spider_spider_proto_depIdxs,
+		MessageInfos:      file_core_v1_spider_spider_proto_msgTypes,
 	}.Build()
-	File_api_core_v1_spider_spider_proto = out.File
-	file_api_core_v1_spider_spider_proto_goTypes = nil
-	file_api_core_v1_spider_spider_proto_depIdxs = nil
+	File_core_v1_spider_spider_proto = out.File
+	file_core_v1_spider_spider_proto_goTypes = nil
+	file_core_v1_spider_spider_proto_depIdxs = nil
 }

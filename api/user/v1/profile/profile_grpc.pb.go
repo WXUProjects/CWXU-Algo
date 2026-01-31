@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v6.33.1
-// source: api/user/v1/profile/profile.proto
+// source: user/v1/profile/profile.proto
 
 package profile
 
@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Profile_GetById_FullMethodName = "/api.user.v1.Profile/GetById"
-	Profile_GetList_FullMethodName = "/api.user.v1.Profile/GetList"
-	Profile_Update_FullMethodName  = "/api.user.v1.Profile/Update"
+	Profile_GetById_FullMethodName   = "/api.user.v1.Profile/GetById"
+	Profile_GetList_FullMethodName   = "/api.user.v1.Profile/GetList"
+	Profile_Update_FullMethodName    = "/api.user.v1.Profile/Update"
+	Profile_MoveGroup_FullMethodName = "/api.user.v1.Profile/MoveGroup"
 )
 
 // ProfileClient is the client API for Profile service.
@@ -31,6 +32,7 @@ type ProfileClient interface {
 	GetById(ctx context.Context, in *GetByIdReq, opts ...grpc.CallOption) (*GetByIdRes, error)
 	GetList(ctx context.Context, in *GetListReq, opts ...grpc.CallOption) (*GetListRes, error)
 	Update(ctx context.Context, in *UpdateReq, opts ...grpc.CallOption) (*UpdateRes, error)
+	MoveGroup(ctx context.Context, in *MoveGroupReq, opts ...grpc.CallOption) (*MoveGroupRes, error)
 }
 
 type profileClient struct {
@@ -71,6 +73,16 @@ func (c *profileClient) Update(ctx context.Context, in *UpdateReq, opts ...grpc.
 	return out, nil
 }
 
+func (c *profileClient) MoveGroup(ctx context.Context, in *MoveGroupReq, opts ...grpc.CallOption) (*MoveGroupRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MoveGroupRes)
+	err := c.cc.Invoke(ctx, Profile_MoveGroup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProfileServer is the server API for Profile service.
 // All implementations must embed UnimplementedProfileServer
 // for forward compatibility.
@@ -78,6 +90,7 @@ type ProfileServer interface {
 	GetById(context.Context, *GetByIdReq) (*GetByIdRes, error)
 	GetList(context.Context, *GetListReq) (*GetListRes, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
+	MoveGroup(context.Context, *MoveGroupReq) (*MoveGroupRes, error)
 	mustEmbedUnimplementedProfileServer()
 }
 
@@ -96,6 +109,9 @@ func (UnimplementedProfileServer) GetList(context.Context, *GetListReq) (*GetLis
 }
 func (UnimplementedProfileServer) Update(context.Context, *UpdateReq) (*UpdateRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Update not implemented")
+}
+func (UnimplementedProfileServer) MoveGroup(context.Context, *MoveGroupReq) (*MoveGroupRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method MoveGroup not implemented")
 }
 func (UnimplementedProfileServer) mustEmbedUnimplementedProfileServer() {}
 func (UnimplementedProfileServer) testEmbeddedByValue()                 {}
@@ -172,6 +188,24 @@ func _Profile_Update_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Profile_MoveGroup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MoveGroupReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).MoveGroup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_MoveGroup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).MoveGroup(ctx, req.(*MoveGroupReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Profile_ServiceDesc is the grpc.ServiceDesc for Profile service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -191,7 +225,11 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Update",
 			Handler:    _Profile_Update_Handler,
 		},
+		{
+			MethodName: "MoveGroup",
+			Handler:    _Profile_MoveGroup_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "api/user/v1/profile/profile.proto",
+	Metadata: "user/v1/profile/profile.proto",
 }

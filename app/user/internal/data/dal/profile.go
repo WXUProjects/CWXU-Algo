@@ -62,3 +62,14 @@ func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64) ([]mo
 	}
 	return list, total, nil
 }
+
+func (d *ProfileDal) MoveGroup(ctx context.Context, userId uint64, groupId int64) error {
+	result := d.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", userId).Update("group_id", groupId)
+	if result.Error != nil {
+		return fmt.Errorf("移动用户组失败: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("用户不存在")
+	}
+	return nil
+}

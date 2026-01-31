@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v6.33.1
-// source: api/core/v1/spider/spider.proto
+// source: core/v1/spider/spider.proto
 
 package spider
 
@@ -193,5 +193,5 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "api/core/v1/spider/spider.proto",
+	Metadata: "core/v1/spider/spider.proto",
 }

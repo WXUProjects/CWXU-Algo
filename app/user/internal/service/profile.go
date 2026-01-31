@@ -33,6 +33,20 @@ type ProfileService struct {
 	profileUseCase *biz.ProfileUseCase
 }
 
+func (p *ProfileService) MoveGroup(ctx context.Context, req *profile.MoveGroupReq) (*profile.MoveGroupRes, error) {
+	if !auth.VerifyAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "需要管理员权限操作")
+	}
+	err := p.profileDal.MoveGroup(ctx, req.UserId, req.GroupId)
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	return &profile.MoveGroupRes{
+		Code:    0,
+		Message: "移动成功",
+	}, nil
+}
+
 func (p *ProfileService) coreDataRPC() (*grpc2.ClientConn, error) {
 	return grpc.DialInsecure(
 		context.Background(),

@@ -49,3 +49,25 @@ func VerifyById(ctx context.Context, userId uint) bool {
 	}
 	return true
 }
+
+func VerifyAdmin(ctx context.Context) bool {
+	parts := strings.Split(praseJwtToken(ctx), ".")
+	if len(parts) != 3 {
+		return false
+	}
+	payloadBase64 := parts[1]
+	dstLen := base64.RawURLEncoding.DecodedLen(len(payloadBase64))
+	dst := make([]byte, dstLen)
+	_, err := base64.RawURLEncoding.Decode(dst, []byte(payloadBase64))
+	if err != nil {
+		return false
+	}
+	pd := JwtPayload{}
+	if err := json.Unmarshal(dst, &pd); err != nil {
+		return false
+	}
+	if len(pd.RoleIDs) != 0 && pd.RoleIDs[0] == 1 {
+		return true
+	}
+	return false
+}

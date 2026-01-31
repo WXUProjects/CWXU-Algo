@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package api.user.group;
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/user/group;group";
+option java_multiple_files = true;
+option java_package = "api.user.group";
+
+service Group {
+  rpc Create (CreateRequest) returns (CreateReply) {
+    option (google.api.http) = {
+      post: "/v1/user/group/create"
+      body: "*"
+    };
+  }
+  rpc Delete (DeleteRequest) returns (DeleteReply) {
+    option (google.api.http) = {
+      post: "/v1/user/group/delete"
+      body: "*"
+    };
+  }
+  rpc Update (UpdateRequest) returns (UpdateReply) {
+    option (google.api.http) = {
+      post: "/v1/user/group/update"
+      body: "*"
+    };
+  }
+  rpc Get (GetRequest) returns (GetReply) {
+    option (google.api.http) = {
+      get: "/v1/user/group/get"
+    };
+  }
+  rpc List (ListRequest) returns (ListReply) {
+    option (google.api.http) = {
+      get: "/v1/user/group/list"
+    };
+  }
+}
+
+message User {
+  uint64 userId = 1;
+  string username = 2;
+  string name = 3;
+  int64 groupId = 5;
+  string avatar = 6;
+  string lastSubmit = 7;
+}
+
+message CreateRequest {
+  string name =        1;
+  string describe =    2;
+}
+
+message CreateReply {
+  int64 id = 1;
+  string message = 2;
+}
+
+message DeleteRequest {
+  int64 id = 1;
+}
+
+message DeleteReply {
+  bool success = 1;
+}
+
+message UpdateRequest {
+  int64 id =      1;
+  string name =   2;
+  string describe = 3;
+}
+
+message UpdateReply {
+  bool success = 1;
+}
+
+message GetRequest {
+  int64 id = 1;
+}
+
+message GetReply {
+  int64 id =        1;
+  string name =     2;
+  string describe = 3;
+  repeated User users = 4;
+}
+
+message ListRequest {
+  int64 page = 1;
+  int64 size = 2;
+}
+
+message ListReply {
+  repeated GetReply list = 1;
+}

@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v6.33.1
-// source: api/core/v1/submit_log/submit.proto
+// source: core/v1/submit_log/submit.proto
 
 package submit_log
 
@@ -39,7 +39,7 @@ type SubmitLog struct {
 
 func (x *SubmitLog) Reset() {
 	*x = SubmitLog{}
-	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[0]
+	mi := &file_core_v1_submit_log_submit_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -51,7 +51,7 @@ func (x *SubmitLog) String() string {
 func (*SubmitLog) ProtoMessage() {}
 
 func (x *SubmitLog) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[0]
+	mi := &file_core_v1_submit_log_submit_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -64,7 +64,7 @@ func (x *SubmitLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitLog.ProtoReflect.Descriptor instead.
 func (*SubmitLog) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_submit_log_submit_proto_rawDescGZIP(), []int{0}
+	return file_core_v1_submit_log_submit_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *SubmitLog) GetId() uint32 {
@@ -141,7 +141,7 @@ type GetSubmitLogReq struct {
 
 func (x *GetSubmitLogReq) Reset() {
 	*x = GetSubmitLogReq{}
-	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[1]
+	mi := &file_core_v1_submit_log_submit_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -153,7 +153,7 @@ func (x *GetSubmitLogReq) String() string {
 func (*GetSubmitLogReq) ProtoMessage() {}
 
 func (x *GetSubmitLogReq) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[1]
+	mi := &file_core_v1_submit_log_submit_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -166,7 +166,7 @@ func (x *GetSubmitLogReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSubmitLogReq.ProtoReflect.Descriptor instead.
 func (*GetSubmitLogReq) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_submit_log_submit_proto_rawDescGZIP(), []int{1}
+	return file_core_v1_submit_log_submit_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *GetSubmitLogReq) GetUserId() int64 {
@@ -199,7 +199,7 @@ type GetSubmitLogRes struct {
 
 func (x *GetSubmitLogRes) Reset() {
 	*x = GetSubmitLogRes{}
-	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[2]
+	mi := &file_core_v1_submit_log_submit_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -211,7 +211,7 @@ func (x *GetSubmitLogRes) String() string {
 func (*GetSubmitLogRes) ProtoMessage() {}
 
 func (x *GetSubmitLogRes) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[2]
+	mi := &file_core_v1_submit_log_submit_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -224,7 +224,7 @@ func (x *GetSubmitLogRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSubmitLogRes.ProtoReflect.Descriptor instead.
 func (*GetSubmitLogRes) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_submit_log_submit_proto_rawDescGZIP(), []int{2}
+	return file_core_v1_submit_log_submit_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GetSubmitLogRes) GetData() []*SubmitLog {
@@ -243,7 +243,7 @@ type LastSubmitTimeReq struct {
 
 func (x *LastSubmitTimeReq) Reset() {
 	*x = LastSubmitTimeReq{}
-	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[3]
+	mi := &file_core_v1_submit_log_submit_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -255,7 +255,7 @@ func (x *LastSubmitTimeReq) String() string {
 func (*LastSubmitTimeReq) ProtoMessage() {}
 
 func (x *LastSubmitTimeReq) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[3]
+	mi := &file_core_v1_submit_log_submit_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -268,7 +268,7 @@ func (x *LastSubmitTimeReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LastSubmitTimeReq.ProtoReflect.Descriptor instead.
 func (*LastSubmitTimeReq) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_submit_log_submit_proto_rawDescGZIP(), []int{3}
+	return file_core_v1_submit_log_submit_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *LastSubmitTimeReq) GetUserIds() []int64 {
@@ -287,7 +287,7 @@ type LastSubmitTimeRes struct {
 
 func (x *LastSubmitTimeRes) Reset() {
 	*x = LastSubmitTimeRes{}
-	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[4]
+	mi := &file_core_v1_submit_log_submit_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -299,7 +299,7 @@ func (x *LastSubmitTimeRes) String() string {
 func (*LastSubmitTimeRes) ProtoMessage() {}
 
 func (x *LastSubmitTimeRes) ProtoReflect() protoreflect.Message {
-	mi := &file_api_core_v1_submit_log_submit_proto_msgTypes[4]
+	mi := &file_core_v1_submit_log_submit_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -312,7 +312,7 @@ func (x *LastSubmitTimeRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LastSubmitTimeRes.ProtoReflect.Descriptor instead.
 func (*LastSubmitTimeRes) Descriptor() ([]byte, []int) {
-	return file_api_core_v1_submit_log_submit_proto_rawDescGZIP(), []int{4}
+	return file_core_v1_submit_log_submit_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *LastSubmitTimeRes) GetTimeMap() []byte {
@@ -322,11 +322,11 @@ func (x *LastSubmitTimeRes) GetTimeMap() []byte {
 	return nil
 }
 
-var File_api_core_v1_submit_log_submit_proto protoreflect.FileDescriptor
+var File_core_v1_submit_log_submit_proto protoreflect.FileDescriptor
 
-const file_api_core_v1_submit_log_submit_proto_rawDesc = "" +
+const file_core_v1_submit_log_submit_proto_rawDesc = "" +
 	"\n" +
-	"#api/core/v1/submit_log/submit.proto\x12\x16api.core.v1.submit_log\x1a\x1cgoogle/api/annotations.proto\"\xe1\x01\n" +
+	"\x1fcore/v1/submit_log/submit.proto\x12\x16api.core.v1.submit_log\x1a\x1cgoogle/api/annotations.proto\"\xe1\x01\n" +
 	"\tSubmitLog\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1a\n" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x17\n" +
@@ -353,26 +353,26 @@ const file_api_core_v1_submit_log_submit_proto_rawDesc = "" +
 	"\x16api.core.v1.submit_logP\x01Z+cwxu-algo/api/core/v1/submit_log;submit_logb\x06proto3"
 
 var (
-	file_api_core_v1_submit_log_submit_proto_rawDescOnce sync.Once
-	file_api_core_v1_submit_log_submit_proto_rawDescData []byte
+	file_core_v1_submit_log_submit_proto_rawDescOnce sync.Once
+	file_core_v1_submit_log_submit_proto_rawDescData []byte
 )
 
-func file_api_core_v1_submit_log_submit_proto_rawDescGZIP() []byte {
-	file_api_core_v1_submit_log_submit_proto_rawDescOnce.Do(func() {
-		file_api_core_v1_submit_log_submit_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_api_core_v1_submit_log_submit_proto_rawDesc), len(file_api_core_v1_submit_log_submit_proto_rawDesc)))
+func file_core_v1_submit_log_submit_proto_rawDescGZIP() []byte {
+	file_core_v1_submit_log_submit_proto_rawDescOnce.Do(func() {
+		file_core_v1_submit_log_submit_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_v1_submit_log_submit_proto_rawDesc), len(file_core_v1_submit_log_submit_proto_rawDesc)))
 	})
-	return file_api_core_v1_submit_log_submit_proto_rawDescData
+	return file_core_v1_submit_log_submit_proto_rawDescData
 }
 
-var file_api_core_v1_submit_log_submit_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
-var file_api_core_v1_submit_log_submit_proto_goTypes = []any{
+var file_core_v1_submit_log_submit_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_core_v1_submit_log_submit_proto_goTypes = []any{
 	(*SubmitLog)(nil),         // 0: api.core.v1.submit_log.SubmitLog
 	(*GetSubmitLogReq)(nil),   // 1: api.core.v1.submit_log.GetSubmitLogReq
 	(*GetSubmitLogRes)(nil),   // 2: api.core.v1.submit_log.GetSubmitLogRes
 	(*LastSubmitTimeReq)(nil), // 3: api.core.v1.submit_log.LastSubmitTimeReq
 	(*LastSubmitTimeRes)(nil), // 4: api.core.v1.submit_log.LastSubmitTimeRes
 }
-var file_api_core_v1_submit_log_submit_proto_depIdxs = []int32{
+var file_core_v1_submit_log_submit_proto_depIdxs = []int32{
 	0, // 0: api.core.v1.submit_log.GetSubmitLogRes.data:type_name -> api.core.v1.submit_log.SubmitLog
 	1, // 1: api.core.v1.submit_log.Submit.GetSubmitLog:input_type -> api.core.v1.submit_log.GetSubmitLogReq
 	3, // 2: api.core.v1.submit_log.Submit.LastSubmitTime:input_type -> api.core.v1.submit_log.LastSubmitTimeReq
@@ -385,26 +385,26 @@ var file_api_core_v1_submit_log_submit_proto_depIdxs = []int32{
 	0, // [0:1] is the sub-list for field type_name
 }
 
-func init() { file_api_core_v1_submit_log_submit_proto_init() }
-func file_api_core_v1_submit_log_submit_proto_init() {
-	if File_api_core_v1_submit_log_submit_proto != nil {
+func init() { file_core_v1_submit_log_submit_proto_init() }
+func file_core_v1_submit_log_submit_proto_init() {
+	if File_core_v1_submit_log_submit_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_core_v1_submit_log_submit_proto_rawDesc), len(file_api_core_v1_submit_log_submit_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_submit_log_submit_proto_rawDesc), len(file_core_v1_submit_log_submit_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_api_core_v1_submit_log_submit_proto_goTypes,
-		DependencyIndexes: file_api_core_v1_submit_log_submit_proto_depIdxs,
-		MessageInfos:      file_api_core_v1_submit_log_submit_proto_msgTypes,
+		GoTypes:           file_core_v1_submit_log_submit_proto_goTypes,
+		DependencyIndexes: file_core_v1_submit_log_submit_proto_depIdxs,
+		MessageInfos:      file_core_v1_submit_log_submit_proto_msgTypes,
 	}.Build()
-	File_api_core_v1_submit_log_submit_proto = out.File
-	file_api_core_v1_submit_log_submit_proto_goTypes = nil
-	file_api_core_v1_submit_log_submit_proto_depIdxs = nil
+	File_core_v1_submit_log_submit_proto = out.File
+	file_core_v1_submit_log_submit_proto_goTypes = nil
+	file_core_v1_submit_log_submit_proto_depIdxs = nil
 }

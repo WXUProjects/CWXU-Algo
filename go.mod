@@ -4,12 +4,13 @@ go 1.25.3
 
 require (
 	github.com/PuerkitoBio/goquery v1.11.0
+	github.com/go-kratos/blades v0.3.1
+	github.com/go-kratos/blades/contrib/openai v0.3.0
 	github.com/go-kratos/kratos/contrib/registry/consul/v2 v2.0.0-20251217105121-fb8e43efb207
 	github.com/go-kratos/kratos/v2 v2.9.2
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/wire v0.6.0
 	github.com/hashicorp/consul/api v1.33.0
-	github.com/otiai10/gosseract/v2 v2.4.1
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/streadway/amqp v1.1.0
@@ -32,11 +33,13 @@ require (
 	github.com/fatih/color v1.16.0 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-kratos/aegis v0.2.1-0.20230616030432-99110a3f05f4 // indirect
+	github.com/go-kratos/kit v0.0.0-20251121083925-65298ad2aa44 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-playground/form/v4 v4.2.1 // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
+	github.com/google/jsonschema-go v0.3.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
@@ -56,6 +59,11 @@ require (
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
+	github.com/openai/openai-go/v3 v3.8.1 // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
+	github.com/tidwall/match v1.2.0 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.39.0 // indirect
 	go.opentelemetry.io/otel/metric v1.39.0 // indirect

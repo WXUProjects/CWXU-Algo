@@ -3,9 +3,244 @@
 
 openapi: 3.0.3
 info:
-    title: Profile API
+    title: ""
     version: 0.0.1
 paths:
+    /v1/core/spider/set:
+        post:
+            tags:
+                - Spider
+            operationId: Spider_SetSpider
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.spider.SetSpiderReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.SetSpiderRep'
+    /v1/core/spider/update:
+        post:
+            tags:
+                - Spider
+            operationId: Spider_Update
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.spider.UpdateReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.UpdateRes'
+    /v1/core/statistic/heatmap:
+        get:
+            tags:
+                - Statistic
+            operationId: Statistic_Heatmap
+            parameters:
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+                - name: startDate
+                  in: query
+                  schema:
+                    type: string
+                - name: endDate
+                  in: query
+                  schema:
+                    type: string
+                - name: isAc
+                  in: query
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.statistic.HeatmapResp'
+    /v1/core/statistic/period:
+        get:
+            tags:
+                - Statistic
+            operationId: Statistic_PeriodCount
+            parameters:
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.statistic.PeriodCountResp'
+    /v1/core/submit-log/get-by-id:
+        get:
+            tags:
+                - Submit
+            operationId: Submit_GetSubmitLog
+            parameters:
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: string
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.submit_log.GetSubmitLogRes'
+    /v1/user/auth/login:
+        post:
+            tags:
+                - Auth
+            operationId: Auth_Login
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.LoginReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.LoginRes'
+    /v1/user/auth/register:
+        post:
+            tags:
+                - Auth
+            operationId: Auth_Register
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.RegisterReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.RegisterRes'
+    /v1/user/group/create:
+        post:
+            tags:
+                - Group
+            operationId: Group_Create
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.group.CreateRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.group.CreateReply'
+    /v1/user/group/delete:
+        post:
+            tags:
+                - Group
+            operationId: Group_Delete
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.group.DeleteRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.group.DeleteReply'
+    /v1/user/group/get:
+        get:
+            tags:
+                - Group
+            operationId: Group_Get
+            parameters:
+                - name: id
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.group.GetReply'
+    /v1/user/group/list:
+        get:
+            tags:
+                - Group
+            operationId: Group_List
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: string
+                - name: size
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.group.ListReply'
+    /v1/user/group/update:
+        post:
+            tags:
+                - Group
+            operationId: Group_Update
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.group.UpdateRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.group.UpdateReply'
     /v1/user/profile/get-by-id:
         get:
             tags:
@@ -22,13 +257,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/GetByIdRes'
-                default:
-                    description: Default error response
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Status'
+                                $ref: '#/components/schemas/api.user.v1.GetByIdRes'
     /v1/user/profile/list:
         get:
             tags:
@@ -49,13 +278,25 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/GetListRes'
-                default:
-                    description: Default error response
+                                $ref: '#/components/schemas/api.user.v1.GetListRes'
+    /v1/user/profile/move-group:
+        post:
+            tags:
+                - Profile
+            operationId: Profile_MoveGroup
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.MoveGroupReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/Status'
+                                $ref: '#/components/schemas/api.user.v1.MoveGroupRes'
     /v1/user/profile/update:
         post:
             tags:
@@ -65,7 +306,7 @@ paths:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/UpdateReq'
+                            $ref: '#/components/schemas/api.user.v1.UpdateReq'
                 required: true
             responses:
                 "200":
@@ -73,16 +314,209 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/UpdateRes'
-                default:
-                    description: Default error response
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Status'
+                                $ref: '#/components/schemas/api.user.v1.UpdateRes'
 components:
     schemas:
-        GetByIdRes:
+        api.core.v1.spider.SetSpiderRep:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+        api.core.v1.spider.SetSpiderReq:
+            type: object
+            properties:
+                userId:
+                    type: string
+                platform:
+                    type: string
+                username:
+                    type: string
+        api.core.v1.spider.UpdateReq:
+            type: object
+            properties:
+                userId:
+                    type: string
+        api.core.v1.spider.UpdateRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+        api.core.v1.statistic.AcCount:
+            type: object
+            properties:
+                today:
+                    type: string
+                thisWeek:
+                    type: string
+                lastWeek:
+                    type: string
+                thisMonth:
+                    type: string
+                lastMonth:
+                    type: string
+                thisYear:
+                    type: string
+                lastYear:
+                    type: string
+                total:
+                    type: string
+        api.core.v1.statistic.HeatmapResp:
+            type: object
+            properties:
+                code:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.statistic.HeatmapResp_HeatmapItem'
+        api.core.v1.statistic.HeatmapResp_HeatmapItem:
+            type: object
+            properties:
+                date:
+                    type: string
+                count:
+                    type: string
+        api.core.v1.statistic.PeriodCountResp:
+            type: object
+            properties:
+                code:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/api.core.v1.statistic.PeriodData'
+        api.core.v1.statistic.PeriodData:
+            type: object
+            properties:
+                submit:
+                    $ref: '#/components/schemas/api.core.v1.statistic.SubmitCount'
+                ac:
+                    $ref: '#/components/schemas/api.core.v1.statistic.AcCount'
+        api.core.v1.statistic.SubmitCount:
+            type: object
+            properties:
+                today:
+                    type: string
+                thisWeek:
+                    type: string
+                lastWeek:
+                    type: string
+                thisMonth:
+                    type: string
+                lastMonth:
+                    type: string
+                thisYear:
+                    type: string
+                lastYear:
+                    type: string
+                total:
+                    type: string
+        api.core.v1.submit_log.GetSubmitLogRes:
+            type: object
+            properties:
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.submit_log.SubmitLog'
+        api.core.v1.submit_log.SubmitLog:
+            type: object
+            properties:
+                id:
+                    type: integer
+                    format: uint32
+                platform:
+                    type: string
+                userId:
+                    type: string
+                submitId:
+                    type: string
+                contest:
+                    type: string
+                problem:
+                    type: string
+                lang:
+                    type: string
+                status:
+                    type: string
+                time:
+                    type: string
+        api.user.group.CreateReply:
+            type: object
+            properties:
+                id:
+                    type: string
+                message:
+                    type: string
+        api.user.group.CreateRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                describe:
+                    type: string
+        api.user.group.DeleteReply:
+            type: object
+            properties:
+                success:
+                    type: boolean
+        api.user.group.DeleteRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        api.user.group.GetReply:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                describe:
+                    type: string
+                users:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.group.User'
+        api.user.group.ListReply:
+            type: object
+            properties:
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.group.GetReply'
+        api.user.group.UpdateReply:
+            type: object
+            properties:
+                success:
+                    type: boolean
+        api.user.group.UpdateRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                describe:
+                    type: string
+        api.user.group.User:
+            type: object
+            properties:
+                userId:
+                    type: string
+                username:
+                    type: string
+                name:
+                    type: string
+                groupId:
+                    type: string
+                avatar:
+                    type: string
+                lastSubmit:
+                    type: string
+        api.user.v1.GetByIdRes:
             type: object
             properties:
                 userId:
@@ -100,24 +534,24 @@ components:
                 spiders:
                     type: array
                     items:
-                        $ref: '#/components/schemas/GetByIdRes_Spiders'
-        GetByIdRes_Spiders:
+                        $ref: '#/components/schemas/api.user.v1.GetByIdRes_Spiders'
+        api.user.v1.GetByIdRes_Spiders:
             type: object
             properties:
                 platform:
                     type: string
                 username:
                     type: string
-        GetListRes:
+        api.user.v1.GetListRes:
             type: object
             properties:
                 list:
                     type: array
                     items:
-                        $ref: '#/components/schemas/GetListRes_List'
+                        $ref: '#/components/schemas/api.user.v1.GetListRes_List'
                 total:
                     type: string
-        GetListRes_List:
+        api.user.v1.GetListRes_List:
             type: object
             properties:
                 userId:
@@ -132,31 +566,57 @@ components:
                     type: string
                 lastSubmit:
                     type: string
-        GoogleProtobufAny:
+        api.user.v1.LoginReq:
             type: object
             properties:
-                '@type':
+                username:
                     type: string
-                    description: The type of the serialized message.
-            additionalProperties: true
-            description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message.
-        Status:
+                password:
+                    type: string
+        api.user.v1.LoginRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                jwtToken:
+                    type: string
+        api.user.v1.MoveGroupReq:
+            type: object
+            properties:
+                userId:
+                    type: string
+                groupId:
+                    type: string
+        api.user.v1.MoveGroupRes:
             type: object
             properties:
                 code:
-                    type: integer
-                    description: The status code, which should be an enum value of [google.rpc.Code][google.rpc.Code].
-                    format: int32
+                    type: string
                 message:
                     type: string
-                    description: A developer-facing error message, which should be in English. Any user-facing error message should be localized and sent in the [google.rpc.Status.details][google.rpc.Status.details] field, or localized by the client.
-                details:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/GoogleProtobufAny'
-                    description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
-            description: 'The `Status` type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by [gRPC](https://github.com/grpc). Each `Status` message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the [API Design Guide](https://cloud.google.com/apis/design/errors).'
-        UpdateReq:
+        api.user.v1.RegisterReq:
+            type: object
+            properties:
+                username:
+                    type: string
+                password:
+                    type: string
+                name:
+                    type: string
+                email:
+                    type: string
+                groupId:
+                    type: string
+        api.user.v1.RegisterRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+        api.user.v1.UpdateReq:
             type: object
             properties:
                 userId:
@@ -167,7 +627,7 @@ components:
                     type: string
                 avatar:
                     type: string
-        UpdateRes:
+        api.user.v1.UpdateRes:
             type: object
             properties:
                 code:
@@ -175,4 +635,10 @@ components:
                 message:
                     type: string
 tags:
+    - name: Auth
+      description: Auth 认证服务
+    - name: Group
     - name: Profile
+    - name: Spider
+    - name: Statistic
+    - name: Submit

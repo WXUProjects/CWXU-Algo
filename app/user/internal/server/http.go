@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"cwxu-algo/api/user/v1/auth"
+	"cwxu-algo/api/user/v1/group"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/conf"
 	_const "cwxu-algo/app/common/const"
@@ -22,6 +23,8 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.user.v1.Auth/Register":   "",
 		"/api.user.v1.Profile/GetById": "",
 		"/api.user.v1.Profile/GetList": "",
+		"/api.user.group.Group/Get":    "",
+		"/api.user.group.Group/List":   "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		// log.Info(operation)
@@ -37,6 +40,7 @@ func NewHTTPServer(
 	c *conf.Server,
 	authService *service.AuthService,
 	profileService *service.ProfileService,
+	groupService *service.GroupService,
 	logger log.Logger,
 
 ) *http.Server {
@@ -60,5 +64,6 @@ func NewHTTPServer(
 	srv := http.NewServer(opts...)
 	auth.RegisterAuthHTTPServer(srv, authService)
 	profile.RegisterProfileHTTPServer(srv, profileService)
+	group.RegisterGroupHTTPServer(srv, groupService)
 	return srv
 }

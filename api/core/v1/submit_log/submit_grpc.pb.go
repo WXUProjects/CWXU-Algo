@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v6.33.1
-// source: api/core/v1/submit_log/submit.proto
+// source: core/v1/submit_log/submit.proto
 
 package submit_log
 
@@ -155,5 +155,5 @@ var Submit_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "api/core/v1/submit_log/submit.proto",
+	Metadata: "core/v1/submit_log/submit.proto",
 }
