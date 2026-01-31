@@ -544,6 +544,8 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/api.user.group.GetReply'
+                total:
+                    type: string
         api.user.group.UpdateReply:
             type: object
             properties:

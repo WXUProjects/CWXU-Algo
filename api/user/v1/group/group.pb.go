@@ -569,6 +569,7 @@ func (x *ListRequest) GetSize() int64 {
 type ListReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	List          []*GetReply            `protobuf:"bytes,1,rep,name=list,proto3" json:"list,omitempty"`
+	Total         int64                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -608,6 +609,13 @@ func (x *ListReply) GetList() []*GetReply {
 		return x.List
 	}
 	return nil
+}
+
+func (x *ListReply) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
 }
 
 var File_user_v1_group_group_proto protoreflect.FileDescriptor
@@ -650,9 +658,10 @@ const file_user_v1_group_group_proto_rawDesc = "" +
 	"\x05users\x18\x04 \x03(\v2\x14.api.user.group.UserR\x05users\"5\n" +
 	"\vListRequest\x12\x12\n" +
 	"\x04page\x18\x01 \x01(\x03R\x04page\x12\x12\n" +
-	"\x04size\x18\x02 \x01(\x03R\x04size\"9\n" +
+	"\x04size\x18\x02 \x01(\x03R\x04size\"O\n" +
 	"\tListReply\x12,\n" +
-	"\x04list\x18\x01 \x03(\v2\x18.api.user.group.GetReplyR\x04list2\xf5\x03\n" +
+	"\x04list\x18\x01 \x03(\v2\x18.api.user.group.GetReplyR\x04list\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\x03R\x05total2\xf5\x03\n" +
 	"\x05Group\x12f\n" +
 	"\x06Create\x12\x1d.api.user.group.CreateRequest\x1a\x1b.api.user.group.CreateReply\" \x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/v1/user/group/create\x12f\n" +
 	"\x06Delete\x12\x1d.api.user.group.DeleteRequest\x1a\x1b.api.user.group.DeleteReply\" \x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/v1/user/group/delete\x12f\n" +

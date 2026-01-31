@@ -92,4 +92,5 @@ message ListRequest {
 
 message ListReply {
   repeated GetReply list = 1;
+  int64 total = 2;
 }

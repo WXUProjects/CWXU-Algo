@@ -128,11 +128,11 @@ func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*g
 	if size < 1 {
 		size = 10
 	}
-	list, _, err := g.groupUseCase.List(ctx, page, size)
+	list, total, err := g.groupUseCase.List(ctx, page, size)
 	if err != nil {
 		return nil, errors.InternalServer("查询失败", err.Error())
 	}
-	reply := &group.ListReply{List: make([]*group.GetReply, 0)}
+	reply := &group.ListReply{List: make([]*group.GetReply, 0), Total: total}
 	for _, g := range list {
 		name := ""
 		if g.Name != nil {
