@@ -88,6 +88,43 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.statistic.PeriodCountResp'
+    /v1/core/statistic/rank:
+        get:
+            tags:
+                - Statistic
+            operationId: Statistic_Rank
+            parameters:
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+                - name: time
+                  in: query
+                  schema:
+                    type: string
+                - name: scoreType
+                  in: query
+                  schema:
+                    type: string
+                - name: groupId
+                  in: query
+                  schema:
+                    type: string
+                - name: page
+                  in: query
+                  schema:
+                    type: string
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.statistic.RankResp'
     /v1/core/submit-log/get-by-id:
         get:
             tags:
@@ -395,6 +432,26 @@ components:
                     $ref: '#/components/schemas/api.core.v1.statistic.SubmitCount'
                 ac:
                     $ref: '#/components/schemas/api.core.v1.statistic.AcCount'
+        api.core.v1.statistic.RankItem:
+            type: object
+            properties:
+                rank:
+                    type: string
+                userId:
+                    type: string
+                name:
+                    type: string
+                score:
+                    type: string
+        api.core.v1.statistic.RankResp:
+            type: object
+            properties:
+                code:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.statistic.RankItem'
         api.core.v1.statistic.SubmitCount:
             type: object
             properties:

@@ -13,7 +13,17 @@ import (
 )
 
 // ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewData)
+var ProviderSet = wire.NewSet(NewData, NewDataDB, NewDataRDB)
+
+// NewDataDB 从 Data 中提取 DB
+func NewDataDB(data *Data) *gorm.DB {
+	return data.DB
+}
+
+// NewDataRDB 从 Data 中提取 RDB
+func NewDataRDB(data *Data) *redis.Client {
+	return data.RDB
+}
 
 // Data .
 type Data struct {
