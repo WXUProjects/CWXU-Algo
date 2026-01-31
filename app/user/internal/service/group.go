@@ -10,6 +10,7 @@ import (
 	"cwxu-algo/app/user/internal/biz"
 	"cwxu-algo/app/user/internal/data/dal"
 	"strconv"
+	"time"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
@@ -30,6 +31,7 @@ func (g *GroupService) coreDataRPC() (*grpc2.ClientConn, error) {
 		context.Background(),
 		grpc.WithEndpoint("discovery:///core-data"),
 		grpc.WithDiscovery(g.reg.Reg.(registry.Discovery)),
+		grpc.WithTimeout(20*time.Second),
 	)
 }
 
