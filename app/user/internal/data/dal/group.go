@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/go-kratos/kratos/v2/log"
 	"gorm.io/gorm"
 )
 
@@ -64,6 +65,11 @@ func (d *GroupDal) GetWithUsers(ctx context.Context, id int64) (*model.Group, []
 	if err != nil {
 		return nil, nil, fmt.Errorf("查询组失败: %w", err)
 	}
+	if id == 0 {
+		_ = d.db.WithContext(ctx).Model(&model.User{}).Where("group_id = ?", id).Find(&group.Users)
+		return &group, group.Users, nil
+	}
+	log.Info("group: %v", group)
 	return &group, group.Users, nil
 }
 
