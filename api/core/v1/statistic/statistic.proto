@@ -17,11 +17,6 @@ service Statistic {
       get: "/v1/core/statistic/period"
     };
   }
-  rpc Rank(RankReq) returns (RankResp) {
-    option (google.api.http) = {
-      get: "/v1/core/statistic/rank"
-    };
-  }
 }
 
 message HeatmapReq {
@@ -74,25 +69,4 @@ message AcCount {
   int64 thisYear = 6;
   int64 lastYear = 7;
   int64 total = 8;
-}
-
-message RankReq {
-  int64 userId = 1;
-  string time = 2; // 设置 日 周 月 三个维度
-  string scoreType = 4; // scoreType = "ac" 是 AC 排行榜
-  int64 groupId = 5; // groupId = -1 时候则是全部
-  int64 page = 6;
-  int64 pageSize = 7;
-}
-
-message RankItem {
-  int64 rank = 1; // 排名
-  int64 userId = 2;
-  string name = 3; // 这是姓名
-  int64 score = 4; // 这是统计出来的数量
-}
-
-message RankResp {
-  int64 code = 1;
-  repeated RankItem data = 2;
 }

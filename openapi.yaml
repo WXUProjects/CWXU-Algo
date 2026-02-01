@@ -88,43 +88,6 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.statistic.PeriodCountResp'
-    /v1/core/statistic/rank:
-        get:
-            tags:
-                - Statistic
-            operationId: Statistic_Rank
-            parameters:
-                - name: userId
-                  in: query
-                  schema:
-                    type: string
-                - name: time
-                  in: query
-                  schema:
-                    type: string
-                - name: scoreType
-                  in: query
-                  schema:
-                    type: string
-                - name: groupId
-                  in: query
-                  schema:
-                    type: string
-                - name: page
-                  in: query
-                  schema:
-                    type: string
-                - name: pageSize
-                  in: query
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/api.core.v1.statistic.RankResp'
     /v1/core/submit-log/get-by-id:
         get:
             tags:
@@ -295,6 +258,23 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.GetByIdRes'
+    /v1/user/profile/get-by-name:
+        get:
+            tags:
+                - Profile
+            operationId: Profile_GetByName
+            parameters:
+                - name: name
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.GetByNameRes'
     /v1/user/profile/list:
         get:
             tags:
@@ -432,26 +412,6 @@ components:
                     $ref: '#/components/schemas/api.core.v1.statistic.SubmitCount'
                 ac:
                     $ref: '#/components/schemas/api.core.v1.statistic.AcCount'
-        api.core.v1.statistic.RankItem:
-            type: object
-            properties:
-                rank:
-                    type: string
-                userId:
-                    type: string
-                name:
-                    type: string
-                score:
-                    type: string
-        api.core.v1.statistic.RankResp:
-            type: object
-            properties:
-                code:
-                    type: string
-                data:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/api.core.v1.statistic.RankItem'
         api.core.v1.statistic.SubmitCount:
             type: object
             properties:
@@ -600,6 +560,20 @@ components:
                 platform:
                     type: string
                 username:
+                    type: string
+        api.user.v1.GetByNameRes:
+            type: object
+            properties:
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.GetByNameRes_UserList'
+        api.user.v1.GetByNameRes_UserList:
+            type: object
+            properties:
+                userId:
+                    type: string
+                name:
                     type: string
         api.user.v1.GetListRes:
             type: object

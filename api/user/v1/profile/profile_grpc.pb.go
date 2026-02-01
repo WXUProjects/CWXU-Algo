@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	Profile_GetById_FullMethodName   = "/api.user.v1.Profile/GetById"
+	Profile_GetByName_FullMethodName = "/api.user.v1.Profile/GetByName"
 	Profile_GetList_FullMethodName   = "/api.user.v1.Profile/GetList"
 	Profile_Update_FullMethodName    = "/api.user.v1.Profile/Update"
 	Profile_MoveGroup_FullMethodName = "/api.user.v1.Profile/MoveGroup"
@@ -30,6 +31,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ProfileClient interface {
 	GetById(ctx context.Context, in *GetByIdReq, opts ...grpc.CallOption) (*GetByIdRes, error)
+	GetByName(ctx context.Context, in *GetByNameReq, opts ...grpc.CallOption) (*GetByNameRes, error)
 	GetList(ctx context.Context, in *GetListReq, opts ...grpc.CallOption) (*GetListRes, error)
 	Update(ctx context.Context, in *UpdateReq, opts ...grpc.CallOption) (*UpdateRes, error)
 	MoveGroup(ctx context.Context, in *MoveGroupReq, opts ...grpc.CallOption) (*MoveGroupRes, error)
@@ -47,6 +49,16 @@ func (c *profileClient) GetById(ctx context.Context, in *GetByIdReq, opts ...grp
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetByIdRes)
 	err := c.cc.Invoke(ctx, Profile_GetById_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *profileClient) GetByName(ctx context.Context, in *GetByNameReq, opts ...grpc.CallOption) (*GetByNameRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetByNameRes)
+	err := c.cc.Invoke(ctx, Profile_GetByName_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +100,7 @@ func (c *profileClient) MoveGroup(ctx context.Context, in *MoveGroupReq, opts ..
 // for forward compatibility.
 type ProfileServer interface {
 	GetById(context.Context, *GetByIdReq) (*GetByIdRes, error)
+	GetByName(context.Context, *GetByNameReq) (*GetByNameRes, error)
 	GetList(context.Context, *GetListReq) (*GetListRes, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 	MoveGroup(context.Context, *MoveGroupReq) (*MoveGroupRes, error)
@@ -103,6 +116,9 @@ type UnimplementedProfileServer struct{}
 
 func (UnimplementedProfileServer) GetById(context.Context, *GetByIdReq) (*GetByIdRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetById not implemented")
+}
+func (UnimplementedProfileServer) GetByName(context.Context, *GetByNameReq) (*GetByNameRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetByName not implemented")
 }
 func (UnimplementedProfileServer) GetList(context.Context, *GetListReq) (*GetListRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetList not implemented")
@@ -148,6 +164,24 @@ func _Profile_GetById_Handler(srv interface{}, ctx context.Context, dec func(int
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProfileServer).GetById(ctx, req.(*GetByIdReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Profile_GetByName_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetByNameReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).GetByName(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_GetByName_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).GetByName(ctx, req.(*GetByNameReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -216,6 +250,10 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetById",
 			Handler:    _Profile_GetById_Handler,
+		},
+		{
+			MethodName: "GetByName",
+			Handler:    _Profile_GetByName_Handler,
 		},
 		{
 			MethodName: "GetList",

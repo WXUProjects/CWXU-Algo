@@ -490,210 +490,6 @@ func (x *AcCount) GetTotal() int64 {
 	return 0
 }
 
-type RankReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	Time          string                 `protobuf:"bytes,2,opt,name=time,proto3" json:"time,omitempty"`           // 设置 日 周 月 三个维度
-	ScoreType     string                 `protobuf:"bytes,4,opt,name=scoreType,proto3" json:"scoreType,omitempty"` // scoreType = "ac" 是 AC 排行榜
-	GroupId       int64                  `protobuf:"varint,5,opt,name=groupId,proto3" json:"groupId,omitempty"`    // groupId = -1 时候则是全部
-	Page          int64                  `protobuf:"varint,6,opt,name=page,proto3" json:"page,omitempty"`
-	PageSize      int64                  `protobuf:"varint,7,opt,name=pageSize,proto3" json:"pageSize,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RankReq) Reset() {
-	*x = RankReq{}
-	mi := &file_core_v1_statistic_statistic_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RankReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RankReq) ProtoMessage() {}
-
-func (x *RankReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_statistic_statistic_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RankReq.ProtoReflect.Descriptor instead.
-func (*RankReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *RankReq) GetUserId() int64 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *RankReq) GetTime() string {
-	if x != nil {
-		return x.Time
-	}
-	return ""
-}
-
-func (x *RankReq) GetScoreType() string {
-	if x != nil {
-		return x.ScoreType
-	}
-	return ""
-}
-
-func (x *RankReq) GetGroupId() int64 {
-	if x != nil {
-		return x.GroupId
-	}
-	return 0
-}
-
-func (x *RankReq) GetPage() int64 {
-	if x != nil {
-		return x.Page
-	}
-	return 0
-}
-
-func (x *RankReq) GetPageSize() int64 {
-	if x != nil {
-		return x.PageSize
-	}
-	return 0
-}
-
-type RankItem struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Rank          int64                  `protobuf:"varint,1,opt,name=rank,proto3" json:"rank,omitempty"` // 排名
-	UserId        int64                  `protobuf:"varint,2,opt,name=userId,proto3" json:"userId,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`    // 这是姓名
-	Score         int64                  `protobuf:"varint,4,opt,name=score,proto3" json:"score,omitempty"` // 这是统计出来的数量
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RankItem) Reset() {
-	*x = RankItem{}
-	mi := &file_core_v1_statistic_statistic_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RankItem) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RankItem) ProtoMessage() {}
-
-func (x *RankItem) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_statistic_statistic_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RankItem.ProtoReflect.Descriptor instead.
-func (*RankItem) Descriptor() ([]byte, []int) {
-	return file_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *RankItem) GetRank() int64 {
-	if x != nil {
-		return x.Rank
-	}
-	return 0
-}
-
-func (x *RankItem) GetUserId() int64 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *RankItem) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *RankItem) GetScore() int64 {
-	if x != nil {
-		return x.Score
-	}
-	return 0
-}
-
-type RankResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	Data          []*RankItem            `protobuf:"bytes,2,rep,name=data,proto3" json:"data,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RankResp) Reset() {
-	*x = RankResp{}
-	mi := &file_core_v1_statistic_statistic_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RankResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RankResp) ProtoMessage() {}
-
-func (x *RankResp) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_statistic_statistic_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RankResp.ProtoReflect.Descriptor instead.
-func (*RankResp) Descriptor() ([]byte, []int) {
-	return file_core_v1_statistic_statistic_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *RankResp) GetCode() int64 {
-	if x != nil {
-		return x.Code
-	}
-	return 0
-}
-
-func (x *RankResp) GetData() []*RankItem {
-	if x != nil {
-		return x.Data
-	}
-	return nil
-}
-
 type HeatmapResp_HeatmapItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Date          string                 `protobuf:"bytes,1,opt,name=date,proto3" json:"date,omitempty"`
@@ -704,7 +500,7 @@ type HeatmapResp_HeatmapItem struct {
 
 func (x *HeatmapResp_HeatmapItem) Reset() {
 	*x = HeatmapResp_HeatmapItem{}
-	mi := &file_core_v1_statistic_statistic_proto_msgTypes[10]
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -716,7 +512,7 @@ func (x *HeatmapResp_HeatmapItem) String() string {
 func (*HeatmapResp_HeatmapItem) ProtoMessage() {}
 
 func (x *HeatmapResp_HeatmapItem) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_statistic_statistic_proto_msgTypes[10]
+	mi := &file_core_v1_statistic_statistic_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -789,26 +585,10 @@ const file_core_v1_statistic_statistic_proto_rawDesc = "" +
 	"\tlastMonth\x18\x05 \x01(\x03R\tlastMonth\x12\x1a\n" +
 	"\bthisYear\x18\x06 \x01(\x03R\bthisYear\x12\x1a\n" +
 	"\blastYear\x18\a \x01(\x03R\blastYear\x12\x14\n" +
-	"\x05total\x18\b \x01(\x03R\x05total\"\x9d\x01\n" +
-	"\aRankReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x12\n" +
-	"\x04time\x18\x02 \x01(\tR\x04time\x12\x1c\n" +
-	"\tscoreType\x18\x04 \x01(\tR\tscoreType\x12\x18\n" +
-	"\agroupId\x18\x05 \x01(\x03R\agroupId\x12\x12\n" +
-	"\x04page\x18\x06 \x01(\x03R\x04page\x12\x1a\n" +
-	"\bpageSize\x18\a \x01(\x03R\bpageSize\"`\n" +
-	"\bRankItem\x12\x12\n" +
-	"\x04rank\x18\x01 \x01(\x03R\x04rank\x12\x16\n" +
-	"\x06userId\x18\x02 \x01(\x03R\x06userId\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
-	"\x05score\x18\x04 \x01(\x03R\x05score\"S\n" +
-	"\bRankResp\x12\x12\n" +
-	"\x04code\x18\x01 \x01(\x03R\x04code\x123\n" +
-	"\x04data\x18\x02 \x03(\v2\x1f.api.core.v1.statistic.RankItemR\x04data2\xec\x02\n" +
+	"\x05total\x18\b \x01(\x03R\x05total2\x82\x02\n" +
 	"\tStatistic\x12t\n" +
 	"\aHeatmap\x12!.api.core.v1.statistic.HeatmapReq\x1a\".api.core.v1.statistic.HeatmapResp\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/core/statistic/heatmap\x12\x7f\n" +
-	"\vPeriodCount\x12%.api.core.v1.statistic.PeriodCountReq\x1a&.api.core.v1.statistic.PeriodCountResp\"!\x82\xd3\xe4\x93\x02\x1b\x12\x19/v1/core/statistic/period\x12h\n" +
-	"\x04Rank\x12\x1e.api.core.v1.statistic.RankReq\x1a\x1f.api.core.v1.statistic.RankResp\"\x1f\x82\xd3\xe4\x93\x02\x19\x12\x17/v1/core/statistic/rankBD\n" +
+	"\vPeriodCount\x12%.api.core.v1.statistic.PeriodCountReq\x1a&.api.core.v1.statistic.PeriodCountResp\"!\x82\xd3\xe4\x93\x02\x1b\x12\x19/v1/core/statistic/periodBD\n" +
 	"\x15api.core.v1.statisticP\x01Z)cwxu-algo/api/core/v1/statistic;statisticb\x06proto3"
 
 var (
@@ -823,7 +603,7 @@ func file_core_v1_statistic_statistic_proto_rawDescGZIP() []byte {
 	return file_core_v1_statistic_statistic_proto_rawDescData
 }
 
-var file_core_v1_statistic_statistic_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_core_v1_statistic_statistic_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_core_v1_statistic_statistic_proto_goTypes = []any{
 	(*HeatmapReq)(nil),              // 0: api.core.v1.statistic.HeatmapReq
 	(*HeatmapResp)(nil),             // 1: api.core.v1.statistic.HeatmapResp
@@ -832,28 +612,22 @@ var file_core_v1_statistic_statistic_proto_goTypes = []any{
 	(*PeriodData)(nil),              // 4: api.core.v1.statistic.PeriodData
 	(*SubmitCount)(nil),             // 5: api.core.v1.statistic.SubmitCount
 	(*AcCount)(nil),                 // 6: api.core.v1.statistic.AcCount
-	(*RankReq)(nil),                 // 7: api.core.v1.statistic.RankReq
-	(*RankItem)(nil),                // 8: api.core.v1.statistic.RankItem
-	(*RankResp)(nil),                // 9: api.core.v1.statistic.RankResp
-	(*HeatmapResp_HeatmapItem)(nil), // 10: api.core.v1.statistic.HeatmapResp.HeatmapItem
+	(*HeatmapResp_HeatmapItem)(nil), // 7: api.core.v1.statistic.HeatmapResp.HeatmapItem
 }
 var file_core_v1_statistic_statistic_proto_depIdxs = []int32{
-	10, // 0: api.core.v1.statistic.HeatmapResp.data:type_name -> api.core.v1.statistic.HeatmapResp.HeatmapItem
-	4,  // 1: api.core.v1.statistic.PeriodCountResp.data:type_name -> api.core.v1.statistic.PeriodData
-	5,  // 2: api.core.v1.statistic.PeriodData.submit:type_name -> api.core.v1.statistic.SubmitCount
-	6,  // 3: api.core.v1.statistic.PeriodData.ac:type_name -> api.core.v1.statistic.AcCount
-	8,  // 4: api.core.v1.statistic.RankResp.data:type_name -> api.core.v1.statistic.RankItem
-	0,  // 5: api.core.v1.statistic.Statistic.Heatmap:input_type -> api.core.v1.statistic.HeatmapReq
-	2,  // 6: api.core.v1.statistic.Statistic.PeriodCount:input_type -> api.core.v1.statistic.PeriodCountReq
-	7,  // 7: api.core.v1.statistic.Statistic.Rank:input_type -> api.core.v1.statistic.RankReq
-	1,  // 8: api.core.v1.statistic.Statistic.Heatmap:output_type -> api.core.v1.statistic.HeatmapResp
-	3,  // 9: api.core.v1.statistic.Statistic.PeriodCount:output_type -> api.core.v1.statistic.PeriodCountResp
-	9,  // 10: api.core.v1.statistic.Statistic.Rank:output_type -> api.core.v1.statistic.RankResp
-	8,  // [8:11] is the sub-list for method output_type
-	5,  // [5:8] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	7, // 0: api.core.v1.statistic.HeatmapResp.data:type_name -> api.core.v1.statistic.HeatmapResp.HeatmapItem
+	4, // 1: api.core.v1.statistic.PeriodCountResp.data:type_name -> api.core.v1.statistic.PeriodData
+	5, // 2: api.core.v1.statistic.PeriodData.submit:type_name -> api.core.v1.statistic.SubmitCount
+	6, // 3: api.core.v1.statistic.PeriodData.ac:type_name -> api.core.v1.statistic.AcCount
+	0, // 4: api.core.v1.statistic.Statistic.Heatmap:input_type -> api.core.v1.statistic.HeatmapReq
+	2, // 5: api.core.v1.statistic.Statistic.PeriodCount:input_type -> api.core.v1.statistic.PeriodCountReq
+	1, // 6: api.core.v1.statistic.Statistic.Heatmap:output_type -> api.core.v1.statistic.HeatmapResp
+	3, // 7: api.core.v1.statistic.Statistic.PeriodCount:output_type -> api.core.v1.statistic.PeriodCountResp
+	6, // [6:8] is the sub-list for method output_type
+	4, // [4:6] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_core_v1_statistic_statistic_proto_init() }
@@ -867,7 +641,7 @@ func file_core_v1_statistic_statistic_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_statistic_statistic_proto_rawDesc), len(file_core_v1_statistic_statistic_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

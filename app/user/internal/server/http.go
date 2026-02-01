@@ -19,12 +19,13 @@ import (
 
 func NewWhiteListMatcher() selector.MatchFunc {
 	whiteList := map[string]string{
-		"/api.user.v1.Auth/Login":      "",
-		"/api.user.v1.Auth/Register":   "",
-		"/api.user.v1.Profile/GetById": "",
-		"/api.user.v1.Profile/GetList": "",
-		"/api.user.group.Group/Get":    "",
-		"/api.user.group.Group/List":   "",
+		"/api.user.v1.Auth/Login":        "",
+		"/api.user.v1.Auth/Register":     "",
+		"/api.user.v1.Profile/GetById":   "",
+		"/api.user.v1.Profile/GetByName": "",
+		"/api.user.v1.Profile/GetList":   "",
+		"/api.user.group.Group/Get":      "",
+		"/api.user.group.Group/List":     "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		// log.Info(operation)

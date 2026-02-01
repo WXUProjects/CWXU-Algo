@@ -20,12 +20,14 @@ var _ = binding.EncodeURL
 const _ = http.SupportPackageIsVersion1
 
 const OperationProfileGetById = "/api.user.v1.Profile/GetById"
+const OperationProfileGetByName = "/api.user.v1.Profile/GetByName"
 const OperationProfileGetList = "/api.user.v1.Profile/GetList"
 const OperationProfileMoveGroup = "/api.user.v1.Profile/MoveGroup"
 const OperationProfileUpdate = "/api.user.v1.Profile/Update"
 
 type ProfileHTTPServer interface {
 	GetById(context.Context, *GetByIdReq) (*GetByIdRes, error)
+	GetByName(context.Context, *GetByNameReq) (*GetByNameRes, error)
 	GetList(context.Context, *GetListReq) (*GetListRes, error)
 	MoveGroup(context.Context, *MoveGroupReq) (*MoveGroupRes, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
@@ -34,6 +36,7 @@ type ProfileHTTPServer interface {
 func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r := s.Route("/")
 	r.GET("/v1/user/profile/get-by-id", _Profile_GetById0_HTTP_Handler(srv))
+	r.GET("/v1/user/profile/get-by-name", _Profile_GetByName0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/list", _Profile_GetList0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/update", _Profile_Update2_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/move-group", _Profile_MoveGroup0_HTTP_Handler(srv))
@@ -54,6 +57,25 @@ func _Profile_GetById0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context
 			return err
 		}
 		reply := out.(*GetByIdRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Profile_GetByName0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetByNameReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileGetByName)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetByName(ctx, req.(*GetByNameReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetByNameRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -123,6 +145,7 @@ func _Profile_MoveGroup0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Conte
 
 type ProfileHTTPClient interface {
 	GetById(ctx context.Context, req *GetByIdReq, opts ...http.CallOption) (rsp *GetByIdRes, err error)
+	GetByName(ctx context.Context, req *GetByNameReq, opts ...http.CallOption) (rsp *GetByNameRes, err error)
 	GetList(ctx context.Context, req *GetListReq, opts ...http.CallOption) (rsp *GetListRes, err error)
 	MoveGroup(ctx context.Context, req *MoveGroupReq, opts ...http.CallOption) (rsp *MoveGroupRes, err error)
 	Update(ctx context.Context, req *UpdateReq, opts ...http.CallOption) (rsp *UpdateRes, err error)
@@ -141,6 +164,19 @@ func (c *ProfileHTTPClientImpl) GetById(ctx context.Context, in *GetByIdReq, opt
 	pattern := "/v1/user/profile/get-by-id"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationProfileGetById))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *ProfileHTTPClientImpl) GetByName(ctx context.Context, in *GetByNameReq, opts ...http.CallOption) (*GetByNameRes, error) {
+	var out GetByNameRes
+	pattern := "/v1/user/profile/get-by-name"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProfileGetByName))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {

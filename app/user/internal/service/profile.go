@@ -34,6 +34,22 @@ type ProfileService struct {
 	profileUseCase *biz.ProfileUseCase
 }
 
+func (p *ProfileService) GetByName(ctx context.Context, req *profile.GetByNameReq) (*profile.GetByNameRes, error) {
+	userList, err := p.profileDal.GetByName(ctx, req.Name)
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", "查询时出错")
+	}
+	res := &profile.GetByNameRes{List: make([]*profile.GetByNameRes_UserList, 0)}
+	for _, v := range userList {
+		t := &profile.GetByNameRes_UserList{
+			UserId: int64(v.ID),
+			Name:   v.Name,
+		}
+		res.List = append(res.List, t)
+	}
+	return res, nil
+}
+
 func (p *ProfileService) MoveGroup(ctx context.Context, req *profile.MoveGroupReq) (*profile.MoveGroupRes, error) {
 	if !auth.VerifyAdmin(ctx) {
 		return nil, errors.Forbidden("权限不足", "需要管理员权限操作")

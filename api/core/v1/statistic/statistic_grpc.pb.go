@@ -21,7 +21,6 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	Statistic_Heatmap_FullMethodName     = "/api.core.v1.statistic.Statistic/Heatmap"
 	Statistic_PeriodCount_FullMethodName = "/api.core.v1.statistic.Statistic/PeriodCount"
-	Statistic_Rank_FullMethodName        = "/api.core.v1.statistic.Statistic/Rank"
 )
 
 // StatisticClient is the client API for Statistic service.
@@ -30,7 +29,6 @@ const (
 type StatisticClient interface {
 	Heatmap(ctx context.Context, in *HeatmapReq, opts ...grpc.CallOption) (*HeatmapResp, error)
 	PeriodCount(ctx context.Context, in *PeriodCountReq, opts ...grpc.CallOption) (*PeriodCountResp, error)
-	Rank(ctx context.Context, in *RankReq, opts ...grpc.CallOption) (*RankResp, error)
 }
 
 type statisticClient struct {
@@ -61,23 +59,12 @@ func (c *statisticClient) PeriodCount(ctx context.Context, in *PeriodCountReq, o
 	return out, nil
 }
 
-func (c *statisticClient) Rank(ctx context.Context, in *RankReq, opts ...grpc.CallOption) (*RankResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RankResp)
-	err := c.cc.Invoke(ctx, Statistic_Rank_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // StatisticServer is the server API for Statistic service.
 // All implementations must embed UnimplementedStatisticServer
 // for forward compatibility.
 type StatisticServer interface {
 	Heatmap(context.Context, *HeatmapReq) (*HeatmapResp, error)
 	PeriodCount(context.Context, *PeriodCountReq) (*PeriodCountResp, error)
-	Rank(context.Context, *RankReq) (*RankResp, error)
 	mustEmbedUnimplementedStatisticServer()
 }
 
@@ -93,9 +80,6 @@ func (UnimplementedStatisticServer) Heatmap(context.Context, *HeatmapReq) (*Heat
 }
 func (UnimplementedStatisticServer) PeriodCount(context.Context, *PeriodCountReq) (*PeriodCountResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method PeriodCount not implemented")
-}
-func (UnimplementedStatisticServer) Rank(context.Context, *RankReq) (*RankResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method Rank not implemented")
 }
 func (UnimplementedStatisticServer) mustEmbedUnimplementedStatisticServer() {}
 func (UnimplementedStatisticServer) testEmbeddedByValue()                   {}
@@ -154,24 +138,6 @@ func _Statistic_PeriodCount_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Statistic_Rank_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RankReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(StatisticServer).Rank(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Statistic_Rank_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StatisticServer).Rank(ctx, req.(*RankReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // Statistic_ServiceDesc is the grpc.ServiceDesc for Statistic service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -186,10 +152,6 @@ var Statistic_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PeriodCount",
 			Handler:    _Statistic_PeriodCount_Handler,
-		},
-		{
-			MethodName: "Rank",
-			Handler:    _Statistic_Rank_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

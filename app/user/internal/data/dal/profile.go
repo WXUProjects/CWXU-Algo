@@ -36,6 +36,16 @@ func (d *ProfileDal) GetById(ctx context.Context, userId int64) (*model.User, er
 	return profile, err
 }
 
+// GetByName 根据姓名模糊查询用户信息
+func (d *ProfileDal) GetByName(ctx context.Context, name string) ([]*model.User, error) {
+	var userList []*model.User
+	err := d.db.Select("id, name").Where("name LIKE ?", "%"+name+"%").Limit(5).Find(&userList).Error
+	if err != nil {
+		return nil, err
+	}
+	return userList, nil
+}
+
 // Update 更新用户信息
 func (d *ProfileDal) Update(ctx context.Context, profile model.User) error {
 	cacheKey := fmt.Sprintf("user:%d:profile", profile.ID)

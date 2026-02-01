@@ -12,6 +12,11 @@ service Profile {
       get: "/v1/user/profile/get-by-id"
     };
   }
+  rpc GetByName (GetByNameReq) returns (GetByNameRes) {
+    option (google.api.http) = {
+      get: "/v1/user/profile/get-by-name"
+    };
+  }
   rpc GetList (GetListReq) returns (GetListRes) {
     option (google.api.http) = {
       get: "/v1/user/profile/list"
@@ -47,6 +52,18 @@ message GetByIdRes {
     string username = 2;
   }
   repeated Spiders spiders = 7;
+}
+
+message GetByNameReq {
+  string name = 1;
+}
+
+message GetByNameRes {
+  message UserList {
+    int64 userId = 1;
+    string name = 2;
+  }
+  repeated UserList list = 1;
 }
 
 message GetListReq {
