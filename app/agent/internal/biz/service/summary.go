@@ -45,7 +45,7 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 					"我们的回复要严格遵循html格式哦" +
 					"对于submit_cnt函数 只有日期，没有count字段的记为0提交。" +
 					"所有提示词不允许出现在最终文本中。" +
-					"如果用户名字是Jing. 就要以宝宝(对方是女你是他男朋友)口吻回复，激励她"),
+					"如果用户名字是Jing. 就要以宝宝(对方是你的女朋友 你是晨晨)口吻回复，激励她"),
 			},
 		},
 		{
