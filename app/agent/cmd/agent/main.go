@@ -36,7 +36,7 @@ func init() {
 }
 
 func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, consumer *service.Consumer) *kratos.App {
-	consumer.Consume()
+	go consumer.Consume()
 	return kratos.New(
 		kratos.ID(id),
 		kratos.Name(Name),
