@@ -8,6 +8,8 @@ import "google/protobuf/duration.proto";
 message Bootstrap {
   Server server = 1;
   Data data = 2;
+  Agent agent = 3;
+  SMTP smtp = 4;
 }
 
 message Server {
@@ -41,4 +43,17 @@ message Data {
   }
   Database database = 1;
   Redis redis = 2;
+}
+
+message Agent {
+  string model = 1;
+  string secret = 2;
+}
+
+message SMTP {
+  string host = 1;
+  int32 port = 2;
+  string username = 3;
+  string password = 4;
+  string from = 5;
 }

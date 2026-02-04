@@ -1,0 +1,29 @@
+server:
+  http:
+    addr: 0.0.0.0:8002
+    timeout: 1s
+  grpc:
+    addr: 0.0.0.0:9002
+    timeout: 1s
+  reg_dsn: 192.168.31.251:8500
+  amqp_dsn: amqp://cwxu-algo:cwxu-algo@127.0.0.1:5672/algo
+data:
+  database:
+    driver: postgres
+    source: host=127.0.0.1 user=cwxu password=cwxu dbname=algo_user port=35432 sslmode=disable TimeZone=Asia/Shanghai
+  redis:
+    addr: 127.0.0.1:6379
+    password: cwxu
+    read_timeout: 0.2s
+    write_timeout: 0.2s
+
+agent:
+  model: xxxxx # 火山引擎模型id
+  secret: xxxx
+
+smtp:
+  host: smtp.163.com
+  port: 465
+  username: xxx@163.com
+  password: xxx
+  from: xxx@163.com

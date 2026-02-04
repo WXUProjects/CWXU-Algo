@@ -2,4 +2,4 @@ package task
 
 import "github.com/google/wire"
 
-var ProviderSet = wire.NewSet(NewSpiderTask, NewCronTask)
+var ProviderSet = wire.NewSet(NewSpiderTask, NewCronTask, NewSummaryTask)

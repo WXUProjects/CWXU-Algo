@@ -5,14 +5,19 @@ version: v1
 #  - name: jwt
 endpoints:
   - path: /v1/user/*
-    timeout: 1s
+    timeout: 5s
     protocol: HTTP
     backends:
 #      - target: '127.0.0.1:8001'
       - target: 'discovery:///user'
 #          stripPrefix: /bbs
   - path: /v1/core/*
-    timeout: 1s
+    timeout: 5s
     protocol: HTTP
     backends:
       - target: 'discovery:///core-data'
+  - path: /v1/agent/*
+    timeout: 5s
+    protocol: HTTP
+    backends:
+      - target: 'discovery:///agent'

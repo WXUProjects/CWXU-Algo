@@ -10,14 +10,16 @@ import (
 )
 
 type CronTask struct {
-	spider *SpiderTask
-	db     *gorm.DB
+	spider  *SpiderTask
+	summary *SummaryTask
+	db      *gorm.DB
 }
 
-func NewCronTask(spider *SpiderTask, data *data.Data) *CronTask {
+func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask) *CronTask {
 	return &CronTask{
-		spider: spider,
-		db:     data.DB,
+		spider:  spider,
+		db:      data.DB,
+		summary: summary,
 	}
 }
 
@@ -33,6 +35,16 @@ func (t *CronTask) Do() {
 			Pluck("user_id", &userIds)
 		for _, v := range userIds {
 			t.spider.Do(v, false)
+		}
+	})
+	_, _ = cr.AddFunc("* 8 * * *", func() {
+		// 早8点进行一次总结
+		var userIds []int64
+		t.db.Model(&model.Platform{}).
+			Select("DISTINCT user_id").
+			Pluck("user_id", &userIds)
+		for _, v := range userIds {
+			t.summary.Do(v, "PersonalLastDay")
 		}
 	})
 	cr.Start()
