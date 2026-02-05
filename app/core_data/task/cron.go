@@ -37,7 +37,7 @@ func (t *CronTask) Do() {
 			t.spider.Do(v, false)
 		}
 	})
-	_, _ = cr.AddFunc("* 8 * * *", func() {
+	_, _ = cr.AddFunc("0 8 * * *", func() {
 		// 早8点进行一次总结
 		var userIds []int64
 		t.db.Model(&model.Platform{}).
