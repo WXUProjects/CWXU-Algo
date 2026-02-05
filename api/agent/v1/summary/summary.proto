@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package api.agent.v1.summary;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/agent/v1/summary;summary";
+option java_multiple_files = true;
+option java_package = "api.agent.v1.summary";
+
+service Summary {
+  rpc GetRecentSummary (GetSummaryRequest) returns (GetSummaryReply) {
+    option (google.api.http) = {
+      get: "/v1/agent/summary/recent"
+    };
+  }
+}
+
+message GetSummaryRequest {
+  int64 userId = 1;
+}
+
+message GetSummaryReply {
+  int64 code = 1;
+  string msg = 2;
+  string resp = 3;
+}

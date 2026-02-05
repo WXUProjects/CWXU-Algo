@@ -1,6 +1,8 @@
 package server
 
 import (
+	"cwxu-algo/api/agent/v1/summary"
+	"cwxu-algo/app/agent/internal/service"
 	"cwxu-algo/app/common/conf"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -9,7 +11,7 @@ import (
 )
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, logger log.Logger) *http.Server {
+func NewHTTPServer(c *conf.Server, logger log.Logger, summaryService *service.SummaryService) *http.Server {
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
@@ -25,5 +27,6 @@ func NewHTTPServer(c *conf.Server, logger log.Logger) *http.Server {
 		opts = append(opts, http.Timeout(c.Http.Timeout.AsDuration()))
 	}
 	srv := http.NewServer(opts...)
+	summary.RegisterSummaryHTTPServer(srv, summaryService)
 	return srv
 }

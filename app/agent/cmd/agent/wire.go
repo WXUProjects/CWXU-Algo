@@ -8,7 +8,9 @@ package main
 import (
 	"cwxu-algo/app/agent/internal/agent"
 	"cwxu-algo/app/agent/internal/biz"
+	"cwxu-algo/app/agent/internal/data"
 	"cwxu-algo/app/agent/internal/server"
+	"cwxu-algo/app/agent/internal/service"
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
@@ -20,5 +22,9 @@ import (
 
 // wireApp init kratos application.
 func wireApp(*conf.Server, *conf.Data, log.Logger, *conf.SMTP, *conf.Agent) (*kratos.App, func(), error) {
-	panic(wire.Build(server.ProviderSet, discovery.ProvideSet, agent.ProviderSet, event.ProviderSet, biz.ProviderSet, newApp))
+	panic(wire.Build(server.ProviderSet,
+		discovery.ProvideSet,
+		agent.ProviderSet,
+		event.ProviderSet,
+		biz.ProviderSet, data.ProviderSet, service.ProviderSet, newApp))
 }

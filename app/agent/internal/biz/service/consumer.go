@@ -44,6 +44,9 @@ func (c *Consumer) Consume() {
 			case "PersonalLastDay":
 				err = c.summary.PersonalLastDay(msg.UserId)
 				break
+			case "PersonalRecent":
+				err = c.summary.PersonalRecent(msg.UserId)
+				break
 			}
 			if err != nil {
 				log.Error("RabbitMQ(Summary): " + err.Error())
