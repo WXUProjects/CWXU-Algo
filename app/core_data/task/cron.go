@@ -49,7 +49,7 @@ func (t *CronTask) Do() {
 			t.summary.Do(v, "PersonalLastDay")
 		}
 	})
-	_, _ = cr.AddFunc("0 6,9,12,15,18,21,24 * * *", func() {
+	_, _ = cr.AddFunc("1 6,9,12,15,18,21,0 * * *", func() {
 		// 每6 9 12 15 18 21 24 进行一次总结
 		userIds := t.getUserIds()
 		for _, v := range userIds {
