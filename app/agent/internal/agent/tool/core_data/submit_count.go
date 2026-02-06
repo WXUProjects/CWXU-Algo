@@ -72,7 +72,7 @@ func (c *SubmitCnt) AiInterface(jsonStr string) string {
 	}
 	res, err := c.Handle(scp.StartDate, scp.EndDate, scp.UserId)
 	if err != nil {
-		return "查询失败，请返回：查询失败"
+		return "查询失败" + err.Error()
 	}
 	return res
 }

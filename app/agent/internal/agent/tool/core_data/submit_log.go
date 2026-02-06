@@ -4,6 +4,7 @@ import (
 	"context"
 	"cwxu-algo/api/core/v1/submit_log"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -74,7 +75,7 @@ func (c *SubmitLog) AiInterface(jsonStr string) string {
 	}
 	res, err := c.Handle(scp.EndDate, scp.UserId, scp.Limit)
 	if err != nil {
-		return "查询失败，请返回：查询失败"
+		return "查询失败" + err.Error()
 	}
 	return res
 }
@@ -85,7 +86,10 @@ func (c *SubmitLog) Handle(endDate string, userId int, limit int) (string, error
 		return "", err
 	}
 	sb := submit_log.NewSubmitClient(conn)
-	t, _ := time.Parse("20060102", endDate)
+	t, err := time.Parse("20060102", endDate)
+	if err != nil {
+		return "", errors.New("时间解析错误")
+	}
 	t = t.AddDate(0, 0, 1)
 	res, err := sb.GetSubmitLog(
 		context.Background(),

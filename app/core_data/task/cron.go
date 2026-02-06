@@ -42,7 +42,7 @@ func (t *CronTask) Do() {
 			t.spider.Do(v, false)
 		}
 	})
-	_, _ = cr.AddFunc("0 8 * * *", func() {
+	_, _ = cr.AddFunc("30 7 * * *", func() {
 		// 早8点进行一次总结
 		userIds := t.getUserIds()
 		for _, v := range userIds {

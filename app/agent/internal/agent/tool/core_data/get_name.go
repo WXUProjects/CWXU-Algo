@@ -63,7 +63,7 @@ func (c *GetNameById) AiInterface(jsonStr string) string {
 	}
 	res, err := c.Handle(scp.UserId)
 	if err != nil {
-		return "查询失败"
+		return "查询失败" + err.Error()
 	}
 	return res
 }
@@ -85,6 +85,9 @@ func (c *GetNameById) Handle(userId int) (string, error) {
 		log.Error(err)
 		return "", err
 	}
-	respJson, _ := json.Marshal(res)
+	respJson, err := json.Marshal(res)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("用户id为%d的资料信息是%s", userId, respJson), nil
 }
