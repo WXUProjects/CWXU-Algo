@@ -53,7 +53,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	spiderUseCase := service2.NewSpiderUseCase(dataData)
 	consumer := service2.NewConsumer(rabbitMQ, spiderUseCase)
 	summaryTask := task.NewSummaryTask(rabbitMQ)
-	cronTask := task.NewCronTask(spiderTask, dataData, summaryTask)
+	cronTask := task.NewCronTask(spiderTask, dataData, summaryTask, register)
 	app := newApp(logger, grpcServer, httpServer, register, consumer, cronTask)
 	return app, func() {
 		cleanup2()

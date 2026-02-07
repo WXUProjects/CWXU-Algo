@@ -63,6 +63,7 @@ func (d *ProfileDal) Update(ctx context.Context, profile model.User) error {
 func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64) ([]model.User, int64, error) {
 	var list []model.User
 	err := d.db.Select("id", "username", "name", "groupId", "avatar").
+		Order("id").
 		Limit(int(pageSize)).Offset(int(pageNum-1) * int(pageSize)).
 		Find(&list).Error
 	var total int64
