@@ -1,6 +1,7 @@
 package task
 
 import (
+	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"time"
@@ -13,13 +14,15 @@ type CronTask struct {
 	spider  *SpiderTask
 	summary *SummaryTask
 	db      *gorm.DB
+	reg     *discovery.Register
 }
 
-func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask) *CronTask {
+func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, reg *discovery.Register) *CronTask {
 	return &CronTask{
 		spider:  spider,
 		db:      data.DB,
 		summary: summary,
+		reg:     reg,
 	}
 }
 

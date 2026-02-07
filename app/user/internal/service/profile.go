@@ -122,7 +122,10 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 func (p *ProfileService) Update(ctx context.Context, req *profile.UpdateReq) (*profile.UpdateRes, error) {
 	// 校验JWT
 	if !auth.VerifyById(ctx, uint(req.UserId)) {
-		return nil, UpdateForbidden
+		// 再次校验是不是管理员
+		if !auth.VerifyAdmin(ctx) {
+			return nil, UpdateForbidden
+		}
 	}
 	// 构建 User
 	pro := model.User{
