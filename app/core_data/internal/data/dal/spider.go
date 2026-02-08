@@ -51,7 +51,13 @@ func (s *SpiderDal) GetByUserId(ctx context.Context, userId int64, lastTimeUnix 
 	dbFunc := func() ([]model.SubmitLog, error) {
 		// 降级到纯db
 		t := time.Unix(lastTimeUnix, 0)
-		err := s.db.Order("time DESC").Where("user_id = ? AND time < ?", userId, t).Limit(int(limit)).Find(&sbLog).Error
+		q := s.db.Order("time DESC")
+		if userId != -1 {
+			q.Where("user_id = ? AND time < ?", userId, t)
+		} else {
+			q.Where("time < ?", t)
+		}
+		err := q.Limit(int(limit)).Find(&sbLog).Error
 		go func() {
 			ctx2, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
