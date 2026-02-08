@@ -50,6 +50,8 @@ func (c *Consumer) Consume() {
 			}
 			if err != nil {
 				log.Error("RabbitMQ(Summary): " + err.Error())
+				d.Nack(false, false)
+
 				return
 			}
 			_ = d.Ack(false)

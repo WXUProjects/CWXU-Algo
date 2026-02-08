@@ -64,7 +64,9 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 }
 
 func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, needAll bool) {
-	for i := 0; i < 60; i++ {
+	// 限制最大重试次数
+	maxRetries := 12
+	for i := 0; i < maxRetries; i++ {
 		err := uc.fetchAndSave(userId, plat, needAll)
 		if err == nil {
 			log.Infof("Spider: %s %s 成功", plat.Platform, plat.Username)
@@ -72,18 +74,26 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 			return
 		}
 		log.Errorf(
-			"Spider: %s %s 失败: %v",
+			"Spider: %s %s 失败 (重试 %d/%d): %v",
 			plat.Platform,
 			plat.Username,
+			i+1,
+			maxRetries,
 			err,
 		)
 		// needAll=false，不重试
 		if !needAll {
 			return
 		}
-		// needAll=true，无限重试
+		// needAll=true，重试最多12次
 		time.Sleep(5 * time.Second)
 	}
+	log.Errorf(
+		"Spider: %s %s 达到最大重试次数 %d",
+		plat.Platform,
+		plat.Username,
+		maxRetries,
+	)
 }
 func (uc *SpiderUseCase) invalidateCache(userId int64) {
 	ctx := context.Background()

@@ -5,6 +5,7 @@ import (
 	profile2 "cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/core_data/internal/data"
+	"sync"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/registry"
@@ -19,6 +20,9 @@ type CronTask struct {
 	summary *SummaryTask
 	db      *gorm.DB
 	reg     *registry.Registrar
+	cron    *cron.Cron
+	stopCh  chan struct{}
+	mu      sync.RWMutex
 }
 
 func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, reg *discovery.Register) *CronTask {
@@ -27,8 +31,10 @@ func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, reg 
 		db:      data.DB,
 		summary: summary,
 		reg:     &reg.Reg,
+		stopCh:  make(chan struct{}),
 	}
 }
+
 func (t *CronTask) userRPC() (*grpc2.ClientConn, error) {
 	return grpc.DialInsecure(
 		context.Background(),
@@ -38,16 +44,28 @@ func (t *CronTask) userRPC() (*grpc2.ClientConn, error) {
 	)
 }
 
+func (t *CronTask) Stop() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.cron != nil {
+		t.cron.Stop()
+		t.cron = nil
+	}
+	close(t.stopCh)
+}
+
 func (t *CronTask) getUserIds() []int64 {
 	userRpc, err := t.userRPC()
 	if err != nil {
 		return make([]int64, 0)
 	}
+	defer userRpc.Close()
 	profile := profile2.NewProfileClient(userRpc)
 	getUsers := func(pageNum int) (*profile2.GetListRes, error) {
 		return profile.GetList(context.Background(), &profile2.GetListReq{
 			PageSize: 100,
-			PageNum:  1,
+			PageNum:  int64(pageNum),
 		})
 	}
 	res, err := getUsers(1)
@@ -57,9 +75,10 @@ func (t *CronTask) getUserIds() []int64 {
 	rList := make([]*profile2.GetListRes, 1)
 	rList[0] = res
 	totalPage := (res.Total + 99) / 100
-	for i := 1; i < int(totalPage); i++ {
+	for i := 2; i <= int(totalPage); i++ {
 		r, err := getUsers(i)
 		if err != nil {
+			continue
 		}
 		rList = append(rList, r)
 	}

@@ -84,6 +84,10 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 	}
 	// 获取 最后一次 提交时间
 	conn, err := p.coreDataRPC()
+	if err != nil {
+		return nil, InternalServer
+	}
+	defer conn.Close()
 	sb := submit_log.NewSubmitClient(conn)
 	sp, err := sb.LastSubmitTime(ctx, &submit_log.LastSubmitTimeReq{UserIds: ids})
 	if err != nil {
@@ -152,6 +156,10 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 	}
 	// 获取 platform spider 信息
 	conn, err := p.coreDataRPC()
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	defer conn.Close()
 	s := spider.NewSpiderClient(conn)
 	sp, err := s.GetSpider(ctx, &spider.GetSpiderReq{UserId: req.UserId})
 	if err != nil {

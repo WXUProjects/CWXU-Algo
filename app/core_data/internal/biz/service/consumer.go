@@ -38,11 +38,13 @@ func (c *Consumer) Consume() {
 			err := json.Unmarshal(d.Body, &msg)
 			if err != nil {
 				log.Errorf("RabbitMQ(Spider): 解析json出错 %s", err.Error())
+				_ = d.Nack(false, false)
 				return
 			}
 			err = c.spider.LoadData(msg.UserId, msg.NeedAll)
 			if err != nil {
 				log.Error("RabbitMQ(Spider): " + err.Error())
+				_ = d.Nack(false, false)
 				return
 			}
 			_ = d.Ack(false)

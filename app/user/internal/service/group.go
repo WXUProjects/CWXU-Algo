@@ -94,6 +94,7 @@ func (g *GroupService) Get(ctx context.Context, request *group.GetRequest) (*gro
 		if err != nil {
 			log.Info(err.Error())
 		} else {
+			defer conn.Close()
 			sb := submit_log.NewSubmitClient(conn)
 			sp, err := sb.LastSubmitTime(ctx, &submit_log.LastSubmitTimeReq{UserIds: userIds})
 			if err == nil {

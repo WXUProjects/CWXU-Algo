@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/task"
@@ -54,6 +55,12 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.
 			hs,
 		),
 		kratos.Registrar(reg.Reg),
+		kratos.BeforeStop(func(ctx context.Context) error {
+			log.Info("stopping cron task...")
+			cron.Stop()
+			log.Info("cron task stopped")
+			return nil
+		}),
 	)
 }
 

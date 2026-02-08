@@ -76,6 +76,7 @@ func (c *GetNameById) Handle(userId int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer conn.Close()
 	sb := profile.NewProfileClient(conn)
 	res, err := sb.GetById(
 		context.Background(),

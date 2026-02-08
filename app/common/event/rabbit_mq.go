@@ -8,7 +8,8 @@ import (
 )
 
 type RabbitMQ struct {
-	Ch *amqp.Channel
+	Ch   *amqp.Channel
+	Conn *amqp.Connection
 }
 
 func NewRabbitMQ(data *conf.Server) (*RabbitMQ, func(), error) {
@@ -17,10 +18,16 @@ func NewRabbitMQ(data *conf.Server) (*RabbitMQ, func(), error) {
 		return nil, func() {}, err
 	}
 	ch, err := conn.Channel()
+	if err != nil {
+		conn.Close()
+		return nil, func() {}, err
+	}
 	return &RabbitMQ{
-			Ch: ch,
+			Ch:   ch,
+			Conn: conn,
 		}, func() {
 			_ = ch.Close()
+			_ = conn.Close()
 		}, nil
 }
 
