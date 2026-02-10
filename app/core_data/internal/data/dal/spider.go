@@ -61,7 +61,7 @@ func (s *SpiderDal) GetByUserId(ctx context.Context, userId int64, lastTimeUnix 
 		go func() {
 			ctx2, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			s.SetCache(ctx2, sbLog)
+			s.SetCache(ctx2, sbLog, userId)
 		}()
 		return sbLog, err
 	}
@@ -100,11 +100,11 @@ func (s *SpiderDal) GetByUserId(ctx context.Context, userId int64, lastTimeUnix 
 }
 
 // SetCache 缓存提交记录
-func (s *SpiderDal) SetCache(ctx context.Context, log []model.SubmitLog) {
+func (s *SpiderDal) SetCache(ctx context.Context, log []model.SubmitLog, userId int64) {
 	pipe := s.rdb.Pipeline()
 	// 根据 userId 构建 Zset
 	for _, v := range log {
-		cacheKey := fmt.Sprintf("core:submit_log:user:%d", v.UserID)
+		cacheKey := fmt.Sprintf("core:submit_log:user:%d", userId)
 		_ = pipe.ZAdd(ctx, cacheKey, redis.Z{
 			Score:  float64(v.Time.Unix()),
 			Member: v.ID,
