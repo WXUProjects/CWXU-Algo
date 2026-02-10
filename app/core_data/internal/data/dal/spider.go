@@ -48,15 +48,15 @@ func (s *SpiderDal) GetByUserId(ctx context.Context, userId int64, lastTimeUnix 
 	})
 	var sbLog []model.SubmitLog
 	ids, err := res.Result()
+	t := time.Unix(lastTimeUnix, 0)
+	q := s.db.Order("time DESC")
+	if userId != -1 {
+		q.Where("user_id = ? AND time < ?", userId, t)
+	} else {
+		q.Where("time < ?", t)
+	}
 	dbFunc := func() ([]model.SubmitLog, error) {
 		// 降级到纯db
-		t := time.Unix(lastTimeUnix, 0)
-		q := s.db.Order("time DESC")
-		if userId != -1 {
-			q.Where("user_id = ? AND time < ?", userId, t)
-		} else {
-			q.Where("time < ?", t)
-		}
 		err := q.Limit(int(limit)).Find(&sbLog).Error
 		go func() {
 			ctx2, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -69,8 +69,7 @@ func (s *SpiderDal) GetByUserId(ctx context.Context, userId int64, lastTimeUnix 
 		return dbFunc()
 	}
 	// 防止缓存忽悠人
-	t := time.Unix(lastTimeUnix, 0)
-	err = s.db.Order("time DESC").Where("user_id = ? AND time < ?", userId, t).Limit(1).Find(&sbLog).Error
+	err = q.Limit(1).Find(&sbLog).Error
 	if err != nil || len(ids) < int(limit) || strconv.Itoa(int(sbLog[0].ID)) != ids[0] {
 		return dbFunc()
 	}
