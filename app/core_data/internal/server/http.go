@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"cwxu-algo/api/core/v1/contest_log"
 	"cwxu-algo/api/core/v1/spider"
 	statistic2 "cwxu-algo/api/core/v1/statistic"
 	"cwxu-algo/api/core/v1/submit_log"
@@ -34,7 +35,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 }
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, logger log.Logger, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService) *http.Server {
+func NewHTTPServer(c *conf.Server, logger log.Logger, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService, contestLogService *service.ContestLogService) *http.Server {
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
@@ -56,5 +57,6 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, submitService *service.Sub
 	submit_log.RegisterSubmitHTTPServer(srv, submitService)
 	spider.RegisterSpiderHTTPServer(srv, spiderService)
 	statistic2.RegisterStatisticHTTPServer(srv, statisticService)
+	contest_log.RegisterContestHTTPServer(srv, contestLogService)
 	return srv
 }

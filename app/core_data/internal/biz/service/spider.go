@@ -6,6 +6,7 @@ import (
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -63,14 +64,49 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 		Save(&tmp).Error
 }
 
+func (uc *SpiderUseCase) fetchAndSaveContest(userId int64, plat model.Platform, needAll bool) error {
+	p, ok := spider.Get(plat.Platform)
+	if !ok {
+		return fmt.Errorf("平台插件不存在")
+	}
+	sbFetch, ok := p.(spider.SubmitContestFetcher)
+	if !ok {
+		return fmt.Errorf("平台未实现 SubmitContestFetcher")
+	}
+	tmp, err := sbFetch.FetchContestLog(userId, plat.Username, needAll)
+	if err != nil {
+		return err
+	}
+	if len(tmp) == 0 {
+		return nil
+	}
+
+	return uc.data.DB.
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "contest_id"}},
+			DoNothing: true,
+		}).
+		Save(&tmp).Error
+}
+
 func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, needAll bool) {
 	// 限制最大重试次数
 	maxRetries := 12
 	for i := 0; i < maxRetries; i++ {
 		err := uc.fetchAndSave(userId, plat, needAll)
+		_ = uc.fetchAndSaveContest(userId, plat, needAll)
 		if err == nil {
 			log.Infof("Spider: %s %s 成功", plat.Platform, plat.Username)
 			uc.invalidateCache(userId)
+			return
+		}
+		if strings.Contains(err.Error(), "平台") {
+			log.Errorf(
+				"Spider: %s %s 失败: %v",
+				plat.Platform,
+				plat.Username,
+				err,
+			)
 			return
 		}
 		log.Errorf(
@@ -106,8 +142,8 @@ func (uc *SpiderUseCase) invalidateCache(userId int64) {
 		ctx,
 		fmt.Sprintf("core:submit_log:user:%d", userId),
 		fmt.Sprintf("user:%d:lastSubmitTime", userId),
-		fmt.Sprintf("statistic:period:%d", userId),  // 用户统计缓存
-		fmt.Sprintf("statistic:period:-1"),            // 全局统计缓存
+		fmt.Sprintf("statistic:period:%d", userId), // 用户统计缓存
+		fmt.Sprintf("statistic:period:-1"),         // 全局统计缓存
 	).Err()
 
 	// 2. 模糊前缀，必须 SCAN

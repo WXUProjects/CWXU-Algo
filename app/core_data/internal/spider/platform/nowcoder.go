@@ -236,6 +236,101 @@ func (nc NewNowCoder) FetchSubmitLog(userId int64, username string, needAll bool
 	return res, nil
 }
 
+// ContestHistoryItem 比赛记录项
+type ContestHistoryItem struct {
+	ContestId   json.Number `json:"contestId"`     // 比赛ID
+	ContestName string      `json:"contestName"`   // 比赛名称
+	Rank        int         `json:"rank"`          // 排名
+	TotalCount  int         `json:"problemCount"`  // 总题数
+	AcCount     int         `json:"acceptedCount"` // 过题数
+	Rating      json.Number `json:"rating"`        // 评分
+	ChangeValue json.Number `json:"changeValue"`   // 分数变化值
+	StartTime   json.Number `json:"startTime"`     // 开始时间戳（毫秒）
+	EndTime     json.Number `json:"endTime"`       // 结束时间戳（毫秒）
+	ColorLevel  json.Number `json:"colorLevel"`    // 颜色等级
+}
+
+// ContestHistoryPageInfo 分页信息
+type ContestHistoryPageInfo struct {
+	PageCount    int `json:"pageCount"`
+	PageSize     int `json:"pageSize"`
+	ElementCount int `json:"elementCount"`
+	TotalCount   int `json:"totalCount"`
+	PageCurrent  int `json:"pageCurrent"`
+}
+
+// ContestHistoryData 响应数据
+type ContestHistoryData struct {
+	DataList  []ContestHistoryItem   `json:"dataList"`
+	PageInfo  ContestHistoryPageInfo `json:"pageInfo"`
+	BasicInfo map[string]interface{} `json:"basicInfo"`
+}
+
+// ResponseContest 外层响应结构体
+type ResponseContest struct {
+	Msg  string             `json:"msg"`  // 响应信息
+	Code int                `json:"code"` // 响应码
+	Data ContestHistoryData `json:"data"` // 比赛记录数据
+}
+
+// FetchContestLog 获取比赛日志
+func (nc NewNowCoder) FetchContestLog(userId int64, username string, needAll bool) ([]model.ContestLog, error) {
+	const baseURL = "https://ac.nowcoder.com/acm-heavy/acm/contest/profile/contest-joined-history"
+
+	result := make([]model.ContestLog, 0)
+
+	page := 1
+
+	for {
+		url := fmt.Sprintf("%s?token=&uid=%s&page=%d&onlyJoinedFilter=true&searchContestName=&onlyRatingFilter=false&contestEndFilter=true",
+			baseURL, username, page)
+
+		resp, err := http.Get(url)
+		if err != nil {
+			return nil, err
+		}
+		respData, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		var contestResp ResponseContest
+		if err := json.Unmarshal(respData, &contestResp); err != nil {
+			return nil, err
+		}
+
+		if contestResp.Code != 0 {
+			return nil, fmt.Errorf("nowcoder api error: code=%d, msg=%s", contestResp.Code, contestResp.Msg)
+		}
+
+		for _, item := range contestResp.Data.DataList {
+			contestId, _ := item.ContestId.Int64()
+			startTimeMs, _ := item.StartTime.Int64()
+
+			result = append(result, model.ContestLog{
+				Platform:    spider.NowCoder,
+				UserID:      userId,
+				Rank:        item.Rank,
+				TotalCount:  item.TotalCount,
+				AcCount:     item.AcCount,
+				ContestId:   strconv.FormatInt(contestId, 10),
+				ContestName: item.ContestName,
+				ContestUrl:  "https://ac.nowcoder.com/acm/contest/" + strconv.FormatInt(contestId, 10),
+				Time:        time.Unix(startTimeMs/1000, 0),
+			})
+		}
+
+		// 判断是否需要继续翻页
+		if !needAll || page >= contestResp.Data.PageInfo.PageCount {
+			break
+		}
+		page++
+	}
+
+	return result, nil
+}
+
 func (nc NewNowCoder) Name() string {
 	return spider.NowCoder
 }

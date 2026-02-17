@@ -117,3 +117,136 @@ func (s *SpiderDal) SetCache(ctx context.Context, log []model.SubmitLog, userId 
 	}
 	_, _ = pipe.Exec(ctx)
 }
+
+// GetContestByUserId 获取用户比赛历史
+func (s *SpiderDal) GetContestByUserId(ctx context.Context, userId int64, cursor int64, limit int64, platform string) ([]model.ContestLog, error) {
+	if cursor == 0 {
+		cursor = 33325619029
+	}
+
+	cacheKey := fmt.Sprintf("core:contest_log:user:%d", userId)
+	if platform != "" {
+		cacheKey = fmt.Sprintf("core:contest_log:user:%d:%s", userId, platform)
+	}
+
+	res := s.rdb.ZRevRangeByScore(ctx, cacheKey, &redis.ZRangeBy{
+		Max:   fmt.Sprintf("(%d", cursor),
+		Min:   "-inf",
+		Count: limit,
+	})
+	var contestLogs []model.ContestLog
+	ids, err := res.Result()
+	t := time.Unix(cursor, 0)
+
+	q := s.db.Order("time DESC")
+	if userId != -1 {
+		q = q.Where("user_id = ? AND time < ?", userId, t)
+	} else {
+		q = q.Where("time < ?", t)
+	}
+	if platform != "" {
+		q = q.Where("platform = ?", platform)
+	}
+
+	dbFunc := func() ([]model.ContestLog, error) {
+		err := q.Limit(int(limit)).Find(&contestLogs).Error
+		go func() {
+			ctx2, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			s.SetContestCache(ctx2, contestLogs, userId, platform)
+		}()
+		return contestLogs, err
+	}
+
+	if err != nil {
+		return dbFunc()
+	}
+
+	err = q.Limit(1).Find(&contestLogs).Error
+	if err != nil || len(ids) < int(limit) || (len(contestLogs) > 0 && strconv.Itoa(int(contestLogs[0].ID)) != ids[0]) {
+		return dbFunc()
+	}
+
+	cacheKeys := make([]string, len(ids))
+	for i, id := range ids {
+		cacheKeys[i] = fmt.Sprintf("core:contest_log:detail:%s", id)
+	}
+	r := s.rdb.MGet(ctx, cacheKeys...)
+	rVal, err := r.Result()
+
+	if err != nil || slices.Contains(rVal, nil) {
+		return dbFunc()
+	}
+
+	contestLogs = make([]model.ContestLog, 0)
+	for _, v := range rVal {
+		var l model.ContestLog
+		_ = utils.GobDecoder([]byte(v.(string)), &l)
+		contestLogs = append(contestLogs, l)
+	}
+	return contestLogs, nil
+}
+
+// GetContestList 获取比赛列表
+func (s *SpiderDal) GetContestList(ctx context.Context, userId int64, offset int64, limit int64, platform string) ([]model.ContestLog, int64, error) {
+	var contestLogs []model.ContestLog
+	var total int64
+
+	q := s.db.Model(&model.ContestLog{})
+	if userId != -1 {
+		q = q.Where("user_id = ?", userId)
+	}
+	if platform != "" {
+		q = q.Where("platform = ?", platform)
+	}
+
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if err := q.Order("time DESC").Offset(int(offset)).Limit(int(limit)).Find(&contestLogs).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return contestLogs, total, nil
+}
+
+// GetContestRanking 获取比赛排行榜
+func (s *SpiderDal) GetContestRanking(ctx context.Context, contestId string, offset int64, limit int64) ([]model.ContestLog, int64, error) {
+	var contestLogs []model.ContestLog
+	var total int64
+
+	q := s.db.Model(&model.ContestLog{}).Where("contest_id = ?", contestId)
+
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if err := q.Order("rank ASC").Offset(int(offset)).Limit(int(limit)).Find(&contestLogs).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return contestLogs, total, nil
+}
+
+// SetContestCache 缓存比赛记录
+func (s *SpiderDal) SetContestCache(ctx context.Context, logs []model.ContestLog, userId int64, platform string) {
+	pipe := s.rdb.Pipeline()
+
+	cacheKey := fmt.Sprintf("core:contest_log:user:%d", userId)
+	if platform != "" {
+		cacheKey = fmt.Sprintf("core:contest_log:user:%d:%s", userId, platform)
+	}
+
+	for _, v := range logs {
+		_ = pipe.ZAdd(ctx, cacheKey, redis.Z{
+			Score:  float64(v.Time.Unix()),
+			Member: v.ID,
+		})
+		detailKey := fmt.Sprintf("core:contest_log:detail:%d", v.ID)
+		_ = pipe.Expire(ctx, detailKey, 24*time.Hour)
+		vByte, _ := utils.GobEncoder(v)
+		_ = pipe.Set(ctx, detailKey, vByte, 12*time.Hour)
+	}
+	_, _ = pipe.Exec(ctx)
+}

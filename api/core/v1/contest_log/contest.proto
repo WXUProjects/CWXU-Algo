@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package api.core.v1.contest_log;
+
+import "google/api/annotations.proto";
+
+option go_package = "cwxu-algo/api/core/v1/contest_log;contest_log";
+option java_multiple_files = true;
+option java_package = "api.core.v1.contest_log";
+
+// 竞赛服务
+service Contest {
+  // 获取竞赛列表
+  rpc GetContestList (GetContestListReq) returns (GetContestListRes) {
+    option (google.api.http) = {
+      get: "/v1/core/contest/list"
+    };
+  }
+
+  // 获取用户竞赛历史
+  rpc GetUserContestHistory (GetUserContestHistoryReq) returns (GetUserContestHistoryRes) {
+    option (google.api.http) = {
+      get: "/v1/core/contest/history"
+    };
+  }
+
+  // 获取竞赛排行榜
+  rpc GetContestRanking (GetContestRankingReq) returns (GetContestRankingRes) {
+    option (google.api.http) = {
+      get: "/v1/core/contest/ranking"
+    };
+  }
+}
+
+// 竞赛日志消息体
+message ContestLog {
+  uint32 id = 1;                // ID
+  string platform = 2;          // 平台
+  int64 user_id = 3;            // 用户ID
+  string contest_id = 4;        // 比赛ID
+  string contest_name = 5;      // 比赛名称
+  string contest_url = 6;       // 比赛链接
+  int32 rank = 7;               // 排名
+  int32 total_count = 8;        // 总题数
+  int32 ac_count = 9;           // 过题数
+  int64 time = 10;              // 比赛时间戳
+}
+
+// 获取竞赛列表请求
+message GetContestListReq {
+  int64 user_id = 1;            // 用户ID
+  int64 limit = 2;              // 限制数量
+  int64 offset = 3;             // 偏移量
+  string platform = 4;          // 平台筛选
+}
+
+// 获取竞赛列表响应
+message GetContestListRes {
+  int64 code = 1;               // 状态码
+  string message = 2;           // 消息
+  repeated ContestLog data = 3; // 竞赛列表数据
+  int64 total = 4;              // 总数
+}
+
+// 获取用户竞赛历史请求
+message GetUserContestHistoryReq {
+  int64 user_id = 1;            // 用户ID
+  int64 limit = 2;              // 限制数量
+  int64 cursor = 3;             // 时间游标
+  string platform = 4;          // 平台筛选
+}
+
+// 获取用户竞赛历史响应
+message GetUserContestHistoryRes {
+  int64 code = 1;               // 状态码
+  string message = 2;           // 消息
+  repeated ContestLog data = 3; // 竞赛历史数据
+}
+
+// 获取竞赛排行榜请求
+message GetContestRankingReq {
+  string contest_id = 1;        // 比赛ID
+  int64 groupId = 4;            // 组id
+  int64 limit = 2;              // 限制数量
+  int64 offset = 3;             // 偏移量
+}
+
+// 排行榜项
+message RankingItem {
+  int64 rank = 1;               // 排名
+  int64 user_id = 2;            // 用户ID
+  string name = 3;          // 用户姓名
+  int32 score = 4;              // 得分
+  int32 ac_count = 5;           // 过题数
+  int32 total_count = 6;        // 总题数
+}
+
+// 获取竞赛排行榜响应
+message GetContestRankingRes {
+  int64 code = 1;               // 状态码
+  string message = 2;           // 消息
+  repeated RankingItem data = 3; // 排行榜数据
+  int64 total = 4;              // 总参赛人数
+}

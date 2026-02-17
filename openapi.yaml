@@ -3,16 +3,30 @@
 
 openapi: 3.0.3
 info:
-    title: Summary API
+    title: Contest API
+    description: 竞赛服务
     version: 0.0.1
 paths:
-    /v1/agent/summary/recent:
+    /v1/core/contest/history:
         get:
             tags:
-                - Summary
-            operationId: Summary_GetRecentSummary
+                - Contest
+            description: 获取用户竞赛历史
+            operationId: Contest_GetUserContestHistory
             parameters:
                 - name: userId
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: string
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+                - name: platform
                   in: query
                   schema:
                     type: string
@@ -22,7 +36,79 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/GetSummaryReply'
+                                $ref: '#/components/schemas/GetUserContestHistoryRes'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/core/contest/list:
+        get:
+            tags:
+                - Contest
+            description: 获取竞赛列表
+            operationId: Contest_GetContestList
+            parameters:
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: string
+                - name: offset
+                  in: query
+                  schema:
+                    type: string
+                - name: platform
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetContestListRes'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v1/core/contest/ranking:
+        get:
+            tags:
+                - Contest
+            description: 获取竞赛排行榜
+            operationId: Contest_GetContestRanking
+            parameters:
+                - name: contestId
+                  in: query
+                  schema:
+                    type: string
+                - name: groupId
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: string
+                - name: offset
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetContestRankingRes'
                 default:
                     description: Default error response
                     content:
@@ -31,15 +117,74 @@ paths:
                                 $ref: '#/components/schemas/Status'
 components:
     schemas:
-        GetSummaryReply:
+        ContestLog:
+            type: object
+            properties:
+                id:
+                    type: integer
+                    format: uint32
+                platform:
+                    type: string
+                userId:
+                    type: string
+                contestId:
+                    type: string
+                contestName:
+                    type: string
+                contestUrl:
+                    type: string
+                rank:
+                    type: integer
+                    format: int32
+                totalCount:
+                    type: integer
+                    format: int32
+                acCount:
+                    type: integer
+                    format: int32
+                time:
+                    type: string
+            description: 竞赛日志消息体
+        GetContestListRes:
             type: object
             properties:
                 code:
                     type: string
-                msg:
+                message:
                     type: string
-                resp:
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ContestLog'
+                total:
                     type: string
+            description: 获取竞赛列表响应
+        GetContestRankingRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/RankingItem'
+                total:
+                    type: string
+            description: 获取竞赛排行榜响应
+        GetUserContestHistoryRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ContestLog'
+            description: 获取用户竞赛历史响应
         GoogleProtobufAny:
             type: object
             properties:
@@ -48,6 +193,25 @@ components:
                     description: The type of the serialized message.
             additionalProperties: true
             description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message.
+        RankingItem:
+            type: object
+            properties:
+                rank:
+                    type: string
+                userId:
+                    type: string
+                name:
+                    type: string
+                score:
+                    type: integer
+                    format: int32
+                acCount:
+                    type: integer
+                    format: int32
+                totalCount:
+                    type: integer
+                    format: int32
+            description: 排行榜项
         Status:
             type: object
             properties:
@@ -65,4 +229,4 @@ components:
                     description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
             description: 'The `Status` type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by [gRPC](https://github.com/grpc). Each `Status` message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the [API Design Guide](https://cloud.google.com/apis/design/errors).'
 tags:
-    - name: Summary
+    - name: Contest
