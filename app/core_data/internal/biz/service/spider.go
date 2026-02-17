@@ -83,7 +83,7 @@ func (uc *SpiderUseCase) fetchAndSaveContest(userId int64, plat model.Platform, 
 
 	return uc.data.DB.
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "contest_id"}},
+			Columns:   []clause.Column{{Name: "contest_id"}, {Name: "user_id"}},
 			DoNothing: true,
 		}).
 		Save(&tmp).Error
@@ -144,12 +144,17 @@ func (uc *SpiderUseCase) invalidateCache(userId int64) {
 		fmt.Sprintf("user:%d:lastSubmitTime", userId),
 		fmt.Sprintf("statistic:period:%d", userId), // 用户统计缓存
 		fmt.Sprintf("statistic:period:-1"),         // 全局统计缓存
+		// Contest log 精确 key
+		fmt.Sprintf("core:contest_log:user:%d", userId),
 	).Err()
 
 	// 2. 模糊前缀，必须 SCAN
 	patterns := []string{
 		fmt.Sprintf("statistic:heatmap:%d:*:*:*", userId),
 		"statistic:heatmap:0:*:*:*",
+		// Contest log 相关的模糊 key
+		fmt.Sprintf("core:contest_log:user:%d:*", userId),
+		"core:contest_log:detail:*",
 	}
 
 	for _, pattern := range patterns {

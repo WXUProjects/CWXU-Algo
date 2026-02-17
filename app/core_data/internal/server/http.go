@@ -20,13 +20,15 @@ import (
 
 func NewWhiteListMatcher() selector.MatchFunc {
 	whiteList := map[string]string{
-		"/api.core.v1.submit_log.Submit/GetSubmitLog":  "",
-		"/api.core.v1.spider.Spider/GetSpider":         "",
-		"/api.core.v1.statistic.Statistic/Heatmap":     "",
-		"/api.core.v1.statistic.Statistic/PeriodCount": "",
+		"/api.core.v1.submit_log.Submit/GetSubmitLog":        "",
+		"/api.core.v1.contest_log.Contest/GetContestList":    "",
+		"/api.core.v1.contest_log.Contest/GetContestRanking": "",
+		"/api.core.v1.spider.Spider/GetSpider":               "",
+		"/api.core.v1.statistic.Statistic/Heatmap":           "",
+		"/api.core.v1.statistic.Statistic/PeriodCount":       "",
 	}
 	return func(ctx context.Context, operation string) bool {
-		// log.Info(operation)
+		//log.Info(operation)
 		if _, ok := whiteList[operation]; ok {
 			return false
 		}

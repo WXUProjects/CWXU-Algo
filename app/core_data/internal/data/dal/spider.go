@@ -187,32 +187,86 @@ func (s *SpiderDal) GetContestByUserId(ctx context.Context, userId int64, cursor
 	return contestLogs, nil
 }
 
-// GetContestList 获取比赛列表
-func (s *SpiderDal) GetContestList(ctx context.Context, userId int64, offset int64, limit int64, platform string) ([]model.ContestLog, int64, error) {
-	var contestLogs []model.ContestLog
-	var total int64
-
-	q := s.db.Model(&model.ContestLog{})
+// GetContestList 获取比赛列表（按 contest_id 去重）
+func (s *SpiderDal) GetContestList(_ context.Context, userId int64, offset int64, limit int64, platform string) ([]model.ContestLog, int64, error) {
+	// 先构建基础条件
+	baseQuery := s.db.Model(&model.ContestLog{})
 	if userId != -1 {
-		q = q.Where("user_id = ?", userId)
+		baseQuery = baseQuery.Where("user_id = ?", userId)
 	}
 	if platform != "" {
-		q = q.Where("platform = ?", platform)
+		baseQuery = baseQuery.Where("platform = ?", platform)
 	}
 
-	if err := q.Count(&total).Error; err != nil {
+	// 1. 计算去重后的总数
+	var total int64
+	countQuery := baseQuery.Select("COUNT(DISTINCT contest_id)")
+	if err := countQuery.Scan(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := q.Order("time DESC").Offset(int(offset)).Limit(int(limit)).Find(&contestLogs).Error; err != nil {
+	// 2. 使用窗口函数获取每个 contest_id 最新的记录
+	// 先获取去重且分页后的 contest_id 列表
+	type ContestIdWithTime struct {
+		ContestId string
+		MaxTime   time.Time
+	}
+	var contestIdItems []ContestIdWithTime
+
+	// 构建子查询：按 contest_id 分组，取最新的 time，然后分页
+	paginateQuery := baseQuery.
+		Select("contest_id, MAX(time) as max_time").
+		Group("contest_id").
+		Order("max_time DESC").
+		Offset(int(offset)).
+		Limit(int(limit))
+
+	if err := paginateQuery.Scan(&contestIdItems).Error; err != nil {
 		return nil, 0, err
 	}
 
-	return contestLogs, total, nil
+	if len(contestIdItems) == 0 {
+		return []model.ContestLog{}, total, nil
+	}
+
+	// 3. 根据 contest_id 列表获取完整记录
+	contestIds := make([]string, len(contestIdItems))
+	for i, item := range contestIdItems {
+		contestIds[i] = item.ContestId
+	}
+
+	var contestLogs []model.ContestLog
+	finalQuery := s.db.Model(&model.ContestLog{}).
+		Where("contest_id IN ?", contestIds)
+	if userId != -1 {
+		finalQuery = finalQuery.Where("user_id = ?", userId)
+	}
+	if platform != "" {
+		finalQuery = finalQuery.Where("platform = ?", platform)
+	}
+
+	if err := finalQuery.Find(&contestLogs).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 4. 按照分页查询的顺序重新排列结果
+	logMap := make(map[string]model.ContestLog)
+	for _, item := range contestLogs {
+		logMap[item.ContestId] = item
+	}
+
+	result := make([]model.ContestLog, 0, len(contestIdItems))
+	for _, item := range contestIdItems {
+		if contestLog, ok := logMap[item.ContestId]; ok {
+			result = append(result, contestLog)
+		}
+	}
+
+	return result, total, nil
 }
 
 // GetContestRanking 获取比赛排行榜
-func (s *SpiderDal) GetContestRanking(ctx context.Context, contestId string, offset int64, limit int64) ([]model.ContestLog, int64, error) {
+func (s *SpiderDal) GetContestRanking(_ context.Context, contestId string, offset int64, limit int64) ([]model.ContestLog, int64, error) {
 	var contestLogs []model.ContestLog
 	var total int64
 
