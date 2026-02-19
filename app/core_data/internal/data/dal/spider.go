@@ -266,11 +266,11 @@ func (s *SpiderDal) GetContestList(_ context.Context, userId int64, offset int64
 }
 
 // GetContestRanking 获取比赛排行榜
-func (s *SpiderDal) GetContestRanking(_ context.Context, contestId string, offset int64, limit int64) ([]model.ContestLog, int64, error) {
+func (s *SpiderDal) GetContestRanking(_ context.Context, contestId string, platform string, offset int64, limit int64) ([]model.ContestLog, int64, error) {
 	var contestLogs []model.ContestLog
 	var total int64
 
-	q := s.db.Model(&model.ContestLog{}).Where("id = ?", contestId)
+	q := s.db.Model(&model.ContestLog{}).Where("contest_id = ? and platform = ?", contestId, platform)
 
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err

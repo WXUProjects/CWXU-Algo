@@ -64,7 +64,9 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 }
 
 func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_log.GetContestRankingReq) (*contest_log.GetContestRankingRes, error) {
-	logs, total, err := c.sbDal.GetContestRanking(ctx, req.ContestId, req.Offset, req.Limit)
+	contest := model.ContestLog{}
+	_ = c.db.Where("id = ?", req.ContestId).First(&contest)
+	logs, total, err := c.sbDal.GetContestRanking(ctx, contest.ContestId, contest.Platform, req.Offset, req.Limit)
 	if err != nil {
 		return nil, errors.InternalServer("内部服务器错误", err.Error())
 	}
@@ -92,8 +94,6 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 			TotalCount: int32(v.TotalCount),
 		})
 	}
-	contest := model.ContestLog{}
-	_ = c.db.Where("id = ?", req.ContestId).First(&contest)
 
 	return &contest_log.GetContestRankingRes{
 		Code:    0,
