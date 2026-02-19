@@ -458,6 +458,7 @@ type RankingItem struct {
 	Rank          int64                  `protobuf:"varint,1,opt,name=rank,proto3" json:"rank,omitempty"`                               // 排名
 	UserId        int64                  `protobuf:"varint,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`             // 用户ID
 	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`                                // 用户姓名
+	Avatar        string                 `protobuf:"bytes,7,opt,name=avatar,proto3" json:"avatar,omitempty"`                            // 用户image
 	Score         int32                  `protobuf:"varint,4,opt,name=score,proto3" json:"score,omitempty"`                             // 得分
 	AcCount       int32                  `protobuf:"varint,5,opt,name=ac_count,json=acCount,proto3" json:"ac_count,omitempty"`          // 过题数
 	TotalCount    int32                  `protobuf:"varint,6,opt,name=total_count,json=totalCount,proto3" json:"total_count,omitempty"` // 总题数
@@ -512,6 +513,13 @@ func (x *RankingItem) GetUserId() int64 {
 func (x *RankingItem) GetName() string {
 	if x != nil {
 		return x.Name
+	}
+	return ""
+}
+
+func (x *RankingItem) GetAvatar() string {
+	if x != nil {
+		return x.Avatar
 	}
 	return ""
 }
@@ -656,11 +664,12 @@ const file_api_core_v1_contest_log_contest_proto_rawDesc = "" +
 	"contest_id\x18\x01 \x01(\tR\tcontestId\x12\x18\n" +
 	"\agroupId\x18\x04 \x01(\x03R\agroupId\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x03R\x05limit\x12\x16\n" +
-	"\x06offset\x18\x03 \x01(\x03R\x06offset\"\xa0\x01\n" +
+	"\x06offset\x18\x03 \x01(\x03R\x06offset\"\xb8\x01\n" +
 	"\vRankingItem\x12\x12\n" +
 	"\x04rank\x18\x01 \x01(\x03R\x04rank\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\x03R\x06userId\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x16\n" +
+	"\x06avatar\x18\a \x01(\tR\x06avatar\x12\x14\n" +
 	"\x05score\x18\x04 \x01(\x05R\x05score\x12\x19\n" +
 	"\bac_count\x18\x05 \x01(\x05R\aacCount\x12\x1f\n" +
 	"\vtotal_count\x18\x06 \x01(\x05R\n" +

@@ -72,7 +72,11 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 	}
 
 	items := make([]*contest_log.RankingItem, 0, len(logs))
-	nameMap := map[int64]string{}
+	type user struct {
+		Avatar string
+		Name   string
+	}
+	nameMap := map[int64]user{}
 	for _, v := range logs {
 		if _, ok := nameMap[v.UserID]; !ok {
 			conn, _ := c.userRPC()
@@ -84,12 +88,16 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 			if err != nil {
 				log.Error(err)
 			}
-			nameMap[v.UserID] = res.Name
+			nameMap[v.UserID] = user{
+				Avatar: res.Avatar,
+				Name:   res.Name,
+			}
 		}
 		items = append(items, &contest_log.RankingItem{
 			Rank:       int64(v.Rank),
 			UserId:     v.UserID,
-			Name:       nameMap[v.UserID],
+			Name:       nameMap[v.UserID].Name,
+			Avatar:     nameMap[v.UserID].Avatar,
 			AcCount:    int32(v.AcCount),
 			TotalCount: int32(v.TotalCount),
 		})

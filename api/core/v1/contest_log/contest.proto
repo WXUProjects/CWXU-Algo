@@ -87,6 +87,7 @@ message RankingItem {
   int64 rank = 1;               // 排名
   int64 user_id = 2;            // 用户ID
   string name = 3;          // 用户姓名
+  string avatar = 7;          // 用户image
   int32 score = 4;              // 得分
   int32 ac_count = 5;           // 过题数
   int32 total_count = 6;        // 总题数
