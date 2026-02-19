@@ -4,5 +4,5 @@ import "testing"
 
 func TestLogin(t *testing.T) {
 	gu := NewNowCoder{}
-	t.Log(gu.FetchContestLog(1, "729716694", true))
+	t.Log(gu.FetchSubmitLog(1, "832503900", true))
 }

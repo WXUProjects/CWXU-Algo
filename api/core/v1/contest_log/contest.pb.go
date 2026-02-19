@@ -27,13 +27,10 @@ type ContestLog struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                     // ID
 	Platform      string                 `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"`                          // 平台
-	UserId        int64                  `protobuf:"varint,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`               // 用户ID
 	ContestId     string                 `protobuf:"bytes,4,opt,name=contest_id,json=contestId,proto3" json:"contest_id,omitempty"`       // 比赛ID
 	ContestName   string                 `protobuf:"bytes,5,opt,name=contest_name,json=contestName,proto3" json:"contest_name,omitempty"` // 比赛名称
 	ContestUrl    string                 `protobuf:"bytes,6,opt,name=contest_url,json=contestUrl,proto3" json:"contest_url,omitempty"`    // 比赛链接
-	Rank          int32                  `protobuf:"varint,7,opt,name=rank,proto3" json:"rank,omitempty"`                                 // 排名
 	TotalCount    int32                  `protobuf:"varint,8,opt,name=total_count,json=totalCount,proto3" json:"total_count,omitempty"`   // 总题数
-	AcCount       int32                  `protobuf:"varint,9,opt,name=ac_count,json=acCount,proto3" json:"ac_count,omitempty"`            // 过题数
 	Time          int64                  `protobuf:"varint,10,opt,name=time,proto3" json:"time,omitempty"`                                // 比赛时间戳
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -83,13 +80,6 @@ func (x *ContestLog) GetPlatform() string {
 	return ""
 }
 
-func (x *ContestLog) GetUserId() int64 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
 func (x *ContestLog) GetContestId() string {
 	if x != nil {
 		return x.ContestId
@@ -111,23 +101,9 @@ func (x *ContestLog) GetContestUrl() string {
 	return ""
 }
 
-func (x *ContestLog) GetRank() int32 {
-	if x != nil {
-		return x.Rank
-	}
-	return 0
-}
-
 func (x *ContestLog) GetTotalCount() int32 {
 	if x != nil {
 		return x.TotalCount
-	}
-	return 0
-}
-
-func (x *ContestLog) GetAcCount() int32 {
-	if x != nil {
-		return x.AcCount
 	}
 	return 0
 }
@@ -566,6 +542,7 @@ type GetContestRankingRes struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`      // 状态码
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"` // 消息
+	Contest       *ContestLog            `protobuf:"bytes,5,opt,name=contest,proto3" json:"contest,omitempty"` // 竞赛历史数据
 	Data          []*RankingItem         `protobuf:"bytes,3,rep,name=data,proto3" json:"data,omitempty"`       // 排行榜数据
 	Total         int64                  `protobuf:"varint,4,opt,name=total,proto3" json:"total,omitempty"`    // 总参赛人数
 	unknownFields protoimpl.UnknownFields
@@ -616,6 +593,13 @@ func (x *GetContestRankingRes) GetMessage() string {
 	return ""
 }
 
+func (x *GetContestRankingRes) GetContest() *ContestLog {
+	if x != nil {
+		return x.Contest
+	}
+	return nil
+}
+
 func (x *GetContestRankingRes) GetData() []*RankingItem {
 	if x != nil {
 		return x.Data
@@ -634,21 +618,18 @@ var File_api_core_v1_contest_log_contest_proto protoreflect.FileDescriptor
 
 const file_api_core_v1_contest_log_contest_proto_rawDesc = "" +
 	"\n" +
-	"%api/core/v1/contest_log/contest.proto\x12\x17api.core.v1.contest_log\x1a\x1cgoogle/api/annotations.proto\"\x98\x02\n" +
+	"%api/core/v1/contest_log/contest.proto\x12\x17api.core.v1.contest_log\x1a\x1cgoogle/api/annotations.proto\"\xd0\x01\n" +
 	"\n" +
 	"ContestLog\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1a\n" +
-	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x17\n" +
-	"\auser_id\x18\x03 \x01(\x03R\x06userId\x12\x1d\n" +
+	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x1d\n" +
 	"\n" +
 	"contest_id\x18\x04 \x01(\tR\tcontestId\x12!\n" +
 	"\fcontest_name\x18\x05 \x01(\tR\vcontestName\x12\x1f\n" +
 	"\vcontest_url\x18\x06 \x01(\tR\n" +
-	"contestUrl\x12\x12\n" +
-	"\x04rank\x18\a \x01(\x05R\x04rank\x12\x1f\n" +
+	"contestUrl\x12\x1f\n" +
 	"\vtotal_count\x18\b \x01(\x05R\n" +
-	"totalCount\x12\x19\n" +
-	"\bac_count\x18\t \x01(\x05R\aacCount\x12\x12\n" +
+	"totalCount\x12\x12\n" +
 	"\x04time\x18\n" +
 	" \x01(\x03R\x04time\"v\n" +
 	"\x11GetContestListReq\x12\x17\n" +
@@ -683,10 +664,11 @@ const file_api_core_v1_contest_log_contest_proto_rawDesc = "" +
 	"\x05score\x18\x04 \x01(\x05R\x05score\x12\x19\n" +
 	"\bac_count\x18\x05 \x01(\x05R\aacCount\x12\x1f\n" +
 	"\vtotal_count\x18\x06 \x01(\x05R\n" +
-	"totalCount\"\x94\x01\n" +
+	"totalCount\"\xd3\x01\n" +
 	"\x14GetContestRankingRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x128\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12=\n" +
+	"\acontest\x18\x05 \x01(\v2#.api.core.v1.contest_log.ContestLogR\acontest\x128\n" +
 	"\x04data\x18\x03 \x03(\v2$.api.core.v1.contest_log.RankingItemR\x04data\x12\x14\n" +
 	"\x05total\x18\x04 \x01(\x03R\x05total2\xcb\x03\n" +
 	"\aContest\x12\x87\x01\n" +
@@ -721,18 +703,19 @@ var file_api_core_v1_contest_log_contest_proto_goTypes = []any{
 var file_api_core_v1_contest_log_contest_proto_depIdxs = []int32{
 	0, // 0: api.core.v1.contest_log.GetContestListRes.data:type_name -> api.core.v1.contest_log.ContestLog
 	0, // 1: api.core.v1.contest_log.GetUserContestHistoryRes.data:type_name -> api.core.v1.contest_log.ContestLog
-	6, // 2: api.core.v1.contest_log.GetContestRankingRes.data:type_name -> api.core.v1.contest_log.RankingItem
-	1, // 3: api.core.v1.contest_log.Contest.GetContestList:input_type -> api.core.v1.contest_log.GetContestListReq
-	3, // 4: api.core.v1.contest_log.Contest.GetUserContestHistory:input_type -> api.core.v1.contest_log.GetUserContestHistoryReq
-	5, // 5: api.core.v1.contest_log.Contest.GetContestRanking:input_type -> api.core.v1.contest_log.GetContestRankingReq
-	2, // 6: api.core.v1.contest_log.Contest.GetContestList:output_type -> api.core.v1.contest_log.GetContestListRes
-	4, // 7: api.core.v1.contest_log.Contest.GetUserContestHistory:output_type -> api.core.v1.contest_log.GetUserContestHistoryRes
-	7, // 8: api.core.v1.contest_log.Contest.GetContestRanking:output_type -> api.core.v1.contest_log.GetContestRankingRes
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	0, // 2: api.core.v1.contest_log.GetContestRankingRes.contest:type_name -> api.core.v1.contest_log.ContestLog
+	6, // 3: api.core.v1.contest_log.GetContestRankingRes.data:type_name -> api.core.v1.contest_log.RankingItem
+	1, // 4: api.core.v1.contest_log.Contest.GetContestList:input_type -> api.core.v1.contest_log.GetContestListReq
+	3, // 5: api.core.v1.contest_log.Contest.GetUserContestHistory:input_type -> api.core.v1.contest_log.GetUserContestHistoryReq
+	5, // 6: api.core.v1.contest_log.Contest.GetContestRanking:input_type -> api.core.v1.contest_log.GetContestRankingReq
+	2, // 7: api.core.v1.contest_log.Contest.GetContestList:output_type -> api.core.v1.contest_log.GetContestListRes
+	4, // 8: api.core.v1.contest_log.Contest.GetUserContestHistory:output_type -> api.core.v1.contest_log.GetUserContestHistoryRes
+	7, // 9: api.core.v1.contest_log.Contest.GetContestRanking:output_type -> api.core.v1.contest_log.GetContestRankingRes
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_api_core_v1_contest_log_contest_proto_init() }

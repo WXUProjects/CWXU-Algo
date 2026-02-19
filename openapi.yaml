@@ -125,21 +125,13 @@ components:
                     format: uint32
                 platform:
                     type: string
-                userId:
-                    type: string
                 contestId:
                     type: string
                 contestName:
                     type: string
                 contestUrl:
                     type: string
-                rank:
-                    type: integer
-                    format: int32
                 totalCount:
-                    type: integer
-                    format: int32
-                acCount:
                     type: integer
                     format: int32
                 time:
@@ -166,6 +158,8 @@ components:
                     type: string
                 message:
                     type: string
+                contest:
+                    $ref: '#/components/schemas/ContestLog'
                 data:
                     type: array
                     items:

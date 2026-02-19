@@ -176,7 +176,6 @@ func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []mo
 			break
 		}
 	}
-
 	return result
 }
 

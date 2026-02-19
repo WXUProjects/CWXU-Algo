@@ -57,7 +57,7 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 			Role: model.ChatMessageRoleUser,
 			Content: &model.ChatCompletionMessageContent{
 				StringValue: volcengine.String(fmt.Sprintf("我是 用户id为%d 的用户 分析我的%s（昨天）的提交信息，给出分析和合理建议，给出一份昨日日报。"+
-					"同时也获取最近7天的提交次数，去对比分析走势，同时分析一下昨天提交时间分布.时间是时间戳东八区UTC-8"+
+					"同时也获取最近7天的提交次数，去对比分析走势."+
 					"提示：你需要先获取昨日提交次数，根据昨日提交次数去填写limit参数，更方便哦."+
 					"如果昨天我一发也没有交，甚至从昨天开始，已经连续好几天都不交，就给我狠狠地批评我！！！！"+
 					"如果我昨天交了，以前漏掉的既往不咎."+
