@@ -93,7 +93,7 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 		})
 	}
 	contest := model.ContestLog{}
-	_ = c.db.Where("contest_id = ?", req.ContestId).First(&contest)
+	_ = c.db.Where("id = ?", req.ContestId).First(&contest)
 
 	return &contest_log.GetContestRankingRes{
 		Code:    0,

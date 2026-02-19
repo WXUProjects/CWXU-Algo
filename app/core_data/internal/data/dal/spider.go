@@ -270,7 +270,7 @@ func (s *SpiderDal) GetContestRanking(_ context.Context, contestId string, offse
 	var contestLogs []model.ContestLog
 	var total int64
 
-	q := s.db.Model(&model.ContestLog{}).Where("contest_id = ?", contestId)
+	q := s.db.Model(&model.ContestLog{}).Where("id = ?", contestId)
 
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
