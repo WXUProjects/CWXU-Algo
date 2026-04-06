@@ -22,6 +22,9 @@ type JwtPayload struct {
 func praseJwtToken(ctx context.Context) string {
 	header, _ := transport.FromServerContext(ctx)
 	auths := strings.SplitN(header.RequestHeader().Get("Authorization"), " ", 2)
+	if len(auths) < 2 {
+		return ""
+	}
 	return auths[1]
 }
 

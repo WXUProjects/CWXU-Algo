@@ -70,7 +70,7 @@ func (s *SpiderDal) GetByUserId(ctx context.Context, userId int64, lastTimeUnix 
 	}
 	// 防止缓存忽悠人
 	err = q.Limit(1).Find(&sbLog).Error
-	if err != nil || len(ids) < int(limit) || strconv.Itoa(int(sbLog[0].ID)) != ids[0] {
+	if err != nil || len(ids) < int(limit) || len(sbLog) == 0 || strconv.Itoa(int(sbLog[0].ID)) != ids[0] {
 		return dbFunc()
 	}
 	// 到 Redis 的 Global 查这些ID
@@ -90,7 +90,11 @@ func (s *SpiderDal) GetByUserId(ctx context.Context, userId int64, lastTimeUnix 
 	sbLog = make([]model.SubmitLog, 0)
 	for _, v := range rVal {
 		var l model.SubmitLog
-		_ = utils.GobDecoder([]byte(v.(string)), &l)
+		s, ok := v.(string)
+		if !ok {
+			return dbFunc()
+		}
+		_ = utils.GobDecoder([]byte(s), &l)
 
 		sbLog = append(sbLog, l)
 	}
@@ -181,7 +185,11 @@ func (s *SpiderDal) GetContestByUserId(ctx context.Context, userId int64, cursor
 	contestLogs = make([]model.ContestLog, 0)
 	for _, v := range rVal {
 		var l model.ContestLog
-		_ = utils.GobDecoder([]byte(v.(string)), &l)
+		s, ok := v.(string)
+		if !ok {
+			return dbFunc()
+		}
+		_ = utils.GobDecoder([]byte(s), &l)
 		contestLogs = append(contestLogs, l)
 	}
 	return contestLogs, nil

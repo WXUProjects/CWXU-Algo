@@ -42,8 +42,22 @@ func init() {
 }
 
 func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, cm *service.Consumer, cron *task.CronTask) *kratos.App {
-	go cm.Consume()
-	go cron.Do()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("Consumer goroutine panic: %v", r)
+			}
+		}()
+		cm.Consume()
+	}()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("Cron goroutine panic: %v", r)
+			}
+		}()
+		cron.Do()
+	}()
 	return kratos.New(
 		kratos.ID(fmt.Sprintf("%s-%s-%s", id, Name, Version)),
 		kratos.Name(Name),

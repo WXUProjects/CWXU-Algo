@@ -65,8 +65,12 @@ func (s SubmitLogService) LastSubmitTime(ctx context.Context, req *submit_log.La
 			missUser = append(missUser, req.UserIds[i])
 			continue
 		}
-		in, _ := strconv.ParseInt(v.(string), 10, 64)
-		timesMap[req.UserIds[i]] = in
+		in, ok := v.(string)
+		if !ok {
+			continue
+		}
+		val, _ := strconv.ParseInt(in, 10, 64)
+		timesMap[req.UserIds[i]] = val
 	}
 	// 回源
 	if len(missUser) > 0 {
@@ -84,7 +88,9 @@ func (s SubmitLogService) LastSubmitTime(ctx context.Context, req *submit_log.La
 			// 塞入缓存
 			pipe.Set(ctx, fmt.Sprintf("user:%d:lastSubmitTime", v.UserID), v.Time.Unix(), 1*time.Hour)
 		}
-		_, _ = pipe.Exec(ctx)
+		if _, err := pipe.Exec(ctx); err != nil {
+			log.Errorf("LastSubmitTime: pipeline exec failed: %v", err)
+		}
 	}
 	encoded, err := utils.GobEncoder(timesMap)
 	if err != nil {

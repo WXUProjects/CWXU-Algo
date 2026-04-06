@@ -95,9 +95,12 @@ func (t *CronTask) getUserIds() []int64 {
 }
 
 func (t *CronTask) Do() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	loc, _ := time.LoadLocation("Asia/Shanghai")
-	cr := cron.New(cron.WithLocation(loc))
-	_, _ = cr.AddFunc("1 * * * *", func() {
+	t.cron = cron.New(cron.WithLocation(loc))
+	_, _ = t.cron.AddFunc("1 * * * *", func() {
 		// 增量查询
 		// 获取所有platform表中存在的userid
 		userIds := t.getUserIds()
@@ -105,19 +108,19 @@ func (t *CronTask) Do() {
 			t.spider.Do(v, false)
 		}
 	})
-	_, _ = cr.AddFunc("30 7 * * *", func() {
+	_, _ = t.cron.AddFunc("30 7 * * *", func() {
 		// 早7点半进行一次总结
 		userIds := t.getUserIds()
 		for _, v := range userIds {
 			t.summary.Do(v, "PersonalLastDay")
 		}
 	})
-	_, _ = cr.AddFunc("1 6,9,12,15,18,21,0 * * *", func() {
+	_, _ = t.cron.AddFunc("1 6,9,12,15,18,21,0 * * *", func() {
 		// 每6 9 12 15 18 21 24 进行一次总结
 		userIds := t.getUserIds()
 		for _, v := range userIds {
 			t.summary.Do(v, "PersonalRecent")
 		}
 	})
-	cr.Start()
+	t.cron.Start()
 }

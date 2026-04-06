@@ -94,7 +94,9 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 	maxRetries := 12
 	for i := 0; i < maxRetries; i++ {
 		err := uc.fetchAndSave(userId, plat, needAll)
-		_ = uc.fetchAndSaveContest(userId, plat, needAll)
+		if contestErr := uc.fetchAndSaveContest(userId, plat, needAll); contestErr != nil {
+			log.Errorf("Spider: fetchAndSaveContest %s %s 失败: %v", plat.Platform, plat.Username, contestErr)
+		}
 		if err == nil {
 			log.Infof("Spider: %s %s 成功", plat.Platform, plat.Username)
 			uc.invalidateCache(userId)

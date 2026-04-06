@@ -63,7 +63,7 @@ func (p NewCodeforces) FetchSubmitLog(userId int64, username string, needAll boo
 	}
 
 	if cfResp.Status != "OK" {
-		return nil, fmt.Errorf("API status error:%s", err.Error())
+		return nil, fmt.Errorf("API status error: %s", cfResp.Status)
 	}
 
 	for _, sub := range cfResp.Result {

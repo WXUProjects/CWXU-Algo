@@ -58,6 +58,9 @@ func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) 
 		username, int(t.Unix()),
 	)
 	atc, err := fetchLog(url)
+	if err != nil {
+		return nil, err
+	}
 	// 构建res
 	for _, v := range atc {
 		tmp := model.SubmitLog{
@@ -78,6 +81,9 @@ func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) 
 			username, atc[len(atc)-1].EpochSecond,
 		)
 		atc, err = fetchLog(url)
+		if err != nil {
+			return nil, err
+		}
 		for _, v := range atc {
 			tmp := model.SubmitLog{
 				UserID:   userId,

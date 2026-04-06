@@ -2,9 +2,9 @@ package dal
 
 import (
 	"context"
-	"fmt"
 	"time"
 
+	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -42,29 +42,21 @@ func (d *StatisticDal) HeatmapQuery(ctx context.Context, startDate, endDate stri
 	}
 
 	var result []DailyCount
-	err := d.db.
-		Table(
-			fmt.Sprintf(`
-			(
-				SELECT generate_series(
-					'%s'::date,
-					'%s'::date,
-					INTERVAL '1 day'
-				) AS day
-			) days
-			`, startDate, endDate)).
-		Select(`
-			days.day,
-			COUNT(s.id) AS cnt
-			`).
-		Joins(`
-			LEFT JOIN (?) s
-			ON s.time >= days.day
-		   AND s.time <  days.day + INTERVAL '1 day'
-		`, sub).
-		Group("days.day").
-		Order("days.day").
-		Scan(&result).Error
+	err := d.db.Raw(`
+		SELECT days.day, COUNT(s.id) AS cnt
+		FROM (
+			SELECT generate_series(
+				?::date,
+				?::date,
+				INTERVAL '1 day'
+			) AS day
+		) days
+		LEFT JOIN (?) s
+		ON s.time >= days.day
+		AND s.time < days.day + INTERVAL '1 day'
+		GROUP BY days.day
+		ORDER BY days.day
+	`, startDate, endDate, sub).Scan(&result).Error
 
 	return result, err
 }
@@ -249,7 +241,9 @@ func (d *StatisticDal) countQuery(userId int64, start, end time.Time) int64 {
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
 	}
-	query.Count(&count)
+	if err := query.Count(&count).Error; err != nil {
+		log.Errorf("countQuery error: %v", err)
+	}
 	return count
 }
 
@@ -260,7 +254,9 @@ func (d *StatisticDal) countQueryTotal(userId int64) int64 {
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
 	}
-	query.Count(&count)
+	if err := query.Count(&count).Error; err != nil {
+		log.Errorf("countQueryTotal error: %v", err)
+	}
 	return count
 }
 
@@ -274,7 +270,9 @@ func (d *StatisticDal) countAcDistinctQuery(userId int64, start, end time.Time) 
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
 	}
-	query.Count(&count)
+	if err := query.Count(&count).Error; err != nil {
+		log.Errorf("countAcDistinctQuery error: %v", err)
+	}
 	return count
 }
 
@@ -287,7 +285,9 @@ func (d *StatisticDal) countAcDistinctTotal(userId int64) int64 {
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
 	}
-	query.Count(&count)
+	if err := query.Count(&count).Error; err != nil {
+		log.Errorf("countAcDistinctTotal error: %v", err)
+	}
 	return count
 }
 

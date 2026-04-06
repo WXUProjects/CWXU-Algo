@@ -13,12 +13,17 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
 )
 
-type NewLuoGu struct{}
+type NewLuoGu struct {
+	mu       sync.RWMutex
+	client   *http.Client
+	lastUsed time.Time
+}
 
 func ocrImage(client *http.Client, url string, img []byte) (string, error) {
 	var buf bytes.Buffer
@@ -170,9 +175,58 @@ func parseLuoGuHTML(html string) (*Injection, error) {
 	return &inj, nil
 }
 
-func (lg NewLuoGu) FetchSubmitLog(userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
-	baseUrl := fmt.Sprintf("https://www.luogu.com.cn/record/list?user=%s&page=", username)
+// isSessionValid checks if the cached client still has a valid session
+func (lg *NewLuoGu) isSessionValid() bool {
+	if lg.client == nil {
+		return false
+	}
+	resp, err := lg.client.Get("https://www.luogu.com.cn/api/user/search?user=sanenchen")
+	if err != nil {
+		return false
+	}
+	io.ReadAll(resp.Body)
+	resp.Body.Close()
+	// If redirected to login page, session is invalid
+	if resp.StatusCode == http.StatusMovedPermanently || resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect {
+		return false
+	}
+	return true
+}
+
+// getClient returns a cached client or creates a new one via login
+func (lg *NewLuoGu) getClient() (*http.Client, error) {
+	lg.mu.RLock()
+	cached := lg.client
+	expired := time.Since(lg.lastUsed) >= 30*time.Minute
+	lg.mu.RUnlock()
+
+	if cached != nil && !expired {
+		// Validate session without holding lock
+		if lg.isSessionValid() {
+			return cached, nil
+		}
+	}
+
+	lg.mu.Lock()
+	defer lg.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if lg.client != nil && time.Since(lg.lastUsed) < 30*time.Minute && lg.isSessionValid() {
+		return lg.client, nil
+	}
+
 	client, err := login("sanenchen", "sanenchen123")
+	if err != nil {
+		return nil, err
+	}
+	lg.client = client
+	lg.lastUsed = time.Now()
+	return client, nil
+}
+
+func (lg *NewLuoGu) FetchSubmitLog(userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+	baseUrl := fmt.Sprintf("https://www.luogu.com.cn/record/list?user=%s&page=", username)
+	client, err := lg.getClient()
 	if err != nil {
 		return nil, err
 	}
@@ -181,8 +235,8 @@ func (lg NewLuoGu) FetchSubmitLog(userId int64, username string, needAll bool) (
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	rb, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 	var subs []Record
 	inj, err := parseLuoGuHTML(string(rb))
 	if err != nil {
@@ -196,8 +250,8 @@ func (lg NewLuoGu) FetchSubmitLog(userId int64, username string, needAll bool) (
 			if err != nil {
 				return nil, err
 			}
-			defer resp.Body.Close()
 			rb, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
 			inj, err := parseLuoGuHTML(string(rb))
 			if err != nil {
 				return nil, err
@@ -231,10 +285,10 @@ func (lg NewLuoGu) FetchSubmitLog(userId int64, username string, needAll bool) (
 	return res, nil
 }
 
-func (lg NewLuoGu) Name() string {
+func (lg *NewLuoGu) Name() string {
 	return spider.LuoGu
 }
 
 func init() {
-	spider.Register(NewLuoGu{})
+	spider.Register(&NewLuoGu{})
 }

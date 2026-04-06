@@ -79,18 +79,26 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 	nameMap := map[int64]user{}
 	for _, v := range logs {
 		if _, ok := nameMap[v.UserID]; !ok {
-			conn, _ := c.userRPC()
-			sb := profile.NewProfileClient(conn)
-			res, err := sb.GetById(
-				context.Background(),
-				&profile.GetByIdReq{UserId: v.UserID},
-			)
+			conn, err := c.userRPC()
 			if err != nil {
-				log.Error(err)
-			}
-			nameMap[v.UserID] = user{
-				Avatar: res.Avatar,
-				Name:   res.Name,
+				log.Errorf("userRPC failed: %v", err)
+				nameMap[v.UserID] = user{}
+			} else {
+				defer conn.Close()
+				sb := profile.NewProfileClient(conn)
+				res, err := sb.GetById(
+					context.Background(),
+					&profile.GetByIdReq{UserId: v.UserID},
+				)
+				if err != nil {
+					log.Errorf("GetById failed: %v", err)
+					nameMap[v.UserID] = user{}
+				} else {
+					nameMap[v.UserID] = user{
+						Avatar: res.Avatar,
+						Name:   res.Name,
+					}
+				}
 			}
 		}
 		items = append(items, &contest_log.RankingItem{

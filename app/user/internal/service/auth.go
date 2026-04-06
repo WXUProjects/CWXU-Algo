@@ -38,7 +38,7 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 		return res, nil
 	}
 	// 签发 JWT Token
-	expire := time.Now().Add(8640 * time.Hour) // 过期时间12小时
+	expire := time.Now().Add(8640 * time.Hour) // 过期时间8640小时
 	jwtToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"userId":   u.ID,
 		"username": u.Username,
