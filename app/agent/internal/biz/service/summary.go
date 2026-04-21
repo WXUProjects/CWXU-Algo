@@ -39,6 +39,9 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 	// 获取昨天日期
 	lastDay := time.Now()
 	lastDay = lastDay.AddDate(0, 0, -1)
+	if userId == 23 {
+		return nil
+	}
 	startDate := lastDay.Format("20060102")
 	msg := []*model.ChatCompletionMessage{
 		{
