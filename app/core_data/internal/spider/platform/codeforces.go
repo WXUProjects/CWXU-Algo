@@ -91,7 +91,7 @@ func (p NewCodeforces) FetchSubmitLog(userId int64, username string, needAll boo
 func (p NewCodeforces) FetchContestLog(userId int64, username string, needAll bool) ([]model.ContestLog, error) {
 	var contestLogs []model.ContestLog
 
-	url := fmt.Sprintf("https://codeforces.com/contests/with/%s", username)
+	url := fmt.Sprintf("https://codeforces.com/contests/with/%s?type=all", username)
 
 	// ⚠️ 注意：标准 http.Get 极易触发 Cloudflare 5秒盾，导致返回 403/503
 	// 生产环境中建议替换为 http.Client 配合特定的 Headers 或代理
