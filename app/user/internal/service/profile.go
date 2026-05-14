@@ -192,6 +192,17 @@ func NewProfileService(profileDal *dal.ProfileDal, reg *discovery.Register, prof
 	}
 }
 
+// GetUserIdsByGroup 根据组ID获取用户ID列表
+func (p *ProfileService) GetUserIdsByGroup(ctx context.Context, req *profile.GetUserIdsByGroupReq) (*profile.GetUserIdsByGroupRes, error) {
+	ids, err := p.profileUseCase.GetUserIdsByGroup(ctx, req.GroupId)
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	return &profile.GetUserIdsByGroupRes{
+		UserIds: ids,
+	}, nil
+}
+
 // SetEmailEnabled 设置用户邮件发送开关
 func (p *ProfileService) SetEmailEnabled(ctx context.Context, req *profile.SetEmailEnabledReq) (*profile.SetEmailEnabledRes, error) {
 	if !auth.VerifySelfOrAbove(ctx, uint(req.UserId)) {

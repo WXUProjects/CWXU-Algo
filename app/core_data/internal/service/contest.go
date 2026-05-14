@@ -66,7 +66,44 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_log.GetContestRankingReq) (*contest_log.GetContestRankingRes, error) {
 	contest := model.ContestLog{}
 	_ = c.db.Where("id = ?", req.ContestId).First(&contest)
-	logs, total, err := c.sbDal.GetContestRanking(ctx, contest.ContestId, contest.Platform, req.Offset, req.Limit)
+
+	contestProto := &contest_log.ContestLog{
+		Id:          uint32(contest.ID),
+		Platform:    contest.Platform,
+		ContestId:   contest.ContestId,
+		ContestName: contest.ContestName,
+		ContestUrl:  contest.ContestUrl,
+		TotalCount:  int32(contest.TotalCount),
+		Time:        contest.Time.Unix(),
+	}
+
+	var userIds []int64
+	if req.GroupId != nil {
+		conn, err := c.userRPC()
+		if err != nil {
+			log.Errorf("userRPC failed: %v", err)
+			return nil, errors.InternalServer("内部服务器错误", "获取用户组信息失败")
+		}
+		defer conn.Close()
+		sb := profile.NewProfileClient(conn)
+		res, err := sb.GetUserIdsByGroup(ctx, &profile.GetUserIdsByGroupReq{GroupId: *req.GroupId})
+		if err != nil {
+			log.Errorf("GetUserIdsByGroup failed: %v", err)
+			return nil, errors.InternalServer("内部服务器错误", "获取用户组信息失败")
+		}
+		userIds = res.UserIds
+		if len(userIds) == 0 {
+			return &contest_log.GetContestRankingRes{
+				Code:    0,
+				Message: "OK",
+				Contest: contestProto,
+				Data:    make([]*contest_log.RankingItem, 0),
+				Total:   0,
+			}, nil
+		}
+	}
+
+	logs, total, err := c.sbDal.GetContestRanking(ctx, contest.ContestId, contest.Platform, req.Offset, req.Limit, userIds)
 	if err != nil {
 		return nil, errors.InternalServer("内部服务器错误", err.Error())
 	}
@@ -114,17 +151,9 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 	return &contest_log.GetContestRankingRes{
 		Code:    0,
 		Message: "OK",
-		Contest: &contest_log.ContestLog{
-			Id:          uint32(contest.ID),
-			Platform:    contest.Platform,
-			ContestId:   contest.ContestId,
-			ContestName: contest.ContestName,
-			ContestUrl:  contest.ContestUrl,
-			TotalCount:  int32(contest.TotalCount),
-			Time:        contest.Time.Unix(),
-		},
-		Data:  items,
-		Total: total,
+		Contest: contestProto,
+		Data:    items,
+		Total:   total,
 	}, nil
 }
 

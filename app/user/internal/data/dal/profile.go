@@ -103,6 +103,15 @@ func (d *ProfileDal) GetEmailEnabled(ctx context.Context, userId int64) (bool, e
 	return user.EmailEnabled, nil
 }
 
+// GetUserIdsByGroup 根据组ID获取用户ID列表
+func (d *ProfileDal) GetUserIdsByGroup(ctx context.Context, groupId int64) ([]int64, error) {
+	var ids []int64
+	err := d.db.Model(&model.User{}).
+		Where("group_id = ?", groupId).
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
 // SetRoleId 设置用户角色ID
 func (d *ProfileDal) SetRoleId(ctx context.Context, userId int64, roleId int) error {
 	cacheKey := fmt.Sprintf("user:%d:profile", userId)

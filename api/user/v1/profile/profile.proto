@@ -40,6 +40,11 @@ service Profile {
       body: "*",
     };
   }
+  rpc GetUserIdsByGroup (GetUserIdsByGroupReq) returns (GetUserIdsByGroupRes) {
+    option (google.api.http) = {
+      get: "/v1/user/profile/ids-by-group"
+    };
+  }
 }
 
 message GetByIdReq {
@@ -124,4 +129,12 @@ message SetEmailEnabledReq {
 message SetEmailEnabledRes {
   int64 code = 1;
   string message = 2;
+}
+
+message GetUserIdsByGroupReq {
+  int64 groupId = 1;
+}
+
+message GetUserIdsByGroupRes {
+  repeated int64 userIds = 1;
 }

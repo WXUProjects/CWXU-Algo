@@ -387,7 +387,7 @@ func (x *GetUserContestHistoryRes) GetData() []*ContestLog {
 type GetContestRankingReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ContestId     string                 `protobuf:"bytes,1,opt,name=contest_id,json=contestId,proto3" json:"contest_id,omitempty"` // 比赛ID
-	GroupId       int64                  `protobuf:"varint,4,opt,name=groupId,proto3" json:"groupId,omitempty"`                     // 组id
+	GroupId       *int64                 `protobuf:"varint,4,opt,name=groupId,proto3,oneof" json:"groupId,omitempty"`               // 组id（不传返回全部，传具体值按组过滤，包括0）
 	Limit         int64                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`                         // 限制数量
 	Offset        int64                  `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`                       // 偏移量
 	unknownFields protoimpl.UnknownFields
@@ -432,8 +432,8 @@ func (x *GetContestRankingReq) GetContestId() string {
 }
 
 func (x *GetContestRankingReq) GetGroupId() int64 {
-	if x != nil {
-		return x.GroupId
+	if x != nil && x.GroupId != nil {
+		return *x.GroupId
 	}
 	return 0
 }
@@ -658,13 +658,15 @@ const file_core_v1_contest_log_contest_proto_rawDesc = "" +
 	"\x18GetUserContestHistoryRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x127\n" +
-	"\x04data\x18\x03 \x03(\v2#.api.core.v1.contest_log.ContestLogR\x04data\"}\n" +
+	"\x04data\x18\x03 \x03(\v2#.api.core.v1.contest_log.ContestLogR\x04data\"\x8e\x01\n" +
 	"\x14GetContestRankingReq\x12\x1d\n" +
 	"\n" +
-	"contest_id\x18\x01 \x01(\tR\tcontestId\x12\x18\n" +
-	"\agroupId\x18\x04 \x01(\x03R\agroupId\x12\x14\n" +
+	"contest_id\x18\x01 \x01(\tR\tcontestId\x12\x1d\n" +
+	"\agroupId\x18\x04 \x01(\x03H\x00R\agroupId\x88\x01\x01\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x03R\x05limit\x12\x16\n" +
-	"\x06offset\x18\x03 \x01(\x03R\x06offset\"\xb8\x01\n" +
+	"\x06offset\x18\x03 \x01(\x03R\x06offsetB\n" +
+	"\n" +
+	"\b_groupId\"\xb8\x01\n" +
 	"\vRankingItem\x12\x12\n" +
 	"\x04rank\x18\x01 \x01(\x03R\x04rank\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\x03R\x06userId\x12\x12\n" +
@@ -732,6 +734,7 @@ func file_core_v1_contest_log_contest_proto_init() {
 	if File_core_v1_contest_log_contest_proto != nil {
 		return
 	}
+	file_core_v1_contest_log_contest_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

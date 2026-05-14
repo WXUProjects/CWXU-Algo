@@ -478,6 +478,23 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.GetByNameRes'
+    /v1/user/profile/ids-by-group:
+        get:
+            tags:
+                - Profile
+            operationId: Profile_GetUserIdsByGroup
+            parameters:
+                - name: groupId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.GetUserIdsByGroupRes'
     /v1/user/profile/list:
         get:
             tags:
@@ -1045,6 +1062,13 @@ components:
                 roleId:
                     type: integer
                     format: int32
+        api.user.v1.GetUserIdsByGroupRes:
+            type: object
+            properties:
+                userIds:
+                    type: array
+                    items:
+                        type: string
         api.user.v1.LoginReq:
             type: object
             properties:

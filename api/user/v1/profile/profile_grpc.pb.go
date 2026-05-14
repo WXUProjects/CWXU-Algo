@@ -19,12 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Profile_GetById_FullMethodName         = "/api.user.v1.Profile/GetById"
-	Profile_GetByName_FullMethodName       = "/api.user.v1.Profile/GetByName"
-	Profile_GetList_FullMethodName         = "/api.user.v1.Profile/GetList"
-	Profile_Update_FullMethodName          = "/api.user.v1.Profile/Update"
-	Profile_MoveGroup_FullMethodName       = "/api.user.v1.Profile/MoveGroup"
-	Profile_SetEmailEnabled_FullMethodName = "/api.user.v1.Profile/SetEmailEnabled"
+	Profile_GetById_FullMethodName           = "/api.user.v1.Profile/GetById"
+	Profile_GetByName_FullMethodName         = "/api.user.v1.Profile/GetByName"
+	Profile_GetList_FullMethodName           = "/api.user.v1.Profile/GetList"
+	Profile_Update_FullMethodName            = "/api.user.v1.Profile/Update"
+	Profile_MoveGroup_FullMethodName         = "/api.user.v1.Profile/MoveGroup"
+	Profile_SetEmailEnabled_FullMethodName   = "/api.user.v1.Profile/SetEmailEnabled"
+	Profile_GetUserIdsByGroup_FullMethodName = "/api.user.v1.Profile/GetUserIdsByGroup"
 )
 
 // ProfileClient is the client API for Profile service.
@@ -37,6 +38,7 @@ type ProfileClient interface {
 	Update(ctx context.Context, in *UpdateReq, opts ...grpc.CallOption) (*UpdateRes, error)
 	MoveGroup(ctx context.Context, in *MoveGroupReq, opts ...grpc.CallOption) (*MoveGroupRes, error)
 	SetEmailEnabled(ctx context.Context, in *SetEmailEnabledReq, opts ...grpc.CallOption) (*SetEmailEnabledRes, error)
+	GetUserIdsByGroup(ctx context.Context, in *GetUserIdsByGroupReq, opts ...grpc.CallOption) (*GetUserIdsByGroupRes, error)
 }
 
 type profileClient struct {
@@ -107,6 +109,16 @@ func (c *profileClient) SetEmailEnabled(ctx context.Context, in *SetEmailEnabled
 	return out, nil
 }
 
+func (c *profileClient) GetUserIdsByGroup(ctx context.Context, in *GetUserIdsByGroupReq, opts ...grpc.CallOption) (*GetUserIdsByGroupRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUserIdsByGroupRes)
+	err := c.cc.Invoke(ctx, Profile_GetUserIdsByGroup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProfileServer is the server API for Profile service.
 // All implementations must embed UnimplementedProfileServer
 // for forward compatibility.
@@ -117,6 +129,7 @@ type ProfileServer interface {
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 	MoveGroup(context.Context, *MoveGroupReq) (*MoveGroupRes, error)
 	SetEmailEnabled(context.Context, *SetEmailEnabledReq) (*SetEmailEnabledRes, error)
+	GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error)
 	mustEmbedUnimplementedProfileServer()
 }
 
@@ -144,6 +157,9 @@ func (UnimplementedProfileServer) MoveGroup(context.Context, *MoveGroupReq) (*Mo
 }
 func (UnimplementedProfileServer) SetEmailEnabled(context.Context, *SetEmailEnabledReq) (*SetEmailEnabledRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetEmailEnabled not implemented")
+}
+func (UnimplementedProfileServer) GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetUserIdsByGroup not implemented")
 }
 func (UnimplementedProfileServer) mustEmbedUnimplementedProfileServer() {}
 func (UnimplementedProfileServer) testEmbeddedByValue()                 {}
@@ -274,6 +290,24 @@ func _Profile_SetEmailEnabled_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Profile_GetUserIdsByGroup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUserIdsByGroupReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).GetUserIdsByGroup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_GetUserIdsByGroup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).GetUserIdsByGroup(ctx, req.(*GetUserIdsByGroupReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Profile_ServiceDesc is the grpc.ServiceDesc for Profile service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -304,6 +338,10 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetEmailEnabled",
 			Handler:    _Profile_SetEmailEnabled_Handler,
+		},
+		{
+			MethodName: "GetUserIdsByGroup",
+			Handler:    _Profile_GetUserIdsByGroup_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
