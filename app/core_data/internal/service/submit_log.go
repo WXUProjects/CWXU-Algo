@@ -25,13 +25,26 @@ type SubmitLogService struct {
 }
 
 func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetSubmitLogReq) (*submit_log.GetSubmitLogRes, error) {
-	d, err := s.sbDal.GetByUserId(ctx, req.UserId, req.Cursor, req.Limit)
+	// 多取一些，过滤掉力扣合成记录后仍尽量凑满 limit
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	fetchLimit := limit * 3
+	if fetchLimit < 30 {
+		fetchLimit = 30
+	}
+	d, err := s.sbDal.GetByUserId(ctx, req.UserId, req.Cursor, fetchLimit)
 	log.Info(d)
 	if err != nil {
 		return nil, errors.InternalServer("内部服务器错误", err.Error())
 	}
-	r := make([]*submit_log.SubmitLog, 0)
+	r := make([]*submit_log.SubmitLog, 0, limit)
 	for _, v := range d {
+		// 力扣只参与热力图/统计，不进活动流
+		if v.Platform == "LeetCode" {
+			continue
+		}
 		r = append(r, &submit_log.SubmitLog{
 			Id:       uint32(v.ID),
 			UserId:   v.UserID,
@@ -43,6 +56,9 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 			Status:   v.Status,
 			Time:     v.Time.Unix(),
 		})
+		if int64(len(r)) >= limit {
+			break
+		}
 	}
 	return &submit_log.GetSubmitLogRes{
 		Data: r,

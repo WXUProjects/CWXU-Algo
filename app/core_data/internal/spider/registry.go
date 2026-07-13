@@ -10,6 +10,7 @@ var (
 	LuoGu      = "LuoGu"
 	CodeForces = "CodeForces"
 	QOJ        = "QOJ"
+	LeetCode   = "LeetCode"
 )
 var registry = map[string]Provider{}
 

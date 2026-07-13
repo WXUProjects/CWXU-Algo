@@ -25,6 +25,9 @@ func TestSpiderDal(t *testing.T) {
 	}
 	d, _, _ := data.NewData(&c)
 	dal := NewSpiderDal(d)
-	r := dal.GetByUserId(context.Background(), 1, -1, 10)
+	r, err := dal.GetByUserId(context.Background(), 1, -1, 10)
+	if err != nil {
+		t.Log(err)
+	}
 	t.Log(r)
 }

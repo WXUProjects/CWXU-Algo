@@ -36,6 +36,9 @@ func (d *StatisticDal) HeatmapQuery(ctx context.Context, startDate, endDate stri
 		Select("id, time")
 	if isAc {
 		sub = sub.Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
+	} else {
+		// 力扣合成 AC 只用于做题数，不进入提交热力图（真实提交由 lc-cal 记录承担）
+		sub = sub.Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
 	}
 	if userId != 0 {
 		sub = sub.Where("user_id = ?", userId)
@@ -181,6 +184,9 @@ func (d *StatisticDal) GetRank(ctx context.Context, userId int64, timeType, scor
 	if scoreType == "ac" {
 		// AC排行榜，按user_id, problem去重
 		baseQuery = baseQuery.Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
+	} else {
+		// 提交榜：力扣合成 AC 不计入
+		baseQuery = baseQuery.Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
 	}
 
 	// 获取总数
@@ -237,7 +243,10 @@ func (d *StatisticDal) GetRank(ctx context.Context, userId int64, timeType, scor
 // countQuery 统计指定时间范围内的记录数
 func (d *StatisticDal) countQuery(userId int64, start, end time.Time) int64 {
 	var count int64
-	query := d.db.Table("submit_logs").Where("time >= ? AND time < ?", start, end)
+	query := d.db.Table("submit_logs").
+		Where("time >= ? AND time < ?", start, end).
+		// 力扣合成 AC 不计入提交次数
+		Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
 	}
@@ -250,7 +259,8 @@ func (d *StatisticDal) countQuery(userId int64, start, end time.Time) int64 {
 // countQueryTotal 统计所有记录数
 func (d *StatisticDal) countQueryTotal(userId int64) int64 {
 	var count int64
-	query := d.db.Table("submit_logs")
+	query := d.db.Table("submit_logs").
+		Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
 	}
