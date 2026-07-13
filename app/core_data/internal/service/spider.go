@@ -58,6 +58,37 @@ func (s SpiderService) Update(ctx context.Context, req *spider.UpdateReq) (*spid
 	}, nil
 }
 
+// UpdateAll 管理员一键触发所有已绑定 OJ 用户的全量更新
+func (s SpiderService) UpdateAll(ctx context.Context, _ *spider.UpdateAllReq) (*spider.UpdateAllRes, error) {
+	if !auth.VerifyAdmin(ctx) {
+		return nil, SetForbidden
+	}
+	// 全站按钮限流：同一管理员 5 分钟内只能点一次
+	adminId := int64(auth.GetCurrentUserId(ctx))
+	limiter := s.getLimiter(-adminId, 5*time.Minute) // 负 id 与用户更新限流隔离
+	if !limiter.Allow() {
+		return nil, RateLimitError
+	}
+
+	var userIds []int64
+	if err := s.db.Model(&model.Platform{}).
+		Distinct("user_id").
+		Pluck("user_id", &userIds).Error; err != nil {
+		log.Errorf("UpdateAll: query platform users failed: %v", err)
+		return nil, InternalError
+	}
+
+	for _, uid := range userIds {
+		s.spider.Do(uid, true)
+	}
+
+	return &spider.UpdateAllRes{
+		Code:    0,
+		Message: fmt.Sprintf("已为 %d 名用户触发全量更新，后台异步抓取中", len(userIds)),
+		Count:   int64(len(userIds)),
+	}, nil
+}
+
 func (s SpiderService) GetSpider(ctx context.Context, req *spider.GetSpiderReq) (*spider.GetSpiderRep, error) {
 	var plats []model.Platform
 	err := s.db.Where("user_id = ?", req.UserId).Find(&plats).Error

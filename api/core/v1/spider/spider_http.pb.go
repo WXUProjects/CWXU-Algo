@@ -21,16 +21,20 @@ const _ = http.SupportPackageIsVersion1
 
 const OperationSpiderSetSpider = "/api.core.v1.spider.Spider/SetSpider"
 const OperationSpiderUpdate = "/api.core.v1.spider.Spider/Update"
+const OperationSpiderUpdateAll = "/api.core.v1.spider.Spider/UpdateAll"
 
 type SpiderHTTPServer interface {
 	SetSpider(context.Context, *SetSpiderReq) (*SetSpiderRep, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
+	// UpdateAll 管理员一键全量更新所有已绑定 OJ 的用户
+	UpdateAll(context.Context, *UpdateAllReq) (*UpdateAllRes, error)
 }
 
 func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
 	r := s.Route("/")
 	r.POST("/v1/core/spider/set", _Spider_SetSpider0_HTTP_Handler(srv))
 	r.POST("/v1/core/spider/update", _Spider_Update0_HTTP_Handler(srv))
+	r.POST("/v1/core/spider/update-all", _Spider_UpdateAll0_HTTP_Handler(srv))
 }
 
 func _Spider_SetSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
@@ -77,9 +81,33 @@ func _Spider_Update0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) e
 	}
 }
 
+func _Spider_UpdateAll0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in UpdateAllReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderUpdateAll)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.UpdateAll(ctx, req.(*UpdateAllReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*UpdateAllRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SpiderHTTPClient interface {
 	SetSpider(ctx context.Context, req *SetSpiderReq, opts ...http.CallOption) (rsp *SetSpiderRep, err error)
 	Update(ctx context.Context, req *UpdateReq, opts ...http.CallOption) (rsp *UpdateRes, err error)
+	// UpdateAll 管理员一键全量更新所有已绑定 OJ 的用户
+	UpdateAll(ctx context.Context, req *UpdateAllReq, opts ...http.CallOption) (rsp *UpdateAllRes, err error)
 }
 
 type SpiderHTTPClientImpl struct {
@@ -108,6 +136,20 @@ func (c *SpiderHTTPClientImpl) Update(ctx context.Context, in *UpdateReq, opts .
 	pattern := "/v1/core/spider/update"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationSpiderUpdate))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdateAll 管理员一键全量更新所有已绑定 OJ 的用户
+func (c *SpiderHTTPClientImpl) UpdateAll(ctx context.Context, in *UpdateAllReq, opts ...http.CallOption) (*UpdateAllRes, error) {
+	var out UpdateAllRes
+	pattern := "/v1/core/spider/update-all"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationSpiderUpdateAll))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

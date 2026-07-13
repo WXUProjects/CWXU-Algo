@@ -21,6 +21,13 @@ service Spider {
       body: "*"
     };
   }
+  // 管理员一键全量更新所有已绑定 OJ 的用户
+  rpc UpdateAll (UpdateAllReq) returns (UpdateAllRes) {
+    option (google.api.http) = {
+      post: "/v1/core/spider/update-all",
+      body: "*"
+    };
+  }
 }
 
 message SetSpiderReq {
@@ -53,5 +60,13 @@ message UpdateReq {
 message UpdateRes {
   int64 code = 1;
   string message = 2;
+}
+
+message UpdateAllReq {}
+
+message UpdateAllRes {
+  int64 code = 1;
+  string message = 2;
+  int64 count = 3; // 触发更新的用户数
 }
 
