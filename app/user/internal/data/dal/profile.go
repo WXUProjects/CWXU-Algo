@@ -136,3 +136,18 @@ func (d *ProfileDal) SetRoleId(ctx context.Context, userId int64, roleId int) er
 		return d.db.Model(&model.User{}).Where("id = ?", userId).Update("role_id", roleId).Error
 	})
 }
+
+// Delete 软删除用户，并清理 profile 缓存
+func (d *ProfileDal) Delete(ctx context.Context, userId int64) error {
+	cacheKey := fmt.Sprintf("user:%d:profile", userId)
+	return data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
+		result := d.db.WithContext(ctx).Delete(&model.User{}, userId)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("用户不存在")
+		}
+		return nil
+	})
+}

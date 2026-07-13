@@ -220,6 +220,35 @@ func (p *ProfileService) GetByIds(ctx context.Context, req *profile.GetByIdsReq)
 	return &profile.GetByIdsRes{Profiles: list}, nil
 }
 
+// Delete 管理员删除用户（软删除）
+func (p *ProfileService) Delete(ctx context.Context, req *profile.DeleteReq) (*profile.DeleteRes, error) {
+	if !auth.VerifyAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "仅管理员可删除用户")
+	}
+	if req.UserId <= 0 {
+		return nil, errors.BadRequest("参数错误", "用户ID无效")
+	}
+	callerId := int64(auth.GetCurrentUserId(ctx))
+	if callerId == req.UserId {
+		return nil, errors.Forbidden("权限不足", "不能删除自己")
+	}
+	target, err := p.profileDal.GetById(ctx, req.UserId)
+	if err != nil {
+		return nil, errors.BadRequest("参数错误", "用户不存在")
+	}
+	// 禁止删除管理员账号
+	if target.RoleID == permission.RoleAdmin {
+		return nil, errors.Forbidden("权限不足", "不能删除管理员账号")
+	}
+	if err := p.profileDal.Delete(ctx, req.UserId); err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	return &profile.DeleteRes{
+		Code:    0,
+		Message: "删除成功",
+	}, nil
+}
+
 // SetEmailEnabled 设置用户邮件发送开关
 func (p *ProfileService) SetEmailEnabled(ctx context.Context, req *profile.SetEmailEnabledReq) (*profile.SetEmailEnabledRes, error) {
 	if !auth.VerifySelfOrAbove(ctx, uint(req.UserId)) {

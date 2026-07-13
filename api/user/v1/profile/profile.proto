@@ -51,6 +51,13 @@ service Profile {
       body: "*",
     };
   }
+  // 管理员删除用户（软删除）
+  rpc Delete (DeleteReq) returns (DeleteRes) {
+    option (google.api.http) = {
+      post: "/v1/user/profile/delete",
+      body: "*",
+    };
+  }
 }
 
 message GetByIdReq {
@@ -156,4 +163,13 @@ message GetByIdsRes {
     string avatar = 3;
   }
   repeated UserProfile profiles = 1;
+}
+
+message DeleteReq {
+  int64 userId = 1;
+}
+
+message DeleteRes {
+  int64 code = 1;
+  string message = 2;
 }
