@@ -9,18 +9,19 @@ import (
 )
 
 type SpiderTask struct {
-	rabbitMQ *amqp.Channel
+	mq *event.RabbitMQ
 }
 
-func NewSpiderTask(rabbitMQ *event.RabbitMQ) *SpiderTask {
-	return &SpiderTask{
-		rabbitMQ: rabbitMQ.Ch,
-	}
+func NewSpiderTask(mq *event.RabbitMQ) *SpiderTask {
+	return &SpiderTask{mq: mq}
 }
 
 func (t *SpiderTask) Do(userId int64, needAll bool) {
-	q, err := t.rabbitMQ.QueueDeclare("spider", true, false, false, false, nil)
-	if err != nil {
+	if t.mq == nil {
+		log.Errorf("SpiderTask: mq not ready")
+		return
+	}
+	if _, err := t.mq.QueueDeclare("spider", true, false, false, false, nil); err != nil {
 		log.Errorf("SpiderTask: QueueDeclare failed: %v", err)
 		return
 	}
@@ -30,9 +31,10 @@ func (t *SpiderTask) Do(userId int64, needAll bool) {
 		log.Errorf("SpiderTask: json.Marshal failed: %v", err)
 		return
 	}
-	if err := t.rabbitMQ.Publish("", q.Name, false, false, amqp.Publishing{
-		ContentType: "application/json",
-		Body:        body,
+	if err := t.mq.Publish("", "spider", false, false, amqp.Publishing{
+		ContentType:  "application/json",
+		Body:         body,
+		DeliveryMode: amqp.Persistent,
 	}); err != nil {
 		log.Errorf("SpiderTask: Publish failed: %v", err)
 	}

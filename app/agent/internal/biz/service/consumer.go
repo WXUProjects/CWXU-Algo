@@ -3,37 +3,56 @@ package service
 import (
 	"cwxu-algo/app/common/event"
 	"encoding/json"
+	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/streadway/amqp"
 )
 
 type Consumer struct {
-	ch      *amqp.Channel
+	mq      *event.RabbitMQ
 	summary *SummaryUseCase
 }
 
-func NewConsumer(ch *event.RabbitMQ, summary *SummaryUseCase) *Consumer {
+func NewConsumer(mq *event.RabbitMQ, summary *SummaryUseCase) *Consumer {
 	return &Consumer{
-		ch:      ch.Ch,
+		mq:      mq,
 		summary: summary,
 	}
 }
 
 func (c *Consumer) Consume() {
-	q, err := c.ch.QueueDeclare("summary", true, false, false, false, nil)
-	if err != nil {
-		log.Error("打开消息队列 summary 失败", err.Error())
-		return
+	for {
+		if err := c.consumeOnce(); err != nil {
+			log.Errorf("summary consumer 退出: %v，5s 后重连", err)
+		} else {
+			log.Warnf("summary consumer 通道关闭，5s 后重连")
+		}
+		time.Sleep(5 * time.Second)
 	}
-	_ = c.ch.Qos(2, 0, false)
-	msgs, err := c.ch.Consume(q.Name, "", false, false, false, false, nil)
+}
+
+func (c *Consumer) consumeOnce() error {
+	ch, err := c.mq.OpenChannel()
 	if err != nil {
-		log.Error("打开消息队列 消息 失败")
-		return
+		return err
 	}
+	defer ch.Close()
+
+	q, err := ch.QueueDeclare("summary", true, false, false, false, nil)
+	if err != nil {
+		return err
+	}
+	if err := ch.Qos(2, 0, false); err != nil {
+		return err
+	}
+	msgs, err := ch.Consume(q.Name, "agent-summary", false, false, false, false, nil)
+	if err != nil {
+		return err
+	}
+	log.Infof("summary consumer 已就绪")
+
 	for d := range msgs {
-		// 必须捕获 d 副本，避免并发下 delivery 变量复用导致 Ack/Nack 错乱
 		go func(d amqp.Delivery) {
 			msg := event.SummaryEvent{}
 			if err := json.Unmarshal(d.Body, &msg); err != nil {
@@ -54,11 +73,11 @@ func (c *Consumer) Consume() {
 			}
 			if runErr != nil {
 				log.Errorf("RabbitMQ(Summary) user=%d type=%s: %v", msg.UserId, msg.Type, runErr)
-				// 短暂失败允许重入队
 				_ = d.Nack(false, true)
 				return
 			}
 			_ = d.Ack(false)
 		}(d)
 	}
+	return nil
 }

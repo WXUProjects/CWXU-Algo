@@ -139,7 +139,7 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog) (*model.Problem, bool,
 }
 
 func (uc *ProblemUseCase) enqueueFetch(id uint, platform, externalID, url string) error {
-	if uc.mq == nil || uc.mq.Ch == nil {
+	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
 	}
 	body, _ := json.Marshal(event.ProblemFetchEvent{
@@ -148,10 +148,10 @@ func (uc *ProblemUseCase) enqueueFetch(id uint, platform, externalID, url string
 		ExternalID: externalID,
 		URL:        url,
 	})
-	if _, err := uc.mq.Ch.QueueDeclare("problem_fetch", true, false, false, false, nil); err != nil {
+	if _, err := uc.mq.QueueDeclare("problem_fetch", true, false, false, false, nil); err != nil {
 		return err
 	}
-	return uc.mq.Ch.Publish("", "problem_fetch", false, false, amqp.Publishing{
+	return uc.mq.Publish("", "problem_fetch", false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		Body:         body,
 		DeliveryMode: amqp.Persistent,
@@ -159,14 +159,14 @@ func (uc *ProblemUseCase) enqueueFetch(id uint, platform, externalID, url string
 }
 
 func (uc *ProblemUseCase) enqueueAnalyze(id uint) error {
-	if uc.mq == nil || uc.mq.Ch == nil {
+	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
 	}
 	body, _ := json.Marshal(event.ProblemAnalyzeEvent{ProblemID: id})
-	if _, err := uc.mq.Ch.QueueDeclare("problem_analyze", true, false, false, false, nil); err != nil {
+	if _, err := uc.mq.QueueDeclare("problem_analyze", true, false, false, false, nil); err != nil {
 		return err
 	}
-	return uc.mq.Ch.Publish("", "problem_analyze", false, false, amqp.Publishing{
+	return uc.mq.Publish("", "problem_analyze", false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		Body:         body,
 		DeliveryMode: amqp.Persistent,
@@ -663,7 +663,6 @@ func (uc *ProblemUseCase) queueStats() []struct {
 		Consumers   int64
 		Concurrency int64
 	}, 0, 2)
-	// amqp Channel 非并发安全，勿与 consumer 共用；仅返回配置并发，积压用 DB 近似
 	for _, q := range []struct {
 		name string
 		conc int64
@@ -672,31 +671,42 @@ func (uc *ProblemUseCase) queueStats() []struct {
 		{"problem_fetch", problemFetchConcurrency, model.ProblemStatusPending},
 		{"problem_analyze", problemAnalyzeConcurrency, model.ProblemStatusTagging},
 	} {
-		var msgs int64
-		_ = uc.data.DB.Model(&model.Problem{}).Where("status = ?", q.stat).Count(&msgs).Error
-		// FETCHING 也算爬取侧积压
-		if q.name == "problem_fetch" {
-			var fetching int64
-			_ = uc.data.DB.Model(&model.Problem{}).Where("status = ?", model.ProblemStatusFetching).Count(&fetching).Error
-			msgs += fetching
+		var msgs, consumers int64
+		inspected := false
+		// 优先读真实 MQ 积压/消费者
+		if uc.mq != nil {
+			if info, err := uc.mq.QueueInspect(q.name); err == nil {
+				msgs = int64(info.Messages)
+				consumers = int64(info.Consumers)
+				inspected = true
+			}
+		}
+		// inspect 失败时用 DB 近似积压
+		if !inspected {
+			_ = uc.data.DB.Model(&model.Problem{}).Where("status = ?", q.stat).Count(&msgs).Error
+			if q.name == "problem_fetch" {
+				var fetching int64
+				_ = uc.data.DB.Model(&model.Problem{}).Where("status = ?", model.ProblemStatusFetching).Count(&fetching).Error
+				msgs += fetching
+			}
 		}
 		out = append(out, struct {
 			Name        string
 			Messages    int64
 			Consumers   int64
 			Concurrency int64
-		}{q.name, msgs, 1, q.conc})
+		}{q.name, msgs, consumers, q.conc})
 	}
 	return out
 }
 
 // purgeAnalyzeQueue 仅清空 AI 分析队列，不动题面爬取队列
 func (uc *ProblemUseCase) purgeAnalyzeQueue() (purgedAnalyze int, err error) {
-	if uc.mq == nil || uc.mq.Ch == nil {
+	if uc.mq == nil {
 		return 0, fmt.Errorf("mq not ready")
 	}
-	_, _ = uc.mq.Ch.QueueDeclare("problem_analyze", true, false, false, false, nil)
-	return uc.mq.Ch.QueuePurge("problem_analyze", false)
+	_, _ = uc.mq.QueueDeclare("problem_analyze", true, false, false, false, nil)
+	return uc.mq.QueuePurge("problem_analyze", false)
 }
 
 // EmergencyStop 仅暂停 AI 分析并清空 problem_analyze 队列；题面不删、爬取不停
