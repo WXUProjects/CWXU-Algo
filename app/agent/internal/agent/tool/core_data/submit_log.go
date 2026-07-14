@@ -55,14 +55,15 @@ func (c *SubmitLog) Description() *model.Tool {
 						"description": "结束时间，例如 20220101",
 					},
 					"limit": map[string]interface{}{
-						"type":        "int",
+						"type":        "integer",
 						"description": "从endDate开始，向前退limit条",
 					},
 					"userId": map[string]interface{}{
-						"type":        "int",
+						"type":        "integer",
 						"description": "用户id",
 					},
 				},
+				"required": []string{"endDate", "limit", "userId"},
 			},
 		},
 	}
@@ -85,6 +86,7 @@ func (c *SubmitLog) Handle(endDate string, userId int, limit int) (string, error
 	if err != nil {
 		return "", err
 	}
+	defer conn.Close()
 	sb := submit_log.NewSubmitClient(conn)
 	t, err := time.Parse("20060102", endDate)
 	if err != nil {

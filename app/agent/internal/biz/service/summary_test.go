@@ -1,117 +1,89 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
-
-	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 )
 
-// MockChat mocks the agent.Chat for testing
-type MockChat struct {
-	Messages []*model.ChatCompletionMessage
-	Tools    []interface{}
-	Result   string
-	Err      error
-}
-
-func (m *MockChat) Chat(messages []*model.ChatCompletionMessage, tools ...interface{}) (string, error) {
-	m.Messages = messages
-	m.Tools = tools
-	return m.Result, m.Err
-}
-
-// TestWeeklyReportForCoach_ChecksMondayLogic tests that WeeklyReportForCoach is called on Monday
-func TestPersonalLastDay_CoachMondayRedirect(t *testing.T) {
-	// This test verifies the Monday redirect logic for coach (userId=23)
-	// Since time.Now() is used, we can only verify the code path exists
-
-	uc := &SummaryUseCase{
-		chat:     nil, // Will be replaced with mock
-		mailConf: nil,
-		reg:      nil,
-		redis:    nil,
+func TestFillMissingDays(t *testing.T) {
+	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.Local)
+	end := time.Date(2026, 7, 3, 0, 0, 0, 0, time.Local)
+	days := fillMissingDays(start, end, nil)
+	if len(days) != 3 {
+		t.Fatalf("expected 3 days, got %d", len(days))
 	}
-
-	// Test that non-coach users don't trigger the Monday check
-	userId := int64(999)
-	// This should NOT redirect to WeeklyReportForCoach since userId != 23
-	if userId == 23 {
-		t.Error("non-coach user should not be treated as coach")
-	}
-
-	// Test that coach on non-Monday returns nil
-	coachUserId := int64(23)
-	today := time.Now().Weekday()
-	if today != time.Monday && coachUserId == 23 {
-		// Should return nil (skip)
-		if uc.PersonalLastDay(coachUserId) != nil {
-			t.Error("coach on non-Monday should return nil")
-		}
+	if days[0].Count != 0 || days[1].Date != "2026-07-02" {
+		t.Fatalf("unexpected days: %+v", days)
 	}
 }
 
-func TestIsMonday(t *testing.T) {
-	// Test helper to check if a date is Monday
-	testDate := time.Date(2026, 4, 20, 0, 0, 0, 0, time.Local) // 2026-04-20 is Monday
-	if testDate.Weekday() != time.Monday {
-		t.Error("2026-04-20 should be Monday")
+func TestConsecutiveZeroFromEnd(t *testing.T) {
+	days := []DayCount{
+		{Date: "2026-07-01", Count: 3},
+		{Date: "2026-07-02", Count: 0},
+		{Date: "2026-07-03", Count: 0},
+	}
+	if n := consecutiveZeroFromEnd(days); n != 2 {
+		t.Fatalf("expected 2, got %d", n)
+	}
+	days[2].Count = 1
+	if n := consecutiveZeroFromEnd(days); n != 0 {
+		t.Fatalf("expected 0, got %d", n)
 	}
 }
 
-func TestGetDateRange(t *testing.T) {
-	// Test the date range calculation for weekly report
-	now := time.Now()
-	lastWeekStart := now.AddDate(0, 0, -7).Format("20060102")
-	lastWeekEnd := now.AddDate(0, 0, -1).Format("20060102")
-
-	if len(lastWeekStart) != 8 || len(lastWeekEnd) != 8 {
-		t.Errorf("date format incorrect: start=%s, end=%s", lastWeekStart, lastWeekEnd)
+func TestSumDayCounts(t *testing.T) {
+	if sumDayCounts([]DayCount{{Count: 1}, {Count: 2}, {Count: 3}}) != 6 {
+		t.Fatal("sum mismatch")
 	}
 }
 
-func TestWeeklyReportForCoach_PromptContent(t *testing.T) {
-	// Test that WeeklyReportForCoach builds correct prompt
-	coachUserId := int64(23)
-	now := time.Now()
-	lastWeekStart := now.AddDate(0, 0, -7).Format("20060102")
-	lastWeekEnd := now.AddDate(0, 0, -1).Format("20060102")
-
-	// Verify the date range is correct (7 days ago to yesterday)
-	startDate, _ := time.Parse("20060102", lastWeekStart)
-	endDate, _ := time.Parse("20060102", lastWeekEnd)
-
-	// Check that the date range covers 7 days (difference is 6 days, but includes 7 days of data)
-	daysDiff := endDate.Sub(startDate).Hours() / 24
-	if daysDiff != 6 {
-		t.Errorf("date range should cover 7 days (6 days difference), got %v days difference", daysDiff)
+func TestStripCodeFence(t *testing.T) {
+	in := "```json\n{\"msg\":[\"a\"],\"updateTime\":1}\n```"
+	out := stripCodeFence(in)
+	var p recentSummaryPayload
+	if err := json.Unmarshal([]byte(out), &p); err != nil {
+		t.Fatalf("parse failed: %v raw=%s", err, out)
 	}
-
-	_ = coachUserId // suppress unused warning
+	if len(p.Msg) != 1 || p.UpdateTime != 1 {
+		t.Fatalf("unexpected payload %+v", p)
+	}
 }
 
-func TestCoachSkipLogic(t *testing.T) {
-	// Test the skip logic for coach userId=23
+func TestCoachRoleSkipLogic(t *testing.T) {
 	tests := []struct {
-		userId       int64
-		isMonday     bool
-		expectNil    bool
-		description  string
+		roleId    int
+		isMonday  bool
+		expectNil bool
+		desc      string
 	}{
-		{23, false, true, "coach on non-Monday should skip (return nil)"},
-		{23, true, false, "coach on Monday should NOT skip"},
-		{1, false, false, "non-coach should not skip"},
-		{99, true, false, "another non-coach should not skip"},
+		{2, false, true, "coach non-Monday skip"},
+		{2, true, false, "coach Monday run weekly"},
+		{0, false, false, "member daily"},
+		{1, true, false, "admin monday both"},
 	}
-
 	for _, tt := range tests {
-		t.Run(tt.description, func(t *testing.T) {
-			// Simulate the logic in PersonalLastDay
-			shouldSkip := tt.userId == 23 && !tt.isMonday
+		t.Run(tt.desc, func(t *testing.T) {
+			shouldSkip := tt.roleId == 2 && !tt.isMonday
 			if shouldSkip != tt.expectNil {
-				t.Errorf("userId=%d, isMonday=%v: expected skip=%v, got skip=%v",
-					tt.userId, tt.isMonday, tt.expectNil, shouldSkip)
+				t.Errorf("role=%d monday=%v skip want %v got %v", tt.roleId, tt.isMonday, tt.expectNil, shouldSkip)
 			}
 		})
+	}
+}
+
+func TestWeeklyDateRange(t *testing.T) {
+	now := time.Date(2026, 7, 13, 10, 0, 0, 0, time.Local) // Monday
+	weekEnd := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -1)
+	weekStart := weekEnd.AddDate(0, 0, -6)
+	if weekEnd.Format(dateLayout) != "2026-07-12" || weekStart.Format(dateLayout) != "2026-07-06" {
+		t.Fatalf("range %s ~ %s", weekStart.Format(dateLayout), weekEnd.Format(dateLayout))
+	}
+}
+
+func TestFormatCNDate(t *testing.T) {
+	if formatCNDate("2026-07-06") != "7月6日" {
+		t.Fatalf("got %s", formatCNDate("2026-07-06"))
 	}
 }

@@ -44,6 +44,7 @@ func (c *RedisSet) Description() *model.Tool {
 						"description": "Redis的value",
 					},
 				},
+				"required": []string{"key", "value"},
 			},
 		},
 	}
@@ -65,7 +66,7 @@ func (c *RedisSet) Handle(key, value string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := c.rdb.Set(ctx, key, value, 0).Err()
+	err := c.rdb.Set(ctx, key, value, 4*time.Hour).Err()
 	if err != nil {
 		log.Error(err)
 		return "", err

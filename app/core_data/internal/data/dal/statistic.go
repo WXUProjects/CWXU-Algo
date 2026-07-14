@@ -136,13 +136,12 @@ type RankItem struct {
 	Score  int64
 }
 
-// GetRank 获取排行榜数据
+// GetRank 获取排行榜数据（相对时间：日/周/月）
 func (d *StatisticDal) GetRank(ctx context.Context, userId int64, timeType, scoreType string, groupId int64, page, pageSize int64) ([]RankItem, int64, error) {
 	now := time.Now()
 	var startTime time.Time
 	var endTime = now
 
-	// 时间范围计算
 	switch timeType {
 	case "日":
 		startTime = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
@@ -151,62 +150,50 @@ func (d *StatisticDal) GetRank(ctx context.Context, userId int64, timeType, scor
 	case "月":
 		startTime = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	default:
-		// 默认全部时间
 		startTime = time.Time{}
 		endTime = time.Now().Add(100 * 365 * 24 * time.Hour)
 	}
+	return d.GetRankByRange(ctx, startTime, endTime, scoreType, groupId, page, pageSize)
+}
+
+// GetRankByRange 按绝对时间区间排行（end 为开区间上界）
+func (d *StatisticDal) GetRankByRange(ctx context.Context, startTime, endTime time.Time, scoreType string, groupId int64, page, pageSize int64) ([]RankItem, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
 
 	type RankQueryResult struct {
-		Rank   int64
 		UserID int64
 		Name   string
 		Score  int64
 	}
 
-	var results []RankQueryResult
+	applyFilters := func(q *gorm.DB) *gorm.DB {
+		q = q.Where("time >= ? AND time < ?", startTime, endTime)
+		if groupId != -1 && groupId != 0 {
+			q = q.Where("group_id = ?", groupId)
+		}
+		if scoreType == "ac" {
+			q = q.Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
+		} else {
+			q = q.Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
+		}
+		return q
+	}
+
 	var total int64
-
-	// 基础查询
-	baseQuery := d.db.Table("submit_logs").
-		Where("time >= ? AND time < ?", startTime, endTime)
-
-	// 按用户ID筛选
-	if userId != 0 {
-		baseQuery = baseQuery.Where("user_id = ?", userId)
+	countSub := applyFilters(d.db.WithContext(ctx).Table("submit_logs")).Select("user_id").Group("user_id")
+	if err := d.db.WithContext(ctx).Table("(?) AS t", countSub).Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
 
-	// 按分组筛选
-	if groupId != -1 {
-		baseQuery = baseQuery.Where("group_id = ?", groupId)
-	}
-
-	// 根据scoreType决定统计方式
-	if scoreType == "ac" {
-		// AC排行榜，按user_id, problem去重
-		baseQuery = baseQuery.Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
-	} else {
-		// 提交榜：力扣合成 AC 不计入
-		baseQuery = baseQuery.Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
-	}
-
-	// 获取总数
-	countQuery := d.db.Table("(SELECT user_id FROM submit_logs WHERE time >= ? AND time < ?", startTime, endTime)
-	if userId != 0 {
-		countQuery = countQuery.Where("user_id = ?", userId)
-	}
-	if groupId != -1 {
-		countQuery = countQuery.Where("group_id = ?", groupId)
-	}
-	if scoreType == "ac" {
-		countQuery = countQuery.Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
-	}
-	countQuery = countQuery.Group("user_id")
-	countQuery.Count(&total)
-
-	// 分页
 	offset := (page - 1) * pageSize
-
-	// 执行查询
 	var selectClause string
 	if scoreType == "ac" {
 		selectClause = "COUNT(DISTINCT problem)"
@@ -214,29 +201,27 @@ func (d *StatisticDal) GetRank(ctx context.Context, userId int64, timeType, scor
 		selectClause = "COUNT(*)"
 	}
 
-	err := d.db.Table("(?)", baseQuery).
-		Select("user_id, name, "+selectClause+" as score").
+	var results []RankQueryResult
+	err := applyFilters(d.db.WithContext(ctx).Table("submit_logs")).
+		Select("user_id, name, " + selectClause + " as score").
 		Group("user_id, name").
 		Order("score DESC").
 		Offset(int(offset)).
 		Limit(int(pageSize)).
 		Scan(&results).Error
-
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// 计算排名
 	items := make([]RankItem, len(results))
 	for i, r := range results {
 		items[i] = RankItem{
-			Rank:   int64(offset) + int64(i+1),
+			Rank:   offset + int64(i+1),
 			UserID: r.UserID,
 			Name:   r.Name,
 			Score:  r.Score,
 		}
 	}
-
 	return items, total, nil
 }
 

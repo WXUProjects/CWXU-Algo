@@ -47,10 +47,11 @@ func (c *StatisticPeriod) Description() *model.Tool {
 				"type": "object",
 				"properties": map[string]interface{}{
 					"userId": map[string]interface{}{
-						"type":        "int",
+						"type":        "integer",
 						"description": "用户id",
 					},
 				},
+				"required": []string{"userId"},
 			},
 		},
 	}
@@ -73,6 +74,7 @@ func (c *StatisticPeriod) Handle(userId int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer conn.Close()
 	sb := statistic.NewStatisticClient(conn)
 	res, err := sb.PeriodCount(
 		context.Background(),

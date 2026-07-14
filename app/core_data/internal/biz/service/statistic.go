@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"cwxu-algo/api/core/v1/statistic"
 	data2 "cwxu-algo/app/common/data"
@@ -58,6 +59,54 @@ func (uc *StatisticUseCase) Heatmap(ctx context.Context, req *statistic.HeatmapR
 	return &statistic.HeatmapResp{
 		Code: 0,
 		Data: items,
+	}, nil
+}
+
+// Rank 按日期区间获取排行
+func (uc *StatisticUseCase) Rank(ctx context.Context, req *statistic.RankReq) (*statistic.RankResp, error) {
+	if req.StartDate == "" || req.EndDate == "" {
+		return nil, errors.BadRequest("参数错误", "日期参数错误")
+	}
+	start, err := time.ParseInLocation("2006-01-02", req.StartDate, time.Local)
+	if err != nil {
+		return nil, errors.BadRequest("参数错误", "startDate 格式应为 YYYY-MM-DD")
+	}
+	end, err := time.ParseInLocation("2006-01-02", req.EndDate, time.Local)
+	if err != nil {
+		return nil, errors.BadRequest("参数错误", "endDate 格式应为 YYYY-MM-DD")
+	}
+	// endDate 含当天，查询用次日 0 点开区间
+	endExclusive := end.AddDate(0, 0, 1)
+
+	scoreType := req.ScoreType
+	if scoreType == "" {
+		scoreType = "submit"
+	}
+	groupId := req.GroupId
+	if groupId == 0 {
+		groupId = -1
+	}
+	page := req.Page
+	pageSize := req.PageSize
+
+	items, total, err := uc.dal.GetRankByRange(ctx, start, endExclusive, scoreType, groupId, page, pageSize)
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+
+	data := make([]*statistic.RankItem, len(items))
+	for i, v := range items {
+		data[i] = &statistic.RankItem{
+			Rank:   v.Rank,
+			UserId: v.UserID,
+			Name:   v.Name,
+			Score:  v.Score,
+		}
+	}
+	return &statistic.RankResp{
+		Code:  0,
+		Data:  data,
+		Total: total,
 	}, nil
 }
 

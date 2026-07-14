@@ -56,10 +56,11 @@ func (c *SubmitCnt) Description() *model.Tool {
 						"description": "结束时间，例如 20220101",
 					},
 					"userId": map[string]interface{}{
-						"type":        "int",
+						"type":        "integer",
 						"description": "用户id 0为全局维度",
 					},
 				},
+				"required": []string{"startDate", "endDate", "userId"},
 			},
 		},
 	}
@@ -82,6 +83,7 @@ func (c *SubmitCnt) Handle(startDate, endDate string, userId int) (string, error
 	if err != nil {
 		return "", err
 	}
+	defer conn.Close()
 	sb := statistic.NewStatisticClient(conn)
 	res, err := sb.Heatmap(
 		context.Background(),

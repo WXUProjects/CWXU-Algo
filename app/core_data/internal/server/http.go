@@ -27,6 +27,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.core.v1.spider.Spider/GetSpider":                "",
 		"/api.core.v1.statistic.Statistic/Heatmap":            "",
 		"/api.core.v1.statistic.Statistic/PeriodCount":        "",
+		"/api.core.v1.statistic.Statistic/Rank":               "",
 		"/api.core.v1.bulletin.Bulletin/Get":                  "",
 		"/api.core.v1.bulletin.Bulletin/List":                 "",
 	}

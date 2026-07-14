@@ -47,10 +47,11 @@ func (c *GetNameById) Description() *model.Tool {
 				"type": "object",
 				"properties": map[string]interface{}{
 					"userId": map[string]interface{}{
-						"type":        "int",
+						"type":        "integer",
 						"description": "用户id",
 					},
 				},
+				"required": []string{"userId"},
 			},
 		},
 	}

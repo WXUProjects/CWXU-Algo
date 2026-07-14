@@ -30,3 +30,8 @@ func (s *StatisticService) Heatmap(ctx context.Context, req *statistic.HeatmapRe
 func (s *StatisticService) PeriodCount(ctx context.Context, req *statistic.PeriodCountReq) (*statistic.PeriodCountResp, error) {
 	return s.uc.PeriodCount(ctx, req)
 }
+
+// Rank 按时间区间获取排行
+func (s *StatisticService) Rank(ctx context.Context, req *statistic.RankReq) (*statistic.RankResp, error) {
+	return s.uc.Rank(ctx, req)
+}
