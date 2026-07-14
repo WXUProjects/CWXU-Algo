@@ -104,9 +104,11 @@ type Problem struct {
 	Status          string        `gorm:"size:32;index;default:'PENDING'"`
 	ErrorMsg        string        `gorm:"type:text"`
 	// FetchAttempts 题面爬取失败次数（仅 ProcessFetch 累计；AI 分析失败不计）
-	// >=3 升为 FAILED_PERM
-	FetchAttempts   int           `gorm:"default:0"`
-	LastSubmittedAt *time.Time    `gorm:"index"`
+	// 非瞬时错误 >=3 升为 FAILED_PERM
+	FetchAttempts int `gorm:"default:0"`
+	// FetchFailSince 首次可恢复（405/WAF 等）爬取失败时间；持续超 24h → FAILED_PERM
+	FetchFailSince  *time.Time `gorm:"index"`
+	LastSubmittedAt *time.Time `gorm:"index"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }

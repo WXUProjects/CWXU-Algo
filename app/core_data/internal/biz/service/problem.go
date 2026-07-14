@@ -239,26 +239,7 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	}
 	fetched, err := problem_fetch.Fetch(p.Platform, p.ExternalID, url)
 	if err != nil {
-		msg := truncateErr(err.Error())
-		attempts := p.FetchAttempts + 1
-		st := model.ProblemStatusFailed
-		if isPermanentFetchError(msg) {
-			st = model.ProblemStatusFailedPerm
-		} else if attempts >= maxFetchAttempts {
-			// 爬取超过 3 次仍失败 → 永久失败（AI 失败不计次）
-			st = model.ProblemStatusFailedPerm
-			msg = fmt.Sprintf("爬取失败超过%d次: %s", maxFetchAttempts, msg)
-		}
-		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
-			"status":         st,
-			"error_msg":      msg,
-			"fetch_attempts": attempts,
-		}).Error
-		// 永久失败返回 nil，让消费者 Ack，避免毒消息反复投递
-		if st == model.ProblemStatusFailedPerm {
-			return nil
-		}
-		return err
+		return uc.handleFetchError(&p, err)
 	}
 
 	title := p.Title
@@ -266,11 +247,12 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		title = fetched.Title
 	}
 	updates := map[string]interface{}{
-		"content_md":     fetched.ContentMD,
-		"title":          title,
-		"error_msg":      "",
-		"status":         model.ProblemStatusTagging,
-		"fetch_attempts": 0,
+		"content_md":       fetched.ContentMD,
+		"title":            title,
+		"error_msg":        "",
+		"status":           model.ProblemStatusTagging,
+		"fetch_attempts":   0,
+		"fetch_fail_since": nil,
 	}
 	if p.URL == "" && url != "" {
 		updates["url"] = url
@@ -353,8 +335,11 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 // backfillWindow 历史回填 / AI 分析仅处理最近 N 个月有提交的题
 const backfillWindow = 6 * 30 * 24 * time.Hour // ≈6 个月
 
-// maxFetchAttempts 题面爬取可恢复失败的最大次数，超过则 FAILED_PERM
+// maxFetchAttempts 非瞬时爬取失败最大次数，超过则 FAILED_PERM
 const maxFetchAttempts = 3
+
+// transientFailWindow 405/WAF 等瞬时错误允许持续重试的最长时间，超时 → FAILED_PERM
+const transientFailWindow = 24 * time.Hour
 
 // Backfill 历史回填：绑定未关联提交 + 按题面是否已爬决定入队
 // - 无题面 content_md → 全部入爬取队列（不限 6 个月；含 FAILED_PERM 重试爬）
@@ -437,12 +422,13 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 			// 已有题面：跳过爬取
 			continue
 		}
-		// 永久错误文案且已多次失败：仍允许回填重爬一次（重置 attempts）
+		// 允许回填重爬：重置 attempts / 失败时钟
 		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 			Updates(map[string]interface{}{
-				"status":         model.ProblemStatusPending,
-				"error_msg":      "",
-				"fetch_attempts": 0,
+				"status":           model.ProblemStatusPending,
+				"error_msg":        "",
+				"fetch_attempts":   0,
+				"fetch_fail_since": nil,
 			}).Error
 		if e := uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL); e == nil {
 			enqueued++
@@ -1045,16 +1031,94 @@ func truncateErr(s string) string {
 	return s
 }
 
-// isPermanentFetchError 不可恢复的爬取错误：不再重试、不再入队（软黑名单 FAILED_PERM）
-// 例如 CF/洛谷/牛客「未找到题面」、无 URL、不支持平台等
-// 注意：WAF/登录墙/Cloudflare 等拦截类一律可重试，不进黑名单
-func isPermanentFetchError(msg string) bool {
+// handleFetchError 爬取失败：瞬时错误退避重试，持续超 24h 或非瞬时满 3 次 → FAILED_PERM
+func (uc *ProblemUseCase) handleFetchError(p *model.Problem, err error) error {
+	msg := truncateErr(err.Error())
+	attempts := p.FetchAttempts + 1
+	st := model.ProblemStatusFailed
+	updates := map[string]interface{}{
+		"fetch_attempts": attempts,
+		"error_msg":      msg,
+	}
+
+	if isPermanentFetchError(msg) {
+		st = model.ProblemStatusFailedPerm
+		updates["status"] = st
+		updates["fetch_fail_since"] = nil
+		_ = uc.data.DB.Model(p).Updates(updates).Error
+		return nil
+	}
+
+	if isTransientFetchError(msg) {
+		// 记录首次瞬时失败时间
+		failSince := p.FetchFailSince
+		if failSince == nil {
+			now := time.Now()
+			failSince = &now
+			updates["fetch_fail_since"] = now
+		}
+		if time.Since(*failSince) >= transientFailWindow {
+			st = model.ProblemStatusFailedPerm
+			msg = fmt.Sprintf("瞬时失败超过24小时: %s", msg)
+			updates["status"] = st
+			updates["error_msg"] = truncateErr(msg)
+			updates["fetch_fail_since"] = nil
+			_ = uc.data.DB.Model(p).Updates(updates).Error
+			return nil
+		}
+		// 退避等待后再让消费者 requeue，避免 405 热循环
+		wait := transientBackoff(attempts)
+		msg = fmt.Sprintf("瞬时失败(退避%v, 自%s起可重试至24h): %s",
+			wait.Round(time.Second), failSince.Format("01-02 15:04"), msg)
+		updates["status"] = st
+		updates["error_msg"] = truncateErr(msg)
+		_ = uc.data.DB.Model(p).Updates(updates).Error
+		log.Warnf("problem %d fetch transient, sleep %v: %s", p.ID, wait, msg)
+		time.Sleep(wait)
+		return err
+	}
+
+	// 普通可恢复错误：满 3 次 → 永久
+	if attempts >= maxFetchAttempts {
+		st = model.ProblemStatusFailedPerm
+		msg = fmt.Sprintf("爬取失败超过%d次: %s", maxFetchAttempts, msg)
+		updates["status"] = st
+		updates["error_msg"] = truncateErr(msg)
+		updates["fetch_fail_since"] = nil
+		_ = uc.data.DB.Model(p).Updates(updates).Error
+		return nil
+	}
+	updates["status"] = st
+	_ = uc.data.DB.Model(p).Updates(updates).Error
+	return err
+}
+
+// transientBackoff 405/WAF 退避：30s → 1m → 2m → 5m → 10m（封顶）
+func transientBackoff(attempts int) time.Duration {
+	if attempts < 1 {
+		attempts = 1
+	}
+	switch {
+	case attempts <= 1:
+		return 30 * time.Second
+	case attempts == 2:
+		return time.Minute
+	case attempts == 3:
+		return 2 * time.Minute
+	case attempts == 4:
+		return 5 * time.Minute
+	default:
+		return 10 * time.Minute
+	}
+}
+
+// isTransientFetchError 瞬时/风控类错误：退避重试，满 24h 才升 FAILED_PERM
+func isTransientFetchError(msg string) bool {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
 		return false
 	}
-	// 网络/WAF/登录墙/HTTP 瞬时错误：可重试，明确排除
-	if strings.Contains(msg, "Cloudflare") ||
+	return strings.Contains(msg, "Cloudflare") ||
 		strings.Contains(msg, "请稍后重试") ||
 		strings.Contains(msg, "WAF") ||
 		strings.Contains(msg, "需要登录") ||
@@ -1062,7 +1126,22 @@ func isPermanentFetchError(msg string) bool {
 		strings.Contains(msg, "status 405") ||
 		strings.Contains(msg, "status 403") ||
 		strings.Contains(msg, "status 429") ||
-		strings.Contains(msg, "status 503") {
+		strings.Contains(msg, "status 503") ||
+		strings.Contains(msg, "status 502") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "瞬时失败")
+}
+
+// isPermanentFetchError 不可恢复的爬取错误：不再重试、不再入队（软黑名单 FAILED_PERM）
+// 例如 CF/洛谷/牛客「未找到题面」、无 URL、不支持平台等
+// 注意：WAF/登录墙/Cloudflare/405 等拦截类一律可重试，不进黑名单
+func isPermanentFetchError(msg string) bool {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return false
+	}
+	if isTransientFetchError(msg) {
 		return false
 	}
 	permanent := []string{

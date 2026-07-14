@@ -45,24 +45,79 @@ func Fetch(platform, externalID, problemURL string) (*FetchedContent, error) {
 	}
 }
 
-const browserUA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36`
+// 浏览器指纹池：UA 与 Sec-CH-UA 版本必须一致，轮换降低特征
+type browserProfile struct {
+	UA       string
+	SecCHUA  string
+	Platform string // "Windows" | "macOS"
+}
+
+var browserProfiles = []browserProfile{
+	{
+		UA:       `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36`,
+		SecCHUA:  `"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"`,
+		Platform: `"Windows"`,
+	},
+	{
+		UA:       `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36`,
+		SecCHUA:  `"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"`,
+		Platform: `"Windows"`,
+	},
+	{
+		UA:       `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36`,
+		SecCHUA:  `"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"`,
+		Platform: `"macOS"`,
+	},
+	{
+		UA:       `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15`,
+		SecCHUA:  "", // Safari 不发 Sec-CH-UA
+		Platform: "",
+	},
+}
+
+var (
+	browserProfileMu  sync.Mutex
+	browserProfileIdx int
+)
+
+func nextBrowserProfile() browserProfile {
+	browserProfileMu.Lock()
+	defer browserProfileMu.Unlock()
+	p := browserProfiles[browserProfileIdx%len(browserProfiles)]
+	browserProfileIdx++
+	return p
+}
+
+const browserUA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36`
 
 func setBrowserHeaders(req *http.Request, referer string) {
-	req.Header.Set("User-Agent", browserUA)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	req.Header.Set("Sec-Ch-Ua", `"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"`)
-	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
-	req.Header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
-	req.Header.Set("Sec-Fetch-Dest", "document")
-	req.Header.Set("Sec-Fetch-Mode", "navigate")
-	req.Header.Set("Sec-Fetch-User", "?1")
+	setBrowserHeadersWithProfile(req, referer, browserProfiles[0])
+}
+
+func setBrowserHeadersWithProfile(req *http.Request, referer string, p browserProfile) {
+	req.Header.Set("User-Agent", p.UA)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7")
+	// 不要手动设 Accept-Encoding：由 Transport 自动协商并解压，避免指纹/解压不一致
 	req.Header.Set("Upgrade-Insecure-Requests", "1")
+	req.Header.Set("Cache-Control", "max-age=0")
 	req.Header.Set("Connection", "keep-alive")
+	if p.SecCHUA != "" {
+		req.Header.Set("Sec-Ch-Ua", p.SecCHUA)
+		req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+		if p.Platform != "" {
+			req.Header.Set("Sec-Ch-Ua-Platform", p.Platform)
+		}
+		req.Header.Set("Sec-Fetch-Dest", "document")
+		req.Header.Set("Sec-Fetch-Mode", "navigate")
+		req.Header.Set("Sec-Fetch-User", "?1")
+	}
 	if referer != "" {
 		req.Header.Set("Referer", referer)
-		req.Header.Set("Sec-Fetch-Site", "same-origin")
-	} else {
+		if p.SecCHUA != "" {
+			req.Header.Set("Sec-Fetch-Site", "same-origin")
+		}
+	} else if p.SecCHUA != "" {
 		req.Header.Set("Sec-Fetch-Site", "none")
 	}
 }
@@ -79,20 +134,53 @@ func httpGet(rawURL string) (*http.Response, error) {
 
 // 牛客 WAF：无 Cookie 会返回阿里云滑块页；先访问对应站点首页拿 Cookie 再抓题面
 // AC 站 ac.nowcoder.com；主站 www.nowcoder.com（/practice/{uuid}）
+// 双站分 Client + Cookie，主站串行限速，避免并发/串 Cookie 触发 405
 var (
-	nowcoderClientOnce sync.Once
-	nowcoderClient     *http.Client
+	nowcoderACOnce     sync.Once
+	nowcoderMainOnce   sync.Once
+	nowcoderACClient   *http.Client
+	nowcoderMainClient *http.Client
+	nowcoderMainMu     sync.Mutex
+	nowcoderMainLast   time.Time
 )
 
-func getNowCoderClient() *http.Client {
-	nowcoderClientOnce.Do(func() {
-		jar, _ := cookiejar.New(nil)
-		nowcoderClient = &http.Client{
-			Timeout: 30 * time.Second,
-			Jar:     jar,
-		}
+func newNowCoderHTTPClient() *http.Client {
+	jar, _ := cookiejar.New(nil)
+	// 使用默认 Transport（含 HTTP/2）：强关 HTTP/2 反而会和 ALPN 冲突导致异常响应
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	return &http.Client{
+		Timeout:   45 * time.Second,
+		Jar:       jar,
+		Transport: tr,
+		// 禁止把 GET 跟成非 GET（部分网关 302 后会 405）
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			if req.Method != http.MethodGet && req.Method != http.MethodHead {
+				req.Method = http.MethodGet
+				req.Body = nil
+				req.GetBody = nil
+				req.ContentLength = 0
+			}
+			setBrowserHeaders(req, via[len(via)-1].URL.String())
+			return nil
+		},
+	}
+}
+
+func getNowCoderACClient() *http.Client {
+	nowcoderACOnce.Do(func() {
+		nowcoderACClient = newNowCoderHTTPClient()
 	})
-	return nowcoderClient
+	return nowcoderACClient
+}
+
+func getNowCoderMainClient() *http.Client {
+	nowcoderMainOnce.Do(func() {
+		nowcoderMainClient = newNowCoderHTTPClient()
+	})
+	return nowcoderMainClient
 }
 
 func nowcoderSiteOrigin(rawURL string) string {
@@ -102,47 +190,91 @@ func nowcoderSiteOrigin(rawURL string) string {
 	return "https://ac.nowcoder.com"
 }
 
-func nowcoderWarmup(client *http.Client, origin string) {
+func nowcoderClientFor(rawURL string) *http.Client {
+	if isMainNowCoderURL(rawURL) {
+		return getNowCoderMainClient()
+	}
+	return getNowCoderACClient()
+}
+
+// nowcoderSession 绑定 Client + 当前浏览器指纹（一轮请求内保持一致）
+type nowcoderSession struct {
+	client  *http.Client
+	profile browserProfile
+	origin  string
+}
+
+func nowcoderClearCookies(client *http.Client, origin string) {
+	if client == nil || client.Jar == nil {
+		return
+	}
 	if origin == "" {
 		origin = "https://ac.nowcoder.com"
 	}
-	req, err := http.NewRequest(http.MethodGet, origin+"/", nil)
-	if err != nil {
-		return
+	if u, e := url.Parse(origin + "/"); e == nil {
+		client.Jar.SetCookies(u, nil)
 	}
-	setBrowserHeaders(req, "")
-	resp, err := client.Do(req)
+}
+
+func (s *nowcoderSession) get(rawURL, referer string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	setBrowserHeadersWithProfile(req, referer, s.profile)
+	return s.client.Do(req)
+}
+
+// warmup 模拟真人进站：首页 →（主站）题库列表，拿 Cookie
+func (s *nowcoderSession) warmup() {
+	resp, err := s.get(s.origin+"/", "")
 	if err != nil {
 		return
 	}
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
+	if !strings.Contains(s.origin, "www.nowcoder.com") {
+		return
+	}
+	// 主站再点一层列表页，Referer 链更像浏览器
+	time.Sleep(200*time.Millisecond + time.Duration(time.Now().UnixNano()%300)*time.Millisecond)
+	resp2, err := s.get(s.origin+"/practice", s.origin+"/")
+	if err != nil {
+		return
+	}
+	io.Copy(io.Discard, resp2.Body)
+	resp2.Body.Close()
 }
 
 func nowcoderGet(rawURL string) (*http.Response, error) {
-	client := getNowCoderClient()
+	client := nowcoderClientFor(rawURL)
 	origin := nowcoderSiteOrigin(rawURL)
-	// 无 Cookie 时先预热对应站点首页
+	sess := &nowcoderSession{client: client, profile: nextBrowserProfile(), origin: origin}
+
+	// 主站：串行 + 1.2~2.0s 抖动间隔，降低 405
+	if isMainNowCoderURL(rawURL) {
+		nowcoderMainMu.Lock()
+		defer nowcoderMainMu.Unlock()
+		minGap := 1200 * time.Millisecond
+		jitter := time.Duration(time.Now().UnixNano()%800) * time.Millisecond
+		if d := time.Since(nowcoderMainLast); d < minGap+jitter {
+			time.Sleep(minGap + jitter - d)
+		}
+		nowcoderMainLast = time.Now()
+	}
+
+	// 无 Cookie 时先预热
 	if u, err := url.Parse(origin + "/"); err == nil {
 		if len(client.Jar.Cookies(u)) == 0 {
-			nowcoderWarmup(client, origin)
+			sess.warmup()
 		}
 	}
-	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
-	if err != nil {
-		return nil, err
+	// 主站 Referer 用 /practice 列表，更像从题库点进题
+	referer := origin + "/"
+	if isMainNowCoderURL(rawURL) {
+		referer = origin + "/practice"
 	}
-	setBrowserHeaders(req, origin+"/")
-	return client.Do(req)
-}
-
-func nowcoderClearCookies(origin string) {
-	if origin == "" {
-		origin = "https://ac.nowcoder.com"
-	}
-	if u, e := url.Parse(origin + "/"); e == nil {
-		getNowCoderClient().Jar.SetCookies(u, nil)
-	}
+	return sess.get(rawURL, referer)
 }
 
 func isNowCoderUUID(s string) bool {
@@ -526,9 +658,10 @@ func isMainNowCoderURL(raw string) bool {
 	return strings.Contains(raw, "www.nowcoder.com") || isNowCoderUUID(extractUUIDFromURL(raw))
 }
 
-// nowcoderFetchHTML GET 题面页；WAF/405 清 Cookie 预热后重试一次
+// nowcoderFetchHTML GET 题面页；405/WAF 换指纹 + 清 Cookie + 退避，最多 3 次
 func nowcoderFetchHTML(problemURL string) (string, error) {
 	origin := nowcoderSiteOrigin(problemURL)
+	client := nowcoderClientFor(problemURL)
 	do := func() (int, string, error) {
 		resp, err := nowcoderGet(problemURL)
 		if err != nil {
@@ -541,29 +674,37 @@ func nowcoderFetchHTML(problemURL string) (string, error) {
 		}
 		return resp.StatusCode, string(body), nil
 	}
-	code, html, err := do()
+
+	var code int
+	var html string
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			nowcoderClearCookies(client, origin)
+			// 换 UA 指纹：下次 nowcoderGet 会 nextBrowserProfile
+			// 退避 2s / 4s
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+		}
+		code, html, err = do()
+		if err != nil {
+			if attempt == 2 {
+				return "", err
+			}
+			continue
+		}
+		if code == 200 && !isNowCoderWAF(html) {
+			break
+		}
+	}
 	if err != nil {
 		return "", err
 	}
-	// 405/WAF/非 200：清 Cookie 再试
-	needRetry := code != 200 || isNowCoderWAF(html) || code == 405
-	if needRetry {
-		nowcoderClearCookies(origin)
-		nowcoderWarmup(getNowCoderClient(), origin)
-		code2, html2, err2 := do()
-		if err2 != nil {
-			return "", err2
-		}
-		code, html = code2, html2
-	}
 	if code != 200 {
-		// 405/403 等可重试，不当永久错误文案里的“未找到”
 		return "", fmt.Errorf("NowCoder status %d，请稍后重试", code)
 	}
 	if isNowCoderWAF(html) {
 		return "", fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")
 	}
-	// 真·登录墙
 	if strings.Contains(html, "请先登录") &&
 		!strings.Contains(html, "subject-question") &&
 		!strings.Contains(html, "输入描述") &&
