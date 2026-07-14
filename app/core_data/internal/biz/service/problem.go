@@ -1053,12 +1053,16 @@ func isPermanentFetchError(msg string) bool {
 	if msg == "" {
 		return false
 	}
-	// 网络/WAF/登录墙：可重试，明确排除
+	// 网络/WAF/登录墙/HTTP 瞬时错误：可重试，明确排除
 	if strings.Contains(msg, "Cloudflare") ||
 		strings.Contains(msg, "请稍后重试") ||
 		strings.Contains(msg, "WAF") ||
 		strings.Contains(msg, "需要登录") ||
-		strings.Contains(msg, "被拦截") {
+		strings.Contains(msg, "被拦截") ||
+		strings.Contains(msg, "status 405") ||
+		strings.Contains(msg, "status 403") ||
+		strings.Contains(msg, "status 429") ||
+		strings.Contains(msg, "status 503") {
 		return false
 	}
 	permanent := []string{

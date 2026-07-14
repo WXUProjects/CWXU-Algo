@@ -472,12 +472,12 @@ func parseLuoGuJSON(body []byte) (*FetchedContent, error) {
 }
 
 func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
+	id := strings.TrimSpace(externalID)
 	if problemURL == "" {
-		if externalID == "" {
+		if id == "" {
 			return nil, fmt.Errorf("NowCoder 缺少题面 URL 与 external_id")
 		}
-		id := strings.TrimSpace(externalID)
-		// 主站：32 hex UUID → www.nowcoder.com/practice/{uuid}
+		// 主站：32 hex UUID → https://www.nowcoder.com/practice/{uuid}
 		if isNowCoderUUID(id) {
 			problemURL = "https://www.nowcoder.com/practice/" + strings.ToLower(strings.ReplaceAll(id, "-", ""))
 		} else {
@@ -494,45 +494,229 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 			}
 		}
 	}
+	// 强制主站 UUID 走 /practice/{uuid}（避免错误 URL 导致 405）
+	if isNowCoderUUID(id) || isNowCoderUUID(extractUUIDFromURL(problemURL)) {
+		uuid := id
+		if !isNowCoderUUID(uuid) {
+			uuid = extractUUIDFromURL(problemURL)
+		}
+		uuid = strings.ToLower(strings.ReplaceAll(uuid, "-", ""))
+		problemURL = "https://www.nowcoder.com/practice/" + uuid
+	}
+
+	html, err := nowcoderFetchHTML(problemURL)
+	if err != nil {
+		return nil, err
+	}
+	if isMainNowCoderURL(problemURL) {
+		return parseNowCoderMainHTML(html)
+	}
+	return parseNowCoderACHHTML(html)
+}
+
+func extractUUIDFromURL(raw string) string {
+	m := regexp.MustCompile(`(?i)/practice/([0-9a-fA-F-]{32,36})`).FindStringSubmatch(raw)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+func isMainNowCoderURL(raw string) bool {
+	return strings.Contains(raw, "www.nowcoder.com") || isNowCoderUUID(extractUUIDFromURL(raw))
+}
+
+// nowcoderFetchHTML GET 题面页；WAF/405 清 Cookie 预热后重试一次
+func nowcoderFetchHTML(problemURL string) (string, error) {
 	origin := nowcoderSiteOrigin(problemURL)
-	resp, err := nowcoderGet(problemURL)
+	do := func() (int, string, error) {
+		resp, err := nowcoderGet(problemURL)
+		if err != nil {
+			return 0, "", err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return resp.StatusCode, "", err
+		}
+		return resp.StatusCode, string(body), nil
+	}
+	code, html, err := do()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	html := string(body)
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("NowCoder status %d", resp.StatusCode)
-	}
-	// WAF 滑块页：清 Cookie 再预热重试一次
-	if isNowCoderWAF(html) {
+	// 405/WAF/非 200：清 Cookie 再试
+	needRetry := code != 200 || isNowCoderWAF(html) || code == 405
+	if needRetry {
 		nowcoderClearCookies(origin)
 		nowcoderWarmup(getNowCoderClient(), origin)
-		resp2, err2 := nowcoderGet(problemURL)
+		code2, html2, err2 := do()
 		if err2 != nil {
-			return nil, fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")
+			return "", err2
 		}
-		defer resp2.Body.Close()
-		body2, err2 := io.ReadAll(resp2.Body)
-		if err2 != nil {
-			return nil, err2
+		code, html = code2, html2
+	}
+	if code != 200 {
+		// 405/403 等可重试，不当永久错误文案里的“未找到”
+		return "", fmt.Errorf("NowCoder status %d，请稍后重试", code)
+	}
+	if isNowCoderWAF(html) {
+		return "", fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")
+	}
+	// 真·登录墙
+	if strings.Contains(html, "请先登录") &&
+		!strings.Contains(html, "subject-question") &&
+		!strings.Contains(html, "输入描述") &&
+		!strings.Contains(html, "question-oi") {
+		return "", fmt.Errorf("NowCoder 需要登录，请稍后重试")
+	}
+	return html, nil
+}
+
+func cleanNowCoderTitle(title string) string {
+	title = strings.TrimSpace(title)
+	for _, sep := range []string{"_", "-", "|"} {
+		title = strings.TrimSpace(strings.Split(title, sep)[0])
+	}
+	return title
+}
+
+// parseNowCoderMainHTML 主站 /practice/{uuid}：题面在 body 顶部 SEO 隐藏区
+func parseNowCoderMainHTML(html string) (*FetchedContent, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, err
+	}
+	title := cleanNowCoderTitle(doc.Find("title").First().Text())
+	if title == "" {
+		title = cleanNowCoderTitle(doc.Find("h1, .pop-title, .question-title").First().Text())
+	}
+
+	// SEO 隐藏区：position absolute 离屏 div，含描述 + 输入输出 + question-oi 样例
+	var root *goquery.Selection
+	doc.Find("body > div").Each(func(_ int, s *goquery.Selection) {
+		if root != nil {
+			return
 		}
-		html = string(body2)
-		if resp2.StatusCode != 200 {
-			return nil, fmt.Errorf("NowCoder status %d", resp2.StatusCode)
+		style, _ := s.Attr("style")
+		if strings.Contains(style, "-1000000") || strings.Contains(s.Text(), "输入描述") {
+			root = s
 		}
-		if isNowCoderWAF(html) {
-			return nil, fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")
+	})
+	if root == nil {
+		// 兜底：整页有 输入描述 / question-oi 也算
+		if strings.Contains(html, "输入描述") || doc.Find(".question-oi").Length() > 0 {
+			root = doc.Find("body")
 		}
 	}
-	// 真·登录墙（排除 WAF 页误伤）
-	if strings.Contains(html, "请先登录") && !strings.Contains(html, "subject-question") {
-		return nil, fmt.Errorf("NowCoder 需要登录，请稍后重试")
+	if root == nil {
+		return nil, fmt.Errorf("NowCoder 主站未找到题面 DOM")
 	}
+
+	// 公式 img → $alt$
+	replaceNowCoderMath(root)
+	root.Find("br").Each(func(_ int, br *goquery.Selection) {
+		br.ReplaceWithHtml("\n")
+	})
+
+	var b strings.Builder
+	if title != "" {
+		b.WriteString("# ")
+		b.WriteString(title)
+		b.WriteString("\n\n")
+	}
+
+	// 描述：隐藏区开头纯文本（到第一个 h5 输入描述之前）
+	// 用 HTML 切分更稳
+	raw, _ := root.Html()
+	desc := raw
+	if i := strings.Index(desc, "输入描述"); i > 0 {
+		// 去掉 h5 之前的标签噪声：取 text of a temp selection
+		pre := desc[:i]
+		// 粗提文本
+		preDoc, _ := goquery.NewDocumentFromReader(strings.NewReader("<div>" + pre + "</div>"))
+		if preDoc != nil {
+			t := normalizeNowCoderText(preDoc.Text())
+			if t != "" {
+				b.WriteString(t)
+				b.WriteString("\n\n")
+			}
+		}
+	} else {
+		// 无输入描述时整块 text，去掉样例区再写
+		t := normalizeNowCoderText(root.Clone().Find(".question-oi").Remove().End().Text())
+		if t != "" {
+			b.WriteString(t)
+			b.WriteString("\n\n")
+		}
+	}
+
+	// 输入 / 输出描述：h5
+	root.Find("h5").Each(func(_ int, h *goquery.Selection) {
+		ht := strings.TrimSpace(h.Text())
+		pre := strings.TrimSpace(h.NextFiltered("pre").Text())
+		if pre == "" {
+			pre = strings.TrimSpace(h.Next().Text())
+		}
+		if strings.Contains(ht, "输入") {
+			b.WriteString("## 输入描述\n\n")
+			b.WriteString(normalizeNowCoderText(pre))
+			b.WriteString("\n\n")
+		} else if strings.Contains(ht, "输出") {
+			b.WriteString("## 输出描述\n\n")
+			b.WriteString(normalizeNowCoderText(pre))
+			b.WriteString("\n\n")
+		}
+	})
+
+	// 样例：.question-oi
+	root.Find(".question-oi").Each(func(_ int, oi *goquery.Selection) {
+		hd := strings.TrimSpace(oi.Find(".question-oi-hd").First().Text())
+		if hd == "" {
+			hd = "示例"
+		}
+		b.WriteString("## ")
+		b.WriteString(hd)
+		b.WriteString("\n\n")
+		oi.Find(".question-oi-mod").Each(func(_ int, mod *goquery.Selection) {
+			h2 := strings.TrimSpace(mod.Find("h2").First().Text())
+			cont := mod.Find(".question-oi-cont").First()
+			replaceNowCoderMath(cont)
+			pre := cont.Find("pre").First()
+			body := ""
+			if pre.Length() > 0 {
+				body = strings.TrimRight(pre.Text(), "\n")
+			} else {
+				body = normalizeNowCoderText(cont.Text())
+			}
+			if h2 != "" {
+				b.WriteString("### ")
+				b.WriteString(h2)
+				b.WriteString("\n\n")
+			}
+			if body != "" {
+				if pre.Length() > 0 {
+					b.WriteString("```\n")
+					b.WriteString(body)
+					b.WriteString("\n```\n\n")
+				} else {
+					b.WriteString(body)
+					b.WriteString("\n\n")
+				}
+			}
+		})
+	})
+
+	md := collapseBlankLines(strings.TrimSpace(b.String()))
+	md = strings.ReplaceAll(md, "$$$", "$")
+	if len(md) < 8 {
+		return nil, fmt.Errorf("NowCoder 主站题面为空")
+	}
+	return &FetchedContent{Title: title, ContentMD: md}, nil
+}
+
+// parseNowCoderACHHTML AC 站 /acm/problem/{id}
+func parseNowCoderACHHTML(html string) (*FetchedContent, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return nil, err
@@ -541,9 +725,7 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 	if title == "" {
 		title = strings.TrimSpace(doc.Find("title").First().Text())
 	}
-	title = strings.TrimSpace(strings.Split(title, "_")[0])
-	title = strings.TrimSpace(strings.Split(title, "-")[0])
-	title = strings.TrimSpace(strings.Split(title, "|")[0])
+	title = cleanNowCoderTitle(title)
 
 	// 主内容：多 selector 兼容页面改版
 	q := doc.Find("div.subject-question").First()
@@ -554,9 +736,7 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 		return nil, fmt.Errorf("NowCoder 未找到题面 DOM")
 	}
 
-	// 将 equation img 替换为 $alt$
 	replaceNowCoderMath(q)
-	// br → newline
 	q.Find("br").Each(func(_ int, br *goquery.Selection) {
 		br.ReplaceWithHtml("\n")
 	})
@@ -567,12 +747,10 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 		b.WriteString(title)
 		b.WriteString("\n\n")
 	}
-	// 主体
 	bodyText := normalizeNowCoderText(q.Text())
 	b.WriteString(bodyText)
 	b.WriteString("\n\n")
 
-	// 输入输出 / 样例：h2 / h3 / .question-oi-cont 等
 	sectionSel := doc.Find("h2, h3, .question-oi-cont h2, .question-oi-cont h3")
 	sectionSel.Each(func(_ int, h *goquery.Selection) {
 		ht := strings.TrimSpace(h.Text())
@@ -584,7 +762,6 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 		if content == "" {
 			content = strings.TrimSpace(h.Parent().Contents().Not("h2,h3").Text())
 		}
-		// 样例 pre：当前块或后续兄弟
 		preNodes := h.Parent().Find("pre")
 		if preNodes.Length() == 0 {
 			preNodes = next.Find("pre")
@@ -615,7 +792,6 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 	})
 
 	md := collapseBlankLines(strings.TrimSpace(b.String()))
-	// 清理可能重复的标题行
 	md = strings.ReplaceAll(md, "$$$", "$")
 	if len(md) < 8 {
 		return nil, fmt.Errorf("NowCoder 题面为空")
