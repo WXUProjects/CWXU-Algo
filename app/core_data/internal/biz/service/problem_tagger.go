@@ -29,7 +29,7 @@ func NewProblemTagger(c *conf.AiAnalyze) *ProblemTagger {
 		return t
 	}
 	base := normalizeOpenAIBaseURL(c.Endpoint)
-	httpClient := &http.Client{Timeout: 120 * time.Second}
+	httpClient := &http.Client{Timeout: 240 * time.Second}
 	t.client = openai.NewClient(
 		option.WithAPIKey(c.Secret),
 		option.WithBaseURL(base),

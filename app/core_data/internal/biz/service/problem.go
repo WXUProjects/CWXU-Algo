@@ -107,10 +107,32 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog) (*model.Problem, bool,
 		"external_id": parsed.ExternalID,
 	}).Error
 
-	// 新题且可爬 → 入队
+	// 新题且可爬 → 入队抓题面 + AI
 	if isNew && !parsed.SkipFetch && existing.Status == model.ProblemStatusPending {
 		if err := uc.enqueueFetch(existing.ID, existing.Platform, existing.ExternalID, existing.URL); err != nil {
 			log.Errorf("enqueue problem %d: %v", existing.ID, err)
+		}
+	}
+	// 已存在但题面未完成：补入队（例如之前失败/卡住）
+	if !isNew && !parsed.SkipFetch {
+		switch existing.Status {
+		case model.ProblemStatusPending, model.ProblemStatusFailed:
+			if strings.TrimSpace(existing.ContentMD) == "" {
+				if err := uc.enqueueFetch(existing.ID, existing.Platform, existing.ExternalID, existing.URL); err != nil {
+					log.Errorf("re-enqueue fetch problem %d: %v", existing.ID, err)
+				}
+			} else if !pipelineControl.IsAnalyzePaused() {
+				_ = uc.data.DB.Model(&existing).Update("status", model.ProblemStatusTagging).Error
+				if err := uc.enqueueAnalyze(existing.ID); err != nil {
+					log.Errorf("re-enqueue analyze problem %d: %v", existing.ID, err)
+				}
+			}
+		case model.ProblemStatusTagging:
+			if strings.TrimSpace(existing.ContentMD) != "" && !pipelineControl.IsAnalyzePaused() {
+				if err := uc.enqueueAnalyze(existing.ID); err != nil {
+					log.Errorf("re-enqueue analyze problem %d: %v", existing.ID, err)
+				}
+			}
 		}
 	}
 	return &existing, isNew, nil
@@ -151,11 +173,8 @@ func (uc *ProblemUseCase) enqueueAnalyze(id uint) error {
 	})
 }
 
-// ProcessFetch 仅爬取题面；成功后状态 TAGGING 并投递 AI 队列
+// ProcessFetch 仅爬取题面；成功后状态 TAGGING 并投递 AI 队列（不受 AI 紧急停止影响）
 func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetchEvent) error {
-	if pipelineControl.IsPaused() {
-		return fmt.Errorf("pipeline paused")
-	}
 	var p model.Problem
 	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
 		return err
@@ -222,8 +241,8 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 
 // ProcessAnalyze 仅 AI 打标（不爬取、不送用户代码）
 func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAnalyzeEvent) error {
-	if pipelineControl.IsPaused() {
-		return fmt.Errorf("pipeline paused")
+	if pipelineControl.IsAnalyzePaused() {
+		return fmt.Errorf("ai analyze paused")
 	}
 	var p model.Problem
 	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
@@ -650,46 +669,51 @@ func (uc *ProblemUseCase) queueStats() []struct {
 	return out
 }
 
-func (uc *ProblemUseCase) purgeQueues() (purgedFetch, purgedAnalyze int, err error) {
+// purgeAnalyzeQueue 仅清空 AI 分析队列，不动题面爬取队列
+func (uc *ProblemUseCase) purgeAnalyzeQueue() (purgedAnalyze int, err error) {
 	if uc.mq == nil || uc.mq.Ch == nil {
-		return 0, 0, fmt.Errorf("mq not ready")
+		return 0, fmt.Errorf("mq not ready")
 	}
-	for _, name := range []string{"problem_fetch", "problem_analyze"} {
-		_, _ = uc.mq.Ch.QueueDeclare(name, true, false, false, false, nil)
-	}
-	purgedFetch, err = uc.mq.Ch.QueuePurge("problem_fetch", false)
-	if err != nil {
-		return
-	}
-	purgedAnalyze, err = uc.mq.Ch.QueuePurge("problem_analyze", false)
-	return
+	_, _ = uc.mq.Ch.QueueDeclare("problem_analyze", true, false, false, false, nil)
+	return uc.mq.Ch.QueuePurge("problem_analyze", false)
 }
 
-// EmergencyStop 暂停流水线并清空队列
+// EmergencyStop 仅暂停 AI 分析并清空 problem_analyze 队列；题面不删、爬取不停
 func (uc *ProblemUseCase) EmergencyStop() (purgedFetch, purgedAnalyze int, err error) {
-	pipelineControl.SetPaused(true)
-	return uc.purgeQueues()
+	pipelineControl.SetAnalyzePaused(true)
+	purgedAnalyze, err = uc.purgeAnalyzeQueue()
+	return 0, purgedAnalyze, err
 }
 
-// Resume 恢复流水线
+// Resume 恢复 AI 分析
 func (uc *ProblemUseCase) Resume() {
-	pipelineControl.SetPaused(false)
+	pipelineControl.SetAnalyzePaused(false)
 }
 
-// ResetAll 清空队列，将非 COMPLETED 重置为 PENDING 并重新入队
+// ResetAll 仅重置 AI 分析结果（保留 content_md 题面），清空 AI 队列并可选重新入队分析
 func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, purgedAnalyze int, err error) {
-	pipelineControl.SetPaused(true)
-	purgedFetch, purgedAnalyze, err = uc.purgeQueues()
+	pipelineControl.SetAnalyzePaused(true)
+	purgedAnalyze, err = uc.purgeAnalyzeQueue()
 	if err != nil {
 		return
 	}
-	// 卡住中的任务一并重置
+	// 清除分析字段，保留题面 content_md；有题面的回到 TAGGING，无题面保持 PENDING
+	// 1) 有题面：清标签/难度/解法，状态 TAGGING
 	res := uc.data.DB.Model(&model.Problem{}).
-		Where("status != ?", model.ProblemStatusCompleted).
+		Where("status IN ?", []string{
+			model.ProblemStatusCompleted,
+			model.ProblemStatusTagging,
+			model.ProblemStatusFailed,
+		}).
+		Where("content_md IS NOT NULL AND content_md != ''").
 		Where("platform != ?", spider.LeetCode).
 		Updates(map[string]interface{}{
-			"status":    model.ProblemStatusPending,
-			"error_msg": "",
+			"status":         model.ProblemStatusTagging,
+			"problem_type":   "",
+			"difficulty":     "",
+			"tags":           model.StringArray{},
+			"solutions_meta": model.SolutionsMeta{},
+			"error_msg":      "",
 		})
 	if res.Error != nil {
 		err = res.Error
@@ -697,17 +721,31 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 	}
 	reset = int(res.RowsAffected)
 
+	// 2) 无题面的失败/卡住：只清错误，不回删题面（本来就没有）
+	res2 := uc.data.DB.Model(&model.Problem{}).
+		Where("status IN ?", []string{model.ProblemStatusFailed, model.ProblemStatusFetching}).
+		Where("(content_md IS NULL OR content_md = '')").
+		Where("platform != ?", spider.LeetCode).
+		Updates(map[string]interface{}{
+			"status":    model.ProblemStatusPending,
+			"error_msg": "",
+		})
+	if res2.Error == nil {
+		reset += int(res2.RowsAffected)
+	}
+
 	if requeue {
 		var list []model.Problem
-		_ = uc.data.DB.Where("status = ? AND platform != ?", model.ProblemStatusPending, spider.LeetCode).
-			Order("id desc").Limit(2000).Find(&list).Error
+		_ = uc.data.DB.Where("status = ? AND platform != ?", model.ProblemStatusTagging, spider.LeetCode).
+			Where("content_md IS NOT NULL AND content_md != ''").
+			Order("id desc").Limit(3000).Find(&list).Error
 		for _, p := range list {
-			if e := uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL); e == nil {
+			if e := uc.enqueueAnalyze(p.ID); e == nil {
 				enqueued++
 			}
 		}
 	}
-	pipelineControl.SetPaused(false)
+	pipelineControl.SetAnalyzePaused(false)
 	return
 }
 

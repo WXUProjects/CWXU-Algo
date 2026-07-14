@@ -345,7 +345,7 @@ func (s *ProblemService) EmergencyStop(ctx context.Context, req *problem.Emergen
 	}
 	return &problem.EmergencyStopRes{
 		Code:          0,
-		Message:       "已紧急停止并清空队列",
+		Message:       "已暂停 AI 分析并清空分析队列（题面保留）",
 		PurgedFetch:   int64(pf),
 		PurgedAnalyze: int64(pa),
 	}, nil
@@ -365,7 +365,7 @@ func (s *ProblemService) ResetAll(ctx context.Context, req *problem.ResetAllReq)
 	}
 	return &problem.ResetAllRes{
 		Code:          0,
-		Message:       "已全部重置",
+		Message:       "已重置 AI 分析（题面保留）",
 		Reset_:        int64(reset),
 		Enqueued:      int64(enqueued),
 		PurgedFetch:   int64(pf),
@@ -378,5 +378,5 @@ func (s *ProblemService) Resume(ctx context.Context, req *problem.ResumeReq) (*p
 		return &problem.ResumeRes{Code: 1, Message: "仅管理员可操作"}, nil
 	}
 	s.uc.Resume()
-	return &problem.ResumeRes{Code: 0, Message: "流水线已恢复"}, nil
+	return &problem.ResumeRes{Code: 0, Message: "AI 分析已恢复"}, nil
 }

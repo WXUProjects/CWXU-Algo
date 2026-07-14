@@ -63,11 +63,7 @@ func (c *ProblemFetchConsumer) Consume() {
 				_ = d.Nack(false, false)
 				return
 			}
-			if pipelineControl.IsPaused() {
-				// 紧急停止：丢弃消息（队列可能已 purge）
-				_ = d.Ack(false)
-				return
-			}
+			// 题面爬取不因 AI 紧急停止而中断
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			if err := c.problem.ProcessFetch(ctx, msg); err != nil {
@@ -126,11 +122,13 @@ func (c *ProblemAnalyzeConsumer) Consume() {
 				_ = d.Nack(false, false)
 				return
 			}
-			if pipelineControl.IsPaused() {
+			if pipelineControl.IsAnalyzePaused() {
+				// AI 紧急停止：丢弃分析消息（队列可能已 purge）
 				_ = d.Ack(false)
 				return
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			// AI 分析超时 240s
+			ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 			defer cancel()
 			if err := c.problem.ProcessAnalyze(ctx, msg); err != nil {
 				log.Errorf("RabbitMQ(problem_analyze) id=%d: %v", msg.ProblemID, err)
