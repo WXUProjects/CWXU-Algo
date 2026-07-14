@@ -113,7 +113,13 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog) (*model.Problem, bool,
 			log.Errorf("enqueue problem %d: %v", existing.ID, err)
 		}
 	}
-	// 已存在但题面未完成：补入队（例如之前失败/卡住）
+	// 永久失败：升级标记后不再入队
+	if existing.Status == model.ProblemStatusFailed && isPermanentFetchError(existing.ErrorMsg) {
+		_ = uc.data.DB.Model(&existing).Update("status", model.ProblemStatusFailedPerm).Error
+		existing.Status = model.ProblemStatusFailedPerm
+	}
+
+	// 已存在但题面未完成：补入队（例如之前失败/卡住）；FAILED_PERM 永不重试
 	if !isNew && !parsed.SkipFetch {
 		switch existing.Status {
 		case model.ProblemStatusPending, model.ProblemStatusFailed:
@@ -133,6 +139,8 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog) (*model.Problem, bool,
 					log.Errorf("re-enqueue analyze problem %d: %v", existing.ID, err)
 				}
 			}
+		case model.ProblemStatusFailedPerm, model.ProblemStatusSkipped:
+			// 永久失败 / 跳过：不入队
 		}
 	}
 	return &existing, isNew, nil
@@ -188,6 +196,14 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		}
 		return nil
 	}
+	// 永久失败：直接丢弃消息，不再爬
+	if p.Status == model.ProblemStatusFailedPerm {
+		return nil
+	}
+	if p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg) {
+		_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusFailedPerm).Error
+		return nil
+	}
 	if p.Platform == spider.LeetCode || p.Status == model.ProblemStatusSkipped {
 		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
 			"status": model.ProblemStatusSkipped,
@@ -206,6 +222,10 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if res.Error != nil {
 		return res.Error
 	}
+	// 已被别人标成永久失败 / 并发跳过
+	if res.RowsAffected == 0 {
+		return nil
+	}
 
 	url := p.URL
 	if url == "" {
@@ -213,10 +233,19 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	}
 	fetched, err := problem_fetch.Fetch(p.Platform, p.ExternalID, url)
 	if err != nil {
+		msg := truncateErr(err.Error())
+		st := model.ProblemStatusFailed
+		if isPermanentFetchError(msg) {
+			st = model.ProblemStatusFailedPerm
+		}
 		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
-			"status":    model.ProblemStatusFailed,
-			"error_msg": truncateErr(err.Error()),
+			"status":    st,
+			"error_msg": msg,
 		}).Error
+		// 永久失败返回 nil，让消费者 Ack，避免毒消息反复投递
+		if st == model.ProblemStatusFailedPerm {
+			return nil
+		}
 		return err
 	}
 
@@ -256,7 +285,15 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	if p.Status == model.ProblemStatusSkipped || p.Platform == spider.LeetCode {
 		return nil
 	}
+	if p.Status == model.ProblemStatusFailedPerm {
+		return nil
+	}
 	if strings.TrimSpace(p.ContentMD) == "" {
+		// 永久错误不重爬
+		if isPermanentFetchError(p.ErrorMsg) {
+			_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusFailedPerm).Error
+			return nil
+		}
 		// 无题面，退回爬取
 		_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusPending).Error
 		return uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL)
@@ -296,6 +333,7 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 }
 
 // Backfill 历史回填：绑定未关联提交 + 把所有未完成题目塞进 MQ（可紧急停止中断消费）
+// 会先把「未找到题面」等永久错误标为 FAILED_PERM，清空 problem_fetch 后只重入可重试任务。
 func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued int64, err error) {
 	// 0 = 尽量全量（单次最多 5000 提交 + 全量未完成题）
 	if limit <= 0 {
@@ -303,6 +341,17 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 	}
 	// 确保流水线在跑
 	pipelineControl.SetPaused(false)
+
+	// 1) 历史永久错误：FAILED → FAILED_PERM，不再重试
+	_ = uc.markExistingPermanentFailures()
+
+	// 2) 清空爬取队列（去掉里面已永久失败的毒消息）
+	if uc.mq != nil {
+		_, _ = uc.mq.QueueDeclare("problem_fetch", true, false, false, false, nil)
+		if n, perr := uc.mq.QueuePurge("problem_fetch", false); perr == nil {
+			log.Infof("Backfill: purged problem_fetch %d messages", n)
+		}
+	}
 
 	var logs []model.SubmitLog
 	err = uc.data.DB.Where("(problem_id IS NULL OR problem_id = 0) AND platform != ?", spider.LeetCode).
@@ -323,7 +372,7 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		_ = p
 	}
 
-	// 把所有需要处理的题塞进队列（不只新建）
+	// 把所有需要处理的题塞进队列（排除 FAILED_PERM / SKIPPED）
 	var todos []model.Problem
 	_ = uc.data.DB.Where("status IN ? AND platform != ?", []string{
 		model.ProblemStatusPending,
@@ -339,6 +388,12 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 			continue
 		}
 		seen[p.ID] = true
+		// 再拦一层：error_msg 已是永久错误
+		if isPermanentFetchError(p.ErrorMsg) {
+			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+				Update("status", model.ProblemStatusFailedPerm).Error
+			continue
+		}
 		// 已有题面 → AI 队列；否则爬取队列
 		if strings.TrimSpace(p.ContentMD) != "" {
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
@@ -361,6 +416,28 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		}
 	}
 	return
+}
+
+// markExistingPermanentFailures 将历史 FAILED 中匹配永久错误文案的标为 FAILED_PERM
+func (uc *ProblemUseCase) markExistingPermanentFailures() int64 {
+	var list []model.Problem
+	_ = uc.data.DB.Where("status = ?", model.ProblemStatusFailed).
+		Where("error_msg IS NOT NULL AND error_msg != ''").
+		Find(&list).Error
+	var n int64
+	for _, p := range list {
+		if !isPermanentFetchError(p.ErrorMsg) {
+			continue
+		}
+		if err := uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+			Update("status", model.ProblemStatusFailedPerm).Error; err == nil {
+			n++
+		}
+	}
+	if n > 0 {
+		log.Infof("markExistingPermanentFailures: %d → FAILED_PERM", n)
+	}
+	return n
 }
 
 type ListProblemFilter struct {
@@ -785,6 +862,41 @@ func truncateErr(s string) string {
 		return s[:500]
 	}
 	return s
+}
+
+// isPermanentFetchError 不可恢复的爬取错误：不再重试、不再入队
+// 例如 CF/洛谷/牛客「未找到题面」、无 URL、不支持平台等
+func isPermanentFetchError(msg string) bool {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return false
+	}
+	// 网络/拦截类可重试，明确排除
+	if strings.Contains(msg, "Cloudflare") ||
+		strings.Contains(msg, "请稍后重试") ||
+		strings.Contains(msg, "需要登录") ||
+		strings.Contains(msg, "被拦截") {
+		return false
+	}
+	permanent := []string{
+		"未找到题面",
+		"未找到题面 DOM",
+		"无法解析 CF external_id",
+		"LeetCode 不支持爬取",
+		"不支持的平台",
+		"缺少题面 URL",
+		"竞赛题无稳定题面 URL",
+		"AtCoder 缺少 URL",
+		"empty url",
+		"题面为空",
+		"JSON 无题面",
+	}
+	for _, p := range permanent {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func mapSubmitStatus(s string) string {
