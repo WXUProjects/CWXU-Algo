@@ -303,10 +303,15 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 		return uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL)
 	}
 
-	// 近 6 个月：以 submit_logs 最近提交为准（不是只看可能过期的 last_submitted_at）
+	// 近 6 个月：以 submit_logs 最近提交为准（与看板「待分析近6月」同一口径）
 	if !uc.withinAnalyzeWindow(&p) {
-		log.Infof("ProcessAnalyze skip out-of-window id=%d last=%v", p.ID, p.LastSubmittedAt)
-		// 保持 TAGGING，避免误标失败；入队侧应已过滤，这里防脏消息
+		// 超窗：不再占「待分析」名额；静默 Ack 会让人以为在跑 AI
+		log.Warnf("ProcessAnalyze out-of-window id=%d last=%v → SKIPPED_ANALYZE", p.ID, p.LastSubmittedAt)
+		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+			"status":    model.ProblemStatusTagging, // 仍保留有题面待分析语义
+			"error_msg": "超出6个月分析窗口(以submit_logs最近提交为准)，已跳过",
+		}).Error
+		// 返回 error 会 requeue；此处 Ack 丢弃，靠重置/新提交再入队
 		return nil
 	}
 
@@ -380,13 +385,24 @@ func (uc *ProblemUseCase) refreshLastSubmittedAt(p *model.Problem) *time.Time {
 }
 
 // withinAnalyzeWindow 是否在 AI 分析 6 个月窗口内（以 submit_logs 为准）
-// last_submitted_at / 提交时间为空：视为可分析（与历史入队 NULL 兼容）
+// 无任何提交记录：不算近 6 月，不分析（避免 NULL last_submitted_at 虚高待分析后入队即 Ack）
 func (uc *ProblemUseCase) withinAnalyzeWindow(p *model.Problem) bool {
 	t := uc.refreshLastSubmittedAt(p)
 	if t == nil {
-		return true
+		return false
 	}
 	return !t.Before(time.Now().Add(-backfillWindow))
+}
+
+// sqlRecentSubmitCutoff 近 6 月有提交：submit_logs 存在 time>=cutoff 的绑定记录
+// 用于 Progress 统计 / ResetAll 入队，与 ProcessAnalyze 窗口一致
+func sqlHasRecentSubmit(cutoff time.Time) (clause string, args []interface{}) {
+	return `EXISTS (
+		SELECT 1 FROM submit_logs s
+		WHERE s.problem_id = problems.id
+		  AND s.time IS NOT NULL
+		  AND s.time >= ?
+	)`, []interface{}{cutoff}
 }
 
 // Backfill 历史回填：绑定未关联提交 + 按题面是否已爬决定入队
@@ -849,9 +865,10 @@ func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
 		Status string
 		Count  int64
 	}
-	// 全量：PENDING / FETCHING / COMPLETED（爬取不限时间；已完成看全库）
-	// 近 6 个月：TAGGING / FAILED / FAILED_PERM / SKIPPED 等（与 AI 入队窗口一致）
+	// 全量：PENDING / FETCHING / COMPLETED
+	// 近 6 个月：以 submit_logs 有 time>=cutoff 为准（与 ProcessAnalyze 一致，禁止 NULL 虚高）
 	cutoff := time.Now().Add(-backfillWindow)
+	recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
 	fullStatuses := []string{
 		model.ProblemStatusPending,
 		model.ProblemStatusFetching,
@@ -868,7 +885,7 @@ func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
 	if err := uc.data.DB.Model(&model.Problem{}).
 		Select("status, count(*) as count").
 		Where("status NOT IN ?", fullStatuses).
-		Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
+		Where(recentClause, recentArgs...).
 		Group("status").Scan(&recent).Error; err != nil {
 		return snap, err
 	}
@@ -881,15 +898,15 @@ func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
 		snap.Total += r.Count
 	}
 	_ = uc.data.DB.Where("status = ?", model.ProblemStatusFailed).
-		Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
+		Where(recentClause, recentArgs...).
 		Order("updated_at desc").Limit(20).Find(&snap.Failed).Error
 	_ = uc.data.DB.Where("status = ?", model.ProblemStatusFailedPerm).
-		Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
+		Where(recentClause, recentArgs...).
 		Order("updated_at desc").Limit(50).Find(&snap.FailedPerm).Error
-	// 爬取中全量；待分析仅近 6 个月
+	// 爬取中全量；待分析仅近 6 个月（submit_logs）
 	_ = uc.data.DB.Where(
-		"(status = ?) OR (status = ? AND (last_submitted_at IS NULL OR last_submitted_at >= ?))",
-		model.ProblemStatusFetching, model.ProblemStatusTagging, cutoff,
+		"(status = ?) OR (status = ? AND "+recentClause+")",
+		append([]interface{}{model.ProblemStatusFetching, model.ProblemStatusTagging}, recentArgs...)...,
 	).Order("updated_at desc").Limit(30).Find(&snap.InProgress).Error
 
 	snap.Paused = pipelineControl.IsAnalyzePaused()
@@ -933,10 +950,11 @@ func (uc *ProblemUseCase) queueStats() []struct {
 		// inspect 失败时用 DB 近似积压
 		if !inspected {
 			cq := uc.data.DB.Model(&model.Problem{}).Where("status = ?", q.stat)
-			// 分析队列仅近 6 个月；爬取队列全量
+			// 分析队列仅近 6 个月（submit_logs）；爬取队列全量
 			if q.name == "problem_analyze" {
 				cutoff := time.Now().Add(-backfillWindow)
-				cq = cq.Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff)
+				rc, ra := sqlHasRecentSubmit(cutoff)
+				cq = cq.Where(rc, ra...)
 			}
 			_ = cq.Count(&msgs).Error
 			if q.name == "problem_fetch" {
@@ -1057,8 +1075,7 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 	}
 
 	if requeue {
-		// 分析入队：仅近 6 个月有提交（submit_logs.MAX(time) 或 last_submitted_at）
-		// 先批量回写 last_submitted_at，再按窗口过滤
+		// 批量回写 last_submitted_at ← submit_logs.MAX(time)
 		_ = uc.data.DB.Exec(`
 			UPDATE problems p
 			SET last_submitted_at = s.mx
@@ -1072,18 +1089,21 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 			  AND (p.last_submitted_at IS NULL OR p.last_submitted_at < s.mx)
 		`).Error
 
+		// 仅：有题面 + TAGGING + submit_logs 近 6 月有提交（禁止 NULL 虚入队）
 		cutoff := time.Now().Add(-backfillWindow)
+		recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
 		var list []model.Problem
-		_ = uc.data.DB.Where("status = ? AND platform != ?", model.ProblemStatusTagging, spider.LeetCode).
+		q := uc.data.DB.Where("status = ? AND platform != ?", model.ProblemStatusTagging, spider.LeetCode).
 			Where("content_md IS NOT NULL AND content_md != ''").
-			Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
-			Order("last_submitted_at DESC NULLS LAST, id DESC").Find(&list).Error
+			Where(recentClause, recentArgs...).
+			Order("last_submitted_at DESC NULLS LAST, id DESC")
+		_ = q.Find(&list).Error
 		for _, p := range list {
 			if e := uc.enqueueAnalyze(p.ID); e == nil {
 				enqueued++
 			}
 		}
-		log.Infof("ResetAll: reset=%d analyze_enqueued=%d (window 6m via submit_logs)", reset, enqueued)
+		log.Infof("ResetAll: reset=%d analyze_enqueued=%d (strict 6m via submit_logs EXISTS)", reset, enqueued)
 	}
 	pipelineControl.SetAnalyzePaused(false)
 	return
