@@ -59,14 +59,18 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*
 	}
 	system := `你是算法题目标签分析器。快速、粗略分析即可，不必深入推导，不要长篇推理。
 仅输出 JSON，不要 markdown 代码块，不要解释过程。
-硬性要求：algorithm_tags、problem_type、suggested_solutions 的 name/brief_explanation 必须中文；英文标签要译成中文（DP→动态规划，BFS→广度优先搜索）。
-若题面排版混乱，可在 content_md 字段输出整理后的 Markdown 题面（标题/输入输出/样例分段清晰）；否则 content_md 可为空字符串。
+
+【最高优先级】所有字符串字段的可见文字必须是中文，禁止英文单词/短语作为展示内容。
+包括但不限于：problem_type、difficulty、algorithm_tags、suggested_solutions 的 name/brief_explanation/time_complexity/space_complexity、content_md 中的标题与说明。
+若题面为英文：标签与类型仍用中文；content_md 可保留必要英文专有名词，但章节标题与说明用中文。
+英文算法名必须译成中文，例如：DP→动态规划，BFS→广度优先搜索，DFS→深度优先搜索，Dijkstra→最短路，Binary Search→二分查找。
+
 字段：
-- problem_type: 中文模块名
-- difficulty: Easy | Medium | Hard
-- algorithm_tags: 中文算法标签数组（2~6 个即可）
-- suggested_solutions: 1~2 个即可，含 name, time_complexity, space_complexity, brief_explanation（各一两句）
-- content_md: 可选，优化排版后的中文/原文 Markdown 题面
+- problem_type: 中文模块名（图论、动态规划、数据结构、数学、字符串、贪心等）
+- difficulty: 只能是 简单 / 中等 / 困难
+- algorithm_tags: 中文算法标签数组（2~6 个）
+- suggested_solutions: 1~2 个，含 name, time_complexity, space_complexity, brief_explanation（中文，各一两句；复杂度可用 O(n) 这种数学写法）
+- content_md: 可选，优化排版后的 Markdown 题面；章节名用中文（题意、输入、输出、样例、说明）；不需要则空字符串
 禁止分析用户代码；不要输出除 JSON 外的任何文字。`
 	user := fmt.Sprintf("标题: %s\n\n题面:\n%s", title, content)
 
@@ -142,14 +146,14 @@ func normalizeDifficulty(d string) string {
 	d = strings.TrimSpace(d)
 	switch strings.ToLower(d) {
 	case "easy", "简单", "入门":
-		return "Easy"
+		return "简单"
 	case "medium", "中等", "中级":
-		return "Medium"
+		return "中等"
 	case "hard", "困难", "高级":
-		return "Hard"
+		return "困难"
 	default:
 		if d == "" {
-			return "Medium"
+			return "中等"
 		}
 		return d
 	}
