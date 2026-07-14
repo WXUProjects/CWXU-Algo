@@ -10,6 +10,7 @@ message Bootstrap {
   Data data = 2;
   Agent agent = 3;
   SMTP smtp = 4;
+  AiAnalyze ai_analyze = 5;
 }
 
 message Server {
@@ -56,4 +57,11 @@ message SMTP {
   string username = 3;
   string password = 4;
   string from = 5;
+}
+
+// 题库 AI 打标专用配置（与 agent 聊天隔离，OpenAI 兼容接口）
+message AiAnalyze {
+  string endpoint = 1;
+  string model = 2;
+  string secret = 3;
 }

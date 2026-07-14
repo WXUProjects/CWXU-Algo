@@ -1,0 +1,187 @@
+syntax = "proto3";
+
+package api.core.v1.problem;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/core/v1/problem;problem";
+option java_multiple_files = true;
+option java_package = "api.core.v1.problem";
+
+service Problem {
+  rpc List (ListProblemReq) returns (ListProblemRes) {
+    option (google.api.http) = {
+      get: "/v1/core/problem/list"
+    };
+  }
+  rpc Get (GetProblemReq) returns (GetProblemRes) {
+    option (google.api.http) = {
+      get: "/v1/core/problem/get"
+    };
+  }
+  rpc ListSubmissions (ListSubmissionsReq) returns (ListSubmissionsRes) {
+    option (google.api.http) = {
+      get: "/v1/core/problem/submissions"
+    };
+  }
+  rpc UserProfile (UserProfileReq) returns (UserProfileRes) {
+    option (google.api.http) = {
+      get: "/v1/core/problem/user-profile"
+    };
+  }
+  rpc Progress (ProgressReq) returns (ProgressRes) {
+    option (google.api.http) = {
+      get: "/v1/core/problem/progress"
+    };
+  }
+  rpc Backfill (BackfillReq) returns (BackfillRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/backfill"
+      body: "*"
+    };
+  }
+}
+
+message SolutionMeta {
+  string name = 1;
+  string time_complexity = 2;
+  string space_complexity = 3;
+  string brief_explanation = 4;
+}
+
+message ProblemInfo {
+  uint32 id = 1;
+  string platform = 2;
+  string external_id = 3;
+  string title = 4;
+  string url = 5;
+  string content_md = 6;
+  string problem_type = 7;
+  repeated string tags = 8;
+  repeated SolutionMeta solutions = 9;
+  string difficulty = 10;
+  string status = 11;
+  string error_msg = 12;
+  int64 last_submitted_at = 13;
+  // 当前用户对该题状态: AC / TRIED / NONE（仅 list 且传 userId 时）
+  string user_status = 14;
+}
+
+message ListProblemReq {
+  int64 page = 1;
+  int64 page_size = 2;
+  // 排序: latest_desc(默认) / latest_asc
+  string sort = 3;
+  // 多平台逗号分隔
+  string platforms = 4;
+  // 标签逗号分隔，匹配任一
+  string tags = 5;
+  // 用户做题状态过滤: AC / TRIED / NONE（需 user_id）
+  string user_status = 6;
+  int64 user_id = 7;
+}
+
+message ListProblemRes {
+  int64 code = 1;
+  string message = 2;
+  repeated ProblemInfo data = 3;
+  int64 total = 4;
+  int64 page = 5;
+  int64 page_size = 6;
+}
+
+message GetProblemReq {
+  uint32 id = 1;
+}
+
+message GetProblemRes {
+  int64 code = 1;
+  string message = 2;
+  ProblemInfo data = 3;
+}
+
+message SubmissionInfo {
+  uint32 id = 1;
+  int64 user_id = 2;
+  string platform = 3;
+  string submit_id = 4;
+  string lang = 5;
+  string status = 6;
+  int64 time = 7;
+  string contest = 8;
+}
+
+message ListSubmissionsReq {
+  uint32 problem_id = 1;
+  int64 page = 2;
+  int64 page_size = 3;
+  int64 user_id = 4;
+}
+
+message ListSubmissionsRes {
+  int64 code = 1;
+  string message = 2;
+  repeated SubmissionInfo data = 3;
+  int64 total = 4;
+}
+
+message TagScore {
+  string tag = 1;
+  double score = 2;
+  int64 ac_count = 3;
+}
+
+message NamedCount {
+  string name = 1;
+  int64 count = 2;
+}
+
+message UserProfileReq {
+  int64 user_id = 1;
+}
+
+message UserProfileRes {
+  int64 code = 1;
+  string message = 2;
+  repeated TagScore radar = 3;
+  repeated NamedCount platforms = 4;
+  repeated NamedCount difficulties = 5;
+  int64 total_ac = 6;
+}
+
+message ProgressReq {}
+
+message ProgressItem {
+  string status = 1;
+  int64 count = 2;
+}
+
+message FailedProblem {
+  uint32 id = 1;
+  string platform = 2;
+  string external_id = 3;
+  string title = 4;
+  string error_msg = 5;
+  int64 updated_at = 6;
+}
+
+message ProgressRes {
+  int64 code = 1;
+  string message = 2;
+  repeated ProgressItem items = 3;
+  repeated FailedProblem recent_failed = 4;
+  int64 total = 5;
+}
+
+message BackfillReq {
+  // 最大处理条数，0 表示默认 500
+  int64 limit = 1;
+}
+
+message BackfillRes {
+  int64 code = 1;
+  string message = 2;
+  int64 scanned = 3;
+  int64 bound = 4;
+  int64 created = 5;
+  int64 enqueued = 6;
+}

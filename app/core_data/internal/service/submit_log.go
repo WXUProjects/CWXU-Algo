@@ -45,16 +45,21 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 		if v.Platform == "LeetCode" {
 			continue
 		}
+		var problemID uint32
+		if v.ProblemID != nil {
+			problemID = uint32(*v.ProblemID)
+		}
 		r = append(r, &submit_log.SubmitLog{
-			Id:       uint32(v.ID),
-			UserId:   v.UserID,
-			Platform: v.Platform,
-			SubmitId: v.SubmitID,
-			Contest:  v.Contest,
-			Problem:  v.Problem,
-			Lang:     v.Lang,
-			Status:   v.Status,
-			Time:     v.Time.Unix(),
+			Id:        uint32(v.ID),
+			UserId:    v.UserID,
+			Platform:  v.Platform,
+			SubmitId:  v.SubmitID,
+			Contest:   v.Contest,
+			Problem:   v.Problem,
+			Lang:      v.Lang,
+			Status:    v.Status,
+			Time:      v.Time.Unix(),
+			ProblemId: problemID,
 		})
 		if int64(len(r)) >= limit {
 			break

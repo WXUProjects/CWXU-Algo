@@ -14,12 +14,14 @@ import (
 )
 
 type SpiderUseCase struct {
-	data *data.Data
+	data    *data.Data
+	problem *ProblemUseCase
 }
 
-func NewSpiderUseCase(data *data.Data) *SpiderUseCase {
+func NewSpiderUseCase(data *data.Data, problem *ProblemUseCase) *SpiderUseCase {
 	return &SpiderUseCase{
-		data: data,
+		data:    data,
+		problem: problem,
 	}
 }
 
@@ -100,6 +102,9 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 		if err == nil {
 			log.Infof("Spider: %s %s 成功", plat.Platform, plat.Username)
 			uc.invalidateCache(userId)
+			if uc.problem != nil {
+				uc.problem.BindSubmitsAfterSpider(userId)
+			}
 			return
 		}
 		if strings.Contains(err.Error(), "平台") {

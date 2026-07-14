@@ -25,6 +25,7 @@ message SubmitLog {
   string lang = 7;                         // 语言
   string status = 8;                       // 状态
   int64 time = 9;                          // 提交时间
+  uint32 problem_id = 10;                  // 内部题库 ID，0 表示未关联
 }
 message GetSubmitLogReq {
   int64 user_id = 1;

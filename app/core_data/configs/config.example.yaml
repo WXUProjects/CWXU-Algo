@@ -16,3 +16,8 @@ data:
     password: cwxu
     read_timeout: 0.2s
     write_timeout: 0.2s
+
+ai_analyze:
+  endpoint: http://103.24.219.60:8001/api
+  model: glm-5-2-260617
+  secret: xxx

@@ -28,7 +28,7 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, aiAnalyze *conf.AiAnalyze) (*kratos.App, func(), error) {
 	dataData, cleanup, err := data.NewData(confData)
 	if err != nil {
 		return nil, nil, err
@@ -52,12 +52,16 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	contestLogService := service.NewContestLogService(spiderDal, dataData, register)
 	bulletinDal := dal.NewBulletinDal(dataData)
 	bulletinService := service.NewBulletinService(bulletinDal)
-	httpServer := server.NewHTTPServer(confServer, logger, submitLogService, spiderService, statisticService, contestLogService, bulletinService)
-	spiderUseCase := service2.NewSpiderUseCase(dataData)
+	problemTagger := service2.NewProblemTagger(aiAnalyze)
+	problemUseCase := service2.NewProblemUseCase(dataData, rabbitMQ, problemTagger)
+	problemService := service.NewProblemService(problemUseCase)
+	httpServer := server.NewHTTPServer(confServer, logger, submitLogService, spiderService, statisticService, contestLogService, bulletinService, problemService)
+	spiderUseCase := service2.NewSpiderUseCase(dataData, problemUseCase)
 	consumer := service2.NewConsumer(rabbitMQ, spiderUseCase)
+	problemFetchConsumer := service2.NewProblemFetchConsumer(rabbitMQ, problemUseCase)
 	summaryTask := task.NewSummaryTask(rabbitMQ)
 	cronTask := task.NewCronTask(spiderTask, dataData, summaryTask, register)
-	app := newApp(logger, grpcServer, httpServer, register, consumer, cronTask)
+	app := newApp(logger, grpcServer, httpServer, register, consumer, problemFetchConsumer, cronTask)
 	return app, func() {
 		cleanup2()
 		cleanup()
