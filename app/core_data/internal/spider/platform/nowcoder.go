@@ -113,16 +113,33 @@ func isDigits(s string) bool {
 	return true
 }
 
+// normalizeNowCoderUUID 主站 questionUuid：32 位 hex（可带连字符）
+func normalizeNowCoderUUID(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.ReplaceAll(s, "-", "")
+	if len(s) != 32 {
+		return ""
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return ""
+		}
+	}
+	return s
+}
+
 func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []model.SubmitLog {
 	// ===== record 定义（必须是命名类型）=====
 	type Record struct {
 		Problem struct {
-			// id = 题库数字 id，对应 https://ac.nowcoder.com/acm/problem/{id}
-			// questionNum 可能是 "309177" 或 "ACM3227"（展示号，不能当 external_id）
-			ID          int64  `json:"id"`
-			QuestionID  int64  `json:"questionId"`
-			QuestionNum string `json:"questionNum"`
-			Title       string `json:"title"`
+			// AC 站：id = 题库数字 id → https://ac.nowcoder.com/acm/problem/{id}
+			// 主站：questionUuid = 32 位 hex → https://www.nowcoder.com/practice/{uuid}
+			// questionNum 可能是 "309177" 或 "ACM413"（展示号，不能当 external_id）
+			ID           int64  `json:"id"`
+			QuestionID   int64  `json:"questionId"`
+			QuestionNum  string `json:"questionNum"`
+			QuestionUUID string `json:"questionUuid"`
+			Title        string `json:"title"`
 		} `json:"problem"`
 		Submission struct {
 			ID          int64 `json:"id"`
@@ -180,22 +197,32 @@ func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []mo
 
 	handle := func(records []Record) bool {
 		for _, it := range records {
-			// 稳定 external_id 必须用数字题库 id，不能用 questionNum（可能是 ACM3227）
-			pid := it.Problem.ID
-			if pid == 0 {
-				pid = it.Problem.QuestionID
-			}
 			title := strings.TrimSpace(it.Problem.Title)
+			// 主站：优先 questionUuid（32 hex）；AC 站：数字 id
+			// 写入 "id 标题" 供 parseNowCoder 识别
 			problem := title
-			if pid > 0 {
+			uuid := normalizeNowCoderUUID(it.Problem.QuestionUUID)
+			if uuid != "" {
 				if title != "" {
-					problem = strconv.FormatInt(pid, 10) + " " + title
+					problem = uuid + " " + title
 				} else {
-					problem = strconv.FormatInt(pid, 10)
+					problem = uuid
 				}
-			} else if qn := strings.TrimSpace(it.Problem.QuestionNum); qn != "" {
-				// 兜底：纯数字 questionNum 也可用
-				problem = strings.TrimSpace(qn + " " + title)
+			} else {
+				pid := it.Problem.ID
+				if pid == 0 {
+					pid = it.Problem.QuestionID
+				}
+				if pid > 0 {
+					if title != "" {
+						problem = strconv.FormatInt(pid, 10) + " " + title
+					} else {
+						problem = strconv.FormatInt(pid, 10)
+					}
+				} else if qn := strings.TrimSpace(it.Problem.QuestionNum); qn != "" && isDigits(qn) {
+					// 兜底：仅纯数字 questionNum 可用（ACM413 等展示号不可）
+					problem = strings.TrimSpace(qn + " " + title)
+				}
 			}
 			result = append(result, model.SubmitLog{
 				UserID:   userId,

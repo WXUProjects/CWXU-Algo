@@ -369,14 +369,17 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 	pipelineControl.SetAnalyzePaused(false)
 	pipelineControl.SetFetchPaused(false)
 
-	// 0) 牛客错误 external_id：非纯数字 → 解绑后重解析
+	// 0) 牛客错误 external_id：既非 AC 数字 id、也非主站 32hex UUID → 解绑后重解析
 	if res := uc.data.DB.Exec(`
 		UPDATE submit_logs
 		SET problem_id = NULL, external_id = ''
 		WHERE platform = ?
 		  AND (
 		    external_id IS NULL OR external_id = ''
-		    OR external_id !~ '^[0-9]+$'
+		    OR (
+		      external_id !~ '^[0-9]+$'
+		      AND external_id !~ '^[0-9a-fA-F]{32}$'
+		    )
 		  )
 	`, spider.NowCoder); res.Error == nil && res.RowsAffected > 0 {
 		log.Infof("Backfill: unbound %d NowCoder submits with bad external_id", res.RowsAffected)

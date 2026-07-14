@@ -77,7 +77,8 @@ func httpGet(rawURL string) (*http.Response, error) {
 	return client.Do(req)
 }
 
-// 牛客 WAF：无 Cookie 会返回阿里云滑块页；先访问首页拿 Cookie 再抓题面
+// 牛客 WAF：无 Cookie 会返回阿里云滑块页；先访问对应站点首页拿 Cookie 再抓题面
+// AC 站 ac.nowcoder.com；主站 www.nowcoder.com（/practice/{uuid}）
 var (
 	nowcoderClientOnce sync.Once
 	nowcoderClient     *http.Client
@@ -94,8 +95,18 @@ func getNowCoderClient() *http.Client {
 	return nowcoderClient
 }
 
-func nowcoderWarmup(client *http.Client) {
-	req, err := http.NewRequest(http.MethodGet, "https://ac.nowcoder.com/", nil)
+func nowcoderSiteOrigin(rawURL string) string {
+	if strings.Contains(rawURL, "www.nowcoder.com") {
+		return "https://www.nowcoder.com"
+	}
+	return "https://ac.nowcoder.com"
+}
+
+func nowcoderWarmup(client *http.Client, origin string) {
+	if origin == "" {
+		origin = "https://ac.nowcoder.com"
+	}
+	req, err := http.NewRequest(http.MethodGet, origin+"/", nil)
 	if err != nil {
 		return
 	}
@@ -110,18 +121,41 @@ func nowcoderWarmup(client *http.Client) {
 
 func nowcoderGet(rawURL string) (*http.Response, error) {
 	client := getNowCoderClient()
-	// 无 Cookie 时先预热首页
-	if u, err := url.Parse("https://ac.nowcoder.com/"); err == nil {
+	origin := nowcoderSiteOrigin(rawURL)
+	// 无 Cookie 时先预热对应站点首页
+	if u, err := url.Parse(origin + "/"); err == nil {
 		if len(client.Jar.Cookies(u)) == 0 {
-			nowcoderWarmup(client)
+			nowcoderWarmup(client, origin)
 		}
 	}
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	setBrowserHeaders(req, "https://ac.nowcoder.com/")
+	setBrowserHeaders(req, origin+"/")
 	return client.Do(req)
+}
+
+func nowcoderClearCookies(origin string) {
+	if origin == "" {
+		origin = "https://ac.nowcoder.com"
+	}
+	if u, e := url.Parse(origin + "/"); e == nil {
+		getNowCoderClient().Jar.SetCookies(u, nil)
+	}
+}
+
+func isNowCoderUUID(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(strings.ReplaceAll(s, "-", "")))
+	if len(s) != 32 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func isNowCoderWAF(html string) bool {
@@ -442,19 +476,25 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 		if externalID == "" {
 			return nil, fmt.Errorf("NowCoder 缺少题面 URL 与 external_id")
 		}
-		// 数字题号 → 练习题；从 external_id 提取纯数字前缀
-		id := externalID
-		if !isAllDigits(id) {
-			if m := regexp.MustCompile(`^\d+`).FindString(id); m != "" {
-				id = m
+		id := strings.TrimSpace(externalID)
+		// 主站：32 hex UUID → www.nowcoder.com/practice/{uuid}
+		if isNowCoderUUID(id) {
+			problemURL = "https://www.nowcoder.com/practice/" + strings.ToLower(strings.ReplaceAll(id, "-", ""))
+		} else {
+			// AC 站：数字题号 → ac.nowcoder.com/acm/problem/{id}
+			if !isAllDigits(id) {
+				if m := regexp.MustCompile(`^\d+`).FindString(id); m != "" {
+					id = m
+				}
+			}
+			if isAllDigits(id) {
+				problemURL = "https://ac.nowcoder.com/acm/problem/" + id
+			} else {
+				return nil, fmt.Errorf("NowCoder 无稳定题面 URL，跳过爬取")
 			}
 		}
-		if isAllDigits(id) {
-			problemURL = "https://ac.nowcoder.com/acm/problem/" + id
-		} else {
-			return nil, fmt.Errorf("NowCoder 竞赛题无稳定题面 URL，跳过爬取")
-		}
 	}
+	origin := nowcoderSiteOrigin(problemURL)
 	resp, err := nowcoderGet(problemURL)
 	if err != nil {
 		return nil, err
@@ -470,10 +510,8 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 	}
 	// WAF 滑块页：清 Cookie 再预热重试一次
 	if isNowCoderWAF(html) {
-		if u, e := url.Parse("https://ac.nowcoder.com/"); e == nil {
-			getNowCoderClient().Jar.SetCookies(u, nil)
-		}
-		nowcoderWarmup(getNowCoderClient())
+		nowcoderClearCookies(origin)
+		nowcoderWarmup(getNowCoderClient(), origin)
 		resp2, err2 := nowcoderGet(problemURL)
 		if err2 != nil {
 			return nil, fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")

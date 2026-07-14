@@ -22,8 +22,10 @@ var (
 	reLuoGuPID            = regexp.MustCompile(`^([A-Z]\d+)\s+(.+)$`)
 	reAtCoderTask         = regexp.MustCompile(`^[a-z0-9_]+$`)
 	reQOJNum              = regexp.MustCompile(`#?\s*(\d+)`)
-	reDigits              = regexp.MustCompile(`^\d+$`)
-	reNowCoderProblemURL  = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/acm/problem/(\d+)`)
+	reDigits                 = regexp.MustCompile(`^\d+$`)
+	reNowCoderProblemURL     = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/acm/problem/(\d+)`)
+	reNowCoderPracticeURL    = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/practice/([0-9a-fA-F-]{32,36})`)
+	reNowCoderUUID           = regexp.MustCompile(`(?i)^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$|^[0-9a-f]{32}$`)
 )
 
 // ParseProblemIdentity 从 SubmitLog 字段解析 (platform, external_id)
@@ -149,62 +151,104 @@ func parseLuoGu(problem string) (*ParsedProblem, error) {
 }
 
 func parseNowCoder(contest, problem string) (*ParsedProblem, error) {
-	// 正确 external_id = 牛客题库数字 id（/acm/problem/{id}）
-	// Problem 期望形如 "309177 【模板】高精度加法"；禁止用 questionNum(ACM3227) 或 main|uid 当 id
+	// AC 站 external_id = 数字 id → https://ac.nowcoder.com/acm/problem/{id}
+	// 主站 external_id = questionUuid（32 hex）→ https://www.nowcoder.com/practice/{uuid}
+	// 禁止用 questionNum(ACM413) 或 main|uid 当 id
 	title := strings.TrimSpace(problem)
 	ext := ""
+	isMainSite := false
 
-	// 1) 文本里的 /acm/problem/123 或 /problem/123
-	if m := reNowCoderProblemURL.FindStringSubmatch(problem); m != nil {
-		ext = m[1]
-		// 标题尽量去掉 URL 残留
-		title = strings.TrimSpace(reNowCoderProblemURL.ReplaceAllString(problem, ""))
+	// 1) 主站 practice URL
+	if m := reNowCoderPracticeURL.FindStringSubmatch(problem); m != nil {
+		if u := normalizeNowCoderUUID(m[1]); u != "" {
+			ext = u
+			isMainSite = true
+			title = strings.TrimSpace(reNowCoderPracticeURL.ReplaceAllString(problem, ""))
+		}
 	}
 
-	// 2) 以纯数字开头："309177 标题"
+	// 2) AC 站 /acm/problem/123
+	if ext == "" {
+		if m := reNowCoderProblemURL.FindStringSubmatch(problem); m != nil {
+			ext = m[1]
+			title = strings.TrimSpace(reNowCoderProblemURL.ReplaceAllString(problem, ""))
+		}
+	}
+
+	// 3) 字段首 token：UUID 或纯数字
 	if ext == "" {
 		fields := strings.Fields(problem)
-		if len(fields) > 0 && reDigits.MatchString(fields[0]) {
-			ext = fields[0]
-			if len(fields) > 1 {
-				title = strings.Join(fields[1:], " ")
-			} else {
-				title = ext
+		if len(fields) > 0 {
+			if u := normalizeNowCoderUUID(fields[0]); u != "" {
+				ext = u
+				isMainSite = true
+				if len(fields) > 1 {
+					title = strings.Join(fields[1:], " ")
+				} else {
+					title = ext
+				}
+			} else if reDigits.MatchString(fields[0]) {
+				ext = fields[0]
+				if len(fields) > 1 {
+					title = strings.Join(fields[1:], " ")
+				} else {
+					title = ext
+				}
 			}
 		}
 	}
 
-	// 3) 整段纯数字
-	if ext == "" && reDigits.MatchString(strings.TrimSpace(problem)) {
-		ext = strings.TrimSpace(problem)
-		title = ext
+	// 4) 整段 UUID / 纯数字
+	if ext == "" {
+		raw := strings.TrimSpace(problem)
+		if u := normalizeNowCoderUUID(raw); u != "" {
+			ext = u
+			isMainSite = true
+			title = ext
+		} else if reDigits.MatchString(raw) {
+			ext = raw
+			title = ext
+		}
 	}
 
-	// 4) contest 若是纯数字比赛 id 且 problem 无数字 id：竞赛题无稳定练习题号 → 跳过爬取
-	// 绝不使用 main|username / 标题 sanitize 当 external_id（会全站串题）
+	// 5) contest 若是纯数字比赛 id 且 problem 无稳定 id：竞赛题无法去重 → 跳过
 	if ext == "" {
-		// 尝试从 contest 提取数字（真实 contest id，不是 main|uid）
 		c := contest
 		if i := strings.Index(c, "|"); i >= 0 {
-			// main|uid 不是比赛 id，忽略
 			c = ""
 		}
 		if reDigits.MatchString(c) {
-			// 竞赛提交但无题目数字 id：无法稳定去重，跳过题库
-			return nil, fmt.Errorf("nowcoder contest problem without numeric id")
+			return nil, fmt.Errorf("nowcoder contest problem without stable id")
 		}
-		return nil, fmt.Errorf("nowcoder missing numeric problem id: %q", problem)
+		return nil, fmt.Errorf("nowcoder missing problem id: %q", problem)
 	}
 
 	if title == "" {
 		title = ext
 	}
+	problemURL := "https://ac.nowcoder.com/acm/problem/" + ext
+	if isMainSite {
+		problemURL = "https://www.nowcoder.com/practice/" + ext
+	}
 	return &ParsedProblem{
 		Platform:   spider.NowCoder,
 		ExternalID: ext,
 		Title:      title,
-		URL:        "https://ac.nowcoder.com/acm/problem/" + ext,
+		URL:        problemURL,
 	}, nil
+}
+
+// normalizeNowCoderUUID 主站 questionUuid：32 位 hex（可带连字符），统一去掉连字符入库
+func normalizeNowCoderUUID(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if !reNowCoderUUID.MatchString(s) {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "-", "")
+	if len(s) != 32 {
+		return ""
+	}
+	return s
 }
 
 func parseQOJ(problem string) (*ParsedProblem, error) {

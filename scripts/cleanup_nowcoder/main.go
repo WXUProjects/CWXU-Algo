@@ -50,16 +50,21 @@ func main() {
 		mustPrint(db, "submit_logs NowCoder", `
 			SELECT
 			  COUNT(*)::text AS total,
-			  COUNT(*) FILTER (WHERE external_id ~ '^[0-9]+$')::text AS good_digit_eid,
+			  COUNT(*) FILTER (WHERE external_id ~ '^[0-9]+$')::text AS ac_digit_eid,
+			  COUNT(*) FILTER (WHERE external_id ~ '^[0-9a-fA-F]{32}$')::text AS main_uuid_eid,
 			  COUNT(*) FILTER (WHERE external_id IS NULL OR external_id = '')::text AS empty_eid,
-			  COUNT(*) FILTER (WHERE external_id IS NOT NULL AND external_id <> '' AND external_id !~ '^[0-9]+$')::text AS bad_eid,
+			  COUNT(*) FILTER (WHERE external_id IS NOT NULL AND external_id <> ''
+			    AND external_id !~ '^[0-9]+$'
+			    AND external_id !~ '^[0-9a-fA-F]{32}$')::text AS bad_eid,
 			  COUNT(*) FILTER (WHERE contest LIKE 'main|%')::text AS main_contest
 			FROM submit_logs WHERE platform = 'NowCoder'`)
 		mustPrint(db, "problems NowCoder", `
 			SELECT
 			  COUNT(*)::text AS total,
-			  COUNT(*) FILTER (WHERE external_id ~ '^[0-9]+$')::text AS good,
-			  COUNT(*) FILTER (WHERE external_id !~ '^[0-9]+$')::text AS bad
+			  COUNT(*) FILTER (WHERE external_id ~ '^[0-9]+$')::text AS ac_digit,
+			  COUNT(*) FILTER (WHERE external_id ~ '^[0-9a-fA-F]{32}$')::text AS main_uuid,
+			  COUNT(*) FILTER (WHERE external_id !~ '^[0-9]+$'
+			    AND external_id !~ '^[0-9a-fA-F]{32}$')::text AS bad
 			FROM problems WHERE platform = 'NowCoder'`)
 		mustPrint(db, "contest_logs NowCoder (保留)", `
 			SELECT COUNT(*)::text AS total FROM contest_logs WHERE platform = 'NowCoder'`)
@@ -74,7 +79,9 @@ func main() {
 		SELECT LEFT(external_id, 80) AS external_id, COUNT(*)::text AS cnt
 		FROM submit_logs
 		WHERE platform = 'NowCoder'
-		  AND external_id IS NOT NULL AND external_id <> '' AND external_id !~ '^[0-9]+$'
+		  AND external_id IS NOT NULL AND external_id <> ''
+		  AND external_id !~ '^[0-9]+$'
+		  AND external_id !~ '^[0-9a-fA-F]{32}$'
 		GROUP BY LEFT(external_id, 80)
 		ORDER BY COUNT(*) DESC
 		LIMIT 15`)
