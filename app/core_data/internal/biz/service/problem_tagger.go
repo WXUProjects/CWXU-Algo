@@ -40,6 +40,11 @@ func NewProblemTagger(c *conf.AiAnalyze) *ProblemTagger {
 	return t
 }
 
+// Ready 是否已配置可用（非 nil 空壳）
+func (t *ProblemTagger) Ready() bool {
+	return t != nil && t.ready
+}
+
 type aiAnalyzeResult struct {
 	ProblemType        string               `json:"problem_type"`
 	Difficulty         string               `json:"difficulty"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"cwxu-algo/app/common/event"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -170,12 +171,19 @@ func (c *ProblemAnalyzeConsumer) consumeOnce() error {
 			}
 			if pipelineControl.IsAnalyzePaused() {
 				// 暂停：丢弃（暂停时已 purge；恢复后用回填/重试再入队）
+				log.Warnf("problem_analyze id=%d dropped: AI paused", msg.ProblemID)
 				_ = d.Ack(false)
 				return
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 			defer cancel()
 			if err := c.problem.ProcessAnalyze(ctx, msg); err != nil {
+				// 暂停类错误：Ack 丢弃，避免 requeue 热循环；恢复后靠重置/回填再入队
+				if strings.Contains(err.Error(), "paused") {
+					log.Warnf("RabbitMQ(problem_analyze) id=%d paused, ack drop: %v", msg.ProblemID, err)
+					_ = d.Ack(false)
+					return
+				}
 				log.Errorf("RabbitMQ(problem_analyze) id=%d: %v", msg.ProblemID, err)
 				// 分析出错：发回队列重试
 				_ = d.Nack(false, true)

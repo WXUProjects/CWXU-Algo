@@ -197,11 +197,11 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if p.Status == model.ProblemStatusCompleted {
 		return nil
 	}
-	// 已有题面：不再爬取，直接进 AI（若 AI 未暂停）
+	// 已有题面：不再爬取；近 6 个月（submit_logs）才入 AI
 	if strings.TrimSpace(p.ContentMD) != "" || p.Status == model.ProblemStatusTagging {
 		if p.Status != model.ProblemStatusCompleted {
 			_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
-			if !pipelineControl.IsAnalyzePaused() {
+			if !pipelineControl.IsAnalyzePaused() && uc.withinAnalyzeWindow(&p) {
 				return uc.enqueueAnalyze(p.ID)
 			}
 		}
@@ -260,10 +260,15 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if err := uc.data.DB.Model(&p).Updates(updates).Error; err != nil {
 		return err
 	}
+	// 爬取成功后：仅近 6 个月有提交的题进 AI（以 submit_logs 为准）
+	if pipelineControl.IsAnalyzePaused() || !uc.withinAnalyzeWindow(&p) {
+		return nil
+	}
 	return uc.enqueueAnalyze(p.ID)
 }
 
 // ProcessAnalyze 仅 AI 打标（不爬取、不送用户代码）
+// 6 个月窗口：以 submit_logs 中该题最近一次提交时间为准（并回写 last_submitted_at）。
 func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAnalyzeEvent) error {
 	if pipelineControl.IsAnalyzePaused() {
 		return fmt.Errorf("ai analyze paused")
@@ -276,16 +281,15 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	defer pipelineControl.TrackEnd("analyze", p.ID)
 	// 已识别完成：跳过
 	if p.Status == model.ProblemStatusCompleted {
+		log.Debugf("ProcessAnalyze skip completed id=%d", p.ID)
 		return nil
 	}
 	if p.Status == model.ProblemStatusSkipped || p.Platform == spider.LeetCode {
+		log.Debugf("ProcessAnalyze skip skipped/leetcode id=%d", p.ID)
 		return nil
 	}
 	if p.Status == model.ProblemStatusFailedPerm {
-		return nil
-	}
-	// 超过 6 个月：不处理
-	if p.LastSubmittedAt != nil && p.LastSubmittedAt.Before(time.Now().Add(-backfillWindow)) {
+		log.Debugf("ProcessAnalyze skip failed_perm id=%d", p.ID)
 		return nil
 	}
 	if strings.TrimSpace(p.ContentMD) == "" {
@@ -299,7 +303,14 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 		return uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL)
 	}
 
-	if uc.tagger == nil {
+	// 近 6 个月：以 submit_logs 最近提交为准（不是只看可能过期的 last_submitted_at）
+	if !uc.withinAnalyzeWindow(&p) {
+		log.Infof("ProcessAnalyze skip out-of-window id=%d last=%v", p.ID, p.LastSubmittedAt)
+		// 保持 TAGGING，避免误标失败；入队侧应已过滤，这里防脏消息
+		return nil
+	}
+
+	if uc.tagger == nil || !uc.tagger.Ready() {
 		return uc.data.DB.Model(&p).Updates(map[string]interface{}{
 			"status":    model.ProblemStatusFailed,
 			"error_msg": "ai_analyze 未配置",
@@ -307,6 +318,7 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	}
 
 	_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
+	log.Infof("ProcessAnalyze start id=%d platform=%s ext=%s last=%v", p.ID, p.Platform, p.ExternalID, p.LastSubmittedAt)
 
 	result, aerr := uc.tagger.Analyze(ctx, p.Title, p.ContentMD)
 	if aerr != nil {
@@ -340,6 +352,42 @@ const maxFetchAttempts = 3
 
 // transientFailWindow 405/WAF 等瞬时错误允许持续重试的最长时间，超时 → FAILED_PERM
 const transientFailWindow = 24 * time.Hour
+
+// latestSubmitTimeFromLogs 从 submit_logs 取该题最近一次提交时间
+func (uc *ProblemUseCase) latestSubmitTimeFromLogs(problemID uint) *time.Time {
+	var t *time.Time
+	_ = uc.data.DB.Model(&model.SubmitLog{}).
+		Select("MAX(time)").
+		Where("problem_id = ?", problemID).
+		Scan(&t).Error
+	return t
+}
+
+// refreshLastSubmittedAt 用 submit_logs 最近提交回写 problems.last_submitted_at
+func (uc *ProblemUseCase) refreshLastSubmittedAt(p *model.Problem) *time.Time {
+	if p == nil || p.ID == 0 {
+		return nil
+	}
+	latest := uc.latestSubmitTimeFromLogs(p.ID)
+	if latest == nil {
+		return p.LastSubmittedAt
+	}
+	if p.LastSubmittedAt == nil || latest.After(*p.LastSubmittedAt) {
+		_ = uc.data.DB.Model(p).Update("last_submitted_at", *latest).Error
+		p.LastSubmittedAt = latest
+	}
+	return p.LastSubmittedAt
+}
+
+// withinAnalyzeWindow 是否在 AI 分析 6 个月窗口内（以 submit_logs 为准）
+// last_submitted_at / 提交时间为空：视为可分析（与历史入队 NULL 兼容）
+func (uc *ProblemUseCase) withinAnalyzeWindow(p *model.Problem) bool {
+	t := uc.refreshLastSubmittedAt(p)
+	if t == nil {
+		return true
+	}
+	return !t.Before(time.Now().Add(-backfillWindow))
+}
 
 // Backfill 历史回填：绑定未关联提交 + 按题面是否已爬决定入队
 // - 无题面 content_md → 全部入爬取队列（不限 6 个月；含 FAILED_PERM 重试爬）
@@ -1009,16 +1057,33 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 	}
 
 	if requeue {
-		// 分析入队：新题优先（最近提交 → 旧题）
+		// 分析入队：仅近 6 个月有提交（submit_logs.MAX(time) 或 last_submitted_at）
+		// 先批量回写 last_submitted_at，再按窗口过滤
+		_ = uc.data.DB.Exec(`
+			UPDATE problems p
+			SET last_submitted_at = s.mx
+			FROM (
+				SELECT problem_id, MAX(time) AS mx
+				FROM submit_logs
+				WHERE problem_id IS NOT NULL AND problem_id <> 0
+				GROUP BY problem_id
+			) s
+			WHERE p.id = s.problem_id
+			  AND (p.last_submitted_at IS NULL OR p.last_submitted_at < s.mx)
+		`).Error
+
+		cutoff := time.Now().Add(-backfillWindow)
 		var list []model.Problem
 		_ = uc.data.DB.Where("status = ? AND platform != ?", model.ProblemStatusTagging, spider.LeetCode).
 			Where("content_md IS NOT NULL AND content_md != ''").
-			Order("last_submitted_at DESC NULLS LAST, id DESC").Limit(3000).Find(&list).Error
+			Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
+			Order("last_submitted_at DESC NULLS LAST, id DESC").Find(&list).Error
 		for _, p := range list {
 			if e := uc.enqueueAnalyze(p.ID); e == nil {
 				enqueued++
 			}
 		}
+		log.Infof("ResetAll: reset=%d analyze_enqueued=%d (window 6m via submit_logs)", reset, enqueued)
 	}
 	pipelineControl.SetAnalyzePaused(false)
 	return
