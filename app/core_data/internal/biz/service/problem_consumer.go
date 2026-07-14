@@ -86,13 +86,21 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 				return
 			}
 			if pipelineControl.IsFetchPaused() {
-				// 暂停：丢弃（暂停时已 purge；恢复后用回填/重试再入队）
-				_ = d.Ack(false)
+				// 暂停：requeue 保留（勿 Ack 丢弃）
+				log.Warnf("problem_fetch id=%d requeue: fetch paused", msg.ProblemID)
+				time.Sleep(2 * time.Second)
+				_ = d.Nack(false, true)
 				return
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			if err := c.problem.ProcessFetch(ctx, msg); err != nil {
+				if strings.Contains(err.Error(), "paused") {
+					log.Warnf("RabbitMQ(problem_fetch) id=%d requeue paused: %v", msg.ProblemID, err)
+					time.Sleep(2 * time.Second)
+					_ = d.Nack(false, true)
+					return
+				}
 				log.Errorf("RabbitMQ(problem_fetch) id=%d: %v", msg.ProblemID, err)
 				// 可恢复错误：发回队列重试；永久失败 ProcessFetch 返回 nil 已 Ack
 				_ = d.Nack(false, true)
@@ -170,18 +178,20 @@ func (c *ProblemAnalyzeConsumer) consumeOnce() error {
 				return
 			}
 			if pipelineControl.IsAnalyzePaused() {
-				// 暂停：丢弃（暂停时已 purge；恢复后用回填/重试再入队）
-				log.Warnf("problem_analyze id=%d dropped: AI paused", msg.ProblemID)
-				_ = d.Ack(false)
+				// 暂停：requeue 保留消息（勿 Ack 丢弃；ResetAll 等可能在短暂 pause 窗口入队）
+				// 短睡避免热循环；PauseAnalyze 会 purge Ready，故意清空时仍生效
+				log.Warnf("problem_analyze id=%d requeue: AI paused", msg.ProblemID)
+				time.Sleep(2 * time.Second)
+				_ = d.Nack(false, true)
 				return
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 			defer cancel()
 			if err := c.problem.ProcessAnalyze(ctx, msg); err != nil {
-				// 暂停类错误：Ack 丢弃，避免 requeue 热循环；恢复后靠重置/回填再入队
 				if strings.Contains(err.Error(), "paused") {
-					log.Warnf("RabbitMQ(problem_analyze) id=%d paused, ack drop: %v", msg.ProblemID, err)
-					_ = d.Ack(false)
+					log.Warnf("RabbitMQ(problem_analyze) id=%d requeue paused: %v", msg.ProblemID, err)
+					time.Sleep(2 * time.Second)
+					_ = d.Nack(false, true)
 					return
 				}
 				log.Errorf("RabbitMQ(problem_analyze) id=%d: %v", msg.ProblemID, err)

@@ -1031,10 +1031,13 @@ func (uc *ProblemUseCase) ProgressPausedFetch() bool {
 }
 
 // ResetAll 仅重置 AI 分析结果（保留 content_md 题面），清空 AI 队列并可选重新入队分析
+// 顺序必须是：暂停 → 清空队列 → 改 DB → 恢复暂停 → 再入队
+// 若在暂停期间入队，消费者会把消息 Ack 丢掉（只剩碰巧在恢复后取出的少数任务）。
 func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, purgedAnalyze int, err error) {
 	pipelineControl.SetAnalyzePaused(true)
 	purgedAnalyze, err = uc.purgeAnalyzeQueue()
 	if err != nil {
+		pipelineControl.SetAnalyzePaused(false)
 		return
 	}
 	// 清除分析字段，保留题面 content_md；有题面的回到 TAGGING，无题面保持 PENDING
@@ -1057,6 +1060,7 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 		})
 	if res.Error != nil {
 		err = res.Error
+		pipelineControl.SetAnalyzePaused(false)
 		return
 	}
 	reset = int(res.RowsAffected)
@@ -1073,6 +1077,9 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 	if res2.Error == nil {
 		reset += int(res2.RowsAffected)
 	}
+
+	// 先恢复再入队，避免 paused 期间消息被 Ack 丢弃
+	pipelineControl.SetAnalyzePaused(false)
 
 	if requeue {
 		// 批量回写 last_submitted_at ← submit_logs.MAX(time)
@@ -1103,9 +1110,8 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 				enqueued++
 			}
 		}
-		log.Infof("ResetAll: reset=%d analyze_enqueued=%d (strict 6m via submit_logs EXISTS)", reset, enqueued)
+		log.Infof("ResetAll: reset=%d analyze_enqueued=%d (enqueue after unpause)", reset, enqueued)
 	}
-	pipelineControl.SetAnalyzePaused(false)
 	return
 }
 
