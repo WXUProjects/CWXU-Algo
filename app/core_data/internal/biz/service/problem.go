@@ -356,17 +356,16 @@ const backfillWindow = 6 * 30 * 24 * time.Hour // ≈6 个月
 // maxFetchAttempts 题面爬取可恢复失败的最大次数，超过则 FAILED_PERM
 const maxFetchAttempts = 3
 
-// Backfill 历史回填：绑定未关联提交 + 未完成题入队
-// - 已有题面 → 只进 AI 队列（不再爬）
-// - 无题面 → 进爬取队列
-// - COMPLETED / 超 6 个月 / FAILED_PERM / SKIPPED → 跳过
+// Backfill 历史回填：绑定未关联提交 + 按题面是否已爬决定入队
+// - 无题面 content_md → 全部入爬取队列（不限 6 个月；含 FAILED_PERM 重试爬）
+// - 已有题面 → 跳过爬取（不重爬）
+// - SKIPPED / LeetCode → 跳过
 func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued int64, err error) {
-	// 0 = 尽量全量（单次最多 5000 提交）
+	// 0 = 尽量全量（单次最多 5000 提交绑定）
 	if limit <= 0 {
 		limit = 5000
 	}
-	// 回填时恢复双队列
-	pipelineControl.SetAnalyzePaused(false)
+	// 回填时恢复爬取队列（分析是否暂停不影响本次「补爬题面」）
 	pipelineControl.SetFetchPaused(false)
 
 	// 0) 牛客错误 external_id：既非 AC 数字 id、也非主站 32hex UUID → 解绑后重解析
@@ -385,10 +384,10 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		log.Infof("Backfill: unbound %d NowCoder submits with bad external_id", res.RowsAffected)
 	}
 
-	// 1) 历史永久错误：FAILED → FAILED_PERM
+	// 1) 历史永久错误文案：FAILED → FAILED_PERM（仍会在下方无题面时重新入爬取）
 	_ = uc.markExistingPermanentFailures()
 
-	// 2) 清空爬取队列（去掉毒消息）
+	// 2) 清空爬取队列（去掉毒消息，按当前 DB 重入队）
 	if uc.mq != nil {
 		_, _ = uc.mq.QueueDeclare("problem_fetch", true, false, false, false, nil)
 		if n, perr := uc.mq.QueuePurge("problem_fetch", false); perr == nil {
@@ -396,7 +395,7 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		}
 	}
 
-	// 优先重绑牛客 + 其它未绑定（仅最近 6 个月提交）
+	// 3) 绑定未关联提交（绑定窗口仍近 6 个月，避免扫全库过慢）
 	cutoff := time.Now().Add(-backfillWindow)
 	var logs []model.SubmitLog
 	err = uc.data.DB.Where("(problem_id IS NULL OR problem_id = 0) AND platform != ?", spider.LeetCode).
@@ -419,17 +418,14 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		_ = p
 	}
 
-	// 未完成题入队：跳过 COMPLETED / 超 6 个月 / 永久失败
-	// 入队顺序：新题优先（最近提交 → 旧题），MQ FIFO 先发先消费
+	// 4) 全库检查题面：无 content_md → 全部入爬取；有题面 → 跳过
+	// 不限 last_submitted_at / 不限条数；除 SKIPPED 外含 FAILED_PERM
 	var todos []model.Problem
-	_ = uc.data.DB.Where("status IN ? AND platform != ?", []string{
-		model.ProblemStatusPending,
-		model.ProblemStatusFetching,
-		model.ProblemStatusFailed,
-		model.ProblemStatusTagging,
-	}, spider.LeetCode).
-		Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
-		Order("last_submitted_at DESC NULLS LAST, id DESC").Find(&todos).Error
+	_ = uc.data.DB.Where("platform != ?", spider.LeetCode).
+		Where("status != ?", model.ProblemStatusSkipped).
+		Where("(content_md IS NULL OR content_md = '')").
+		Order("last_submitted_at DESC NULLS LAST, id DESC").
+		Find(&todos).Error
 
 	seen := map[uint]bool{}
 	for _, p := range todos {
@@ -437,37 +433,22 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 			continue
 		}
 		seen[p.ID] = true
-		// 已识别完成：跳过
-		if p.Status == model.ProblemStatusCompleted {
-			continue
-		}
-		// 永久错误 → 黑名单
-		if isPermanentFetchError(p.ErrorMsg) {
-			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
-				Update("status", model.ProblemStatusFailedPerm).Error
-			continue
-		}
-		// 已有题面 → 只进 AI，不爬
 		if strings.TrimSpace(p.ContentMD) != "" {
-			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
-				Updates(map[string]interface{}{
-					"status":    model.ProblemStatusTagging,
-					"error_msg": "",
-				}).Error
-			if e := uc.enqueueAnalyze(p.ID); e == nil {
-				enqueued++
-			}
-		} else {
-			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
-				Updates(map[string]interface{}{
-					"status":    model.ProblemStatusPending,
-					"error_msg": "",
-				}).Error
-			if e := uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL); e == nil {
-				enqueued++
-			}
+			// 已有题面：跳过爬取
+			continue
+		}
+		// 永久错误文案且已多次失败：仍允许回填重爬一次（重置 attempts）
+		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+			Updates(map[string]interface{}{
+				"status":         model.ProblemStatusPending,
+				"error_msg":      "",
+				"fetch_attempts": 0,
+			}).Error
+		if e := uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL); e == nil {
+			enqueued++
 		}
 	}
+	log.Infof("Backfill: scanned=%d bound=%d created=%d fetch_enqueued=%d", scanned, bound, created, enqueued)
 	return
 }
 
