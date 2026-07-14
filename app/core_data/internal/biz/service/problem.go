@@ -508,11 +508,11 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 					WHERE s.problem_id = problems.id AND s.user_id = ?
 				)`, f.UserID)
 			case "AC":
-				// 与 mapSubmitStatus 一致：含 ACCEPT / OK / AC
+				// 与 isACStatus / 画像统计一致：按 problem_id 关联
 				q = q.Where(`EXISTS (
 					SELECT 1 FROM submit_logs s
 					WHERE s.problem_id = problems.id AND s.user_id = ?
-					  AND (UPPER(s.status) IN ('AC','OK') OR UPPER(s.status) LIKE '%ACCEPT%')
+					  AND (`+sqlACStatusCond("s.status")+`)
 				)`, f.UserID)
 			case "TRIED":
 				q = q.Where(`EXISTS (
@@ -521,7 +521,7 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 				) AND NOT EXISTS (
 					SELECT 1 FROM submit_logs s
 					WHERE s.problem_id = problems.id AND s.user_id = ?
-					  AND (UPPER(s.status) IN ('AC','OK') OR UPPER(s.status) LIKE '%ACCEPT%')
+					  AND (`+sqlACStatusCond("s.status")+`)
 				)`, f.UserID, f.UserID)
 			}
 		}
@@ -611,8 +611,8 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	Count int64
 }, totalAC int64, err error) {
 
-	// AC 判定：status 含 OK / Accepted / AC
-	acCond := "(status ILIKE '%accept%' OR status = 'OK' OR status = 'AC' OR status ILIKE 'accepted%')"
+	// AC 判定：与 isACStatus 一致（OK / Accepted / AC / 答案正确 等）
+	acCond := sqlACStatusCond("status")
 
 	type tagRow struct {
 		Tag   string
@@ -914,12 +914,51 @@ func isPermanentFetchError(msg string) bool {
 	return false
 }
 
-func mapSubmitStatus(s string) string {
+// isACStatus 是否算通过（与 AC 数量统计同源）
+// 覆盖：AC / OK / Accepted / 答案正确 / 通过 等
+func isACStatus(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
 	u := strings.ToUpper(s)
-	if strings.Contains(u, "ACCEPT") || u == "OK" || u == "AC" {
+	if u == "AC" || u == "OK" || u == "ACCEPT" || u == "ACCEPTED" {
+		return true
+	}
+	if strings.Contains(u, "ACCEPT") { // Accepted, Partially Accepted 等 — 全 AC 平台通常不带 Partially
+		// CF: OK；部分平台写 Accepted
+		if strings.Contains(u, "PARTIAL") || strings.Contains(u, "部分") {
+			return false
+		}
+		return true
+	}
+	// 中文（牛客等）
+	if strings.Contains(s, "答案正确") || s == "通过" || strings.Contains(s, "完全正确") {
+		return true
+	}
+	// AtCoder 等
+	if u == "AC" || strings.HasPrefix(u, "AC ") {
+		return true
+	}
+	return false
+}
+
+// sqlACStatusCond 生成 SQL 片段，col 为列名（可带表别名，如 s.status）
+func sqlACStatusCond(col string) string {
+	return `(` +
+		`UPPER(` + col + `) IN ('AC','OK','ACCEPT','ACCEPTED')` +
+		` OR (UPPER(` + col + `) LIKE '%ACCEPT%' AND UPPER(` + col + `) NOT LIKE '%PARTIAL%')` +
+		` OR ` + col + ` LIKE '%答案正确%'` +
+		` OR ` + col + ` = '通过'` +
+		` OR ` + col + ` LIKE '%完全正确%'` +
+		`)`
+}
+
+func mapSubmitStatus(s string) string {
+	if isACStatus(s) {
 		return "AC"
 	}
-	if s == "" {
+	if strings.TrimSpace(s) == "" {
 		return "NONE"
 	}
 	return "TRIED"
