@@ -623,33 +623,29 @@ func (uc *ProblemUseCase) queueStats() []struct {
 		Consumers   int64
 		Concurrency int64
 	}, 0, 2)
-	if uc.mq == nil || uc.mq.Ch == nil {
-		return out
-	}
+	// amqp Channel 非并发安全，勿与 consumer 共用；仅返回配置并发，积压用 DB 近似
 	for _, q := range []struct {
 		name string
 		conc int64
+		stat string
 	}{
-		{"problem_fetch", problemFetchConcurrency},
-		{"problem_analyze", problemAnalyzeConcurrency},
+		{"problem_fetch", problemFetchConcurrency, model.ProblemStatusPending},
+		{"problem_analyze", problemAnalyzeConcurrency, model.ProblemStatusTagging},
 	} {
-		qi, err := uc.mq.Ch.QueueDeclarePassive(q.name, true, false, false, false, nil)
-		if err != nil {
-			// 队列可能尚未创建
-			_, _ = uc.mq.Ch.QueueDeclare(q.name, true, false, false, false, nil)
-			qi, err = uc.mq.Ch.QueueDeclarePassive(q.name, true, false, false, false, nil)
-		}
-		msgs, cons := int64(0), int64(0)
-		if err == nil {
-			msgs = int64(qi.Messages)
-			cons = int64(qi.Consumers)
+		var msgs int64
+		_ = uc.data.DB.Model(&model.Problem{}).Where("status = ?", q.stat).Count(&msgs).Error
+		// FETCHING 也算爬取侧积压
+		if q.name == "problem_fetch" {
+			var fetching int64
+			_ = uc.data.DB.Model(&model.Problem{}).Where("status = ?", model.ProblemStatusFetching).Count(&fetching).Error
+			msgs += fetching
 		}
 		out = append(out, struct {
 			Name        string
 			Messages    int64
 			Consumers   int64
 			Concurrency int64
-		}{q.name, msgs, cons, q.conc})
+		}{q.name, msgs, 1, q.conc})
 	}
 	return out
 }

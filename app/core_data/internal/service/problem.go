@@ -266,12 +266,15 @@ func firstNonEmptyTitle(a, b string) string {
 }
 
 func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq) (*problem.ProgressRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
+	// RoleAdmin=1 < RoleCoach=2，不能用 VerifyMinRole(Coach)
+	if !auth.VerifyAdmin(ctx) && !auth.VerifyCoach(ctx) {
 		return &problem.ProgressRes{Code: 1, Message: "权限不足"}, nil
 	}
 	snap, err := s.uc.Progress()
 	if err != nil {
-		return nil, errors.InternalServer("progress failed", err.Error())
+		// 不因 MQ 等附属信息失败而整页不可用
+		log.Errorf("problem progress: %v", err)
+		snap = biz.ProgressSnapshot{}
 	}
 	pi := make([]*problem.ProgressItem, 0, len(snap.Items))
 	for _, v := range snap.Items {
