@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	ProblemStatusPending   = "PENDING"
-	ProblemStatusFetching  = "FETCHING"
+	ProblemStatusPending   = "PENDING"   // 待爬取
+	ProblemStatusFetching  = "FETCHING"  // 爬取中
+	ProblemStatusTagging   = "TAGGING"   // 题面已就绪，待/正在 AI 分析
 	ProblemStatusCompleted = "COMPLETED"
 	ProblemStatusFailed    = "FAILED"
 	ProblemStatusSkipped   = "SKIPPED"

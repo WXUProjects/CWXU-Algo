@@ -41,7 +41,7 @@ func init() {
 	flag.StringVar(&flagconf, "conf", "./configs", "config path, eg: -conf config.yaml")
 }
 
-func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, cm *service.Consumer, pfc *service.ProblemFetchConsumer, cron *task.CronTask) *kratos.App {
+func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, cm *service.Consumer, pfc *service.ProblemFetchConsumer, pac *service.ProblemAnalyzeConsumer, cron *task.CronTask) *kratos.App {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -57,6 +57,14 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.
 			}
 		}()
 		pfc.Consume()
+	}()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("ProblemAnalyzeConsumer panic: %v", r)
+			}
+		}()
+		pac.Consume()
 	}()
 	go func() {
 		defer func() {

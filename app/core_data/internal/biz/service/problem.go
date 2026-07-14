@@ -122,8 +122,7 @@ func (uc *ProblemUseCase) enqueueFetch(id uint, platform, externalID, url string
 		ExternalID: externalID,
 		URL:        url,
 	})
-	_, err := uc.mq.Ch.QueueDeclare("problem_fetch", true, false, false, false, nil)
-	if err != nil {
+	if _, err := uc.mq.Ch.QueueDeclare("problem_fetch", true, false, false, false, nil); err != nil {
 		return err
 	}
 	return uc.mq.Ch.Publish("", "problem_fetch", false, false, amqp.Publishing{
@@ -133,13 +132,32 @@ func (uc *ProblemUseCase) enqueueFetch(id uint, platform, externalID, url string
 	})
 }
 
-// ProcessFetch 消费队列：爬取 + AI
+func (uc *ProblemUseCase) enqueueAnalyze(id uint) error {
+	if uc.mq == nil || uc.mq.Ch == nil {
+		return fmt.Errorf("mq not ready")
+	}
+	body, _ := json.Marshal(event.ProblemAnalyzeEvent{ProblemID: id})
+	if _, err := uc.mq.Ch.QueueDeclare("problem_analyze", true, false, false, false, nil); err != nil {
+		return err
+	}
+	return uc.mq.Ch.Publish("", "problem_analyze", false, false, amqp.Publishing{
+		ContentType:  "application/json",
+		Body:         body,
+		DeliveryMode: amqp.Persistent,
+	})
+}
+
+// ProcessFetch 仅爬取题面；成功后状态 TAGGING 并投递 AI 队列
 func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetchEvent) error {
 	var p model.Problem
 	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
 		return err
 	}
-	if p.Status == model.ProblemStatusCompleted {
+	if p.Status == model.ProblemStatusCompleted || p.Status == model.ProblemStatusTagging {
+		// 已有题面则直接补 AI
+		if p.ContentMD != "" && p.Status != model.ProblemStatusCompleted {
+			return uc.enqueueAnalyze(p.ID)
+		}
 		return nil
 	}
 	if p.Platform == spider.LeetCode || p.Status == model.ProblemStatusSkipped {
@@ -148,17 +166,17 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		}).Error
 		return nil
 	}
+	// 已有 content 的失败题：跳过爬取，只重试 AI
+	if p.ContentMD != "" {
+		_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
+		return uc.enqueueAnalyze(p.ID)
+	}
 
-	// CAS 状态
 	res := uc.data.DB.Model(&model.Problem{}).
-		Where("id = ? AND status IN ?", p.ID, []string{model.ProblemStatusPending, model.ProblemStatusFailed}).
+		Where("id = ? AND status IN ?", p.ID, []string{model.ProblemStatusPending, model.ProblemStatusFailed, model.ProblemStatusFetching}).
 		Update("status", model.ProblemStatusFetching)
 	if res.Error != nil {
 		return res.Error
-	}
-	if res.RowsAffected == 0 && p.Status == model.ProblemStatusFetching {
-		// 允许重试卡住的 FETCHING
-		_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusFetching).Error
 	}
 
 	url := p.URL
@@ -182,32 +200,61 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		"content_md": fetched.ContentMD,
 		"title":      title,
 		"error_msg":  "",
+		"status":     model.ProblemStatusTagging,
 	}
 	if p.URL == "" && url != "" {
 		updates["url"] = url
 	}
+	if err := uc.data.DB.Model(&p).Updates(updates).Error; err != nil {
+		return err
+	}
+	return uc.enqueueAnalyze(p.ID)
+}
 
-	// AI 打标（仅题面）
-	if uc.tagger != nil {
-		result, aerr := uc.tagger.Analyze(ctx, title, fetched.ContentMD)
-		if aerr != nil {
-			log.Errorf("AI tag problem %d: %v", p.ID, aerr)
-			// 题面已拿到，标记 FAILED 但保留 content，便于重试 AI
-			updates["status"] = model.ProblemStatusFailed
-			updates["error_msg"] = "AI: " + truncateErr(aerr.Error())
-			_ = uc.data.DB.Model(&p).Updates(updates).Error
-			return aerr
-		}
-		updates["problem_type"] = result.ProblemType
-		updates["difficulty"] = result.Difficulty
-		updates["tags"] = model.StringArray(result.AlgorithmTags)
-		updates["solutions_meta"] = model.SolutionsMeta(result.SuggestedSolutions)
-		updates["status"] = model.ProblemStatusCompleted
-	} else {
-		updates["status"] = model.ProblemStatusCompleted
+// ProcessAnalyze 仅 AI 打标（不爬取、不送用户代码）
+func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAnalyzeEvent) error {
+	var p model.Problem
+	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
+		return err
+	}
+	if p.Status == model.ProblemStatusCompleted {
+		return nil
+	}
+	if p.Status == model.ProblemStatusSkipped || p.Platform == spider.LeetCode {
+		return nil
+	}
+	if strings.TrimSpace(p.ContentMD) == "" {
+		// 无题面，退回爬取
+		_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusPending).Error
+		return uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL)
 	}
 
-	return uc.data.DB.Model(&p).Updates(updates).Error
+	if uc.tagger == nil {
+		return uc.data.DB.Model(&p).Updates(map[string]interface{}{
+			"status":    model.ProblemStatusFailed,
+			"error_msg": "ai_analyze 未配置",
+		}).Error
+	}
+
+	_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
+
+	result, aerr := uc.tagger.Analyze(ctx, p.Title, p.ContentMD)
+	if aerr != nil {
+		log.Errorf("AI tag problem %d: %v", p.ID, aerr)
+		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+			"status":    model.ProblemStatusFailed,
+			"error_msg": "AI: " + truncateErr(aerr.Error()),
+		}).Error
+		return aerr
+	}
+	return uc.data.DB.Model(&p).Updates(map[string]interface{}{
+		"problem_type":    result.ProblemType,
+		"difficulty":      result.Difficulty,
+		"tags":            model.StringArray(result.AlgorithmTags),
+		"solutions_meta":  model.SolutionsMeta(result.SuggestedSolutions),
+		"status":          model.ProblemStatusCompleted,
+		"error_msg":       "",
+	}).Error
 }
 
 // Backfill 全量历史回填；同时重试 FAILED 题目入队
@@ -236,11 +283,20 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 			}
 		}
 	}
-	// 重试失败题
+	// 重试失败 / 卡住的 TAGGING
 	var failed []model.Problem
-	_ = uc.data.DB.Where("status = ?", model.ProblemStatusFailed).
+	_ = uc.data.DB.Where("status IN ?", []string{model.ProblemStatusFailed, model.ProblemStatusTagging}).
 		Order("updated_at asc").Limit(limit / 2).Find(&failed).Error
 	for _, p := range failed {
+		if strings.TrimSpace(p.ContentMD) != "" {
+			// 已有题面 → 只重试 AI
+			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+				Update("status", model.ProblemStatusTagging).Error
+			if e := uc.enqueueAnalyze(p.ID); e == nil {
+				enqueued++
+			}
+			continue
+		}
 		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 			Update("status", model.ProblemStatusPending).Error
 		if e := uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL); e == nil {
