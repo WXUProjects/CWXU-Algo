@@ -247,14 +247,15 @@ func (s *ProblemService) UserProfile(ctx context.Context, req *problem.UserProfi
 func toFailedProto(list []model.Problem) []*problem.FailedProblem {
 	ff := make([]*problem.FailedProblem, 0, len(list))
 	for _, f := range list {
-		// FailedProblem 无 status 字段时前端用 errorMsg/title 展示；inProgress 同结构
 		ff = append(ff, &problem.FailedProblem{
-			Id:         uint32(f.ID),
-			Platform:   f.Platform,
-			ExternalId: f.ExternalID,
-			Title:      firstNonEmptyTitle(f.Title, f.Status),
-			ErrorMsg:   firstNonEmptyTitle(f.ErrorMsg, f.Status),
-			UpdatedAt:  f.UpdatedAt.Unix(),
+			Id:            uint32(f.ID),
+			Platform:      f.Platform,
+			ExternalId:    f.ExternalID,
+			Title:         firstNonEmptyTitle(f.Title, f.Status),
+			ErrorMsg:      firstNonEmptyTitle(f.ErrorMsg, f.Status),
+			UpdatedAt:     f.UpdatedAt.Unix(),
+			Status:        f.Status,
+			FetchAttempts: int32(f.FetchAttempts),
 		})
 	}
 	return ff
@@ -303,17 +304,18 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 		})
 	}
 	return &problem.ProgressRes{
-		Code:          0,
-		Message:       "success",
-		Items:         pi,
-		RecentFailed:  toFailedProto(snap.Failed),
-		Total:         snap.Total,
-		Paused:        snap.Paused,
-		ActiveJobs:    jobs,
-		Queues:        qs,
-		InProgress:    toFailedProto(snap.InProgress),
-		FetchPaused:   snap.FetchPaused,
-		AnalyzePaused: snap.AnalyzePaused,
+		Code:             0,
+		Message:          "success",
+		Items:            pi,
+		RecentFailed:     toFailedProto(snap.Failed),
+		Total:            snap.Total,
+		Paused:           snap.Paused,
+		ActiveJobs:       jobs,
+		Queues:           qs,
+		InProgress:       toFailedProto(snap.InProgress),
+		FetchPaused:      snap.FetchPaused,
+		AnalyzePaused:    snap.AnalyzePaused,
+		RecentFailedPerm: toFailedProto(snap.FailedPerm),
 	}, nil
 }
 

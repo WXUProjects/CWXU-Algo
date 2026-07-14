@@ -1121,6 +1121,8 @@ type FailedProblem struct {
 	Title         string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
 	ErrorMsg      string                 `protobuf:"bytes,5,opt,name=error_msg,json=errorMsg,proto3" json:"error_msg,omitempty"`
 	UpdatedAt     int64                  `protobuf:"varint,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Status        string                 `protobuf:"bytes,7,opt,name=status,proto3" json:"status,omitempty"`
+	FetchAttempts int32                  `protobuf:"varint,8,opt,name=fetch_attempts,json=fetchAttempts,proto3" json:"fetch_attempts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1193,6 +1195,20 @@ func (x *FailedProblem) GetErrorMsg() string {
 func (x *FailedProblem) GetUpdatedAt() int64 {
 	if x != nil {
 		return x.UpdatedAt
+	}
+	return 0
+}
+
+func (x *FailedProblem) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *FailedProblem) GetFetchAttempts() int32 {
+	if x != nil {
+		return x.FetchAttempts
 	}
 	return 0
 }
@@ -1350,20 +1366,21 @@ func (x *QueueStatus) GetConcurrency() int64 {
 }
 
 type ProgressRes struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Items         []*ProgressItem        `protobuf:"bytes,3,rep,name=items,proto3" json:"items,omitempty"`
-	RecentFailed  []*FailedProblem       `protobuf:"bytes,4,rep,name=recent_failed,json=recentFailed,proto3" json:"recent_failed,omitempty"`
-	Total         int64                  `protobuf:"varint,5,opt,name=total,proto3" json:"total,omitempty"`
-	Paused        bool                   `protobuf:"varint,6,opt,name=paused,proto3" json:"paused,omitempty"` // AI 暂停（兼容）
-	ActiveJobs    []*ActiveJob           `protobuf:"bytes,7,rep,name=active_jobs,json=activeJobs,proto3" json:"active_jobs,omitempty"`
-	Queues        []*QueueStatus         `protobuf:"bytes,8,rep,name=queues,proto3" json:"queues,omitempty"`
-	InProgress    []*FailedProblem       `protobuf:"bytes,9,rep,name=in_progress,json=inProgress,proto3" json:"in_progress,omitempty"` // DB 中 FETCHING/TAGGING
-	FetchPaused   bool                   `protobuf:"varint,10,opt,name=fetch_paused,json=fetchPaused,proto3" json:"fetch_paused,omitempty"`
-	AnalyzePaused bool                   `protobuf:"varint,11,opt,name=analyze_paused,json=analyzePaused,proto3" json:"analyze_paused,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Code             int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message          string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Items            []*ProgressItem        `protobuf:"bytes,3,rep,name=items,proto3" json:"items,omitempty"`
+	RecentFailed     []*FailedProblem       `protobuf:"bytes,4,rep,name=recent_failed,json=recentFailed,proto3" json:"recent_failed,omitempty"`
+	Total            int64                  `protobuf:"varint,5,opt,name=total,proto3" json:"total,omitempty"`
+	Paused           bool                   `protobuf:"varint,6,opt,name=paused,proto3" json:"paused,omitempty"` // AI 暂停（兼容）
+	ActiveJobs       []*ActiveJob           `protobuf:"bytes,7,rep,name=active_jobs,json=activeJobs,proto3" json:"active_jobs,omitempty"`
+	Queues           []*QueueStatus         `protobuf:"bytes,8,rep,name=queues,proto3" json:"queues,omitempty"`
+	InProgress       []*FailedProblem       `protobuf:"bytes,9,rep,name=in_progress,json=inProgress,proto3" json:"in_progress,omitempty"` // DB 中 FETCHING/TAGGING
+	FetchPaused      bool                   `protobuf:"varint,10,opt,name=fetch_paused,json=fetchPaused,proto3" json:"fetch_paused,omitempty"`
+	AnalyzePaused    bool                   `protobuf:"varint,11,opt,name=analyze_paused,json=analyzePaused,proto3" json:"analyze_paused,omitempty"`
+	RecentFailedPerm []*FailedProblem       `protobuf:"bytes,12,rep,name=recent_failed_perm,json=recentFailedPerm,proto3" json:"recent_failed_perm,omitempty"` // 永久失败，可点进详情
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ProgressRes) Reset() {
@@ -1471,6 +1488,13 @@ func (x *ProgressRes) GetAnalyzePaused() bool {
 		return x.AnalyzePaused
 	}
 	return false
+}
+
+func (x *ProgressRes) GetRecentFailedPerm() []*FailedProblem {
+	if x != nil {
+		return x.RecentFailedPerm
+	}
+	return nil
 }
 
 type BackfillReq struct {
@@ -2275,7 +2299,7 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\vProgressReq\"<\n" +
 	"\fProgressItem\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x03R\x05count\"\xae\x01\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\"\xed\x01\n" +
 	"\rFailedProblem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1a\n" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x1f\n" +
@@ -2284,7 +2308,9 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x05title\x18\x04 \x01(\tR\x05title\x12\x1b\n" +
 	"\terror_msg\x18\x05 \x01(\tR\berrorMsg\x12\x1d\n" +
 	"\n" +
-	"updated_at\x18\x06 \x01(\x03R\tupdatedAt\"\xb2\x01\n" +
+	"updated_at\x18\x06 \x01(\x03R\tupdatedAt\x12\x16\n" +
+	"\x06status\x18\a \x01(\tR\x06status\x12%\n" +
+	"\x0efetch_attempts\x18\b \x01(\x05R\rfetchAttempts\"\xb2\x01\n" +
 	"\tActiveJob\x12\x1d\n" +
 	"\n" +
 	"problem_id\x18\x01 \x01(\rR\tproblemId\x12\x1a\n" +
@@ -2299,7 +2325,7 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\bmessages\x18\x02 \x01(\x03R\bmessages\x12\x1c\n" +
 	"\tconsumers\x18\x03 \x01(\x03R\tconsumers\x12 \n" +
-	"\vconcurrency\x18\x04 \x01(\x03R\vconcurrency\"\xf5\x03\n" +
+	"\vconcurrency\x18\x04 \x01(\x03R\vconcurrency\"\xc7\x04\n" +
 	"\vProgressRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x127\n" +
@@ -2314,7 +2340,8 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"inProgress\x12!\n" +
 	"\ffetch_paused\x18\n" +
 	" \x01(\bR\vfetchPaused\x12%\n" +
-	"\x0eanalyze_paused\x18\v \x01(\bR\ranalyzePaused\"#\n" +
+	"\x0eanalyze_paused\x18\v \x01(\bR\ranalyzePaused\x12P\n" +
+	"\x12recent_failed_perm\x18\f \x03(\v2\".api.core.v1.problem.FailedProblemR\x10recentFailedPerm\"#\n" +
 	"\vBackfillReq\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x03R\x05limit\"\xa1\x01\n" +
 	"\vBackfillRes\x12\x12\n" +
@@ -2435,35 +2462,36 @@ var file_core_v1_problem_problem_proto_depIdxs = []int32{
 	16, // 9: api.core.v1.problem.ProgressRes.active_jobs:type_name -> api.core.v1.problem.ActiveJob
 	17, // 10: api.core.v1.problem.ProgressRes.queues:type_name -> api.core.v1.problem.QueueStatus
 	15, // 11: api.core.v1.problem.ProgressRes.in_progress:type_name -> api.core.v1.problem.FailedProblem
-	2,  // 12: api.core.v1.problem.Problem.List:input_type -> api.core.v1.problem.ListProblemReq
-	4,  // 13: api.core.v1.problem.Problem.Get:input_type -> api.core.v1.problem.GetProblemReq
-	7,  // 14: api.core.v1.problem.Problem.ListSubmissions:input_type -> api.core.v1.problem.ListSubmissionsReq
-	11, // 15: api.core.v1.problem.Problem.UserProfile:input_type -> api.core.v1.problem.UserProfileReq
-	13, // 16: api.core.v1.problem.Problem.Progress:input_type -> api.core.v1.problem.ProgressReq
-	19, // 17: api.core.v1.problem.Problem.Backfill:input_type -> api.core.v1.problem.BackfillReq
-	21, // 18: api.core.v1.problem.Problem.EmergencyStop:input_type -> api.core.v1.problem.EmergencyStopReq
-	23, // 19: api.core.v1.problem.Problem.ResetAll:input_type -> api.core.v1.problem.ResetAllReq
-	25, // 20: api.core.v1.problem.Problem.Resume:input_type -> api.core.v1.problem.ResumeReq
-	27, // 21: api.core.v1.problem.Problem.RetryFailed:input_type -> api.core.v1.problem.RetryFailedReq
-	29, // 22: api.core.v1.problem.Problem.ToggleAnalyze:input_type -> api.core.v1.problem.TogglePipelineReq
-	29, // 23: api.core.v1.problem.Problem.ToggleFetch:input_type -> api.core.v1.problem.TogglePipelineReq
-	3,  // 24: api.core.v1.problem.Problem.List:output_type -> api.core.v1.problem.ListProblemRes
-	5,  // 25: api.core.v1.problem.Problem.Get:output_type -> api.core.v1.problem.GetProblemRes
-	8,  // 26: api.core.v1.problem.Problem.ListSubmissions:output_type -> api.core.v1.problem.ListSubmissionsRes
-	12, // 27: api.core.v1.problem.Problem.UserProfile:output_type -> api.core.v1.problem.UserProfileRes
-	18, // 28: api.core.v1.problem.Problem.Progress:output_type -> api.core.v1.problem.ProgressRes
-	20, // 29: api.core.v1.problem.Problem.Backfill:output_type -> api.core.v1.problem.BackfillRes
-	22, // 30: api.core.v1.problem.Problem.EmergencyStop:output_type -> api.core.v1.problem.EmergencyStopRes
-	24, // 31: api.core.v1.problem.Problem.ResetAll:output_type -> api.core.v1.problem.ResetAllRes
-	26, // 32: api.core.v1.problem.Problem.Resume:output_type -> api.core.v1.problem.ResumeRes
-	28, // 33: api.core.v1.problem.Problem.RetryFailed:output_type -> api.core.v1.problem.RetryFailedRes
-	30, // 34: api.core.v1.problem.Problem.ToggleAnalyze:output_type -> api.core.v1.problem.TogglePipelineRes
-	30, // 35: api.core.v1.problem.Problem.ToggleFetch:output_type -> api.core.v1.problem.TogglePipelineRes
-	24, // [24:36] is the sub-list for method output_type
-	12, // [12:24] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	15, // 12: api.core.v1.problem.ProgressRes.recent_failed_perm:type_name -> api.core.v1.problem.FailedProblem
+	2,  // 13: api.core.v1.problem.Problem.List:input_type -> api.core.v1.problem.ListProblemReq
+	4,  // 14: api.core.v1.problem.Problem.Get:input_type -> api.core.v1.problem.GetProblemReq
+	7,  // 15: api.core.v1.problem.Problem.ListSubmissions:input_type -> api.core.v1.problem.ListSubmissionsReq
+	11, // 16: api.core.v1.problem.Problem.UserProfile:input_type -> api.core.v1.problem.UserProfileReq
+	13, // 17: api.core.v1.problem.Problem.Progress:input_type -> api.core.v1.problem.ProgressReq
+	19, // 18: api.core.v1.problem.Problem.Backfill:input_type -> api.core.v1.problem.BackfillReq
+	21, // 19: api.core.v1.problem.Problem.EmergencyStop:input_type -> api.core.v1.problem.EmergencyStopReq
+	23, // 20: api.core.v1.problem.Problem.ResetAll:input_type -> api.core.v1.problem.ResetAllReq
+	25, // 21: api.core.v1.problem.Problem.Resume:input_type -> api.core.v1.problem.ResumeReq
+	27, // 22: api.core.v1.problem.Problem.RetryFailed:input_type -> api.core.v1.problem.RetryFailedReq
+	29, // 23: api.core.v1.problem.Problem.ToggleAnalyze:input_type -> api.core.v1.problem.TogglePipelineReq
+	29, // 24: api.core.v1.problem.Problem.ToggleFetch:input_type -> api.core.v1.problem.TogglePipelineReq
+	3,  // 25: api.core.v1.problem.Problem.List:output_type -> api.core.v1.problem.ListProblemRes
+	5,  // 26: api.core.v1.problem.Problem.Get:output_type -> api.core.v1.problem.GetProblemRes
+	8,  // 27: api.core.v1.problem.Problem.ListSubmissions:output_type -> api.core.v1.problem.ListSubmissionsRes
+	12, // 28: api.core.v1.problem.Problem.UserProfile:output_type -> api.core.v1.problem.UserProfileRes
+	18, // 29: api.core.v1.problem.Problem.Progress:output_type -> api.core.v1.problem.ProgressRes
+	20, // 30: api.core.v1.problem.Problem.Backfill:output_type -> api.core.v1.problem.BackfillRes
+	22, // 31: api.core.v1.problem.Problem.EmergencyStop:output_type -> api.core.v1.problem.EmergencyStopRes
+	24, // 32: api.core.v1.problem.Problem.ResetAll:output_type -> api.core.v1.problem.ResetAllRes
+	26, // 33: api.core.v1.problem.Problem.Resume:output_type -> api.core.v1.problem.ResumeRes
+	28, // 34: api.core.v1.problem.Problem.RetryFailed:output_type -> api.core.v1.problem.RetryFailedRes
+	30, // 35: api.core.v1.problem.Problem.ToggleAnalyze:output_type -> api.core.v1.problem.TogglePipelineRes
+	30, // 36: api.core.v1.problem.Problem.ToggleFetch:output_type -> api.core.v1.problem.TogglePipelineRes
+	25, // [25:37] is the sub-list for method output_type
+	13, // [13:25] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_core_v1_problem_problem_proto_init() }

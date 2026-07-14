@@ -240,13 +240,19 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	fetched, err := problem_fetch.Fetch(p.Platform, p.ExternalID, url)
 	if err != nil {
 		msg := truncateErr(err.Error())
+		attempts := p.FetchAttempts + 1
 		st := model.ProblemStatusFailed
 		if isPermanentFetchError(msg) {
 			st = model.ProblemStatusFailedPerm
+		} else if attempts >= maxFetchAttempts {
+			// 爬取超过 3 次仍失败 → 永久失败（AI 失败不计次）
+			st = model.ProblemStatusFailedPerm
+			msg = fmt.Sprintf("爬取失败超过%d次: %s", maxFetchAttempts, msg)
 		}
 		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
-			"status":    st,
-			"error_msg": msg,
+			"status":         st,
+			"error_msg":      msg,
+			"fetch_attempts": attempts,
 		}).Error
 		// 永久失败返回 nil，让消费者 Ack，避免毒消息反复投递
 		if st == model.ProblemStatusFailedPerm {
@@ -260,10 +266,11 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		title = fetched.Title
 	}
 	updates := map[string]interface{}{
-		"content_md": fetched.ContentMD,
-		"title":      title,
-		"error_msg":  "",
-		"status":     model.ProblemStatusTagging,
+		"content_md":     fetched.ContentMD,
+		"title":          title,
+		"error_msg":      "",
+		"status":         model.ProblemStatusTagging,
+		"fetch_attempts": 0,
 	}
 	if p.URL == "" && url != "" {
 		updates["url"] = url
@@ -345,6 +352,9 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 
 // backfillWindow 历史回填 / AI 分析仅处理最近 N 个月有提交的题
 const backfillWindow = 6 * 30 * 24 * time.Hour // ≈6 个月
+
+// maxFetchAttempts 题面爬取可恢复失败的最大次数，超过则 FAILED_PERM
+const maxFetchAttempts = 3
 
 // Backfill 历史回填：绑定未关联提交 + 未完成题入队
 // - 已有题面 → 只进 AI 队列（不再爬）
@@ -800,6 +810,7 @@ type ProgressSnapshot struct {
 		Count  int64
 	}
 	Failed         []model.Problem
+	FailedPerm     []model.Problem
 	InProgress     []model.Problem
 	Total          int64
 	Paused         bool // AI 暂停（兼容）
@@ -820,10 +831,30 @@ func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
 		Status string
 		Count  int64
 	}
+	// 全量：PENDING / FETCHING / COMPLETED（爬取不限时间；已完成看全库）
+	// 近 6 个月：TAGGING / FAILED / FAILED_PERM / SKIPPED 等（与 AI 入队窗口一致）
+	cutoff := time.Now().Add(-backfillWindow)
+	fullStatuses := []string{
+		model.ProblemStatusPending,
+		model.ProblemStatusFetching,
+		model.ProblemStatusCompleted,
+	}
 	var rows []sc
-	if err := uc.data.DB.Model(&model.Problem{}).Select("status, count(*) as count").Group("status").Scan(&rows).Error; err != nil {
+	if err := uc.data.DB.Model(&model.Problem{}).
+		Select("status, count(*) as count").
+		Where("status IN ?", fullStatuses).
+		Group("status").Scan(&rows).Error; err != nil {
 		return snap, err
 	}
+	var recent []sc
+	if err := uc.data.DB.Model(&model.Problem{}).
+		Select("status, count(*) as count").
+		Where("status NOT IN ?", fullStatuses).
+		Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
+		Group("status").Scan(&recent).Error; err != nil {
+		return snap, err
+	}
+	rows = append(rows, recent...)
 	for _, r := range rows {
 		snap.Items = append(snap.Items, struct {
 			Status string
@@ -832,9 +863,16 @@ func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
 		snap.Total += r.Count
 	}
 	_ = uc.data.DB.Where("status = ?", model.ProblemStatusFailed).
+		Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
 		Order("updated_at desc").Limit(20).Find(&snap.Failed).Error
-	_ = uc.data.DB.Where("status IN ?", []string{model.ProblemStatusFetching, model.ProblemStatusTagging}).
-		Order("updated_at desc").Limit(30).Find(&snap.InProgress).Error
+	_ = uc.data.DB.Where("status = ?", model.ProblemStatusFailedPerm).
+		Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
+		Order("updated_at desc").Limit(50).Find(&snap.FailedPerm).Error
+	// 爬取中全量；待分析仅近 6 个月
+	_ = uc.data.DB.Where(
+		"(status = ?) OR (status = ? AND (last_submitted_at IS NULL OR last_submitted_at >= ?))",
+		model.ProblemStatusFetching, model.ProblemStatusTagging, cutoff,
+	).Order("updated_at desc").Limit(30).Find(&snap.InProgress).Error
 
 	snap.Paused = pipelineControl.IsAnalyzePaused()
 	snap.FetchPaused = pipelineControl.IsFetchPaused()
@@ -876,7 +914,13 @@ func (uc *ProblemUseCase) queueStats() []struct {
 		}
 		// inspect 失败时用 DB 近似积压
 		if !inspected {
-			_ = uc.data.DB.Model(&model.Problem{}).Where("status = ?", q.stat).Count(&msgs).Error
+			cq := uc.data.DB.Model(&model.Problem{}).Where("status = ?", q.stat)
+			// 分析队列仅近 6 个月；爬取队列全量
+			if q.name == "problem_analyze" {
+				cutoff := time.Now().Add(-backfillWindow)
+				cq = cq.Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff)
+			}
+			_ = cq.Count(&msgs).Error
 			if q.name == "problem_fetch" {
 				var fetching int64
 				_ = uc.data.DB.Model(&model.Problem{}).Where("status = ?", model.ProblemStatusFetching).Count(&fetching).Error

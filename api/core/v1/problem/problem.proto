@@ -209,6 +209,8 @@ message FailedProblem {
   string title = 4;
   string error_msg = 5;
   int64 updated_at = 6;
+  string status = 7;
+  int32 fetch_attempts = 8;
 }
 
 message ActiveJob {
@@ -239,6 +241,7 @@ message ProgressRes {
   repeated FailedProblem in_progress = 9; // DB 中 FETCHING/TAGGING
   bool fetch_paused = 10;
   bool analyze_paused = 11;
+  repeated FailedProblem recent_failed_perm = 12; // 永久失败，可点进详情
 }
 
 message BackfillReq {

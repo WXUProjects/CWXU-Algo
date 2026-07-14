@@ -1219,6 +1219,11 @@ components:
                     type: string
                 updatedAt:
                     type: string
+                status:
+                    type: string
+                fetchAttempts:
+                    type: integer
+                    format: int32
         api.core.v1.problem.GetProblemRes:
             type: object
             properties:
@@ -1344,6 +1349,10 @@ components:
                     type: boolean
                 analyzePaused:
                     type: boolean
+                recentFailedPerm:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.FailedProblem'
         api.core.v1.problem.QueueStatus:
             type: object
             properties:

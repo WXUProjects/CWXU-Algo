@@ -103,6 +103,9 @@ type Problem struct {
 	Difficulty      string        `gorm:"size:32"`
 	Status          string        `gorm:"size:32;index;default:'PENDING'"`
 	ErrorMsg        string        `gorm:"type:text"`
+	// FetchAttempts 题面爬取失败次数（仅 ProcessFetch 累计；AI 分析失败不计）
+	// >=3 升为 FAILED_PERM
+	FetchAttempts   int           `gorm:"default:0"`
 	LastSubmittedAt *time.Time    `gorm:"index"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
