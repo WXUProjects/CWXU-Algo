@@ -20,8 +20,8 @@ type ActiveJob struct {
 }
 
 type PipelineControl struct {
-	// 仅暂停 AI 分析消费；题面爬取不受影响
 	analyzePaused atomic.Bool
+	fetchPaused   atomic.Bool
 	mu            sync.RWMutex
 	active        map[string]*ActiveJob // key: stage:id
 }
@@ -32,6 +32,14 @@ func (p *PipelineControl) IsAnalyzePaused() bool {
 
 func (p *PipelineControl) SetAnalyzePaused(v bool) {
 	p.analyzePaused.Store(v)
+}
+
+func (p *PipelineControl) IsFetchPaused() bool {
+	return p.fetchPaused.Load()
+}
+
+func (p *PipelineControl) SetFetchPaused(v bool) {
+	p.fetchPaused.Store(v)
 }
 
 // IsPaused 兼容旧调用：仅表示 AI 是否暂停

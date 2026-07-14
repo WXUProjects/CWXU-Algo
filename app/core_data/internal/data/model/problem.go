@@ -11,8 +11,8 @@ const (
 	ProblemStatusFetching   = "FETCHING"    // 爬取中
 	ProblemStatusTagging    = "TAGGING"     // 题面已就绪，待/正在 AI 分析
 	ProblemStatusCompleted  = "COMPLETED"
-	ProblemStatusFailed     = "FAILED"      // 可重试失败（网络/拦截等）
-	ProblemStatusFailedPerm = "FAILED_PERM" // 永久失败，不再重试（如 CF 未找到题面）
+	ProblemStatusFailed     = "FAILED"      // 可重试失败（网络/WAF 等）
+	ProblemStatusFailedPerm = "FAILED_PERM" // 永久失败/黑名单，不再重试（未找到题面等）
 	ProblemStatusSkipped    = "SKIPPED"
 )
 

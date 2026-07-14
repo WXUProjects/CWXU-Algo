@@ -303,15 +303,17 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 		})
 	}
 	return &problem.ProgressRes{
-		Code:         0,
-		Message:      "success",
-		Items:        pi,
-		RecentFailed: toFailedProto(snap.Failed),
-		Total:        snap.Total,
-		Paused:       snap.Paused,
-		ActiveJobs:   jobs,
-		Queues:       qs,
-		InProgress:   toFailedProto(snap.InProgress),
+		Code:          0,
+		Message:       "success",
+		Items:         pi,
+		RecentFailed:  toFailedProto(snap.Failed),
+		Total:         snap.Total,
+		Paused:        snap.Paused,
+		ActiveJobs:    jobs,
+		Queues:        qs,
+		InProgress:    toFailedProto(snap.InProgress),
+		FetchPaused:   snap.FetchPaused,
+		AnalyzePaused: snap.AnalyzePaused,
 	}, nil
 }
 
@@ -320,8 +322,9 @@ func (s *ProblemService) Backfill(ctx context.Context, req *problem.BackfillReq)
 		return &problem.BackfillRes{Code: 1, Message: "仅管理员可触发回填"}, nil
 	}
 	if s.uc != nil {
-		// 若处于紧急停止，回填前先恢复
-		s.uc.Resume()
+		// 回填前恢复双队列
+		s.uc.ResumeAnalyze()
+		s.uc.ResumeFetch()
 	}
 	scanned, bound, created, enqueued, err := s.uc.Backfill(int(req.Limit))
 	if err != nil {
@@ -381,4 +384,72 @@ func (s *ProblemService) Resume(ctx context.Context, req *problem.ResumeReq) (*p
 	}
 	s.uc.Resume()
 	return &problem.ResumeRes{Code: 0, Message: "AI 分析已恢复"}, nil
+}
+
+func (s *ProblemService) RetryFailed(ctx context.Context, req *problem.RetryFailedReq) (*problem.RetryFailedRes, error) {
+	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+		return &problem.RetryFailedRes{Code: 1, Message: "仅管理员可操作"}, nil
+	}
+	if s.uc != nil {
+		s.uc.ResumeAnalyze()
+		s.uc.ResumeFetch()
+	}
+	limit := 0
+	if req != nil {
+		limit = int(req.Limit)
+	}
+	scanned, enqueued, blacklisted, err := s.uc.RetryFailed(limit)
+	if err != nil {
+		return nil, errors.InternalServer("retry failed", err.Error())
+	}
+	return &problem.RetryFailedRes{
+		Code:        0,
+		Message:     "success",
+		Scanned:     scanned,
+		Enqueued:    enqueued,
+		Blacklisted: blacklisted,
+	}, nil
+}
+
+func (s *ProblemService) ToggleAnalyze(ctx context.Context, req *problem.TogglePipelineReq) (*problem.TogglePipelineRes, error) {
+	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+		return &problem.TogglePipelineRes{Code: 1, Message: "仅管理员可操作"}, nil
+	}
+	pause := true
+	if req != nil && req.PauseSet {
+		pause = req.Pause
+	} else {
+		// 翻转
+		pause = !s.uc.ProgressPausedAnalyze()
+	}
+	if pause {
+		n, err := s.uc.PauseAnalyze()
+		if err != nil {
+			return nil, errors.InternalServer("pause analyze failed", err.Error())
+		}
+		return &problem.TogglePipelineRes{Code: 0, Message: "AI 分析已暂停并清空队列", Paused: true, Purged: int64(n)}, nil
+	}
+	s.uc.ResumeAnalyze()
+	return &problem.TogglePipelineRes{Code: 0, Message: "AI 分析已恢复", Paused: false}, nil
+}
+
+func (s *ProblemService) ToggleFetch(ctx context.Context, req *problem.TogglePipelineReq) (*problem.TogglePipelineRes, error) {
+	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+		return &problem.TogglePipelineRes{Code: 1, Message: "仅管理员可操作"}, nil
+	}
+	pause := true
+	if req != nil && req.PauseSet {
+		pause = req.Pause
+	} else {
+		pause = !s.uc.ProgressPausedFetch()
+	}
+	if pause {
+		n, err := s.uc.PauseFetch()
+		if err != nil {
+			return nil, errors.InternalServer("pause fetch failed", err.Error())
+		}
+		return &problem.TogglePipelineRes{Code: 0, Message: "题面爬取已暂停并清空队列", Paused: true, Purged: int64(n)}, nil
+	}
+	s.uc.ResumeFetch()
+	return &problem.TogglePipelineRes{Code: 0, Message: "题面爬取已恢复", Paused: false}, nil
 }

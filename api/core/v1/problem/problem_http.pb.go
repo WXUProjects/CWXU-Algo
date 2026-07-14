@@ -27,20 +27,29 @@ const OperationProblemListSubmissions = "/api.core.v1.problem.Problem/ListSubmis
 const OperationProblemProgress = "/api.core.v1.problem.Problem/Progress"
 const OperationProblemResetAll = "/api.core.v1.problem.Problem/ResetAll"
 const OperationProblemResume = "/api.core.v1.problem.Problem/Resume"
+const OperationProblemRetryFailed = "/api.core.v1.problem.Problem/RetryFailed"
+const OperationProblemToggleAnalyze = "/api.core.v1.problem.Problem/ToggleAnalyze"
+const OperationProblemToggleFetch = "/api.core.v1.problem.Problem/ToggleFetch"
 const OperationProblemUserProfile = "/api.core.v1.problem.Problem/UserProfile"
 
 type ProblemHTTPServer interface {
 	Backfill(context.Context, *BackfillReq) (*BackfillRes, error)
-	// EmergencyStop 紧急停止：暂停消费并清空 MQ 队列
+	// EmergencyStop 紧急停止：暂停 AI 并清空分析队列（兼容）
 	EmergencyStop(context.Context, *EmergencyStopReq) (*EmergencyStopRes, error)
 	Get(context.Context, *GetProblemReq) (*GetProblemRes, error)
 	List(context.Context, *ListProblemReq) (*ListProblemRes, error)
 	ListSubmissions(context.Context, *ListSubmissionsReq) (*ListSubmissionsRes, error)
 	Progress(context.Context, *ProgressReq) (*ProgressRes, error)
-	// ResetAll 全部重置：清空队列，非 COMPLETED 题重置为 PENDING 并重新入队爬取
+	// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(context.Context, *ResetAllReq) (*ResetAllRes, error)
-	// Resume 恢复流水线（取消紧急停止）
+	// Resume 恢复 AI（兼容）
 	Resume(context.Context, *ResumeReq) (*ResumeRes, error)
+	// RetryFailed 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+	RetryFailed(context.Context, *RetryFailedReq) (*RetryFailedRes, error)
+	// ToggleAnalyze 暂停/恢复 AI 分析（暂停时清空分析队列）
+	ToggleAnalyze(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error)
+	// ToggleFetch 暂停/恢复题面爬取（暂停时清空爬取队列）
+	ToggleFetch(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error)
 	UserProfile(context.Context, *UserProfileReq) (*UserProfileRes, error)
 }
 
@@ -55,6 +64,9 @@ func RegisterProblemHTTPServer(s *http.Server, srv ProblemHTTPServer) {
 	r.POST("/v1/core/problem/emergency-stop", _Problem_EmergencyStop0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/reset-all", _Problem_ResetAll0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/resume", _Problem_Resume0_HTTP_Handler(srv))
+	r.POST("/v1/core/problem/retry-failed", _Problem_RetryFailed0_HTTP_Handler(srv))
+	r.POST("/v1/core/problem/toggle-analyze", _Problem_ToggleAnalyze0_HTTP_Handler(srv))
+	r.POST("/v1/core/problem/toggle-fetch", _Problem_ToggleFetch0_HTTP_Handler(srv))
 }
 
 func _Problem_List0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
@@ -240,18 +252,90 @@ func _Problem_Resume0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context)
 	}
 }
 
+func _Problem_RetryFailed0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in RetryFailedReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemRetryFailed)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.RetryFailed(ctx, req.(*RetryFailedReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*RetryFailedRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problem_ToggleAnalyze0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in TogglePipelineReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemToggleAnalyze)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ToggleAnalyze(ctx, req.(*TogglePipelineReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*TogglePipelineRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problem_ToggleFetch0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in TogglePipelineReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemToggleFetch)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ToggleFetch(ctx, req.(*TogglePipelineReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*TogglePipelineRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type ProblemHTTPClient interface {
 	Backfill(ctx context.Context, req *BackfillReq, opts ...http.CallOption) (rsp *BackfillRes, err error)
-	// EmergencyStop 紧急停止：暂停消费并清空 MQ 队列
+	// EmergencyStop 紧急停止：暂停 AI 并清空分析队列（兼容）
 	EmergencyStop(ctx context.Context, req *EmergencyStopReq, opts ...http.CallOption) (rsp *EmergencyStopRes, err error)
 	Get(ctx context.Context, req *GetProblemReq, opts ...http.CallOption) (rsp *GetProblemRes, err error)
 	List(ctx context.Context, req *ListProblemReq, opts ...http.CallOption) (rsp *ListProblemRes, err error)
 	ListSubmissions(ctx context.Context, req *ListSubmissionsReq, opts ...http.CallOption) (rsp *ListSubmissionsRes, err error)
 	Progress(ctx context.Context, req *ProgressReq, opts ...http.CallOption) (rsp *ProgressRes, err error)
-	// ResetAll 全部重置：清空队列，非 COMPLETED 题重置为 PENDING 并重新入队爬取
+	// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(ctx context.Context, req *ResetAllReq, opts ...http.CallOption) (rsp *ResetAllRes, err error)
-	// Resume 恢复流水线（取消紧急停止）
+	// Resume 恢复 AI（兼容）
 	Resume(ctx context.Context, req *ResumeReq, opts ...http.CallOption) (rsp *ResumeRes, err error)
+	// RetryFailed 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+	RetryFailed(ctx context.Context, req *RetryFailedReq, opts ...http.CallOption) (rsp *RetryFailedRes, err error)
+	// ToggleAnalyze 暂停/恢复 AI 分析（暂停时清空分析队列）
+	ToggleAnalyze(ctx context.Context, req *TogglePipelineReq, opts ...http.CallOption) (rsp *TogglePipelineRes, err error)
+	// ToggleFetch 暂停/恢复题面爬取（暂停时清空爬取队列）
+	ToggleFetch(ctx context.Context, req *TogglePipelineReq, opts ...http.CallOption) (rsp *TogglePipelineRes, err error)
 	UserProfile(ctx context.Context, req *UserProfileReq, opts ...http.CallOption) (rsp *UserProfileRes, err error)
 }
 
@@ -276,7 +360,7 @@ func (c *ProblemHTTPClientImpl) Backfill(ctx context.Context, in *BackfillReq, o
 	return &out, nil
 }
 
-// EmergencyStop 紧急停止：暂停消费并清空 MQ 队列
+// EmergencyStop 紧急停止：暂停 AI 并清空分析队列（兼容）
 func (c *ProblemHTTPClientImpl) EmergencyStop(ctx context.Context, in *EmergencyStopReq, opts ...http.CallOption) (*EmergencyStopRes, error) {
 	var out EmergencyStopRes
 	pattern := "/v1/core/problem/emergency-stop"
@@ -342,7 +426,7 @@ func (c *ProblemHTTPClientImpl) Progress(ctx context.Context, in *ProgressReq, o
 	return &out, nil
 }
 
-// ResetAll 全部重置：清空队列，非 COMPLETED 题重置为 PENDING 并重新入队爬取
+// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 func (c *ProblemHTTPClientImpl) ResetAll(ctx context.Context, in *ResetAllReq, opts ...http.CallOption) (*ResetAllRes, error) {
 	var out ResetAllRes
 	pattern := "/v1/core/problem/reset-all"
@@ -356,12 +440,54 @@ func (c *ProblemHTTPClientImpl) ResetAll(ctx context.Context, in *ResetAllReq, o
 	return &out, nil
 }
 
-// Resume 恢复流水线（取消紧急停止）
+// Resume 恢复 AI（兼容）
 func (c *ProblemHTTPClientImpl) Resume(ctx context.Context, in *ResumeReq, opts ...http.CallOption) (*ResumeRes, error) {
 	var out ResumeRes
 	pattern := "/v1/core/problem/resume"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProblemResume))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RetryFailed 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+func (c *ProblemHTTPClientImpl) RetryFailed(ctx context.Context, in *RetryFailedReq, opts ...http.CallOption) (*RetryFailedRes, error) {
+	var out RetryFailedRes
+	pattern := "/v1/core/problem/retry-failed"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemRetryFailed))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ToggleAnalyze 暂停/恢复 AI 分析（暂停时清空分析队列）
+func (c *ProblemHTTPClientImpl) ToggleAnalyze(ctx context.Context, in *TogglePipelineReq, opts ...http.CallOption) (*TogglePipelineRes, error) {
+	var out TogglePipelineRes
+	pattern := "/v1/core/problem/toggle-analyze"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemToggleAnalyze))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ToggleFetch 暂停/恢复题面爬取（暂停时清空爬取队列）
+func (c *ProblemHTTPClientImpl) ToggleFetch(ctx context.Context, in *TogglePipelineReq, opts ...http.CallOption) (*TogglePipelineRes, error) {
+	var out TogglePipelineRes
+	pattern := "/v1/core/problem/toggle-fetch"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemToggleFetch))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

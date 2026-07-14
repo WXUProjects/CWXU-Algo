@@ -39,24 +39,45 @@ service Problem {
       body: "*"
     };
   }
-  // 紧急停止：暂停消费并清空 MQ 队列
+  // 紧急停止：暂停 AI 并清空分析队列（兼容）
   rpc EmergencyStop (EmergencyStopReq) returns (EmergencyStopRes) {
     option (google.api.http) = {
       post: "/v1/core/problem/emergency-stop"
       body: "*"
     };
   }
-  // 全部重置：清空队列，非 COMPLETED 题重置为 PENDING 并重新入队爬取
+  // 全部重置：清空 AI 标签，保留题面，可选重新入队分析
   rpc ResetAll (ResetAllReq) returns (ResetAllRes) {
     option (google.api.http) = {
       post: "/v1/core/problem/reset-all"
       body: "*"
     };
   }
-  // 恢复流水线（取消紧急停止）
+  // 恢复 AI（兼容）
   rpc Resume (ResumeReq) returns (ResumeRes) {
     option (google.api.http) = {
       post: "/v1/core/problem/resume"
+      body: "*"
+    };
+  }
+  // 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+  rpc RetryFailed (RetryFailedReq) returns (RetryFailedRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/retry-failed"
+      body: "*"
+    };
+  }
+  // 暂停/恢复 AI 分析（暂停时清空分析队列）
+  rpc ToggleAnalyze (TogglePipelineReq) returns (TogglePipelineRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/toggle-analyze"
+      body: "*"
+    };
+  }
+  // 暂停/恢复题面爬取（暂停时清空爬取队列）
+  rpc ToggleFetch (TogglePipelineReq) returns (TogglePipelineRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/toggle-fetch"
       body: "*"
     };
   }
@@ -212,10 +233,12 @@ message ProgressRes {
   repeated ProgressItem items = 3;
   repeated FailedProblem recent_failed = 4;
   int64 total = 5;
-  bool paused = 6;
+  bool paused = 6; // AI 暂停（兼容）
   repeated ActiveJob active_jobs = 7;
   repeated QueueStatus queues = 8;
   repeated FailedProblem in_progress = 9; // DB 中 FETCHING/TAGGING
+  bool fetch_paused = 10;
+  bool analyze_paused = 11;
 }
 
 message BackfillReq {
@@ -262,4 +285,33 @@ message ResumeReq {}
 message ResumeRes {
   int64 code = 1;
   string message = 2;
+}
+
+message RetryFailedReq {
+  // 最大重试条数，0 表示不限制
+  int64 limit = 1;
+}
+
+message RetryFailedRes {
+  int64 code = 1;
+  string message = 2;
+  // 扫描到的 FAILED 数
+  int64 scanned = 3;
+  // 成功入队数
+  int64 enqueued = 4;
+  // 升为 FAILED_PERM（黑名单）的数量
+  int64 blacklisted = 5;
+}
+
+// pause=true 暂停并清队列；pause=false 恢复；未设置时按当前状态翻转
+message TogglePipelineReq {
+  bool pause = 1;
+  bool pause_set = 2;
+}
+
+message TogglePipelineRes {
+  int64 code = 1;
+  string message = 2;
+  bool paused = 3;
+  int64 purged = 4;
 }

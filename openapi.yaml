@@ -231,7 +231,7 @@ paths:
         post:
             tags:
                 - Problem
-            description: 紧急停止：暂停消费并清空 MQ 队列
+            description: 紧急停止：暂停 AI 并清空分析队列（兼容）
             operationId: Problem_EmergencyStop
             requestBody:
                 content:
@@ -335,7 +335,7 @@ paths:
         post:
             tags:
                 - Problem
-            description: 全部重置：清空队列，非 COMPLETED 题重置为 PENDING 并重新入队爬取
+            description: 全部重置：清空 AI 标签，保留题面，可选重新入队分析
             operationId: Problem_ResetAll
             requestBody:
                 content:
@@ -354,7 +354,7 @@ paths:
         post:
             tags:
                 - Problem
-            description: 恢复流水线（取消紧急停止）
+            description: 恢复 AI（兼容）
             operationId: Problem_Resume
             requestBody:
                 content:
@@ -369,6 +369,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.ResumeRes'
+    /v1/core/problem/retry-failed:
+        post:
+            tags:
+                - Problem
+            description: 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+            operationId: Problem_RetryFailed
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.RetryFailedReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.RetryFailedRes'
     /v1/core/problem/submissions:
         get:
             tags:
@@ -399,6 +418,44 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.ListSubmissionsRes'
+    /v1/core/problem/toggle-analyze:
+        post:
+            tags:
+                - Problem
+            description: 暂停/恢复 AI 分析（暂停时清空分析队列）
+            operationId: Problem_ToggleAnalyze
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.TogglePipelineReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.TogglePipelineRes'
+    /v1/core/problem/toggle-fetch:
+        post:
+            tags:
+                - Problem
+            description: 暂停/恢复题面爬取（暂停时清空爬取队列）
+            operationId: Problem_ToggleFetch
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.TogglePipelineReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.TogglePipelineRes'
     /v1/core/problem/user-profile:
         get:
             tags:
@@ -1283,6 +1340,10 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/api.core.v1.problem.FailedProblem'
+                fetchPaused:
+                    type: boolean
+                analyzePaused:
+                    type: boolean
         api.core.v1.problem.QueueStatus:
             type: object
             properties:
@@ -1328,6 +1389,28 @@ components:
                     type: string
                 message:
                     type: string
+        api.core.v1.problem.RetryFailedReq:
+            type: object
+            properties:
+                limit:
+                    type: string
+                    description: 最大重试条数，0 表示不限制
+        api.core.v1.problem.RetryFailedRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                scanned:
+                    type: string
+                    description: 扫描到的 FAILED 数
+                enqueued:
+                    type: string
+                    description: 成功入队数
+                blacklisted:
+                    type: string
+                    description: 升为 FAILED_PERM（黑名单）的数量
         api.core.v1.problem.SolutionMeta:
             type: object
             properties:
@@ -1370,6 +1453,25 @@ components:
                     type: number
                     format: double
                 acCount:
+                    type: string
+        api.core.v1.problem.TogglePipelineReq:
+            type: object
+            properties:
+                pause:
+                    type: boolean
+                pauseSet:
+                    type: boolean
+            description: pause=true 暂停并清队列；pause=false 恢复；未设置时按当前状态翻转
+        api.core.v1.problem.TogglePipelineRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                paused:
+                    type: boolean
+                purged:
                     type: string
         api.core.v1.problem.UserProfileRes:
             type: object

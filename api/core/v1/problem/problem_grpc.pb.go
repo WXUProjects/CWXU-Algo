@@ -28,6 +28,9 @@ const (
 	Problem_EmergencyStop_FullMethodName   = "/api.core.v1.problem.Problem/EmergencyStop"
 	Problem_ResetAll_FullMethodName        = "/api.core.v1.problem.Problem/ResetAll"
 	Problem_Resume_FullMethodName          = "/api.core.v1.problem.Problem/Resume"
+	Problem_RetryFailed_FullMethodName     = "/api.core.v1.problem.Problem/RetryFailed"
+	Problem_ToggleAnalyze_FullMethodName   = "/api.core.v1.problem.Problem/ToggleAnalyze"
+	Problem_ToggleFetch_FullMethodName     = "/api.core.v1.problem.Problem/ToggleFetch"
 )
 
 // ProblemClient is the client API for Problem service.
@@ -40,12 +43,18 @@ type ProblemClient interface {
 	UserProfile(ctx context.Context, in *UserProfileReq, opts ...grpc.CallOption) (*UserProfileRes, error)
 	Progress(ctx context.Context, in *ProgressReq, opts ...grpc.CallOption) (*ProgressRes, error)
 	Backfill(ctx context.Context, in *BackfillReq, opts ...grpc.CallOption) (*BackfillRes, error)
-	// 紧急停止：暂停消费并清空 MQ 队列
+	// 紧急停止：暂停 AI 并清空分析队列（兼容）
 	EmergencyStop(ctx context.Context, in *EmergencyStopReq, opts ...grpc.CallOption) (*EmergencyStopRes, error)
-	// 全部重置：清空队列，非 COMPLETED 题重置为 PENDING 并重新入队爬取
+	// 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(ctx context.Context, in *ResetAllReq, opts ...grpc.CallOption) (*ResetAllRes, error)
-	// 恢复流水线（取消紧急停止）
+	// 恢复 AI（兼容）
 	Resume(ctx context.Context, in *ResumeReq, opts ...grpc.CallOption) (*ResumeRes, error)
+	// 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+	RetryFailed(ctx context.Context, in *RetryFailedReq, opts ...grpc.CallOption) (*RetryFailedRes, error)
+	// 暂停/恢复 AI 分析（暂停时清空分析队列）
+	ToggleAnalyze(ctx context.Context, in *TogglePipelineReq, opts ...grpc.CallOption) (*TogglePipelineRes, error)
+	// 暂停/恢复题面爬取（暂停时清空爬取队列）
+	ToggleFetch(ctx context.Context, in *TogglePipelineReq, opts ...grpc.CallOption) (*TogglePipelineRes, error)
 }
 
 type problemClient struct {
@@ -146,6 +155,36 @@ func (c *problemClient) Resume(ctx context.Context, in *ResumeReq, opts ...grpc.
 	return out, nil
 }
 
+func (c *problemClient) RetryFailed(ctx context.Context, in *RetryFailedReq, opts ...grpc.CallOption) (*RetryFailedRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RetryFailedRes)
+	err := c.cc.Invoke(ctx, Problem_RetryFailed_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) ToggleAnalyze(ctx context.Context, in *TogglePipelineReq, opts ...grpc.CallOption) (*TogglePipelineRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TogglePipelineRes)
+	err := c.cc.Invoke(ctx, Problem_ToggleAnalyze_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) ToggleFetch(ctx context.Context, in *TogglePipelineReq, opts ...grpc.CallOption) (*TogglePipelineRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TogglePipelineRes)
+	err := c.cc.Invoke(ctx, Problem_ToggleFetch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProblemServer is the server API for Problem service.
 // All implementations must embed UnimplementedProblemServer
 // for forward compatibility.
@@ -156,12 +195,18 @@ type ProblemServer interface {
 	UserProfile(context.Context, *UserProfileReq) (*UserProfileRes, error)
 	Progress(context.Context, *ProgressReq) (*ProgressRes, error)
 	Backfill(context.Context, *BackfillReq) (*BackfillRes, error)
-	// 紧急停止：暂停消费并清空 MQ 队列
+	// 紧急停止：暂停 AI 并清空分析队列（兼容）
 	EmergencyStop(context.Context, *EmergencyStopReq) (*EmergencyStopRes, error)
-	// 全部重置：清空队列，非 COMPLETED 题重置为 PENDING 并重新入队爬取
+	// 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(context.Context, *ResetAllReq) (*ResetAllRes, error)
-	// 恢复流水线（取消紧急停止）
+	// 恢复 AI（兼容）
 	Resume(context.Context, *ResumeReq) (*ResumeRes, error)
+	// 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+	RetryFailed(context.Context, *RetryFailedReq) (*RetryFailedRes, error)
+	// 暂停/恢复 AI 分析（暂停时清空分析队列）
+	ToggleAnalyze(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error)
+	// 暂停/恢复题面爬取（暂停时清空爬取队列）
+	ToggleFetch(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error)
 	mustEmbedUnimplementedProblemServer()
 }
 
@@ -198,6 +243,15 @@ func (UnimplementedProblemServer) ResetAll(context.Context, *ResetAllReq) (*Rese
 }
 func (UnimplementedProblemServer) Resume(context.Context, *ResumeReq) (*ResumeRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Resume not implemented")
+}
+func (UnimplementedProblemServer) RetryFailed(context.Context, *RetryFailedReq) (*RetryFailedRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method RetryFailed not implemented")
+}
+func (UnimplementedProblemServer) ToggleAnalyze(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method ToggleAnalyze not implemented")
+}
+func (UnimplementedProblemServer) ToggleFetch(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method ToggleFetch not implemented")
 }
 func (UnimplementedProblemServer) mustEmbedUnimplementedProblemServer() {}
 func (UnimplementedProblemServer) testEmbeddedByValue()                 {}
@@ -382,6 +436,60 @@ func _Problem_Resume_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Problem_RetryFailed_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RetryFailedReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).RetryFailed(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_RetryFailed_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).RetryFailed(ctx, req.(*RetryFailedReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_ToggleAnalyze_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TogglePipelineReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).ToggleAnalyze(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_ToggleAnalyze_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).ToggleAnalyze(ctx, req.(*TogglePipelineReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_ToggleFetch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TogglePipelineReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).ToggleFetch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_ToggleFetch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).ToggleFetch(ctx, req.(*TogglePipelineReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Problem_ServiceDesc is the grpc.ServiceDesc for Problem service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -424,6 +532,18 @@ var Problem_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Resume",
 			Handler:    _Problem_Resume_Handler,
+		},
+		{
+			MethodName: "RetryFailed",
+			Handler:    _Problem_RetryFailed_Handler,
+		},
+		{
+			MethodName: "ToggleAnalyze",
+			Handler:    _Problem_ToggleAnalyze_Handler,
+		},
+		{
+			MethodName: "ToggleFetch",
+			Handler:    _Problem_ToggleFetch_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

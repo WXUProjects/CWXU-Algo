@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -43,16 +45,90 @@ func Fetch(platform, externalID, problemURL string) (*FetchedContent, error) {
 	}
 }
 
+const browserUA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36`
+
+func setBrowserHeaders(req *http.Request, referer string) {
+	req.Header.Set("User-Agent", browserUA)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("Sec-Ch-Ua", `"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"`)
+	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-User", "?1")
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
+	req.Header.Set("Connection", "keep-alive")
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+	} else {
+		req.Header.Set("Sec-Fetch-Site", "none")
+	}
+}
+
 func httpGet(rawURL string) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	setBrowserHeaders(req, "")
 	client := &http.Client{Timeout: 30 * time.Second}
 	return client.Do(req)
+}
+
+// 牛客 WAF：无 Cookie 会返回阿里云滑块页；先访问首页拿 Cookie 再抓题面
+var (
+	nowcoderClientOnce sync.Once
+	nowcoderClient     *http.Client
+)
+
+func getNowCoderClient() *http.Client {
+	nowcoderClientOnce.Do(func() {
+		jar, _ := cookiejar.New(nil)
+		nowcoderClient = &http.Client{
+			Timeout: 30 * time.Second,
+			Jar:     jar,
+		}
+	})
+	return nowcoderClient
+}
+
+func nowcoderWarmup(client *http.Client) {
+	req, err := http.NewRequest(http.MethodGet, "https://ac.nowcoder.com/", nil)
+	if err != nil {
+		return
+	}
+	setBrowserHeaders(req, "")
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+}
+
+func nowcoderGet(rawURL string) (*http.Response, error) {
+	client := getNowCoderClient()
+	// 无 Cookie 时先预热首页
+	if u, err := url.Parse("https://ac.nowcoder.com/"); err == nil {
+		if len(client.Jar.Cookies(u)) == 0 {
+			nowcoderWarmup(client)
+		}
+	}
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	setBrowserHeaders(req, "https://ac.nowcoder.com/")
+	return client.Do(req)
+}
+
+func isNowCoderWAF(html string) bool {
+	return strings.Contains(html, "aliyun_waf") ||
+		strings.Contains(html, "aliyunCaptcha") ||
+		strings.Contains(html, "访问验证") ||
+		strings.Contains(html, "请进行验证")
 }
 
 func fetchCodeforces(externalID, problemURL string) (*FetchedContent, error) {
@@ -379,7 +455,7 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 			return nil, fmt.Errorf("NowCoder 竞赛题无稳定题面 URL，跳过爬取")
 		}
 	}
-	resp, err := httpGet(problemURL)
+	resp, err := nowcoderGet(problemURL)
 	if err != nil {
 		return nil, err
 	}
@@ -392,9 +468,32 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("NowCoder status %d", resp.StatusCode)
 	}
-	// 登录墙 / 空壳页
-	if strings.Contains(html, "请先登录") || strings.Contains(html, "login-btn") && !strings.Contains(html, "subject-question") {
-		return nil, fmt.Errorf("NowCoder 需要登录或被拦截")
+	// WAF 滑块页：清 Cookie 再预热重试一次
+	if isNowCoderWAF(html) {
+		if u, e := url.Parse("https://ac.nowcoder.com/"); e == nil {
+			getNowCoderClient().Jar.SetCookies(u, nil)
+		}
+		nowcoderWarmup(getNowCoderClient())
+		resp2, err2 := nowcoderGet(problemURL)
+		if err2 != nil {
+			return nil, fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")
+		}
+		defer resp2.Body.Close()
+		body2, err2 := io.ReadAll(resp2.Body)
+		if err2 != nil {
+			return nil, err2
+		}
+		html = string(body2)
+		if resp2.StatusCode != 200 {
+			return nil, fmt.Errorf("NowCoder status %d", resp2.StatusCode)
+		}
+		if isNowCoderWAF(html) {
+			return nil, fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")
+		}
+	}
+	// 真·登录墙（排除 WAF 页误伤）
+	if strings.Contains(html, "请先登录") && !strings.Contains(html, "subject-question") {
+		return nil, fmt.Errorf("NowCoder 需要登录，请稍后重试")
 	}
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {

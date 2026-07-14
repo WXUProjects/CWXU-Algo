@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/streadway/amqp"
@@ -181,18 +182,28 @@ func (uc *ProblemUseCase) enqueueAnalyze(id uint) error {
 	})
 }
 
-// ProcessFetch 仅爬取题面；成功后状态 TAGGING 并投递 AI 队列（不受 AI 紧急停止影响）
+// ProcessFetch 仅爬取题面；成功后状态 TAGGING 并投递 AI 队列
 func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetchEvent) error {
+	if pipelineControl.IsFetchPaused() {
+		return fmt.Errorf("fetch paused")
+	}
 	var p model.Problem
 	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
 		return err
 	}
 	pipelineControl.TrackStart("fetch", p.ID, p.Platform, p.ExternalID, p.Title)
 	defer pipelineControl.TrackEnd("fetch", p.ID)
-	if p.Status == model.ProblemStatusCompleted || p.Status == model.ProblemStatusTagging {
-		// 已有题面则直接补 AI
-		if p.ContentMD != "" && p.Status != model.ProblemStatusCompleted {
-			return uc.enqueueAnalyze(p.ID)
+	// 已识别完成：跳过
+	if p.Status == model.ProblemStatusCompleted {
+		return nil
+	}
+	// 已有题面：不再爬取，直接进 AI（若 AI 未暂停）
+	if strings.TrimSpace(p.ContentMD) != "" || p.Status == model.ProblemStatusTagging {
+		if p.Status != model.ProblemStatusCompleted {
+			_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
+			if !pipelineControl.IsAnalyzePaused() {
+				return uc.enqueueAnalyze(p.ID)
+			}
 		}
 		return nil
 	}
@@ -209,11 +220,6 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 			"status": model.ProblemStatusSkipped,
 		}).Error
 		return nil
-	}
-	// 已有 content 的失败题：跳过爬取，只重试 AI
-	if p.ContentMD != "" {
-		_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
-		return uc.enqueueAnalyze(p.ID)
 	}
 
 	res := uc.data.DB.Model(&model.Problem{}).
@@ -279,6 +285,7 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	}
 	pipelineControl.TrackStart("analyze", p.ID, p.Platform, p.ExternalID, p.Title)
 	defer pipelineControl.TrackEnd("analyze", p.ID)
+	// 已识别完成：跳过
 	if p.Status == model.ProblemStatusCompleted {
 		return nil
 	}
@@ -286,6 +293,10 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 		return nil
 	}
 	if p.Status == model.ProblemStatusFailedPerm {
+		return nil
+	}
+	// 超过 6 个月：不处理
+	if p.LastSubmittedAt != nil && p.LastSubmittedAt.Before(time.Now().Add(-backfillWindow)) {
 		return nil
 	}
 	if strings.TrimSpace(p.ContentMD) == "" {
@@ -332,17 +343,23 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	return uc.data.DB.Model(&p).Updates(updates).Error
 }
 
-// Backfill 历史回填：绑定未关联提交 + 把所有未完成题目塞进 MQ（可紧急停止中断消费）
-// 会先把「未找到题面」等永久错误标为 FAILED_PERM，清空 problem_fetch 后只重入可重试任务。
+// backfillWindow 历史回填 / AI 分析仅处理最近 N 个月有提交的题
+const backfillWindow = 6 * 30 * 24 * time.Hour // ≈6 个月
+
+// Backfill 历史回填：绑定未关联提交 + 未完成题入队
+// - 已有题面 → 只进 AI 队列（不再爬）
+// - 无题面 → 进爬取队列
+// - COMPLETED / 超 6 个月 / FAILED_PERM / SKIPPED → 跳过
 func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued int64, err error) {
-	// 0 = 尽量全量（单次最多 5000 提交 + 全量未完成题）
+	// 0 = 尽量全量（单次最多 5000 提交）
 	if limit <= 0 {
 		limit = 5000
 	}
-	// 确保流水线在跑
-	pipelineControl.SetPaused(false)
+	// 回填时恢复双队列
+	pipelineControl.SetAnalyzePaused(false)
+	pipelineControl.SetFetchPaused(false)
 
-	// 0) 牛客错误 external_id：非纯数字（曾用 ACM3227 / main|uid_标题）→ 解绑后重解析
+	// 0) 牛客错误 external_id：非纯数字 → 解绑后重解析
 	if res := uc.data.DB.Exec(`
 		UPDATE submit_logs
 		SET problem_id = NULL, external_id = ''
@@ -355,10 +372,10 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		log.Infof("Backfill: unbound %d NowCoder submits with bad external_id", res.RowsAffected)
 	}
 
-	// 1) 历史永久错误：FAILED → FAILED_PERM，不再重试
+	// 1) 历史永久错误：FAILED → FAILED_PERM
 	_ = uc.markExistingPermanentFailures()
 
-	// 2) 清空爬取队列（去掉里面已永久失败的毒消息）
+	// 2) 清空爬取队列（去掉毒消息）
 	if uc.mq != nil {
 		_, _ = uc.mq.QueueDeclare("problem_fetch", true, false, false, false, nil)
 		if n, perr := uc.mq.QueuePurge("problem_fetch", false); perr == nil {
@@ -366,9 +383,11 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		}
 	}
 
-	// 优先重绑牛客（刚解绑的）+ 其它未绑定
+	// 优先重绑牛客 + 其它未绑定（仅最近 6 个月提交）
+	cutoff := time.Now().Add(-backfillWindow)
 	var logs []model.SubmitLog
 	err = uc.data.DB.Where("(problem_id IS NULL OR problem_id = 0) AND platform != ?", spider.LeetCode).
+		Where("time IS NULL OR time >= ?", cutoff).
 		Order("CASE WHEN platform = 'NowCoder' THEN 0 ELSE 1 END, id DESC").
 		Limit(limit).Find(&logs).Error
 	if err != nil {
@@ -387,7 +406,8 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		_ = p
 	}
 
-	// 把所有需要处理的题塞进队列（排除 FAILED_PERM / SKIPPED）
+	// 未完成题入队：跳过 COMPLETED / 超 6 个月 / 永久失败
+	// 入队顺序：新题优先（最近提交 → 旧题），MQ FIFO 先发先消费
 	var todos []model.Problem
 	_ = uc.data.DB.Where("status IN ? AND platform != ?", []string{
 		model.ProblemStatusPending,
@@ -395,7 +415,8 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		model.ProblemStatusFailed,
 		model.ProblemStatusTagging,
 	}, spider.LeetCode).
-		Order("id desc").Find(&todos).Error
+		Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
+		Order("last_submitted_at DESC NULLS LAST, id DESC").Find(&todos).Error
 
 	seen := map[uint]bool{}
 	for _, p := range todos {
@@ -403,13 +424,89 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 			continue
 		}
 		seen[p.ID] = true
-		// 再拦一层：error_msg 已是永久错误
+		// 已识别完成：跳过
+		if p.Status == model.ProblemStatusCompleted {
+			continue
+		}
+		// 永久错误 → 黑名单
 		if isPermanentFetchError(p.ErrorMsg) {
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 				Update("status", model.ProblemStatusFailedPerm).Error
 			continue
 		}
-		// 已有题面 → AI 队列；否则爬取队列
+		// 已有题面 → 只进 AI，不爬
+		if strings.TrimSpace(p.ContentMD) != "" {
+			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+				Updates(map[string]interface{}{
+					"status":    model.ProblemStatusTagging,
+					"error_msg": "",
+				}).Error
+			if e := uc.enqueueAnalyze(p.ID); e == nil {
+				enqueued++
+			}
+		} else {
+			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+				Updates(map[string]interface{}{
+					"status":    model.ProblemStatusPending,
+					"error_msg": "",
+				}).Error
+			if e := uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL); e == nil {
+				enqueued++
+			}
+		}
+	}
+	return
+}
+
+// RetryFailed 重试错误队列：仅重入 FAILED（可重试失败），排除 FAILED_PERM 黑名单
+// 会先把永久错误升级为 FAILED_PERM，并解除误标的 WAF/登录墙 FAILED_PERM
+func (uc *ProblemUseCase) RetryFailed(limit int) (scanned, enqueued, blacklisted int64, err error) {
+	pipelineControl.SetAnalyzePaused(false)
+	pipelineControl.SetFetchPaused(false)
+
+	// 解除误标：WAF/登录墙不应进黑名单（历史曾标 FAILED_PERM）
+	if res := uc.data.DB.Model(&model.Problem{}).
+		Where("status = ?", model.ProblemStatusFailedPerm).
+		Where("error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ?",
+			"%需要登录%", "%被拦截%", "%WAF%").
+		Updates(map[string]interface{}{
+			"status":    model.ProblemStatusFailed,
+			"error_msg": "retry: was false permanent (WAF/login)",
+		}); res.Error == nil && res.RowsAffected > 0 {
+		log.Infof("RetryFailed: unblocked %d false FAILED_PERM (WAF/login)", res.RowsAffected)
+	}
+
+	// 先把已是永久错误文案的 FAILED 升为黑名单
+	blacklisted = uc.markExistingPermanentFailures()
+
+	// 仅近 6 个月；新题优先
+	cutoff := time.Now().Add(-backfillWindow)
+	q := uc.data.DB.Where("status = ?", model.ProblemStatusFailed).
+		Where("platform != ?", spider.LeetCode).
+		Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
+		Order("last_submitted_at DESC NULLS LAST, id DESC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var todos []model.Problem
+	if err = q.Find(&todos).Error; err != nil {
+		return
+	}
+	scanned = int64(len(todos))
+
+	seen := map[uint]bool{}
+	for _, p := range todos {
+		if seen[p.ID] {
+			continue
+		}
+		seen[p.ID] = true
+		// 双保险：error_msg 已是永久错误 → 黑名单，不入队
+		if isPermanentFetchError(p.ErrorMsg) {
+			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+				Update("status", model.ProblemStatusFailedPerm).Error
+			blacklisted++
+			continue
+		}
 		if strings.TrimSpace(p.ContentMD) != "" {
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 				Updates(map[string]interface{}{
@@ -702,12 +799,14 @@ type ProgressSnapshot struct {
 		Status string
 		Count  int64
 	}
-	Failed     []model.Problem
-	InProgress []model.Problem
-	Total      int64
-	Paused     bool
-	ActiveJobs []ActiveJob
-	Queues     []struct {
+	Failed         []model.Problem
+	InProgress     []model.Problem
+	Total          int64
+	Paused         bool // AI 暂停（兼容）
+	FetchPaused    bool
+	AnalyzePaused  bool
+	ActiveJobs     []ActiveJob
+	Queues         []struct {
 		Name        string
 		Messages    int64
 		Consumers   int64
@@ -737,7 +836,9 @@ func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
 	_ = uc.data.DB.Where("status IN ?", []string{model.ProblemStatusFetching, model.ProblemStatusTagging}).
 		Order("updated_at desc").Limit(30).Find(&snap.InProgress).Error
 
-	snap.Paused = pipelineControl.IsPaused()
+	snap.Paused = pipelineControl.IsAnalyzePaused()
+	snap.FetchPaused = pipelineControl.IsFetchPaused()
+	snap.AnalyzePaused = pipelineControl.IsAnalyzePaused()
 	snap.ActiveJobs = pipelineControl.SnapshotActive()
 	snap.Queues = uc.queueStats()
 	return snap, nil
@@ -792,25 +893,61 @@ func (uc *ProblemUseCase) queueStats() []struct {
 	return out
 }
 
-// purgeAnalyzeQueue 仅清空 AI 分析队列，不动题面爬取队列
-func (uc *ProblemUseCase) purgeAnalyzeQueue() (purgedAnalyze int, err error) {
+func (uc *ProblemUseCase) purgeQueue(name string) (int, error) {
 	if uc.mq == nil {
 		return 0, fmt.Errorf("mq not ready")
 	}
-	_, _ = uc.mq.QueueDeclare("problem_analyze", true, false, false, false, nil)
-	return uc.mq.QueuePurge("problem_analyze", false)
+	_, _ = uc.mq.QueueDeclare(name, true, false, false, false, nil)
+	return uc.mq.QueuePurge(name, false)
 }
 
-// EmergencyStop 仅暂停 AI 分析并清空 problem_analyze 队列；题面不删、爬取不停
-func (uc *ProblemUseCase) EmergencyStop() (purgedFetch, purgedAnalyze int, err error) {
+func (uc *ProblemUseCase) purgeAnalyzeQueue() (purgedAnalyze int, err error) {
+	return uc.purgeQueue("problem_analyze")
+}
+
+func (uc *ProblemUseCase) purgeFetchQueue() (purgedFetch int, err error) {
+	return uc.purgeQueue("problem_fetch")
+}
+
+// PauseAnalyze 暂停 AI 并清空分析队列
+func (uc *ProblemUseCase) PauseAnalyze() (purged int, err error) {
 	pipelineControl.SetAnalyzePaused(true)
-	purgedAnalyze, err = uc.purgeAnalyzeQueue()
+	return uc.purgeAnalyzeQueue()
+}
+
+// ResumeAnalyze 恢复 AI 分析
+func (uc *ProblemUseCase) ResumeAnalyze() {
+	pipelineControl.SetAnalyzePaused(false)
+}
+
+// PauseFetch 暂停题面爬取并清空爬取队列
+func (uc *ProblemUseCase) PauseFetch() (purged int, err error) {
+	pipelineControl.SetFetchPaused(true)
+	return uc.purgeFetchQueue()
+}
+
+// ResumeFetch 恢复题面爬取
+func (uc *ProblemUseCase) ResumeFetch() {
+	pipelineControl.SetFetchPaused(false)
+}
+
+// EmergencyStop 兼容旧 API：暂停 AI 并清空分析队列
+func (uc *ProblemUseCase) EmergencyStop() (purgedFetch, purgedAnalyze int, err error) {
+	purgedAnalyze, err = uc.PauseAnalyze()
 	return 0, purgedAnalyze, err
 }
 
-// Resume 恢复 AI 分析
+// Resume 兼容旧 API：恢复 AI
 func (uc *ProblemUseCase) Resume() {
-	pipelineControl.SetAnalyzePaused(false)
+	uc.ResumeAnalyze()
+}
+
+func (uc *ProblemUseCase) ProgressPausedAnalyze() bool {
+	return pipelineControl.IsAnalyzePaused()
+}
+
+func (uc *ProblemUseCase) ProgressPausedFetch() bool {
+	return pipelineControl.IsFetchPaused()
 }
 
 // ResetAll 仅重置 AI 分析结果（保留 content_md 题面），清空 AI 队列并可选重新入队分析
@@ -858,10 +995,11 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 	}
 
 	if requeue {
+		// 分析入队：新题优先（最近提交 → 旧题）
 		var list []model.Problem
 		_ = uc.data.DB.Where("status = ? AND platform != ?", model.ProblemStatusTagging, spider.LeetCode).
 			Where("content_md IS NOT NULL AND content_md != ''").
-			Order("id desc").Limit(3000).Find(&list).Error
+			Order("last_submitted_at DESC NULLS LAST, id DESC").Limit(3000).Find(&list).Error
 		for _, p := range list {
 			if e := uc.enqueueAnalyze(p.ID); e == nil {
 				enqueued++
@@ -879,16 +1017,18 @@ func truncateErr(s string) string {
 	return s
 }
 
-// isPermanentFetchError 不可恢复的爬取错误：不再重试、不再入队
+// isPermanentFetchError 不可恢复的爬取错误：不再重试、不再入队（软黑名单 FAILED_PERM）
 // 例如 CF/洛谷/牛客「未找到题面」、无 URL、不支持平台等
+// 注意：WAF/登录墙/Cloudflare 等拦截类一律可重试，不进黑名单
 func isPermanentFetchError(msg string) bool {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
 		return false
 	}
-	// 网络/拦截类可重试，明确排除
+	// 网络/WAF/登录墙：可重试，明确排除
 	if strings.Contains(msg, "Cloudflare") ||
 		strings.Contains(msg, "请稍后重试") ||
+		strings.Contains(msg, "WAF") ||
 		strings.Contains(msg, "需要登录") ||
 		strings.Contains(msg, "被拦截") {
 		return false

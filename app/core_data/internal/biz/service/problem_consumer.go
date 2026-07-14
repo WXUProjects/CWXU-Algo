@@ -13,12 +13,12 @@ import (
 
 const (
 	// 题面爬取并发
-	problemFetchConcurrency = 2
+	problemFetchConcurrency = 4
 	// AI 分析并发
-	problemAnalyzeConcurrency = 3
+	problemAnalyzeConcurrency = 8
 )
 
-// ProblemFetchConsumer 消费 problem_fetch：仅爬取，并发 2
+// ProblemFetchConsumer 消费 problem_fetch：仅爬取，并发 4
 // 使用独立 Channel + 断线自动重连，避免与发布侧共用 channel 导致消费者静默死亡。
 type ProblemFetchConsumer struct {
 	mq      *event.RabbitMQ
@@ -84,12 +84,17 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 				_ = d.Nack(false, false)
 				return
 			}
+			if pipelineControl.IsFetchPaused() {
+				// 暂停：丢弃（暂停时已 purge；恢复后用回填/重试再入队）
+				_ = d.Ack(false)
+				return
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			if err := c.problem.ProcessFetch(ctx, msg); err != nil {
 				log.Errorf("RabbitMQ(problem_fetch) id=%d: %v", msg.ProblemID, err)
-				// 失败不 requeue，避免毒消息死循环；DB 已记 FAILED，可 backfill 重入
-				_ = d.Nack(false, false)
+				// 可恢复错误：发回队列重试；永久失败 ProcessFetch 返回 nil 已 Ack
+				_ = d.Nack(false, true)
 				return
 			}
 			_ = d.Ack(false)
@@ -99,7 +104,7 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 	return nil
 }
 
-// ProblemAnalyzeConsumer 消费 problem_analyze：仅 AI，并发 3
+// ProblemAnalyzeConsumer 消费 problem_analyze：仅 AI，并发 8
 type ProblemAnalyzeConsumer struct {
 	mq      *event.RabbitMQ
 	problem *ProblemUseCase
@@ -164,8 +169,7 @@ func (c *ProblemAnalyzeConsumer) consumeOnce() error {
 				return
 			}
 			if pipelineControl.IsAnalyzePaused() {
-				// 暂停：丢弃消息（EmergencyStop 已 purge；恢复后用 backfill/reset 再入队）
-				// 不可 requeue，否则会空转占满 QoS
+				// 暂停：丢弃（暂停时已 purge；恢复后用回填/重试再入队）
 				_ = d.Ack(false)
 				return
 			}
@@ -173,7 +177,8 @@ func (c *ProblemAnalyzeConsumer) consumeOnce() error {
 			defer cancel()
 			if err := c.problem.ProcessAnalyze(ctx, msg); err != nil {
 				log.Errorf("RabbitMQ(problem_analyze) id=%d: %v", msg.ProblemID, err)
-				_ = d.Nack(false, false)
+				// 分析出错：发回队列重试
+				_ = d.Nack(false, true)
 				return
 			}
 			_ = d.Ack(false)
