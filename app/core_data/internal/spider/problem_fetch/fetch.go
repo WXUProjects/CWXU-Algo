@@ -1,11 +1,15 @@
 package problem_fetch
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -17,108 +21,223 @@ type FetchedContent struct {
 }
 
 // Fetch 按平台爬取题面 Markdown（LeetCode 调用方应跳过）
-func Fetch(platform, externalID, url string) (*FetchedContent, error) {
+func Fetch(platform, externalID, problemURL string) (*FetchedContent, error) {
 	switch platform {
 	case "CodeForces":
-		return fetchCodeforces(externalID, url)
+		return fetchCodeforces(externalID, problemURL)
 	case "AtCoder":
-		return fetchAtCoder(url)
+		return fetchAtCoder(problemURL)
 	case "LuoGu":
-		return fetchLuoGu(externalID, url)
+		return fetchLuoGu(externalID, problemURL)
 	case "QOJ":
-		return fetchGeneric(url)
+		return fetchQOJ(externalID, problemURL)
 	case "NowCoder":
-		if url == "" {
-			return nil, fmt.Errorf("NowCoder 缺少题面 URL，跳过爬取")
-		}
-		return fetchGeneric(url)
+		return fetchNowCoder(externalID, problemURL)
 	case "LeetCode":
 		return nil, fmt.Errorf("LeetCode 不支持爬取")
 	default:
-		if url != "" {
-			return fetchGeneric(url)
+		if problemURL != "" {
+			return fetchGeneric(problemURL)
 		}
 		return nil, fmt.Errorf("不支持的平台: %s", platform)
 	}
 }
 
-func httpGet(url string) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+func httpGet(rawURL string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; CWXU-Algo-ProblemBot/1.0)")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 	client := &http.Client{Timeout: 30 * time.Second}
 	return client.Do(req)
 }
 
-func fetchCodeforces(externalID, url string) (*FetchedContent, error) {
-	if url == "" {
-		// externalID 形如 1843C
+func fetchCodeforces(externalID, problemURL string) (*FetchedContent, error) {
+	if problemURL == "" {
 		contest, index := splitCF(externalID)
 		if contest == "" || index == "" {
 			return nil, fmt.Errorf("无法解析 CF external_id: %s", externalID)
 		}
-		url = fmt.Sprintf("https://codeforces.com/contest/%s/problem/%s", contest, index)
+		// problemset 路径有时比 contest 路径更稳定
+		problemURL = fmt.Sprintf("https://codeforces.com/problemset/problem/%s/%s", contest, index)
 	}
-	resp, err := httpGet(url)
+	resp, err := httpGet(problemURL)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("CF status %d: %s", resp.StatusCode, truncate(string(body), 200))
-	}
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	title := strings.TrimSpace(doc.Find("div.title").First().Text())
-	if title == "" {
-		title = strings.TrimSpace(doc.Find("div.header div.title").First().Text())
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("CF status %d: %s", resp.StatusCode, truncate(string(body), 200))
 	}
-	// 去掉前缀 "C. "
-	if i := strings.Index(title, ". "); i >= 0 && i < 5 {
+	html := string(body)
+	// Cloudflare 拦截
+	if strings.Contains(html, "Just a moment") || strings.Contains(html, "cf-browser-verification") {
+		return nil, fmt.Errorf("CF 被 Cloudflare 拦截，请稍后重试或换网络")
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, err
+	}
+	stmt := doc.Find("div.problem-statement").First()
+	if stmt.Length() == 0 {
+		return nil, fmt.Errorf("CF 未找到题面")
+	}
+
+	title := strings.TrimSpace(stmt.Find("div.header div.title").First().Text())
+	if title == "" {
+		title = strings.TrimSpace(doc.Find("div.title").First().Text())
+	}
+	if i := strings.Index(title, ". "); i >= 0 && i < 6 {
 		title = strings.TrimSpace(title[i+2:])
 	}
-	var parts []string
-	doc.Find("div.problem-statement").Each(func(_ int, s *goquery.Selection) {
-		// 去掉 input/output 文件名等无关
-		s.Find("div.header").Remove()
-		text := strings.TrimSpace(s.Text())
-		if text != "" {
-			parts = append(parts, text)
+
+	// 按语义块转 Markdown，避免整段 Text 粘连
+	var b strings.Builder
+	b.WriteString("# ")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+
+	// 时间/内存限制
+	if tl := strings.TrimSpace(stmt.Find("div.time-limit").Text()); tl != "" {
+		b.WriteString("**")
+		b.WriteString(normalizeSpace(tl))
+		b.WriteString("**\n\n")
+	}
+	if ml := strings.TrimSpace(stmt.Find("div.memory-limit").Text()); ml != "" {
+		b.WriteString("**")
+		b.WriteString(normalizeSpace(ml))
+		b.WriteString("**\n\n")
+	}
+
+	// 去掉 header（含 title/limits），保留正文结构
+	clone := stmt.Clone()
+	clone.Find("div.header").Remove()
+	clone.Children().Each(func(_ int, s *goquery.Selection) {
+		class, _ := s.Attr("class")
+		class = strings.TrimSpace(class)
+		switch {
+		case class == "input-specification":
+			b.WriteString("## 输入\n\n")
+			b.WriteString(selectionToMD(s))
+			b.WriteString("\n\n")
+		case class == "output-specification":
+			b.WriteString("## 输出\n\n")
+			b.WriteString(selectionToMD(s))
+			b.WriteString("\n\n")
+		case class == "sample-tests":
+			b.WriteString("## 样例\n\n")
+			s.Find("div.sample-test").Each(func(i int, sample *goquery.Selection) {
+				b.WriteString(fmt.Sprintf("### 样例 %d\n\n", i+1))
+				in := sample.Find("div.input pre").First()
+				out := sample.Find("div.output pre").First()
+				if in.Length() > 0 {
+					b.WriteString("**输入**\n\n```\n")
+					b.WriteString(strings.TrimRight(in.Text(), "\n"))
+					b.WriteString("\n```\n\n")
+				}
+				if out.Length() > 0 {
+					b.WriteString("**输出**\n\n```\n")
+					b.WriteString(strings.TrimRight(out.Text(), "\n"))
+					b.WriteString("\n```\n\n")
+				}
+			})
+		case class == "note":
+			b.WriteString("## 说明\n\n")
+			b.WriteString(selectionToMD(s))
+			b.WriteString("\n\n")
+		default:
+			// 主描述段落
+			txt := selectionToMD(s)
+			if strings.TrimSpace(txt) != "" {
+				b.WriteString(txt)
+				b.WriteString("\n\n")
+			}
 		}
 	})
-	if len(parts) == 0 {
-		// fallback html
-		html, _ := doc.Find("div.problem-statement").Html()
-		if html == "" {
-			return nil, fmt.Errorf("CF 未找到题面")
-		}
-		parts = append(parts, htmlToRoughMD(html))
+
+	md := strings.TrimSpace(b.String())
+	if md == "" || len(md) < 10 {
+		// fallback
+		md = "# " + title + "\n\n" + selectionToMD(clone)
 	}
-	md := strings.Join(parts, "\n\n")
+	// 清理 CF 公式 $$$...$$$ → $...$
+	md = strings.ReplaceAll(md, "$$$", "$")
+	md = collapseBlankLines(md)
 	return &FetchedContent{Title: title, ContentMD: md}, nil
 }
 
+func selectionToMD(s *goquery.Selection) string {
+	// 处理常见子节点
+	var b strings.Builder
+	s.Contents().Each(func(_ int, n *goquery.Selection) {
+		if goquery.NodeName(n) == "#text" {
+			b.WriteString(n.Text())
+			return
+		}
+		name := goquery.NodeName(n)
+		switch name {
+		case "p":
+			b.WriteString(normalizeSpace(n.Text()))
+			b.WriteString("\n\n")
+		case "ul", "ol":
+			n.Find("li").Each(func(_ int, li *goquery.Selection) {
+				b.WriteString("- ")
+				b.WriteString(normalizeSpace(li.Text()))
+				b.WriteString("\n")
+			})
+			b.WriteString("\n")
+		case "pre":
+			b.WriteString("\n```\n")
+			b.WriteString(strings.TrimRight(n.Text(), "\n"))
+			b.WriteString("\n```\n\n")
+		case "div":
+			// section-title 等
+			if n.HasClass("section-title") {
+				b.WriteString("### ")
+				b.WriteString(normalizeSpace(n.Text()))
+				b.WriteString("\n\n")
+			} else {
+				b.WriteString(selectionToMD(n))
+			}
+		case "span":
+			// tex math often in span
+			if alt, ok := n.Attr("class"); ok && strings.Contains(alt, "tex") {
+				b.WriteString("$")
+				b.WriteString(normalizeSpace(n.Text()))
+				b.WriteString("$")
+			} else {
+				b.WriteString(n.Text())
+			}
+		case "br":
+			b.WriteString("\n")
+		default:
+			b.WriteString(n.Text())
+		}
+	})
+	return strings.TrimSpace(b.String())
+}
+
 func splitCF(externalID string) (contest, index string) {
-	// 1843C / 1843C1 / 1A
 	for i := 0; i < len(externalID); i++ {
-		if externalID[i] >= 'A' && externalID[i] <= 'Z' || externalID[i] >= 'a' && externalID[i] <= 'z' {
+		if (externalID[i] >= 'A' && externalID[i] <= 'Z') || (externalID[i] >= 'a' && externalID[i] <= 'z') {
 			return externalID[:i], externalID[i:]
 		}
 	}
 	return "", ""
 }
 
-func fetchAtCoder(url string) (*FetchedContent, error) {
-	if url == "" {
+func fetchAtCoder(problemURL string) (*FetchedContent, error) {
+	if problemURL == "" {
 		return nil, fmt.Errorf("AtCoder 缺少 URL")
 	}
-	resp, err := httpGet(url)
+	resp, err := httpGet(problemURL)
 	if err != nil {
 		return nil, err
 	}
@@ -134,16 +253,15 @@ func fetchAtCoder(url string) (*FetchedContent, error) {
 	if title == "" {
 		title = strings.TrimSpace(doc.Find("h2").First().Text())
 	}
-	// 优先英文题面
 	var mdParts []string
 	doc.Find("#task-statement span.lang-en, #task-statement .lang-en").Each(func(_ int, s *goquery.Selection) {
-		t := strings.TrimSpace(s.Text())
+		t := selectionToMD(s)
 		if t != "" {
 			mdParts = append(mdParts, t)
 		}
 	})
 	if len(mdParts) == 0 {
-		t := strings.TrimSpace(doc.Find("#task-statement").Text())
+		t := selectionToMD(doc.Find("#task-statement"))
 		if t != "" {
 			mdParts = append(mdParts, t)
 		}
@@ -151,15 +269,15 @@ func fetchAtCoder(url string) (*FetchedContent, error) {
 	if len(mdParts) == 0 {
 		return nil, fmt.Errorf("AtCoder 未找到题面")
 	}
-	return &FetchedContent{Title: title, ContentMD: strings.Join(mdParts, "\n\n")}, nil
+	md := "# " + title + "\n\n" + collapseBlankLines(strings.Join(mdParts, "\n\n"))
+	return &FetchedContent{Title: title, ContentMD: md}, nil
 }
 
-func fetchLuoGu(externalID, url string) (*FetchedContent, error) {
-	if url == "" {
-		url = "https://www.luogu.com.cn/problem/" + externalID
+func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {
+	if problemURL == "" {
+		problemURL = "https://www.luogu.com.cn/problem/" + externalID
 	}
-	// 洛谷需要 _contentOnly 有时更友好
-	apiURL := url
+	apiURL := problemURL
 	if !strings.Contains(apiURL, "_contentOnly") {
 		if strings.Contains(apiURL, "?") {
 			apiURL += "&_contentOnly=1"
@@ -171,7 +289,7 @@ func fetchLuoGu(externalID, url string) (*FetchedContent, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; CWXU-Algo-ProblemBot/1.0)")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -186,7 +304,6 @@ func fetchLuoGu(externalID, url string) (*FetchedContent, error) {
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("洛谷 status %d: %s", resp.StatusCode, truncate(string(body), 200))
 	}
-	// 尝试 JSON
 	if strings.Contains(resp.Header.Get("Content-Type"), "json") || strings.HasPrefix(strings.TrimSpace(string(body)), "{") {
 		return parseLuoGuJSON(body)
 	}
@@ -202,24 +319,206 @@ func fetchLuoGu(externalID, url string) (*FetchedContent, error) {
 	if text == "" {
 		return nil, fmt.Errorf("洛谷未找到题面")
 	}
-	return &FetchedContent{Title: title, ContentMD: text}, nil
+	return &FetchedContent{Title: title, ContentMD: collapseBlankLines(text)}, nil
 }
 
 func parseLuoGuJSON(body []byte) (*FetchedContent, error) {
-	// 轻量解析，避免引入复杂结构
-	s := string(body)
-	title := extractJSONString(s, `"title"`)
-	// content 可能在 currentData.problem.content
-	content := extractJSONString(s, `"description"`)
-	if content == "" {
-		content = extractJSONString(s, `"content"`)
+	var root map[string]interface{}
+	if err := json.Unmarshal(body, &root); err != nil {
+		// fallback 旧逻辑
+		s := string(body)
+		return &FetchedContent{
+			Title:     extractJSONString(s, `"title"`),
+			ContentMD: firstNonEmpty(extractJSONString(s, `"description"`), extractJSONString(s, `"content"`), truncate(s, 8000)),
+		}, nil
 	}
-	if content == "" {
-		// 整段作为文本
-		content = truncate(s, 8000)
+	// 常见结构 currentData.problem
+	title, desc := "", ""
+	if cd, ok := root["currentData"].(map[string]interface{}); ok {
+		if p, ok := cd["problem"].(map[string]interface{}); ok {
+			if t, ok := p["title"].(string); ok {
+				title = t
+			}
+			if d, ok := p["description"].(string); ok {
+				desc = d
+			}
+			if desc == "" {
+				if d, ok := p["content"].(string); ok {
+					desc = d
+				}
+			}
+		}
 	}
-	// 洛谷 description 常为 markdown
-	return &FetchedContent{Title: title, ContentMD: content}, nil
+	if title == "" {
+		title = extractJSONString(string(body), `"title"`)
+	}
+	if desc == "" {
+		desc = firstNonEmpty(extractJSONString(string(body), `"description"`), extractJSONString(string(body), `"content"`))
+	}
+	if desc == "" {
+		return nil, fmt.Errorf("洛谷 JSON 无题面")
+	}
+	return &FetchedContent{Title: title, ContentMD: collapseBlankLines(desc)}, nil
+}
+
+func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
+	if problemURL == "" {
+		if externalID == "" {
+			return nil, fmt.Errorf("NowCoder 缺少题面 URL 与 external_id")
+		}
+		// 数字题号 → 练习题
+		if isAllDigits(externalID) {
+			problemURL = "https://ac.nowcoder.com/acm/problem/" + externalID
+		} else {
+			return nil, fmt.Errorf("NowCoder 缺少题面 URL，跳过爬取")
+		}
+	}
+	resp, err := httpGet(problemURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("NowCoder status %d", resp.StatusCode)
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	title := strings.TrimSpace(doc.Find(".question-title h1, .question-title, .terminal-topic-title, title").First().Text())
+	title = strings.TrimSpace(strings.Split(title, "_")[0])
+	title = strings.TrimSpace(strings.Split(title, "-")[0])
+
+	// 主内容：subject-question，公式在 img[alt]
+	q := doc.Find("div.subject-question").First()
+	if q.Length() == 0 {
+		q = doc.Find(".question-content, .problem-content").First()
+	}
+	if q.Length() == 0 {
+		return nil, fmt.Errorf("NowCoder 未找到题面")
+	}
+
+	// 将 equation img 替换为 $alt$
+	q.Find("img").Each(func(_ int, img *goquery.Selection) {
+		alt, _ := img.Attr("alt")
+		src, _ := img.Attr("src")
+		tex := alt
+		if tex == "" && strings.Contains(src, "equation?tex=") {
+			if u, err := url.Parse(src); err == nil {
+				tex, _ = url.QueryUnescape(u.Query().Get("tex"))
+			}
+		}
+		tex = strings.TrimSpace(tex)
+		// 跳过无意义空白公式
+		if tex == "" || tex == `\hspace{15pt}` || strings.HasPrefix(tex, `\hspace`) && !strings.Contains(tex, "bullet") {
+			img.ReplaceWithHtml("")
+			return
+		}
+		// bullet
+		if strings.Contains(tex, `bullet`) {
+			img.ReplaceWithHtml("\n- ")
+			return
+		}
+		img.ReplaceWithHtml("$" + tex + "$")
+	})
+	// br → newline
+	q.Find("br").Each(func(_ int, br *goquery.Selection) {
+		br.ReplaceWithHtml("\n")
+	})
+
+	var b strings.Builder
+	if title != "" {
+		b.WriteString("# ")
+		b.WriteString(title)
+		b.WriteString("\n\n")
+	}
+	// 主体
+	bodyText := normalizeNowCoderText(q.Text())
+	b.WriteString(bodyText)
+	b.WriteString("\n\n")
+
+	// 输入输出描述
+	doc.Find("h2").Each(func(_ int, h *goquery.Selection) {
+		ht := strings.TrimSpace(h.Text())
+		if ht == "" {
+			return
+		}
+		// 下一兄弟节点
+		next := h.Next()
+		content := strings.TrimSpace(next.Text())
+		if content == "" {
+			// 有时在 parent
+			content = strings.TrimSpace(h.Parent().Contents().Not("h2").Text())
+		}
+		if strings.Contains(ht, "输入") {
+			b.WriteString("## 输入描述\n\n")
+			b.WriteString(normalizeNowCoderText(content))
+			b.WriteString("\n\n")
+		} else if strings.Contains(ht, "输出") {
+			b.WriteString("## 输出描述\n\n")
+			b.WriteString(normalizeNowCoderText(content))
+			b.WriteString("\n\n")
+		} else if strings.Contains(ht, "示例") || strings.Contains(ht, "样例") {
+			b.WriteString("## ")
+			b.WriteString(ht)
+			b.WriteString("\n\n")
+			// pre 样例
+			h.Parent().Find("pre").Each(func(_ int, pre *goquery.Selection) {
+				b.WriteString("```\n")
+				b.WriteString(strings.TrimRight(pre.Text(), "\n"))
+				b.WriteString("\n```\n\n")
+			})
+			if h.Parent().Find("pre").Length() == 0 && content != "" {
+				b.WriteString(normalizeNowCoderText(content))
+				b.WriteString("\n\n")
+			}
+		}
+	})
+
+	md := collapseBlankLines(strings.TrimSpace(b.String()))
+	if len(md) < 8 {
+		return nil, fmt.Errorf("NowCoder 题面为空")
+	}
+	return &FetchedContent{Title: title, ContentMD: md}, nil
+}
+
+func fetchQOJ(externalID, problemURL string) (*FetchedContent, error) {
+	if problemURL == "" && externalID != "" {
+		problemURL = "https://qoj.ac/problem/" + externalID
+	}
+	return fetchGeneric(problemURL)
+}
+
+func fetchGeneric(problemURL string) (*FetchedContent, error) {
+	if problemURL == "" {
+		return nil, fmt.Errorf("empty url")
+	}
+	resp, err := httpGet(problemURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	title := strings.TrimSpace(doc.Find("h1").First().Text())
+	if title == "" {
+		title = strings.TrimSpace(doc.Find("title").Text())
+	}
+	doc.Find("script,style,nav,footer,header").Remove()
+	text := collapseBlankLines(strings.TrimSpace(doc.Find("body").Text()))
+	if text == "" {
+		return nil, fmt.Errorf("empty page")
+	}
+	return &FetchedContent{Title: title, ContentMD: truncate(text, 15000)}, nil
 }
 
 func extractJSONString(s, key string) string {
@@ -228,7 +527,6 @@ func extractJSONString(s, key string) string {
 		return ""
 	}
 	rest := s[i+len(key):]
-	// 找 :
 	ci := strings.Index(rest, ":")
 	if ci < 0 {
 		return ""
@@ -237,7 +535,6 @@ func extractJSONString(s, key string) string {
 	if !strings.HasPrefix(rest, `"`) {
 		return ""
 	}
-	// 简单反转义扫描
 	var b strings.Builder
 	escaped := false
 	for i := 1; i < len(rest); i++ {
@@ -251,6 +548,9 @@ func extractJSONString(s, key string) string {
 			case 'r':
 				b.WriteByte('\r')
 			case '"', '\\', '/':
+				b.WriteByte(c)
+			case 'u':
+				// 简化：保留
 				b.WriteByte(c)
 			default:
 				b.WriteByte(c)
@@ -270,42 +570,51 @@ func extractJSONString(s, key string) string {
 	return b.String()
 }
 
-func fetchGeneric(url string) (*FetchedContent, error) {
-	if url == "" {
-		return nil, fmt.Errorf("empty url")
-	}
-	resp, err := httpGet(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
-	}
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	title := strings.TrimSpace(doc.Find("h1").First().Text())
-	if title == "" {
-		title = strings.TrimSpace(doc.Find("title").Text())
-	}
-	// 去掉 script/style
-	doc.Find("script,style,nav,footer").Remove()
-	text := strings.TrimSpace(doc.Find("body").Text())
-	if text == "" {
-		return nil, fmt.Errorf("empty page")
-	}
-	return &FetchedContent{Title: title, ContentMD: truncate(text, 15000)}, nil
+func normalizeSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
-func htmlToRoughMD(html string) string {
-	// 极简：去标签
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
-	if err != nil {
-		return html
+func normalizeNowCoderText(s string) string {
+	// 压缩空白，保留换行
+	lines := strings.Split(s, "\n")
+	var out []string
+	for _, ln := range lines {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			if len(out) > 0 && out[len(out)-1] != "" {
+				out = append(out, "")
+			}
+			continue
+		}
+		out = append(out, ln)
 	}
-	return strings.TrimSpace(doc.Text())
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+func collapseBlankLines(s string) string {
+	re := regexp.MustCompile(`\n{3,}`)
+	return strings.TrimSpace(re.ReplaceAllString(s, "\n\n"))
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func firstNonEmpty(ss ...string) string {
+	for _, s := range ss {
+		if strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func truncate(s string, n int) string {

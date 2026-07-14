@@ -25,6 +25,9 @@ const (
 	Problem_UserProfile_FullMethodName     = "/api.core.v1.problem.Problem/UserProfile"
 	Problem_Progress_FullMethodName        = "/api.core.v1.problem.Problem/Progress"
 	Problem_Backfill_FullMethodName        = "/api.core.v1.problem.Problem/Backfill"
+	Problem_EmergencyStop_FullMethodName   = "/api.core.v1.problem.Problem/EmergencyStop"
+	Problem_ResetAll_FullMethodName        = "/api.core.v1.problem.Problem/ResetAll"
+	Problem_Resume_FullMethodName          = "/api.core.v1.problem.Problem/Resume"
 )
 
 // ProblemClient is the client API for Problem service.
@@ -37,6 +40,12 @@ type ProblemClient interface {
 	UserProfile(ctx context.Context, in *UserProfileReq, opts ...grpc.CallOption) (*UserProfileRes, error)
 	Progress(ctx context.Context, in *ProgressReq, opts ...grpc.CallOption) (*ProgressRes, error)
 	Backfill(ctx context.Context, in *BackfillReq, opts ...grpc.CallOption) (*BackfillRes, error)
+	// 紧急停止：暂停消费并清空 MQ 队列
+	EmergencyStop(ctx context.Context, in *EmergencyStopReq, opts ...grpc.CallOption) (*EmergencyStopRes, error)
+	// 全部重置：清空队列，非 COMPLETED 题重置为 PENDING 并重新入队爬取
+	ResetAll(ctx context.Context, in *ResetAllReq, opts ...grpc.CallOption) (*ResetAllRes, error)
+	// 恢复流水线（取消紧急停止）
+	Resume(ctx context.Context, in *ResumeReq, opts ...grpc.CallOption) (*ResumeRes, error)
 }
 
 type problemClient struct {
@@ -107,6 +116,36 @@ func (c *problemClient) Backfill(ctx context.Context, in *BackfillReq, opts ...g
 	return out, nil
 }
 
+func (c *problemClient) EmergencyStop(ctx context.Context, in *EmergencyStopReq, opts ...grpc.CallOption) (*EmergencyStopRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EmergencyStopRes)
+	err := c.cc.Invoke(ctx, Problem_EmergencyStop_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) ResetAll(ctx context.Context, in *ResetAllReq, opts ...grpc.CallOption) (*ResetAllRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetAllRes)
+	err := c.cc.Invoke(ctx, Problem_ResetAll_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) Resume(ctx context.Context, in *ResumeReq, opts ...grpc.CallOption) (*ResumeRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResumeRes)
+	err := c.cc.Invoke(ctx, Problem_Resume_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProblemServer is the server API for Problem service.
 // All implementations must embed UnimplementedProblemServer
 // for forward compatibility.
@@ -117,6 +156,12 @@ type ProblemServer interface {
 	UserProfile(context.Context, *UserProfileReq) (*UserProfileRes, error)
 	Progress(context.Context, *ProgressReq) (*ProgressRes, error)
 	Backfill(context.Context, *BackfillReq) (*BackfillRes, error)
+	// 紧急停止：暂停消费并清空 MQ 队列
+	EmergencyStop(context.Context, *EmergencyStopReq) (*EmergencyStopRes, error)
+	// 全部重置：清空队列，非 COMPLETED 题重置为 PENDING 并重新入队爬取
+	ResetAll(context.Context, *ResetAllReq) (*ResetAllRes, error)
+	// 恢复流水线（取消紧急停止）
+	Resume(context.Context, *ResumeReq) (*ResumeRes, error)
 	mustEmbedUnimplementedProblemServer()
 }
 
@@ -144,6 +189,15 @@ func (UnimplementedProblemServer) Progress(context.Context, *ProgressReq) (*Prog
 }
 func (UnimplementedProblemServer) Backfill(context.Context, *BackfillReq) (*BackfillRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Backfill not implemented")
+}
+func (UnimplementedProblemServer) EmergencyStop(context.Context, *EmergencyStopReq) (*EmergencyStopRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method EmergencyStop not implemented")
+}
+func (UnimplementedProblemServer) ResetAll(context.Context, *ResetAllReq) (*ResetAllRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetAll not implemented")
+}
+func (UnimplementedProblemServer) Resume(context.Context, *ResumeReq) (*ResumeRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Resume not implemented")
 }
 func (UnimplementedProblemServer) mustEmbedUnimplementedProblemServer() {}
 func (UnimplementedProblemServer) testEmbeddedByValue()                 {}
@@ -274,6 +328,60 @@ func _Problem_Backfill_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Problem_EmergencyStop_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EmergencyStopReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).EmergencyStop(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_EmergencyStop_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).EmergencyStop(ctx, req.(*EmergencyStopReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_ResetAll_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetAllReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).ResetAll(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_ResetAll_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).ResetAll(ctx, req.(*ResetAllReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_Resume_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResumeReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).Resume(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_Resume_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).Resume(ctx, req.(*ResumeReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Problem_ServiceDesc is the grpc.ServiceDesc for Problem service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -304,6 +412,18 @@ var Problem_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Backfill",
 			Handler:    _Problem_Backfill_Handler,
+		},
+		{
+			MethodName: "EmergencyStop",
+			Handler:    _Problem_EmergencyStop_Handler,
+		},
+		{
+			MethodName: "ResetAll",
+			Handler:    _Problem_ResetAll_Handler,
+		},
+		{
+			MethodName: "Resume",
+			Handler:    _Problem_Resume_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

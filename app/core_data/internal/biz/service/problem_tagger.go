@@ -45,6 +45,7 @@ type aiAnalyzeResult struct {
 	Difficulty         string               `json:"difficulty"`
 	AlgorithmTags      []string             `json:"algorithm_tags"`
 	SuggestedSolutions []model.SolutionMeta `json:"suggested_solutions"`
+	ContentMD          string               `json:"content_md"` // 可选：AI 优化排版后的题面
 }
 
 func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*aiAnalyzeResult, error) {
@@ -56,12 +57,16 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*
 	if len(content) > 12000 {
 		content = content[:12000] + "\n...(truncated)"
 	}
-	system := `你是算法题目标签分析器。仅根据题面输出 JSON，不要 markdown 代码块。
+	system := `你是算法题目标签分析器。快速、粗略分析即可，不必深入推导，不要长篇推理。
+仅输出 JSON，不要 markdown 代码块，不要解释过程。
+硬性要求：algorithm_tags、problem_type、suggested_solutions 的 name/brief_explanation 必须中文；英文标签要译成中文（DP→动态规划，BFS→广度优先搜索）。
+若题面排版混乱，可在 content_md 字段输出整理后的 Markdown 题面（标题/输入输出/样例分段清晰）；否则 content_md 可为空字符串。
 字段：
-- problem_type: 题目类型/模块（如 Graph Theory, Dynamic Programming, Data Structure）
+- problem_type: 中文模块名
 - difficulty: Easy | Medium | Hard
-- algorithm_tags: 核心算法标签字符串数组（中文或英文均可，如 动态规划、二分查找）
-- suggested_solutions: 数组，元素含 name, time_complexity, space_complexity, brief_explanation
+- algorithm_tags: 中文算法标签数组（2~6 个即可）
+- suggested_solutions: 1~2 个即可，含 name, time_complexity, space_complexity, brief_explanation（各一两句）
+- content_md: 可选，优化排版后的中文/原文 Markdown 题面
 禁止分析用户代码；不要输出除 JSON 外的任何文字。`
 	user := fmt.Sprintf("标题: %s\n\n题面:\n%s", title, content)
 

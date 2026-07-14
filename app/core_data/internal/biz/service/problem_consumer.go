@@ -63,6 +63,11 @@ func (c *ProblemFetchConsumer) Consume() {
 				_ = d.Nack(false, false)
 				return
 			}
+			if pipelineControl.IsPaused() {
+				// 紧急停止：丢弃消息（队列可能已 purge）
+				_ = d.Ack(false)
+				return
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			if err := c.problem.ProcessFetch(ctx, msg); err != nil {
@@ -119,6 +124,10 @@ func (c *ProblemAnalyzeConsumer) Consume() {
 			if err := json.Unmarshal(d.Body, &msg); err != nil {
 				log.Errorf("RabbitMQ(problem_analyze): json %v", err)
 				_ = d.Nack(false, false)
+				return
+			}
+			if pipelineControl.IsPaused() {
+				_ = d.Ack(false)
 				return
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)

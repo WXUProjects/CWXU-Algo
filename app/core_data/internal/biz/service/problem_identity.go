@@ -13,7 +13,8 @@ type ParsedProblem struct {
 	ExternalID string
 	Title      string
 	URL        string
-	SkipFetch  bool // LeetCode 等不可爬
+	SkipFetch  bool // 不可爬取（若仍入库则 SKIPPED）
+	SkipBank   bool // 不进入题库（如 LeetCode）
 }
 
 var (
@@ -45,15 +46,12 @@ func ParseProblemIdentity(platform, contest, problem string) (*ParsedProblem, er
 	case spider.QOJ:
 		return parseQOJ(problem)
 	case spider.LeetCode:
-		ext := problem
-		if strings.HasPrefix(problem, "lc-ac-problem-") || problem == "leetcode-submit" {
-			ext = problem
-		}
+		// 力扣不可爬，不入库题库
 		return &ParsedProblem{
-			Platform:   platform,
-			ExternalID: ext,
-			Title:      problem,
-			SkipFetch:  true,
+			Platform:  platform,
+			Title:     problem,
+			SkipFetch: true,
+			SkipBank:  true,
 		}, nil
 	default:
 		// 兜底：用 problem 文本 hash 级 id
@@ -170,10 +168,16 @@ func parseNowCoder(contest, problem string) (*ParsedProblem, error) {
 	if ext == "" {
 		return nil, fmt.Errorf("nowcoder parse fail")
 	}
+	url := ""
+	// 练习题号可直达题面；竞赛题可能无稳定 URL
+	if reDigits.MatchString(ext) {
+		url = "https://ac.nowcoder.com/acm/problem/" + ext
+	}
 	return &ParsedProblem{
 		Platform:   spider.NowCoder,
 		ExternalID: ext,
 		Title:      title,
+		URL:        url,
 	}, nil
 }
 

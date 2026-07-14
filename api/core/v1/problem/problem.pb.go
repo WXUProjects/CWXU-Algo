@@ -533,6 +533,7 @@ type SubmissionInfo struct {
 	Status        string                 `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`
 	Time          int64                  `protobuf:"varint,7,opt,name=time,proto3" json:"time,omitempty"`
 	Contest       string                 `protobuf:"bytes,8,opt,name=contest,proto3" json:"contest,omitempty"`
+	UserName      string                 `protobuf:"bytes,9,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"` // 展示用姓名
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -619,6 +620,13 @@ func (x *SubmissionInfo) GetTime() int64 {
 func (x *SubmissionInfo) GetContest() string {
 	if x != nil {
 		return x.Contest
+	}
+	return ""
+}
+
+func (x *SubmissionInfo) GetUserName() string {
+	if x != nil {
+		return x.UserName
 	}
 	return ""
 }
@@ -1171,6 +1179,158 @@ func (x *FailedProblem) GetUpdatedAt() int64 {
 	return 0
 }
 
+type ActiveJob struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProblemId     uint32                 `protobuf:"varint,1,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
+	Platform      string                 `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"`
+	ExternalId    string                 `protobuf:"bytes,3,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	Title         string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	Stage         string                 `protobuf:"bytes,5,opt,name=stage,proto3" json:"stage,omitempty"` // fetch | analyze
+	StartedAt     int64                  `protobuf:"varint,6,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ActiveJob) Reset() {
+	*x = ActiveJob{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActiveJob) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActiveJob) ProtoMessage() {}
+
+func (x *ActiveJob) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActiveJob.ProtoReflect.Descriptor instead.
+func (*ActiveJob) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ActiveJob) GetProblemId() uint32 {
+	if x != nil {
+		return x.ProblemId
+	}
+	return 0
+}
+
+func (x *ActiveJob) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *ActiveJob) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *ActiveJob) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ActiveJob) GetStage() string {
+	if x != nil {
+		return x.Stage
+	}
+	return ""
+}
+
+func (x *ActiveJob) GetStartedAt() int64 {
+	if x != nil {
+		return x.StartedAt
+	}
+	return 0
+}
+
+type QueueStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Messages      int64                  `protobuf:"varint,2,opt,name=messages,proto3" json:"messages,omitempty"` // 积压消息数
+	Consumers     int64                  `protobuf:"varint,3,opt,name=consumers,proto3" json:"consumers,omitempty"`
+	Concurrency   int64                  `protobuf:"varint,4,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueueStatus) Reset() {
+	*x = QueueStatus{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueueStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueueStatus) ProtoMessage() {}
+
+func (x *QueueStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueueStatus.ProtoReflect.Descriptor instead.
+func (*QueueStatus) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *QueueStatus) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *QueueStatus) GetMessages() int64 {
+	if x != nil {
+		return x.Messages
+	}
+	return 0
+}
+
+func (x *QueueStatus) GetConsumers() int64 {
+	if x != nil {
+		return x.Consumers
+	}
+	return 0
+}
+
+func (x *QueueStatus) GetConcurrency() int64 {
+	if x != nil {
+		return x.Concurrency
+	}
+	return 0
+}
+
 type ProgressRes struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -1178,13 +1338,17 @@ type ProgressRes struct {
 	Items         []*ProgressItem        `protobuf:"bytes,3,rep,name=items,proto3" json:"items,omitempty"`
 	RecentFailed  []*FailedProblem       `protobuf:"bytes,4,rep,name=recent_failed,json=recentFailed,proto3" json:"recent_failed,omitempty"`
 	Total         int64                  `protobuf:"varint,5,opt,name=total,proto3" json:"total,omitempty"`
+	Paused        bool                   `protobuf:"varint,6,opt,name=paused,proto3" json:"paused,omitempty"`
+	ActiveJobs    []*ActiveJob           `protobuf:"bytes,7,rep,name=active_jobs,json=activeJobs,proto3" json:"active_jobs,omitempty"`
+	Queues        []*QueueStatus         `protobuf:"bytes,8,rep,name=queues,proto3" json:"queues,omitempty"`
+	InProgress    []*FailedProblem       `protobuf:"bytes,9,rep,name=in_progress,json=inProgress,proto3" json:"in_progress,omitempty"` // DB 中 FETCHING/TAGGING
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ProgressRes) Reset() {
 	*x = ProgressRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[16]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1196,7 +1360,7 @@ func (x *ProgressRes) String() string {
 func (*ProgressRes) ProtoMessage() {}
 
 func (x *ProgressRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[16]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1209,7 +1373,7 @@ func (x *ProgressRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProgressRes.ProtoReflect.Descriptor instead.
 func (*ProgressRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{16}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ProgressRes) GetCode() int64 {
@@ -1247,6 +1411,34 @@ func (x *ProgressRes) GetTotal() int64 {
 	return 0
 }
 
+func (x *ProgressRes) GetPaused() bool {
+	if x != nil {
+		return x.Paused
+	}
+	return false
+}
+
+func (x *ProgressRes) GetActiveJobs() []*ActiveJob {
+	if x != nil {
+		return x.ActiveJobs
+	}
+	return nil
+}
+
+func (x *ProgressRes) GetQueues() []*QueueStatus {
+	if x != nil {
+		return x.Queues
+	}
+	return nil
+}
+
+func (x *ProgressRes) GetInProgress() []*FailedProblem {
+	if x != nil {
+		return x.InProgress
+	}
+	return nil
+}
+
 type BackfillReq struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// 最大处理条数，0 表示默认 500
@@ -1257,7 +1449,7 @@ type BackfillReq struct {
 
 func (x *BackfillReq) Reset() {
 	*x = BackfillReq{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[17]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1269,7 +1461,7 @@ func (x *BackfillReq) String() string {
 func (*BackfillReq) ProtoMessage() {}
 
 func (x *BackfillReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[17]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1282,7 +1474,7 @@ func (x *BackfillReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackfillReq.ProtoReflect.Descriptor instead.
 func (*BackfillReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{17}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *BackfillReq) GetLimit() int64 {
@@ -1306,7 +1498,7 @@ type BackfillRes struct {
 
 func (x *BackfillRes) Reset() {
 	*x = BackfillRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[18]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1318,7 +1510,7 @@ func (x *BackfillRes) String() string {
 func (*BackfillRes) ProtoMessage() {}
 
 func (x *BackfillRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[18]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1331,7 +1523,7 @@ func (x *BackfillRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackfillRes.ProtoReflect.Descriptor instead.
 func (*BackfillRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{18}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *BackfillRes) GetCode() int64 {
@@ -1374,6 +1566,336 @@ func (x *BackfillRes) GetEnqueued() int64 {
 		return x.Enqueued
 	}
 	return 0
+}
+
+type EmergencyStopReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EmergencyStopReq) Reset() {
+	*x = EmergencyStopReq{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EmergencyStopReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EmergencyStopReq) ProtoMessage() {}
+
+func (x *EmergencyStopReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EmergencyStopReq.ProtoReflect.Descriptor instead.
+func (*EmergencyStopReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{21}
+}
+
+type EmergencyStopRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	PurgedFetch   int64                  `protobuf:"varint,3,opt,name=purged_fetch,json=purgedFetch,proto3" json:"purged_fetch,omitempty"`
+	PurgedAnalyze int64                  `protobuf:"varint,4,opt,name=purged_analyze,json=purgedAnalyze,proto3" json:"purged_analyze,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EmergencyStopRes) Reset() {
+	*x = EmergencyStopRes{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EmergencyStopRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EmergencyStopRes) ProtoMessage() {}
+
+func (x *EmergencyStopRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EmergencyStopRes.ProtoReflect.Descriptor instead.
+func (*EmergencyStopRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *EmergencyStopRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *EmergencyStopRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *EmergencyStopRes) GetPurgedFetch() int64 {
+	if x != nil {
+		return x.PurgedFetch
+	}
+	return 0
+}
+
+func (x *EmergencyStopRes) GetPurgedAnalyze() int64 {
+	if x != nil {
+		return x.PurgedAnalyze
+	}
+	return 0
+}
+
+type ResetAllReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 是否重新入队爬取；false 表示只重置状态并清空队列
+	Requeue bool `protobuf:"varint,1,opt,name=requeue,proto3" json:"requeue,omitempty"`
+	// 兼容 proto3 默认值：true 时使用 requeue 字段，false 时默认 requeue=true
+	RequeueSet    bool `protobuf:"varint,2,opt,name=requeue_set,json=requeueSet,proto3" json:"requeue_set,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetAllReq) Reset() {
+	*x = ResetAllReq{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetAllReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetAllReq) ProtoMessage() {}
+
+func (x *ResetAllReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetAllReq.ProtoReflect.Descriptor instead.
+func (*ResetAllReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *ResetAllReq) GetRequeue() bool {
+	if x != nil {
+		return x.Requeue
+	}
+	return false
+}
+
+func (x *ResetAllReq) GetRequeueSet() bool {
+	if x != nil {
+		return x.RequeueSet
+	}
+	return false
+}
+
+type ResetAllRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Reset_        int64                  `protobuf:"varint,3,opt,name=reset,proto3" json:"reset,omitempty"`
+	Enqueued      int64                  `protobuf:"varint,4,opt,name=enqueued,proto3" json:"enqueued,omitempty"`
+	PurgedFetch   int64                  `protobuf:"varint,5,opt,name=purged_fetch,json=purgedFetch,proto3" json:"purged_fetch,omitempty"`
+	PurgedAnalyze int64                  `protobuf:"varint,6,opt,name=purged_analyze,json=purgedAnalyze,proto3" json:"purged_analyze,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetAllRes) Reset() {
+	*x = ResetAllRes{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetAllRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetAllRes) ProtoMessage() {}
+
+func (x *ResetAllRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetAllRes.ProtoReflect.Descriptor instead.
+func (*ResetAllRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *ResetAllRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *ResetAllRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *ResetAllRes) GetReset_() int64 {
+	if x != nil {
+		return x.Reset_
+	}
+	return 0
+}
+
+func (x *ResetAllRes) GetEnqueued() int64 {
+	if x != nil {
+		return x.Enqueued
+	}
+	return 0
+}
+
+func (x *ResetAllRes) GetPurgedFetch() int64 {
+	if x != nil {
+		return x.PurgedFetch
+	}
+	return 0
+}
+
+func (x *ResetAllRes) GetPurgedAnalyze() int64 {
+	if x != nil {
+		return x.PurgedAnalyze
+	}
+	return 0
+}
+
+type ResumeReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResumeReq) Reset() {
+	*x = ResumeReq{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResumeReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResumeReq) ProtoMessage() {}
+
+func (x *ResumeReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResumeReq.ProtoReflect.Descriptor instead.
+func (*ResumeReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{25}
+}
+
+type ResumeRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResumeRes) Reset() {
+	*x = ResumeRes{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResumeRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResumeRes) ProtoMessage() {}
+
+func (x *ResumeRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResumeRes.ProtoReflect.Descriptor instead.
+func (*ResumeRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ResumeRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *ResumeRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
 }
 
 var File_core_v1_problem_problem_proto protoreflect.FileDescriptor
@@ -1428,7 +1950,7 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\rGetProblemRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x124\n" +
-	"\x04data\x18\x03 \x01(\v2 .api.core.v1.problem.ProblemInfoR\x04data\"\xcc\x01\n" +
+	"\x04data\x18\x03 \x01(\v2 .api.core.v1.problem.ProblemInfoR\x04data\"\xe9\x01\n" +
 	"\x0eSubmissionInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\x03R\x06userId\x12\x1a\n" +
@@ -1437,7 +1959,8 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x04lang\x18\x05 \x01(\tR\x04lang\x12\x16\n" +
 	"\x06status\x18\x06 \x01(\tR\x06status\x12\x12\n" +
 	"\x04time\x18\a \x01(\x03R\x04time\x12\x18\n" +
-	"\acontest\x18\b \x01(\tR\acontest\"}\n" +
+	"\acontest\x18\b \x01(\tR\acontest\x12\x1b\n" +
+	"\tuser_name\x18\t \x01(\tR\buserName\"}\n" +
 	"\x12ListSubmissionsReq\x12\x1d\n" +
 	"\n" +
 	"problem_id\x18\x01 \x01(\rR\tproblemId\x12\x12\n" +
@@ -1478,13 +2001,34 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x05title\x18\x04 \x01(\tR\x05title\x12\x1b\n" +
 	"\terror_msg\x18\x05 \x01(\tR\berrorMsg\x12\x1d\n" +
 	"\n" +
-	"updated_at\x18\x06 \x01(\x03R\tupdatedAt\"\xd3\x01\n" +
+	"updated_at\x18\x06 \x01(\x03R\tupdatedAt\"\xb2\x01\n" +
+	"\tActiveJob\x12\x1d\n" +
+	"\n" +
+	"problem_id\x18\x01 \x01(\rR\tproblemId\x12\x1a\n" +
+	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x1f\n" +
+	"\vexternal_id\x18\x03 \x01(\tR\n" +
+	"externalId\x12\x14\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\x12\x14\n" +
+	"\x05stage\x18\x05 \x01(\tR\x05stage\x12\x1d\n" +
+	"\n" +
+	"started_at\x18\x06 \x01(\x03R\tstartedAt\"}\n" +
+	"\vQueueStatus\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
+	"\bmessages\x18\x02 \x01(\x03R\bmessages\x12\x1c\n" +
+	"\tconsumers\x18\x03 \x01(\x03R\tconsumers\x12 \n" +
+	"\vconcurrency\x18\x04 \x01(\x03R\vconcurrency\"\xab\x03\n" +
 	"\vProgressRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x127\n" +
 	"\x05items\x18\x03 \x03(\v2!.api.core.v1.problem.ProgressItemR\x05items\x12G\n" +
 	"\rrecent_failed\x18\x04 \x03(\v2\".api.core.v1.problem.FailedProblemR\frecentFailed\x12\x14\n" +
-	"\x05total\x18\x05 \x01(\x03R\x05total\"#\n" +
+	"\x05total\x18\x05 \x01(\x03R\x05total\x12\x16\n" +
+	"\x06paused\x18\x06 \x01(\bR\x06paused\x12?\n" +
+	"\vactive_jobs\x18\a \x03(\v2\x1e.api.core.v1.problem.ActiveJobR\n" +
+	"activeJobs\x128\n" +
+	"\x06queues\x18\b \x03(\v2 .api.core.v1.problem.QueueStatusR\x06queues\x12C\n" +
+	"\vin_progress\x18\t \x03(\v2\".api.core.v1.problem.FailedProblemR\n" +
+	"inProgress\"#\n" +
 	"\vBackfillReq\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x03R\x05limit\"\xa1\x01\n" +
 	"\vBackfillRes\x12\x12\n" +
@@ -1493,14 +2037,38 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\ascanned\x18\x03 \x01(\x03R\ascanned\x12\x14\n" +
 	"\x05bound\x18\x04 \x01(\x03R\x05bound\x12\x18\n" +
 	"\acreated\x18\x05 \x01(\x03R\acreated\x12\x1a\n" +
-	"\benqueued\x18\x06 \x01(\x03R\benqueued2\xdc\x05\n" +
+	"\benqueued\x18\x06 \x01(\x03R\benqueued\"\x12\n" +
+	"\x10EmergencyStopReq\"\x8a\x01\n" +
+	"\x10EmergencyStopRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12!\n" +
+	"\fpurged_fetch\x18\x03 \x01(\x03R\vpurgedFetch\x12%\n" +
+	"\x0epurged_analyze\x18\x04 \x01(\x03R\rpurgedAnalyze\"H\n" +
+	"\vResetAllReq\x12\x18\n" +
+	"\arequeue\x18\x01 \x01(\bR\arequeue\x12\x1f\n" +
+	"\vrequeue_set\x18\x02 \x01(\bR\n" +
+	"requeueSet\"\xb7\x01\n" +
+	"\vResetAllRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x14\n" +
+	"\x05reset\x18\x03 \x01(\x03R\x05reset\x12\x1a\n" +
+	"\benqueued\x18\x04 \x01(\x03R\benqueued\x12!\n" +
+	"\fpurged_fetch\x18\x05 \x01(\x03R\vpurgedFetch\x12%\n" +
+	"\x0epurged_analyze\x18\x06 \x01(\x03R\rpurgedAnalyze\"\v\n" +
+	"\tResumeReq\"9\n" +
+	"\tResumeRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\xcd\b\n" +
 	"\aProblem\x12o\n" +
 	"\x04List\x12#.api.core.v1.problem.ListProblemReq\x1a#.api.core.v1.problem.ListProblemRes\"\x1d\x82\xd3\xe4\x93\x02\x17\x12\x15/v1/core/problem/list\x12k\n" +
 	"\x03Get\x12\".api.core.v1.problem.GetProblemReq\x1a\".api.core.v1.problem.GetProblemRes\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1/core/problem/get\x12\x89\x01\n" +
 	"\x0fListSubmissions\x12'.api.core.v1.problem.ListSubmissionsReq\x1a'.api.core.v1.problem.ListSubmissionsRes\"$\x82\xd3\xe4\x93\x02\x1e\x12\x1c/v1/core/problem/submissions\x12~\n" +
 	"\vUserProfile\x12#.api.core.v1.problem.UserProfileReq\x1a#.api.core.v1.problem.UserProfileRes\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/core/problem/user-profile\x12q\n" +
 	"\bProgress\x12 .api.core.v1.problem.ProgressReq\x1a .api.core.v1.problem.ProgressRes\"!\x82\xd3\xe4\x93\x02\x1b\x12\x19/v1/core/problem/progress\x12t\n" +
-	"\bBackfill\x12 .api.core.v1.problem.BackfillReq\x1a .api.core.v1.problem.BackfillRes\"$\x82\xd3\xe4\x93\x02\x1e:\x01*\"\x19/v1/core/problem/backfillB>\n" +
+	"\bBackfill\x12 .api.core.v1.problem.BackfillReq\x1a .api.core.v1.problem.BackfillRes\"$\x82\xd3\xe4\x93\x02\x1e:\x01*\"\x19/v1/core/problem/backfill\x12\x89\x01\n" +
+	"\rEmergencyStop\x12%.api.core.v1.problem.EmergencyStopReq\x1a%.api.core.v1.problem.EmergencyStopRes\"*\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/v1/core/problem/emergency-stop\x12u\n" +
+	"\bResetAll\x12 .api.core.v1.problem.ResetAllReq\x1a .api.core.v1.problem.ResetAllRes\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/v1/core/problem/reset-all\x12l\n" +
+	"\x06Resume\x12\x1e.api.core.v1.problem.ResumeReq\x1a\x1e.api.core.v1.problem.ResumeRes\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/core/problem/resumeB>\n" +
 	"\x13api.core.v1.problemP\x01Z%cwxu-algo/api/core/v1/problem;problemb\x06proto3"
 
 var (
@@ -1515,7 +2083,7 @@ func file_core_v1_problem_problem_proto_rawDescGZIP() []byte {
 	return file_core_v1_problem_problem_proto_rawDescData
 }
 
-var file_core_v1_problem_problem_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_core_v1_problem_problem_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_core_v1_problem_problem_proto_goTypes = []any{
 	(*SolutionMeta)(nil),       // 0: api.core.v1.problem.SolutionMeta
 	(*ProblemInfo)(nil),        // 1: api.core.v1.problem.ProblemInfo
@@ -1533,9 +2101,17 @@ var file_core_v1_problem_problem_proto_goTypes = []any{
 	(*ProgressReq)(nil),        // 13: api.core.v1.problem.ProgressReq
 	(*ProgressItem)(nil),       // 14: api.core.v1.problem.ProgressItem
 	(*FailedProblem)(nil),      // 15: api.core.v1.problem.FailedProblem
-	(*ProgressRes)(nil),        // 16: api.core.v1.problem.ProgressRes
-	(*BackfillReq)(nil),        // 17: api.core.v1.problem.BackfillReq
-	(*BackfillRes)(nil),        // 18: api.core.v1.problem.BackfillRes
+	(*ActiveJob)(nil),          // 16: api.core.v1.problem.ActiveJob
+	(*QueueStatus)(nil),        // 17: api.core.v1.problem.QueueStatus
+	(*ProgressRes)(nil),        // 18: api.core.v1.problem.ProgressRes
+	(*BackfillReq)(nil),        // 19: api.core.v1.problem.BackfillReq
+	(*BackfillRes)(nil),        // 20: api.core.v1.problem.BackfillRes
+	(*EmergencyStopReq)(nil),   // 21: api.core.v1.problem.EmergencyStopReq
+	(*EmergencyStopRes)(nil),   // 22: api.core.v1.problem.EmergencyStopRes
+	(*ResetAllReq)(nil),        // 23: api.core.v1.problem.ResetAllReq
+	(*ResetAllRes)(nil),        // 24: api.core.v1.problem.ResetAllRes
+	(*ResumeReq)(nil),          // 25: api.core.v1.problem.ResumeReq
+	(*ResumeRes)(nil),          // 26: api.core.v1.problem.ResumeRes
 }
 var file_core_v1_problem_problem_proto_depIdxs = []int32{
 	0,  // 0: api.core.v1.problem.ProblemInfo.solutions:type_name -> api.core.v1.problem.SolutionMeta
@@ -1547,23 +2123,32 @@ var file_core_v1_problem_problem_proto_depIdxs = []int32{
 	10, // 6: api.core.v1.problem.UserProfileRes.difficulties:type_name -> api.core.v1.problem.NamedCount
 	14, // 7: api.core.v1.problem.ProgressRes.items:type_name -> api.core.v1.problem.ProgressItem
 	15, // 8: api.core.v1.problem.ProgressRes.recent_failed:type_name -> api.core.v1.problem.FailedProblem
-	2,  // 9: api.core.v1.problem.Problem.List:input_type -> api.core.v1.problem.ListProblemReq
-	4,  // 10: api.core.v1.problem.Problem.Get:input_type -> api.core.v1.problem.GetProblemReq
-	7,  // 11: api.core.v1.problem.Problem.ListSubmissions:input_type -> api.core.v1.problem.ListSubmissionsReq
-	11, // 12: api.core.v1.problem.Problem.UserProfile:input_type -> api.core.v1.problem.UserProfileReq
-	13, // 13: api.core.v1.problem.Problem.Progress:input_type -> api.core.v1.problem.ProgressReq
-	17, // 14: api.core.v1.problem.Problem.Backfill:input_type -> api.core.v1.problem.BackfillReq
-	3,  // 15: api.core.v1.problem.Problem.List:output_type -> api.core.v1.problem.ListProblemRes
-	5,  // 16: api.core.v1.problem.Problem.Get:output_type -> api.core.v1.problem.GetProblemRes
-	8,  // 17: api.core.v1.problem.Problem.ListSubmissions:output_type -> api.core.v1.problem.ListSubmissionsRes
-	12, // 18: api.core.v1.problem.Problem.UserProfile:output_type -> api.core.v1.problem.UserProfileRes
-	16, // 19: api.core.v1.problem.Problem.Progress:output_type -> api.core.v1.problem.ProgressRes
-	18, // 20: api.core.v1.problem.Problem.Backfill:output_type -> api.core.v1.problem.BackfillRes
-	15, // [15:21] is the sub-list for method output_type
-	9,  // [9:15] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	16, // 9: api.core.v1.problem.ProgressRes.active_jobs:type_name -> api.core.v1.problem.ActiveJob
+	17, // 10: api.core.v1.problem.ProgressRes.queues:type_name -> api.core.v1.problem.QueueStatus
+	15, // 11: api.core.v1.problem.ProgressRes.in_progress:type_name -> api.core.v1.problem.FailedProblem
+	2,  // 12: api.core.v1.problem.Problem.List:input_type -> api.core.v1.problem.ListProblemReq
+	4,  // 13: api.core.v1.problem.Problem.Get:input_type -> api.core.v1.problem.GetProblemReq
+	7,  // 14: api.core.v1.problem.Problem.ListSubmissions:input_type -> api.core.v1.problem.ListSubmissionsReq
+	11, // 15: api.core.v1.problem.Problem.UserProfile:input_type -> api.core.v1.problem.UserProfileReq
+	13, // 16: api.core.v1.problem.Problem.Progress:input_type -> api.core.v1.problem.ProgressReq
+	19, // 17: api.core.v1.problem.Problem.Backfill:input_type -> api.core.v1.problem.BackfillReq
+	21, // 18: api.core.v1.problem.Problem.EmergencyStop:input_type -> api.core.v1.problem.EmergencyStopReq
+	23, // 19: api.core.v1.problem.Problem.ResetAll:input_type -> api.core.v1.problem.ResetAllReq
+	25, // 20: api.core.v1.problem.Problem.Resume:input_type -> api.core.v1.problem.ResumeReq
+	3,  // 21: api.core.v1.problem.Problem.List:output_type -> api.core.v1.problem.ListProblemRes
+	5,  // 22: api.core.v1.problem.Problem.Get:output_type -> api.core.v1.problem.GetProblemRes
+	8,  // 23: api.core.v1.problem.Problem.ListSubmissions:output_type -> api.core.v1.problem.ListSubmissionsRes
+	12, // 24: api.core.v1.problem.Problem.UserProfile:output_type -> api.core.v1.problem.UserProfileRes
+	18, // 25: api.core.v1.problem.Problem.Progress:output_type -> api.core.v1.problem.ProgressRes
+	20, // 26: api.core.v1.problem.Problem.Backfill:output_type -> api.core.v1.problem.BackfillRes
+	22, // 27: api.core.v1.problem.Problem.EmergencyStop:output_type -> api.core.v1.problem.EmergencyStopRes
+	24, // 28: api.core.v1.problem.Problem.ResetAll:output_type -> api.core.v1.problem.ResetAllRes
+	26, // 29: api.core.v1.problem.Problem.Resume:output_type -> api.core.v1.problem.ResumeRes
+	21, // [21:30] is the sub-list for method output_type
+	12, // [12:21] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_core_v1_problem_problem_proto_init() }
@@ -1577,7 +2162,7 @@ func file_core_v1_problem_problem_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_problem_problem_proto_rawDesc), len(file_core_v1_problem_problem_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

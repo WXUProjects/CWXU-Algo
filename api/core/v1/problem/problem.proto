@@ -39,6 +39,27 @@ service Problem {
       body: "*"
     };
   }
+  // 紧急停止：暂停消费并清空 MQ 队列
+  rpc EmergencyStop (EmergencyStopReq) returns (EmergencyStopRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/emergency-stop"
+      body: "*"
+    };
+  }
+  // 全部重置：清空队列，非 COMPLETED 题重置为 PENDING 并重新入队爬取
+  rpc ResetAll (ResetAllReq) returns (ResetAllRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/reset-all"
+      body: "*"
+    };
+  }
+  // 恢复流水线（取消紧急停止）
+  rpc Resume (ResumeReq) returns (ResumeRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/resume"
+      body: "*"
+    };
+  }
 }
 
 message SolutionMeta {
@@ -108,6 +129,7 @@ message SubmissionInfo {
   string status = 6;
   int64 time = 7;
   string contest = 8;
+  string user_name = 9; // 展示用姓名
 }
 
 message ListSubmissionsReq {
@@ -164,12 +186,32 @@ message FailedProblem {
   int64 updated_at = 6;
 }
 
+message ActiveJob {
+  uint32 problem_id = 1;
+  string platform = 2;
+  string external_id = 3;
+  string title = 4;
+  string stage = 5; // fetch | analyze
+  int64 started_at = 6;
+}
+
+message QueueStatus {
+  string name = 1;
+  int64 messages = 2; // 积压消息数
+  int64 consumers = 3;
+  int64 concurrency = 4;
+}
+
 message ProgressRes {
   int64 code = 1;
   string message = 2;
   repeated ProgressItem items = 3;
   repeated FailedProblem recent_failed = 4;
   int64 total = 5;
+  bool paused = 6;
+  repeated ActiveJob active_jobs = 7;
+  repeated QueueStatus queues = 8;
+  repeated FailedProblem in_progress = 9; // DB 中 FETCHING/TAGGING
 }
 
 message BackfillReq {
@@ -184,4 +226,36 @@ message BackfillRes {
   int64 bound = 4;
   int64 created = 5;
   int64 enqueued = 6;
+}
+
+message EmergencyStopReq {}
+
+message EmergencyStopRes {
+  int64 code = 1;
+  string message = 2;
+  int64 purged_fetch = 3;
+  int64 purged_analyze = 4;
+}
+
+message ResetAllReq {
+  // 是否重新入队爬取；false 表示只重置状态并清空队列
+  bool requeue = 1;
+  // 兼容 proto3 默认值：true 时使用 requeue 字段，false 时默认 requeue=true
+  bool requeue_set = 2;
+}
+
+message ResetAllRes {
+  int64 code = 1;
+  string message = 2;
+  int64 reset = 3;
+  int64 enqueued = 4;
+  int64 purged_fetch = 5;
+  int64 purged_analyze = 6;
+}
+
+message ResumeReq {}
+
+message ResumeRes {
+  int64 code = 1;
+  string message = 2;
 }

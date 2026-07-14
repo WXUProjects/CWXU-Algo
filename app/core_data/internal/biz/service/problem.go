@@ -49,6 +49,10 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog) (*model.Problem, bool,
 	if err != nil {
 		return nil, false, err
 	}
+	// 不可爬平台（如 LeetCode）不进入题库
+	if parsed.SkipBank {
+		return nil, false, fmt.Errorf("skip bank: %s", parsed.Platform)
+	}
 
 	var existing model.Problem
 	err = uc.data.DB.Where("platform = ? AND external_id = ?", parsed.Platform, parsed.ExternalID).First(&existing).Error
@@ -149,10 +153,15 @@ func (uc *ProblemUseCase) enqueueAnalyze(id uint) error {
 
 // ProcessFetch 仅爬取题面；成功后状态 TAGGING 并投递 AI 队列
 func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetchEvent) error {
+	if pipelineControl.IsPaused() {
+		return fmt.Errorf("pipeline paused")
+	}
 	var p model.Problem
 	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
 		return err
 	}
+	pipelineControl.TrackStart("fetch", p.ID, p.Platform, p.ExternalID, p.Title)
+	defer pipelineControl.TrackEnd("fetch", p.ID)
 	if p.Status == model.ProblemStatusCompleted || p.Status == model.ProblemStatusTagging {
 		// 已有题面则直接补 AI
 		if p.ContentMD != "" && p.Status != model.ProblemStatusCompleted {
@@ -213,10 +222,15 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 
 // ProcessAnalyze 仅 AI 打标（不爬取、不送用户代码）
 func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAnalyzeEvent) error {
+	if pipelineControl.IsPaused() {
+		return fmt.Errorf("pipeline paused")
+	}
 	var p model.Problem
 	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
 		return err
 	}
+	pipelineControl.TrackStart("analyze", p.ID, p.Platform, p.ExternalID, p.Title)
+	defer pipelineControl.TrackEnd("analyze", p.ID)
 	if p.Status == model.ProblemStatusCompleted {
 		return nil
 	}
@@ -247,24 +261,32 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 		}).Error
 		return aerr
 	}
-	return uc.data.DB.Model(&p).Updates(map[string]interface{}{
-		"problem_type":    result.ProblemType,
-		"difficulty":      result.Difficulty,
-		"tags":            model.StringArray(result.AlgorithmTags),
-		"solutions_meta":  model.SolutionsMeta(result.SuggestedSolutions),
-		"status":          model.ProblemStatusCompleted,
-		"error_msg":       "",
-	}).Error
+	updates := map[string]interface{}{
+		"problem_type":   result.ProblemType,
+		"difficulty":     result.Difficulty,
+		"tags":           model.StringArray(result.AlgorithmTags),
+		"solutions_meta": model.SolutionsMeta(result.SuggestedSolutions),
+		"status":         model.ProblemStatusCompleted,
+		"error_msg":      "",
+	}
+	// AI 顺手优化排版后的题面
+	if strings.TrimSpace(result.ContentMD) != "" {
+		updates["content_md"] = result.ContentMD
+	}
+	return uc.data.DB.Model(&p).Updates(updates).Error
 }
 
-// Backfill 全量历史回填；同时重试 FAILED 题目入队
+// Backfill 历史回填：绑定未关联提交 + 把所有未完成题目塞进 MQ（可紧急停止中断消费）
 func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued int64, err error) {
+	// 0 = 尽量全量（单次最多 5000 提交 + 全量未完成题）
 	if limit <= 0 {
-		limit = 500
+		limit = 5000
 	}
+	// 确保流水线在跑
+	pipelineControl.SetPaused(false)
+
 	var logs []model.SubmitLog
-	// 从新到旧回填（优先沉淀近期题目）
-	err = uc.data.DB.Where("problem_id IS NULL OR problem_id = 0").
+	err = uc.data.DB.Where("(problem_id IS NULL OR problem_id = 0) AND platform != ?", spider.LeetCode).
 		Order("id desc").Limit(limit).Find(&logs).Error
 	if err != nil {
 		return
@@ -278,29 +300,45 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		bound++
 		if isNew {
 			created++
-			if p != nil && p.Status == model.ProblemStatusPending {
-				enqueued++
-			}
 		}
+		_ = p
 	}
-	// 重试失败 / 卡住的 TAGGING
-	var failed []model.Problem
-	_ = uc.data.DB.Where("status IN ?", []string{model.ProblemStatusFailed, model.ProblemStatusTagging}).
-		Order("updated_at asc").Limit(limit / 2).Find(&failed).Error
-	for _, p := range failed {
+
+	// 把所有需要处理的题塞进队列（不只新建）
+	var todos []model.Problem
+	_ = uc.data.DB.Where("status IN ? AND platform != ?", []string{
+		model.ProblemStatusPending,
+		model.ProblemStatusFetching,
+		model.ProblemStatusFailed,
+		model.ProblemStatusTagging,
+	}, spider.LeetCode).
+		Order("id desc").Find(&todos).Error
+
+	seen := map[uint]bool{}
+	for _, p := range todos {
+		if seen[p.ID] {
+			continue
+		}
+		seen[p.ID] = true
+		// 已有题面 → AI 队列；否则爬取队列
 		if strings.TrimSpace(p.ContentMD) != "" {
-			// 已有题面 → 只重试 AI
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
-				Update("status", model.ProblemStatusTagging).Error
+				Updates(map[string]interface{}{
+					"status":    model.ProblemStatusTagging,
+					"error_msg": "",
+				}).Error
 			if e := uc.enqueueAnalyze(p.ID); e == nil {
 				enqueued++
 			}
-			continue
-		}
-		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
-			Update("status", model.ProblemStatusPending).Error
-		if e := uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL); e == nil {
-			enqueued++
+		} else {
+			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+				Updates(map[string]interface{}{
+					"status":    model.ProblemStatusPending,
+					"error_msg": "",
+				}).Error
+			if e := uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL); e == nil {
+				enqueued++
+			}
 		}
 	}
 	return
@@ -527,28 +565,153 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	return
 }
 
-func (uc *ProblemUseCase) Progress() (items []struct {
-	Status string
-	Count  int64
-}, failed []model.Problem, total int64, err error) {
+type ProgressSnapshot struct {
+	Items      []struct {
+		Status string
+		Count  int64
+	}
+	Failed     []model.Problem
+	InProgress []model.Problem
+	Total      int64
+	Paused     bool
+	ActiveJobs []ActiveJob
+	Queues     []struct {
+		Name        string
+		Messages    int64
+		Consumers   int64
+		Concurrency int64
+	}
+}
+
+func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
+	var snap ProgressSnapshot
 	type sc struct {
 		Status string
 		Count  int64
 	}
 	var rows []sc
-	err = uc.data.DB.Model(&model.Problem{}).Select("status, count(*) as count").Group("status").Scan(&rows).Error
-	if err != nil {
-		return
+	if err := uc.data.DB.Model(&model.Problem{}).Select("status, count(*) as count").Group("status").Scan(&rows).Error; err != nil {
+		return snap, err
 	}
 	for _, r := range rows {
-		items = append(items, struct {
+		snap.Items = append(snap.Items, struct {
 			Status string
 			Count  int64
 		}{r.Status, r.Count})
-		total += r.Count
+		snap.Total += r.Count
 	}
 	_ = uc.data.DB.Where("status = ?", model.ProblemStatusFailed).
-		Order("updated_at desc").Limit(20).Find(&failed).Error
+		Order("updated_at desc").Limit(20).Find(&snap.Failed).Error
+	_ = uc.data.DB.Where("status IN ?", []string{model.ProblemStatusFetching, model.ProblemStatusTagging}).
+		Order("updated_at desc").Limit(30).Find(&snap.InProgress).Error
+
+	snap.Paused = pipelineControl.IsPaused()
+	snap.ActiveJobs = pipelineControl.SnapshotActive()
+	snap.Queues = uc.queueStats()
+	return snap, nil
+}
+
+func (uc *ProblemUseCase) queueStats() []struct {
+	Name        string
+	Messages    int64
+	Consumers   int64
+	Concurrency int64
+} {
+	out := make([]struct {
+		Name        string
+		Messages    int64
+		Consumers   int64
+		Concurrency int64
+	}, 0, 2)
+	if uc.mq == nil || uc.mq.Ch == nil {
+		return out
+	}
+	for _, q := range []struct {
+		name string
+		conc int64
+	}{
+		{"problem_fetch", problemFetchConcurrency},
+		{"problem_analyze", problemAnalyzeConcurrency},
+	} {
+		qi, err := uc.mq.Ch.QueueDeclarePassive(q.name, true, false, false, false, nil)
+		if err != nil {
+			// 队列可能尚未创建
+			_, _ = uc.mq.Ch.QueueDeclare(q.name, true, false, false, false, nil)
+			qi, err = uc.mq.Ch.QueueDeclarePassive(q.name, true, false, false, false, nil)
+		}
+		msgs, cons := int64(0), int64(0)
+		if err == nil {
+			msgs = int64(qi.Messages)
+			cons = int64(qi.Consumers)
+		}
+		out = append(out, struct {
+			Name        string
+			Messages    int64
+			Consumers   int64
+			Concurrency int64
+		}{q.name, msgs, cons, q.conc})
+	}
+	return out
+}
+
+func (uc *ProblemUseCase) purgeQueues() (purgedFetch, purgedAnalyze int, err error) {
+	if uc.mq == nil || uc.mq.Ch == nil {
+		return 0, 0, fmt.Errorf("mq not ready")
+	}
+	for _, name := range []string{"problem_fetch", "problem_analyze"} {
+		_, _ = uc.mq.Ch.QueueDeclare(name, true, false, false, false, nil)
+	}
+	purgedFetch, err = uc.mq.Ch.QueuePurge("problem_fetch", false)
+	if err != nil {
+		return
+	}
+	purgedAnalyze, err = uc.mq.Ch.QueuePurge("problem_analyze", false)
+	return
+}
+
+// EmergencyStop 暂停流水线并清空队列
+func (uc *ProblemUseCase) EmergencyStop() (purgedFetch, purgedAnalyze int, err error) {
+	pipelineControl.SetPaused(true)
+	return uc.purgeQueues()
+}
+
+// Resume 恢复流水线
+func (uc *ProblemUseCase) Resume() {
+	pipelineControl.SetPaused(false)
+}
+
+// ResetAll 清空队列，将非 COMPLETED 重置为 PENDING 并重新入队
+func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, purgedAnalyze int, err error) {
+	pipelineControl.SetPaused(true)
+	purgedFetch, purgedAnalyze, err = uc.purgeQueues()
+	if err != nil {
+		return
+	}
+	// 卡住中的任务一并重置
+	res := uc.data.DB.Model(&model.Problem{}).
+		Where("status != ?", model.ProblemStatusCompleted).
+		Where("platform != ?", spider.LeetCode).
+		Updates(map[string]interface{}{
+			"status":    model.ProblemStatusPending,
+			"error_msg": "",
+		})
+	if res.Error != nil {
+		err = res.Error
+		return
+	}
+	reset = int(res.RowsAffected)
+
+	if requeue {
+		var list []model.Problem
+		_ = uc.data.DB.Where("status = ? AND platform != ?", model.ProblemStatusPending, spider.LeetCode).
+			Order("id desc").Limit(2000).Find(&list).Error
+		for _, p := range list {
+			if e := uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL); e == nil {
+				enqueued++
+			}
+		}
+	}
+	pipelineControl.SetPaused(false)
 	return
 }
 

@@ -3,22 +3,65 @@ package service
 import (
 	"context"
 	"cwxu-algo/api/core/v1/problem"
+	"cwxu-algo/api/user/v1/profile"
+	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/permission"
 	"cwxu-algo/app/common/utils/auth"
 	biz "cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"strings"
+	"time"
 
 	"github.com/go-kratos/kratos/v2/errors"
+	"github.com/go-kratos/kratos/v2/log"
+	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/go-kratos/kratos/v2/transport/grpc"
+	grpc2 "google.golang.org/grpc"
 )
 
 type ProblemService struct {
 	problem.UnimplementedProblemServer
-	uc *biz.ProblemUseCase
+	uc  *biz.ProblemUseCase
+	reg *registry.Registrar
 }
 
-func NewProblemService(uc *biz.ProblemUseCase) *ProblemService {
-	return &ProblemService{uc: uc}
+func NewProblemService(uc *biz.ProblemUseCase, reg *discovery.Register) *ProblemService {
+	return &ProblemService{uc: uc, reg: &reg.Reg}
+}
+
+func (s *ProblemService) userRPC() (*grpc2.ClientConn, error) {
+	if s.reg == nil {
+		return nil, errors.InternalServer("no registry", "registry nil")
+	}
+	return grpc.DialInsecure(
+		context.Background(),
+		grpc.WithEndpoint("discovery:///user"),
+		grpc.WithDiscovery((*s.reg).(registry.Discovery)),
+		grpc.WithTimeout(10*time.Second),
+	)
+}
+
+func (s *ProblemService) fetchUserNames(ctx context.Context, userIDs []int64) map[int64]string {
+	out := map[int64]string{}
+	if len(userIDs) == 0 {
+		return out
+	}
+	conn, err := s.userRPC()
+	if err != nil {
+		log.Errorf("problem userRPC: %v", err)
+		return out
+	}
+	defer conn.Close()
+	client := profile.NewProfileClient(conn)
+	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIDs})
+	if err != nil {
+		log.Errorf("problem GetByIds: %v", err)
+		return out
+	}
+	for _, p := range res.Profiles {
+		out[p.UserId] = p.Name
+	}
+	return out
 }
 
 func (s *ProblemService) toInfo(p *model.Problem, userStatus string) *problem.ProblemInfo {
@@ -134,8 +177,21 @@ func (s *ProblemService) ListSubmissions(ctx context.Context, req *problem.ListS
 	if err != nil {
 		return nil, errors.InternalServer("query failed", err.Error())
 	}
+	ids := make([]int64, 0, len(list))
+	seen := map[int64]bool{}
+	for _, v := range list {
+		if v.UserID != 0 && !seen[v.UserID] {
+			seen[v.UserID] = true
+			ids = append(ids, v.UserID)
+		}
+	}
+	names := s.fetchUserNames(ctx, ids)
 	data := make([]*problem.SubmissionInfo, 0, len(list))
 	for _, v := range list {
+		name := names[v.UserID]
+		if name == "" {
+			name = ""
+		}
 		data = append(data, &problem.SubmissionInfo{
 			Id:       uint32(v.ID),
 			UserId:   v.UserID,
@@ -145,6 +201,7 @@ func (s *ProblemService) ListSubmissions(ctx context.Context, req *problem.ListS
 			Status:   v.Status,
 			Time:     v.Time.Unix(),
 			Contest:  v.Contest,
+			UserName: name,
 		})
 	}
 	return &problem.ListSubmissionsRes{
@@ -185,41 +242,81 @@ func (s *ProblemService) UserProfile(ctx context.Context, req *problem.UserProfi
 	}, nil
 }
 
-func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq) (*problem.ProgressRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
-		return &problem.ProgressRes{Code: 1, Message: "权限不足"}, nil
-	}
-	items, failed, total, err := s.uc.Progress()
-	if err != nil {
-		return nil, errors.InternalServer("progress failed", err.Error())
-	}
-	pi := make([]*problem.ProgressItem, 0, len(items))
-	for _, v := range items {
-		pi = append(pi, &problem.ProgressItem{Status: v.Status, Count: v.Count})
-	}
-	ff := make([]*problem.FailedProblem, 0, len(failed))
-	for _, f := range failed {
+func toFailedProto(list []model.Problem) []*problem.FailedProblem {
+	ff := make([]*problem.FailedProblem, 0, len(list))
+	for _, f := range list {
+		// FailedProblem 无 status 字段时前端用 errorMsg/title 展示；inProgress 同结构
 		ff = append(ff, &problem.FailedProblem{
 			Id:         uint32(f.ID),
 			Platform:   f.Platform,
 			ExternalId: f.ExternalID,
-			Title:      f.Title,
-			ErrorMsg:   f.ErrorMsg,
+			Title:      firstNonEmptyTitle(f.Title, f.Status),
+			ErrorMsg:   firstNonEmptyTitle(f.ErrorMsg, f.Status),
 			UpdatedAt:  f.UpdatedAt.Unix(),
 		})
 	}
+	return ff
+}
+
+func firstNonEmptyTitle(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
+}
+
+func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq) (*problem.ProgressRes, error) {
+	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
+		return &problem.ProgressRes{Code: 1, Message: "权限不足"}, nil
+	}
+	snap, err := s.uc.Progress()
+	if err != nil {
+		return nil, errors.InternalServer("progress failed", err.Error())
+	}
+	pi := make([]*problem.ProgressItem, 0, len(snap.Items))
+	for _, v := range snap.Items {
+		pi = append(pi, &problem.ProgressItem{Status: v.Status, Count: v.Count})
+	}
+	jobs := make([]*problem.ActiveJob, 0, len(snap.ActiveJobs))
+	for _, j := range snap.ActiveJobs {
+		jobs = append(jobs, &problem.ActiveJob{
+			ProblemId:  uint32(j.ProblemID),
+			Platform:   j.Platform,
+			ExternalId: j.ExternalID,
+			Title:      j.Title,
+			Stage:      j.Stage,
+			StartedAt:  j.StartedAt.Unix(),
+		})
+	}
+	qs := make([]*problem.QueueStatus, 0, len(snap.Queues))
+	for _, q := range snap.Queues {
+		qs = append(qs, &problem.QueueStatus{
+			Name:        q.Name,
+			Messages:    q.Messages,
+			Consumers:   q.Consumers,
+			Concurrency: q.Concurrency,
+		})
+	}
 	return &problem.ProgressRes{
-		Code:          0,
-		Message:       "success",
-		Items:         pi,
-		RecentFailed:  ff,
-		Total:         total,
+		Code:         0,
+		Message:      "success",
+		Items:        pi,
+		RecentFailed: toFailedProto(snap.Failed),
+		Total:        snap.Total,
+		Paused:       snap.Paused,
+		ActiveJobs:   jobs,
+		Queues:       qs,
+		InProgress:   toFailedProto(snap.InProgress),
 	}, nil
 }
 
 func (s *ProblemService) Backfill(ctx context.Context, req *problem.BackfillReq) (*problem.BackfillRes, error) {
 	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
 		return &problem.BackfillRes{Code: 1, Message: "仅管理员可触发回填"}, nil
+	}
+	if s.uc != nil {
+		// 若处于紧急停止，回填前先恢复
+		s.uc.Resume()
 	}
 	scanned, bound, created, enqueued, err := s.uc.Backfill(int(req.Limit))
 	if err != nil {
@@ -233,4 +330,50 @@ func (s *ProblemService) Backfill(ctx context.Context, req *problem.BackfillReq)
 		Created:  created,
 		Enqueued: enqueued,
 	}, nil
+}
+
+func (s *ProblemService) EmergencyStop(ctx context.Context, req *problem.EmergencyStopReq) (*problem.EmergencyStopRes, error) {
+	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+		return &problem.EmergencyStopRes{Code: 1, Message: "仅管理员可操作"}, nil
+	}
+	pf, pa, err := s.uc.EmergencyStop()
+	if err != nil {
+		return nil, errors.InternalServer("emergency stop failed", err.Error())
+	}
+	return &problem.EmergencyStopRes{
+		Code:          0,
+		Message:       "已紧急停止并清空队列",
+		PurgedFetch:   int64(pf),
+		PurgedAnalyze: int64(pa),
+	}, nil
+}
+
+func (s *ProblemService) ResetAll(ctx context.Context, req *problem.ResetAllReq) (*problem.ResetAllRes, error) {
+	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+		return &problem.ResetAllRes{Code: 1, Message: "仅管理员可操作"}, nil
+	}
+	requeue := true
+	if req != nil && req.RequeueSet {
+		requeue = req.Requeue
+	}
+	reset, enqueued, pf, pa, err := s.uc.ResetAll(requeue)
+	if err != nil {
+		return nil, errors.InternalServer("reset failed", err.Error())
+	}
+	return &problem.ResetAllRes{
+		Code:          0,
+		Message:       "已全部重置",
+		Reset_:        int64(reset),
+		Enqueued:      int64(enqueued),
+		PurgedFetch:   int64(pf),
+		PurgedAnalyze: int64(pa),
+	}, nil
+}
+
+func (s *ProblemService) Resume(ctx context.Context, req *problem.ResumeReq) (*problem.ResumeRes, error) {
+	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+		return &problem.ResumeRes{Code: 1, Message: "仅管理员可操作"}, nil
+	}
+	s.uc.Resume()
+	return &problem.ResumeRes{Code: 0, Message: "流水线已恢复"}, nil
 }
