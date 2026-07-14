@@ -250,8 +250,12 @@ type ListProblemReq struct {
 	// 标签逗号分隔，匹配任一
 	Tags string `protobuf:"bytes,5,opt,name=tags,proto3" json:"tags,omitempty"`
 	// 用户做题状态过滤: AC / TRIED / NONE（需 user_id）
-	UserStatus    string `protobuf:"bytes,6,opt,name=user_status,json=userStatus,proto3" json:"user_status,omitempty"`
-	UserId        int64  `protobuf:"varint,7,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	UserStatus string `protobuf:"bytes,6,opt,name=user_status,json=userStatus,proto3" json:"user_status,omitempty"`
+	UserId     int64  `protobuf:"varint,7,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// 关键词：匹配 title / external_id（模糊）
+	Keyword string `protobuf:"bytes,8,opt,name=keyword,proto3" json:"keyword,omitempty"`
+	// 难度：简单 / 中等 / 困难
+	Difficulty    string `protobuf:"bytes,9,opt,name=difficulty,proto3" json:"difficulty,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -333,6 +337,20 @@ func (x *ListProblemReq) GetUserId() int64 {
 		return x.UserId
 	}
 	return 0
+}
+
+func (x *ListProblemReq) GetKeyword() string {
+	if x != nil {
+		return x.Keyword
+	}
+	return ""
+}
+
+func (x *ListProblemReq) GetDifficulty() string {
+	if x != nil {
+		return x.Difficulty
+	}
+	return ""
 }
 
 type ListProblemRes struct {
@@ -1928,7 +1946,7 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\terror_msg\x18\f \x01(\tR\berrorMsg\x12*\n" +
 	"\x11last_submitted_at\x18\r \x01(\x03R\x0flastSubmittedAt\x12\x1f\n" +
 	"\vuser_status\x18\x0e \x01(\tR\n" +
-	"userStatus\"\xc1\x01\n" +
+	"userStatus\"\xfb\x01\n" +
 	"\x0eListProblemReq\x12\x12\n" +
 	"\x04page\x18\x01 \x01(\x03R\x04page\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\x03R\bpageSize\x12\x12\n" +
@@ -1937,7 +1955,11 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x04tags\x18\x05 \x01(\tR\x04tags\x12\x1f\n" +
 	"\vuser_status\x18\x06 \x01(\tR\n" +
 	"userStatus\x12\x17\n" +
-	"\auser_id\x18\a \x01(\x03R\x06userId\"\xbb\x01\n" +
+	"\auser_id\x18\a \x01(\x03R\x06userId\x12\x18\n" +
+	"\akeyword\x18\b \x01(\tR\akeyword\x12\x1e\n" +
+	"\n" +
+	"difficulty\x18\t \x01(\tR\n" +
+	"difficulty\"\xbb\x01\n" +
 	"\x0eListProblemRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x124\n" +

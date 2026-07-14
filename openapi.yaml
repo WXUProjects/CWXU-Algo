@@ -209,6 +209,213 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.contest_log.GetContestRankingRes'
+    /v1/core/problem/backfill:
+        post:
+            tags:
+                - Problem
+            operationId: Problem_Backfill
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.BackfillReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.BackfillRes'
+    /v1/core/problem/emergency-stop:
+        post:
+            tags:
+                - Problem
+            description: 紧急停止：暂停消费并清空 MQ 队列
+            operationId: Problem_EmergencyStop
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.EmergencyStopReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.EmergencyStopRes'
+    /v1/core/problem/get:
+        get:
+            tags:
+                - Problem
+            operationId: Problem_Get
+            parameters:
+                - name: id
+                  in: query
+                  schema:
+                    type: integer
+                    format: uint32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.GetProblemRes'
+    /v1/core/problem/list:
+        get:
+            tags:
+                - Problem
+            operationId: Problem_List
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: string
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: string
+                - name: sort
+                  in: query
+                  description: '排序: latest_desc(默认) / latest_asc'
+                  schema:
+                    type: string
+                - name: platforms
+                  in: query
+                  description: 多平台逗号分隔
+                  schema:
+                    type: string
+                - name: tags
+                  in: query
+                  description: 标签逗号分隔，匹配任一
+                  schema:
+                    type: string
+                - name: userStatus
+                  in: query
+                  description: '用户做题状态过滤: AC / TRIED / NONE（需 user_id）'
+                  schema:
+                    type: string
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+                - name: keyword
+                  in: query
+                  description: 关键词：匹配 title / external_id（模糊）
+                  schema:
+                    type: string
+                - name: difficulty
+                  in: query
+                  description: 难度：简单 / 中等 / 困难
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ListProblemRes'
+    /v1/core/problem/progress:
+        get:
+            tags:
+                - Problem
+            operationId: Problem_Progress
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ProgressRes'
+    /v1/core/problem/reset-all:
+        post:
+            tags:
+                - Problem
+            description: 全部重置：清空队列，非 COMPLETED 题重置为 PENDING 并重新入队爬取
+            operationId: Problem_ResetAll
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.ResetAllReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ResetAllRes'
+    /v1/core/problem/resume:
+        post:
+            tags:
+                - Problem
+            description: 恢复流水线（取消紧急停止）
+            operationId: Problem_Resume
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.ResumeReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ResumeRes'
+    /v1/core/problem/submissions:
+        get:
+            tags:
+                - Problem
+            operationId: Problem_ListSubmissions
+            parameters:
+                - name: problemId
+                  in: query
+                  schema:
+                    type: integer
+                    format: uint32
+                - name: page
+                  in: query
+                  schema:
+                    type: string
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: string
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ListSubmissionsRes'
+    /v1/core/problem/user-profile:
+        get:
+            tags:
+                - Problem
+            operationId: Problem_UserProfile
+            parameters:
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.UserProfileRes'
     /v1/core/spider/set:
         post:
             tags:
@@ -245,6 +452,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.spider.UpdateRes'
+    /v1/core/spider/update-all:
+        post:
+            tags:
+                - Spider
+            description: 管理员一键全量更新所有已绑定 OJ 的用户
+            operationId: Spider_UpdateAll
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.spider.UpdateAllReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.UpdateAllRes'
     /v1/core/statistic/heatmap:
         get:
             tags:
@@ -291,6 +517,49 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.statistic.PeriodCountResp'
+    /v1/core/statistic/rank:
+        get:
+            tags:
+                - Statistic
+            description: Rank 按时间区间获取提交/AC 排行（供周报等场景）
+            operationId: Statistic_Rank
+            parameters:
+                - name: startDate
+                  in: query
+                  description: 开始日期 YYYY-MM-DD（含）
+                  schema:
+                    type: string
+                - name: endDate
+                  in: query
+                  description: 结束日期 YYYY-MM-DD（含）
+                  schema:
+                    type: string
+                - name: scoreType
+                  in: query
+                  description: submit | ac，默认 submit
+                  schema:
+                    type: string
+                - name: page
+                  in: query
+                  description: 分页，默认 page=1 pageSize=10
+                  schema:
+                    type: string
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: string
+                - name: groupId
+                  in: query
+                  description: 分组筛选，-1 或不传表示全部
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.statistic.RankResp'
     /v1/core/submit-log/get-by-id:
         get:
             tags:
@@ -444,6 +713,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.group.UpdateReply'
+    /v1/user/profile/delete:
+        post:
+            tags:
+                - Profile
+            description: 管理员删除用户（软删除）
+            operationId: Profile_Delete
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.DeleteReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.DeleteRes'
     /v1/user/profile/get-by-id:
         get:
             tags:
@@ -807,6 +1095,303 @@ components:
                     type: integer
                     format: int32
             description: 排行榜项
+        api.core.v1.problem.ActiveJob:
+            type: object
+            properties:
+                problemId:
+                    type: integer
+                    format: uint32
+                platform:
+                    type: string
+                externalId:
+                    type: string
+                title:
+                    type: string
+                stage:
+                    type: string
+                startedAt:
+                    type: string
+        api.core.v1.problem.BackfillReq:
+            type: object
+            properties:
+                limit:
+                    type: string
+                    description: 最大处理条数，0 表示默认 500
+        api.core.v1.problem.BackfillRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                scanned:
+                    type: string
+                bound:
+                    type: string
+                created:
+                    type: string
+                enqueued:
+                    type: string
+        api.core.v1.problem.EmergencyStopReq:
+            type: object
+            properties: {}
+        api.core.v1.problem.EmergencyStopRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                purgedFetch:
+                    type: string
+                purgedAnalyze:
+                    type: string
+        api.core.v1.problem.FailedProblem:
+            type: object
+            properties:
+                id:
+                    type: integer
+                    format: uint32
+                platform:
+                    type: string
+                externalId:
+                    type: string
+                title:
+                    type: string
+                errorMsg:
+                    type: string
+                updatedAt:
+                    type: string
+        api.core.v1.problem.GetProblemRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/api.core.v1.problem.ProblemInfo'
+        api.core.v1.problem.ListProblemRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.ProblemInfo'
+                total:
+                    type: string
+                page:
+                    type: string
+                pageSize:
+                    type: string
+        api.core.v1.problem.ListSubmissionsRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.SubmissionInfo'
+                total:
+                    type: string
+        api.core.v1.problem.NamedCount:
+            type: object
+            properties:
+                name:
+                    type: string
+                count:
+                    type: string
+        api.core.v1.problem.ProblemInfo:
+            type: object
+            properties:
+                id:
+                    type: integer
+                    format: uint32
+                platform:
+                    type: string
+                externalId:
+                    type: string
+                title:
+                    type: string
+                url:
+                    type: string
+                contentMd:
+                    type: string
+                problemType:
+                    type: string
+                tags:
+                    type: array
+                    items:
+                        type: string
+                solutions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.SolutionMeta'
+                difficulty:
+                    type: string
+                status:
+                    type: string
+                errorMsg:
+                    type: string
+                lastSubmittedAt:
+                    type: string
+                userStatus:
+                    type: string
+                    description: '当前用户对该题状态: AC / TRIED / NONE（仅 list 且传 userId 时）'
+        api.core.v1.problem.ProgressItem:
+            type: object
+            properties:
+                status:
+                    type: string
+                count:
+                    type: string
+        api.core.v1.problem.ProgressRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.ProgressItem'
+                recentFailed:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.FailedProblem'
+                total:
+                    type: string
+                paused:
+                    type: boolean
+                activeJobs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.ActiveJob'
+                queues:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.QueueStatus'
+                inProgress:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.FailedProblem'
+        api.core.v1.problem.QueueStatus:
+            type: object
+            properties:
+                name:
+                    type: string
+                messages:
+                    type: string
+                consumers:
+                    type: string
+                concurrency:
+                    type: string
+        api.core.v1.problem.ResetAllReq:
+            type: object
+            properties:
+                requeue:
+                    type: boolean
+                    description: 是否重新入队爬取；false 表示只重置状态并清空队列
+                requeueSet:
+                    type: boolean
+                    description: 兼容 proto3 默认值：true 时使用 requeue 字段，false 时默认 requeue=true
+        api.core.v1.problem.ResetAllRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                reset:
+                    type: string
+                enqueued:
+                    type: string
+                purgedFetch:
+                    type: string
+                purgedAnalyze:
+                    type: string
+        api.core.v1.problem.ResumeReq:
+            type: object
+            properties: {}
+        api.core.v1.problem.ResumeRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+        api.core.v1.problem.SolutionMeta:
+            type: object
+            properties:
+                name:
+                    type: string
+                timeComplexity:
+                    type: string
+                spaceComplexity:
+                    type: string
+                briefExplanation:
+                    type: string
+        api.core.v1.problem.SubmissionInfo:
+            type: object
+            properties:
+                id:
+                    type: integer
+                    format: uint32
+                userId:
+                    type: string
+                platform:
+                    type: string
+                submitId:
+                    type: string
+                lang:
+                    type: string
+                status:
+                    type: string
+                time:
+                    type: string
+                contest:
+                    type: string
+                userName:
+                    type: string
+        api.core.v1.problem.TagScore:
+            type: object
+            properties:
+                tag:
+                    type: string
+                score:
+                    type: number
+                    format: double
+                acCount:
+                    type: string
+        api.core.v1.problem.UserProfileRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                radar:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.TagScore'
+                platforms:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.NamedCount'
+                difficulties:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.NamedCount'
+                totalAc:
+                    type: string
         api.core.v1.spider.SetSpiderRep:
             type: object
             properties:
@@ -823,6 +1408,18 @@ components:
                 platform:
                     type: string
                 username:
+                    type: string
+        api.core.v1.spider.UpdateAllReq:
+            type: object
+            properties: {}
+        api.core.v1.spider.UpdateAllRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                count:
                     type: string
         api.core.v1.spider.UpdateReq:
             type: object
@@ -885,6 +1482,28 @@ components:
                     $ref: '#/components/schemas/api.core.v1.statistic.SubmitCount'
                 ac:
                     $ref: '#/components/schemas/api.core.v1.statistic.AcCount'
+        api.core.v1.statistic.RankItem:
+            type: object
+            properties:
+                rank:
+                    type: string
+                userId:
+                    type: string
+                name:
+                    type: string
+                score:
+                    type: string
+        api.core.v1.statistic.RankResp:
+            type: object
+            properties:
+                code:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.statistic.RankItem'
+                total:
+                    type: string
         api.core.v1.statistic.SubmitCount:
             type: object
             properties:
@@ -933,6 +1552,9 @@ components:
                     type: string
                 time:
                     type: string
+                problemId:
+                    type: integer
+                    format: uint32
         api.user.group.CreateReply:
             type: object
             properties:
@@ -1007,6 +1629,18 @@ components:
                 avatar:
                     type: string
                 lastSubmit:
+                    type: string
+        api.user.v1.DeleteReq:
+            type: object
+            properties:
+                userId:
+                    type: string
+        api.user.v1.DeleteRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
                     type: string
         api.user.v1.GetByIdRes:
             type: object
@@ -1231,6 +1865,7 @@ tags:
     - name: Contest
       description: 竞赛服务
     - name: Group
+    - name: Problem
     - name: Profile
     - name: Role
       description: 角色服务：查看角色列表、设置用户角色

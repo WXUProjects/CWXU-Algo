@@ -52,25 +52,39 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*
 	if !t.ready {
 		return nil, fmt.Errorf("ai_analyze 未配置")
 	}
-	// 节约 token：截断超长题面
+	// 节约 token：截断超长题面（翻译+排版需要更多上下文）
 	content := contentMD
-	if len(content) > 12000 {
-		content = content[:12000] + "\n...(truncated)"
+	if len(content) > 18000 {
+		content = content[:18000] + "\n...(truncated)"
 	}
-	system := `你是算法题目标签分析器。快速、粗略分析即可，不必深入推导，不要长篇推理。
+	system := `你是算法题目标签分析器与题面编辑器。快速分析即可，不必深入推导，不要长篇推理。
 仅输出 JSON，不要 markdown 代码块，不要解释过程。
 
 【最高优先级】所有字符串字段的可见文字必须是中文，禁止英文单词/短语作为展示内容。
-包括但不限于：problem_type、difficulty、algorithm_tags、suggested_solutions 的 name/brief_explanation/time_complexity/space_complexity、content_md 中的标题与说明。
-若题面为英文：标签与类型仍用中文；content_md 可保留必要英文专有名词，但章节标题与说明用中文。
+包括但不限于：problem_type、difficulty、algorithm_tags、suggested_solutions 的 name/brief_explanation、content_md 全文。
 英文算法名必须译成中文，例如：DP→动态规划，BFS→广度优先搜索，DFS→深度优先搜索，Dijkstra→最短路，Binary Search→二分查找。
+复杂度字段 time_complexity / space_complexity 可用 O(n)、O(n log n) 等数学写法。
+
+【题面 content_md — 必须输出，禁止空字符串】
+1. 若原题面为英文或中英混杂：将题意、输入、输出、样例说明、约束等全部译成通顺中文；专有名词（人名、平台名）可保留原文一次并附中文。
+2. 若原题面已是中文：优化排版与分段，修正明显乱码/粘连，不要无故改写题意。
+3. 统一 Markdown 结构，章节标题用中文：
+   # 标题
+   ## 题意
+   ## 输入
+   ## 输出
+   ## 样例（多个时用 ### 样例 1 / 样例 2）
+   ## 说明（可选）
+4. 样例输入输出用 fenced code block（三反引号）原样保留数字与格式，不要翻译样例数据。
+5. 数学公式必须用 $...$ 或 $$...$$（KaTeX 兼容）；禁止使用 $$$；禁止把公式拆成纯文字。
+6. 保留原题全部条件与约束，不得删减关键数据范围。
 
 字段：
 - problem_type: 中文模块名（图论、动态规划、数据结构、数学、字符串、贪心等）
 - difficulty: 只能是 简单 / 中等 / 困难
 - algorithm_tags: 中文算法标签数组（2~6 个）
-- suggested_solutions: 1~2 个，含 name, time_complexity, space_complexity, brief_explanation（中文，各一两句；复杂度可用 O(n) 这种数学写法）
-- content_md: 可选，优化排版后的 Markdown 题面；章节名用中文（题意、输入、输出、样例、说明）；不需要则空字符串
+- suggested_solutions: 1~2 个，含 name, time_complexity, space_complexity, brief_explanation（中文，各一两句）
+- content_md: 中文 Markdown 题面（见上，必填）
 禁止分析用户代码；不要输出除 JSON 外的任何文字。`
 	user := fmt.Sprintf("标题: %s\n\n题面:\n%s", title, content)
 
@@ -104,7 +118,59 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*
 		return nil, fmt.Errorf("反序列化 AI JSON 失败: %w body=%s", err, truncateStr(contentStr, 400))
 	}
 	result.Difficulty = normalizeDifficulty(result.Difficulty)
+	result.AlgorithmTags = normalizeChineseTags(result.AlgorithmTags)
+	result.ProblemType = strings.TrimSpace(result.ProblemType)
+	// content_md 必填意图：若模型返回空则保留爬取原文（由调用方决定是否覆盖）
+	result.ContentMD = strings.TrimSpace(result.ContentMD)
+	// 清理 $$$ 为 $
+	if result.ContentMD != "" {
+		result.ContentMD = strings.ReplaceAll(result.ContentMD, "$$$", "$")
+	}
 	return &result, nil
+}
+
+// normalizeChineseTags 去掉空白、过短、明显纯英文标签
+func normalizeChineseTags(tags []string) []string {
+	out := make([]string, 0, len(tags))
+	seen := map[string]bool{}
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" || len([]rune(t)) < 2 {
+			continue
+		}
+		if seen[t] {
+			continue
+		}
+		// 纯 ASCII 英文短语大概率是漏译，丢弃
+		if isASCIIWord(t) {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+		if len(out) >= 6 {
+			break
+		}
+	}
+	return out
+}
+
+func isASCIIWord(s string) bool {
+	hasLetter := false
+	for _, r := range s {
+		if r > 127 {
+			return false
+		}
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+			hasLetter = true
+		} else if r == ' ' || r == '-' || r == '_' {
+			continue
+		} else if r >= '0' && r <= '9' {
+			continue
+		} else {
+			return false
+		}
+	}
+	return hasLetter
 }
 
 // normalizeOpenAIBaseURL 将配置 endpoint 规范为 openai-go 的 BaseURL（需含 /v1/ 前缀路径）。

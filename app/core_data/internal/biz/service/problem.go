@@ -371,6 +371,8 @@ type ListProblemFilter struct {
 	Tags       []string
 	UserStatus string
 	UserID     int64
+	Keyword    string
+	Difficulty string
 }
 
 func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]string, int64, error) {
@@ -394,52 +396,41 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 		}
 		q = q.Where(strings.Join(ors, " OR "), args...)
 	}
+	if kw := strings.TrimSpace(f.Keyword); kw != "" {
+		like := "%" + kw + "%"
+		q = q.Where("(title ILIKE ? OR external_id ILIKE ?)", like, like)
+	}
+	if d := strings.TrimSpace(f.Difficulty); d != "" {
+		q = q.Where("difficulty = ?", d)
+	}
 
-	// 用户状态过滤需要 join
+	// 用户状态：用 SQL 聚合，避免拉全量 submit_logs
 	userStatusMap := map[uint]string{}
 	if f.UserID > 0 {
-		type row struct {
-			ProblemID uint
-			Status    string
-		}
-		var rows []row
-		_ = uc.data.DB.Model(&model.SubmitLog{}).
-			Select("problem_id, status").
-			Where("user_id = ? AND problem_id IS NOT NULL", f.UserID).
-			Find(&rows).Error
-		best := map[uint]string{}
-		for _, r := range rows {
-			if r.ProblemID == 0 {
-				continue
-			}
-			cur := best[r.ProblemID]
-			ns := mapSubmitStatus(r.Status)
-			if rankStatus(ns) > rankStatus(cur) {
-				best[r.ProblemID] = ns
-			}
-		}
-		userStatusMap = best
 		if f.UserStatus != "" {
-			want := strings.ToUpper(f.UserStatus)
-			ids := make([]uint, 0)
-			for id, st := range best {
-				if st == want {
-					ids = append(ids, id)
-				}
-			}
-			if want == "NONE" {
-				// 无提交记录的题
-				has := make([]uint, 0, len(best))
-				for id := range best {
-					has = append(has, id)
-				}
-				if len(has) > 0 {
-					q = q.Where("id NOT IN ?", has)
-				}
-			} else if len(ids) == 0 {
-				return []model.Problem{}, userStatusMap, 0, nil
-			} else {
-				q = q.Where("id IN ?", ids)
+			want := strings.ToUpper(strings.TrimSpace(f.UserStatus))
+			switch want {
+			case "NONE":
+				q = q.Where(`NOT EXISTS (
+					SELECT 1 FROM submit_logs s
+					WHERE s.problem_id = problems.id AND s.user_id = ?
+				)`, f.UserID)
+			case "AC":
+				// 与 mapSubmitStatus 一致：含 ACCEPT / OK / AC
+				q = q.Where(`EXISTS (
+					SELECT 1 FROM submit_logs s
+					WHERE s.problem_id = problems.id AND s.user_id = ?
+					  AND (UPPER(s.status) IN ('AC','OK') OR UPPER(s.status) LIKE '%ACCEPT%')
+				)`, f.UserID)
+			case "TRIED":
+				q = q.Where(`EXISTS (
+					SELECT 1 FROM submit_logs s
+					WHERE s.problem_id = problems.id AND s.user_id = ?
+				) AND NOT EXISTS (
+					SELECT 1 FROM submit_logs s
+					WHERE s.problem_id = problems.id AND s.user_id = ?
+					  AND (UPPER(s.status) IN ('AC','OK') OR UPPER(s.status) LIKE '%ACCEPT%')
+				)`, f.UserID, f.UserID)
 			}
 		}
 	}
@@ -454,7 +445,37 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 	}
 	var list []model.Problem
 	err := q.Order(order).Offset(int((f.Page - 1) * f.PageSize)).Limit(int(f.PageSize)).Find(&list).Error
-	return list, userStatusMap, total, err
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	// 仅补当前页的用户状态
+	if f.UserID > 0 && len(list) > 0 {
+		ids := make([]uint, 0, len(list))
+		for i := range list {
+			ids = append(ids, list[i].ID)
+		}
+		type row struct {
+			ProblemID uint
+			Status    string
+		}
+		var rows []row
+		_ = uc.data.DB.Model(&model.SubmitLog{}).
+			Select("problem_id, status").
+			Where("user_id = ? AND problem_id IN ?", f.UserID, ids).
+			Find(&rows).Error
+		for _, r := range rows {
+			if r.ProblemID == 0 {
+				continue
+			}
+			cur := userStatusMap[r.ProblemID]
+			ns := mapSubmitStatus(r.Status)
+			if rankStatus(ns) > rankStatus(cur) {
+				userStatusMap[r.ProblemID] = ns
+			}
+		}
+	}
+	return list, userStatusMap, total, nil
 }
 
 func (uc *ProblemUseCase) Get(id uint) (*model.Problem, error) {

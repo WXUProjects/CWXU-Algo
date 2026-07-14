@@ -127,6 +127,8 @@ func (s *ProblemService) List(ctx context.Context, req *problem.ListProblemReq) 
 		Tags:       splitCSV(req.Tags),
 		UserStatus: req.UserStatus,
 		UserID:     req.UserId,
+		Keyword:    req.Keyword,
+		Difficulty: req.Difficulty,
 	})
 	if err != nil {
 		return nil, errors.InternalServer("list failed", err.Error())

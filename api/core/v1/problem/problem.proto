@@ -99,6 +99,10 @@ message ListProblemReq {
   // 用户做题状态过滤: AC / TRIED / NONE（需 user_id）
   string user_status = 6;
   int64 user_id = 7;
+  // 关键词：匹配 title / external_id（模糊）
+  string keyword = 8;
+  // 难度：简单 / 中等 / 困难
+  string difficulty = 9;
 }
 
 message ListProblemRes {

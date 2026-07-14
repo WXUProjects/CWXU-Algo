@@ -366,11 +366,17 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 		if externalID == "" {
 			return nil, fmt.Errorf("NowCoder 缺少题面 URL 与 external_id")
 		}
-		// 数字题号 → 练习题
-		if isAllDigits(externalID) {
-			problemURL = "https://ac.nowcoder.com/acm/problem/" + externalID
+		// 数字题号 → 练习题；从 external_id 提取纯数字前缀
+		id := externalID
+		if !isAllDigits(id) {
+			if m := regexp.MustCompile(`^\d+`).FindString(id); m != "" {
+				id = m
+			}
+		}
+		if isAllDigits(id) {
+			problemURL = "https://ac.nowcoder.com/acm/problem/" + id
 		} else {
-			return nil, fmt.Errorf("NowCoder 缺少题面 URL，跳过爬取")
+			return nil, fmt.Errorf("NowCoder 竞赛题无稳定题面 URL，跳过爬取")
 		}
 	}
 	resp, err := httpGet(problemURL)
@@ -382,49 +388,37 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 	if err != nil {
 		return nil, err
 	}
+	html := string(body)
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("NowCoder status %d", resp.StatusCode)
 	}
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	// 登录墙 / 空壳页
+	if strings.Contains(html, "请先登录") || strings.Contains(html, "login-btn") && !strings.Contains(html, "subject-question") {
+		return nil, fmt.Errorf("NowCoder 需要登录或被拦截")
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return nil, err
 	}
-	title := strings.TrimSpace(doc.Find(".question-title h1, .question-title, .terminal-topic-title, title").First().Text())
+	title := strings.TrimSpace(doc.Find(".question-title h1, .question-title, .terminal-topic-title, .title, h1").First().Text())
+	if title == "" {
+		title = strings.TrimSpace(doc.Find("title").First().Text())
+	}
 	title = strings.TrimSpace(strings.Split(title, "_")[0])
 	title = strings.TrimSpace(strings.Split(title, "-")[0])
+	title = strings.TrimSpace(strings.Split(title, "|")[0])
 
-	// 主内容：subject-question，公式在 img[alt]
+	// 主内容：多 selector 兼容页面改版
 	q := doc.Find("div.subject-question").First()
 	if q.Length() == 0 {
-		q = doc.Find(".question-content, .problem-content").First()
+		q = doc.Find(".question-content, .problem-content, .topic-sentence, #questionContent, .nc-post-content").First()
 	}
 	if q.Length() == 0 {
-		return nil, fmt.Errorf("NowCoder 未找到题面")
+		return nil, fmt.Errorf("NowCoder 未找到题面 DOM")
 	}
 
 	// 将 equation img 替换为 $alt$
-	q.Find("img").Each(func(_ int, img *goquery.Selection) {
-		alt, _ := img.Attr("alt")
-		src, _ := img.Attr("src")
-		tex := alt
-		if tex == "" && strings.Contains(src, "equation?tex=") {
-			if u, err := url.Parse(src); err == nil {
-				tex, _ = url.QueryUnescape(u.Query().Get("tex"))
-			}
-		}
-		tex = strings.TrimSpace(tex)
-		// 跳过无意义空白公式
-		if tex == "" || tex == `\hspace{15pt}` || strings.HasPrefix(tex, `\hspace`) && !strings.Contains(tex, "bullet") {
-			img.ReplaceWithHtml("")
-			return
-		}
-		// bullet
-		if strings.Contains(tex, `bullet`) {
-			img.ReplaceWithHtml("\n- ")
-			return
-		}
-		img.ReplaceWithHtml("$" + tex + "$")
-	})
+	replaceNowCoderMath(q)
 	// br → newline
 	q.Find("br").Each(func(_ int, br *goquery.Selection) {
 		br.ReplaceWithHtml("\n")
@@ -441,20 +435,24 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 	b.WriteString(bodyText)
 	b.WriteString("\n\n")
 
-	// 输入输出描述
-	doc.Find("h2").Each(func(_ int, h *goquery.Selection) {
+	// 输入输出 / 样例：h2 / h3 / .question-oi-cont 等
+	sectionSel := doc.Find("h2, h3, .question-oi-cont h2, .question-oi-cont h3")
+	sectionSel.Each(func(_ int, h *goquery.Selection) {
 		ht := strings.TrimSpace(h.Text())
 		if ht == "" {
 			return
 		}
-		// 下一兄弟节点
 		next := h.Next()
 		content := strings.TrimSpace(next.Text())
 		if content == "" {
-			// 有时在 parent
-			content = strings.TrimSpace(h.Parent().Contents().Not("h2").Text())
+			content = strings.TrimSpace(h.Parent().Contents().Not("h2,h3").Text())
 		}
-		if strings.Contains(ht, "输入") {
+		// 样例 pre：当前块或后续兄弟
+		preNodes := h.Parent().Find("pre")
+		if preNodes.Length() == 0 {
+			preNodes = next.Find("pre")
+		}
+		if strings.Contains(ht, "输入") && !strings.Contains(ht, "输出") {
 			b.WriteString("## 输入描述\n\n")
 			b.WriteString(normalizeNowCoderText(content))
 			b.WriteString("\n\n")
@@ -466,13 +464,13 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 			b.WriteString("## ")
 			b.WriteString(ht)
 			b.WriteString("\n\n")
-			// pre 样例
-			h.Parent().Find("pre").Each(func(_ int, pre *goquery.Selection) {
-				b.WriteString("```\n")
-				b.WriteString(strings.TrimRight(pre.Text(), "\n"))
-				b.WriteString("\n```\n\n")
-			})
-			if h.Parent().Find("pre").Length() == 0 && content != "" {
+			if preNodes.Length() > 0 {
+				preNodes.Each(func(_ int, pre *goquery.Selection) {
+					b.WriteString("```\n")
+					b.WriteString(strings.TrimRight(pre.Text(), "\n"))
+					b.WriteString("\n```\n\n")
+				})
+			} else if content != "" {
 				b.WriteString(normalizeNowCoderText(content))
 				b.WriteString("\n\n")
 			}
@@ -480,10 +478,42 @@ func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
 	})
 
 	md := collapseBlankLines(strings.TrimSpace(b.String()))
+	// 清理可能重复的标题行
+	md = strings.ReplaceAll(md, "$$$", "$")
 	if len(md) < 8 {
 		return nil, fmt.Errorf("NowCoder 题面为空")
 	}
 	return &FetchedContent{Title: title, ContentMD: md}, nil
+}
+
+func replaceNowCoderMath(q *goquery.Selection) {
+	q.Find("img").Each(func(_ int, img *goquery.Selection) {
+		alt, _ := img.Attr("alt")
+		src, _ := img.Attr("src")
+		tex := alt
+		if tex == "" && strings.Contains(src, "equation?tex=") {
+			if u, err := url.Parse(src); err == nil {
+				tex, _ = url.QueryUnescape(u.Query().Get("tex"))
+			}
+		}
+		if tex == "" && strings.Contains(src, "tex=") {
+			if u, err := url.Parse(src); err == nil {
+				tex, _ = url.QueryUnescape(u.Query().Get("tex"))
+			}
+		}
+		tex = strings.TrimSpace(tex)
+		if tex == "" || tex == `\hspace{15pt}` || (strings.HasPrefix(tex, `\hspace`) && !strings.Contains(tex, "bullet")) {
+			img.ReplaceWithHtml("")
+			return
+		}
+		if strings.Contains(tex, `bullet`) {
+			img.ReplaceWithHtml("\n- ")
+			return
+		}
+		// 避免公式内未转义的 $ 破坏定界
+		tex = strings.ReplaceAll(tex, "$", "")
+		img.ReplaceWithHtml("$" + tex + "$")
+	})
 }
 
 func fetchQOJ(externalID, problemURL string) (*FetchedContent, error) {
