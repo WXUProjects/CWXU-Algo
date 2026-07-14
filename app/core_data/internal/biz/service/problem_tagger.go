@@ -57,36 +57,41 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*
 	if len(content) > 18000 {
 		content = content[:18000] + "\n...(truncated)"
 	}
-	system := `你是算法题目标签分析器与题面编辑器。快速分析即可，不必深入推导，不要长篇推理。
+	system := `你是算法题目标签分析器与题面「全文中文译者」。先完整翻译/中文化题面，再做轻量标签分析。不要长篇推理。
 仅输出 JSON，不要 markdown 代码块，不要解释过程。
 
-【最高优先级】所有字符串字段的可见文字必须是中文，禁止英文单词/短语作为展示内容。
-包括但不限于：problem_type、difficulty、algorithm_tags、suggested_solutions 的 name/brief_explanation、content_md 全文。
-英文算法名必须译成中文，例如：DP→动态规划，BFS→广度优先搜索，DFS→深度优先搜索，Dijkstra→最短路，Binary Search→二分查找。
-复杂度字段 time_complexity / space_complexity 可用 O(n)、O(n log n) 等数学写法。
+【绝对最高优先级：全文中文】
+- 所有字符串字段的可见文字必须是中文，禁止把英文段落原样拷进 content_md。
+- 包括：标题、题意描述、输入格式、输出格式、样例说明/解释、约束/数据范围、注意、提示、交互说明、评分方式等——凡给人看的句子都要译成通顺中文。
+- problem_type、difficulty、algorithm_tags、suggested_solutions.name / brief_explanation 也必须中文。
+- 英文算法名译中文：DP→动态规划，BFS→广度优先搜索，DFS→深度优先搜索，Dijkstra→最短路，Binary Search→二分查找，Two Pointers→双指针 等。
+- 复杂度 time_complexity / space_complexity 可用 O(n)、O(n log n) 等写法。
+- 禁止偷懒：不得只译标题、不得只改章节名而正文仍是英文、不得用「见原文」代替翻译。
 
-【题面 content_md — 必须输出，禁止空字符串】
-1. 若原题面为英文或中英混杂：将题意、输入、输出、样例说明、约束等全部译成通顺中文；专有名词（人名、平台名）可保留原文一次并附中文。
-2. 若原题面已是中文：优化排版与分段，修正明显乱码/粘连，不要无故改写题意。
-3. 统一 Markdown 结构，章节标题用中文：
-   # 标题
+【题面 content_md — 必须输出且必须为完整中文 Markdown，禁止空字符串】
+1. 无论原题是英文、中英混杂还是其他语言：都要「完全翻译」为中文题面；专有名词（人名、公司名、平台名）可首次保留原文并附中文，其后用中文。
+2. 若原题已是中文：优化排版与分段，修正乱码/粘连，不无故改题意；仍保证章节齐全、表述通顺。
+3. 统一结构（标题用中文）：
+   # 标题（中文）
    ## 题意
    ## 输入
    ## 输出
-   ## 样例（多个时用 ### 样例 1 / 样例 2）
-   ## 说明（可选）
-4. 样例输入输出用 fenced code block（三反引号）原样保留数字与格式，不要翻译样例数据。
-5. 数学公式必须用 $...$ 或 $$...$$（KaTeX 兼容）；禁止使用 $$$；禁止把公式拆成纯文字。
-6. 保留原题全部条件与约束，不得删减关键数据范围。
+   ## 约束（或 数据范围）
+   ## 样例（多个时 ### 样例 1 / 样例 2）
+   ## 说明（样例解释也必须中文）
+   ## 提示（若有）
+4. 样例「输入/输出数据」用 fenced code block 原样保留（数字、换行、格式不改）；样例外的说明文字必须中文。
+5. 数学公式用 $...$ 或 $$...$$（KaTeX）；禁止 $$$；变量名可保留英文字母。
+6. 保留全部条件、约束与边界，不得删减；翻译后信息量不得少于原题。
 
 字段：
 - problem_type: 中文模块名（图论、动态规划、数据结构、数学、字符串、贪心等）
 - difficulty: 只能是 简单 / 中等 / 困难
 - algorithm_tags: 中文算法标签数组（2~6 个）
 - suggested_solutions: 1~2 个，含 name, time_complexity, space_complexity, brief_explanation（中文，各一两句）
-- content_md: 中文 Markdown 题面（见上，必填）
+- content_md: 完整中文 Markdown 题面（必填，全文中文）
 禁止分析用户代码；不要输出除 JSON 外的任何文字。`
-	user := fmt.Sprintf("标题: %s\n\n题面:\n%s", title, content)
+	user := fmt.Sprintf("请将下列题目完整翻译/整理为中文题面，并完成标签分析。\n标题: %s\n\n原题面:\n%s", title, content)
 
 	params := openai.ChatCompletionNewParams{
 		Model: shared.ChatModel(t.model),
