@@ -342,6 +342,19 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 	// 确保流水线在跑
 	pipelineControl.SetPaused(false)
 
+	// 0) 牛客错误 external_id：非纯数字（曾用 ACM3227 / main|uid_标题）→ 解绑后重解析
+	if res := uc.data.DB.Exec(`
+		UPDATE submit_logs
+		SET problem_id = NULL, external_id = ''
+		WHERE platform = ?
+		  AND (
+		    external_id IS NULL OR external_id = ''
+		    OR external_id !~ '^[0-9]+$'
+		  )
+	`, spider.NowCoder); res.Error == nil && res.RowsAffected > 0 {
+		log.Infof("Backfill: unbound %d NowCoder submits with bad external_id", res.RowsAffected)
+	}
+
 	// 1) 历史永久错误：FAILED → FAILED_PERM，不再重试
 	_ = uc.markExistingPermanentFailures()
 
@@ -353,9 +366,11 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		}
 	}
 
+	// 优先重绑牛客（刚解绑的）+ 其它未绑定
 	var logs []model.SubmitLog
 	err = uc.data.DB.Where("(problem_id IS NULL OR problem_id = 0) AND platform != ?", spider.LeetCode).
-		Order("id desc").Limit(limit).Find(&logs).Error
+		Order("CASE WHEN platform = 'NowCoder' THEN 0 ELSE 1 END, id DESC").
+		Limit(limit).Find(&logs).Error
 	if err != nil {
 		return
 	}

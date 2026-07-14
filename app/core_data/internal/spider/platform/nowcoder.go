@@ -17,7 +17,8 @@ import (
 
 type Submission struct {
 	RunID      string
-	Problem    string
+	Problem    string // 展示用：优先 "数字题号 标题"
+	ProblemID  string // 牛客题库数字 id（/acm/problem/{id}）
 	Result     string
 	Score      string
 	TimeMS     string
@@ -56,9 +57,37 @@ func analysisSubs(doc *goquery.Document) []Submission {
 		if tds.Length() < 9 {
 			return
 		}
+		probCell := tds.Eq(1)
+		title := strings.TrimSpace(probCell.Text())
+		// 从链接提取稳定数字题号：/acm/problem/316899
+		problemID := ""
+		probCell.Find("a").Each(func(_ int, a *goquery.Selection) {
+			if problemID != "" {
+				return
+			}
+			href, _ := a.Attr("href")
+			if i := strings.LastIndex(href, "/problem/"); i >= 0 {
+				id := strings.Trim(href[i+len("/problem/"):], "/")
+				// 去掉 query
+				if j := strings.IndexAny(id, "?#"); j >= 0 {
+					id = id[:j]
+				}
+				if id != "" && isDigits(id) {
+					problemID = id
+				}
+			}
+		})
+		problem := title
+		if problemID != "" {
+			// 统一 "id 标题"，供 parseNowCoder 使用
+			if !strings.HasPrefix(title, problemID) {
+				problem = problemID + " " + title
+			}
+		}
 		sub := Submission{
 			RunID:      strings.TrimSpace(tds.Eq(0).Text()),
-			Problem:    strings.TrimSpace(tds.Eq(1).Text()),
+			Problem:    problem,
+			ProblemID:  problemID,
 			Result:     strings.TrimSpace(tds.Eq(2).Text()),
 			Score:      strings.TrimSpace(tds.Eq(3).Text()),
 			TimeMS:     strings.TrimSpace(tds.Eq(4).Text()),
@@ -72,10 +101,26 @@ func analysisSubs(doc *goquery.Document) []Submission {
 	return subs
 }
 
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []model.SubmitLog {
 	// ===== record 定义（必须是命名类型）=====
 	type Record struct {
 		Problem struct {
+			// id = 题库数字 id，对应 https://ac.nowcoder.com/acm/problem/{id}
+			// questionNum 可能是 "309177" 或 "ACM3227"（展示号，不能当 external_id）
+			ID          int64  `json:"id"`
+			QuestionID  int64  `json:"questionId"`
 			QuestionNum string `json:"questionNum"`
 			Title       string `json:"title"`
 		} `json:"problem"`
@@ -135,15 +180,33 @@ func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []mo
 
 	handle := func(records []Record) bool {
 		for _, it := range records {
+			// 稳定 external_id 必须用数字题库 id，不能用 questionNum（可能是 ACM3227）
+			pid := it.Problem.ID
+			if pid == 0 {
+				pid = it.Problem.QuestionID
+			}
+			title := strings.TrimSpace(it.Problem.Title)
+			problem := title
+			if pid > 0 {
+				if title != "" {
+					problem = strconv.FormatInt(pid, 10) + " " + title
+				} else {
+					problem = strconv.FormatInt(pid, 10)
+				}
+			} else if qn := strings.TrimSpace(it.Problem.QuestionNum); qn != "" {
+				// 兜底：纯数字 questionNum 也可用
+				problem = strings.TrimSpace(qn + " " + title)
+			}
 			result = append(result, model.SubmitLog{
 				UserID:   userId,
 				Platform: spider.NowCoder,
 				SubmitID: strconv.FormatInt(it.Submission.ID, 10),
-				Contest:  "main|" + username,
-				Problem:  it.Problem.QuestionNum + " " + it.Problem.Title,
-				Lang:     it.Language,
-				Status:   it.Status.Desc,
-				Time:     time.Unix(it.Submission.CreatedDate/1000, 0),
+				// 练习题不写 contest，避免 parse 时用 main|uid 污染 external_id
+				Contest: "",
+				Problem: problem,
+				Lang:    it.Language,
+				Status:  it.Status.Desc,
+				Time:    time.Unix(it.Submission.CreatedDate/1000, 0),
 			})
 			if len(result) >= limit {
 				return false

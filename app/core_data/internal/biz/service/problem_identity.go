@@ -18,11 +18,12 @@ type ParsedProblem struct {
 }
 
 var (
-	reCFProblem   = regexp.MustCompile(`^([A-Za-z0-9]+)\s*-\s*(.+)$`)
-	reLuoGuPID    = regexp.MustCompile(`^([A-Z]\d+)\s+(.+)$`)
-	reAtCoderTask = regexp.MustCompile(`^[a-z0-9_]+$`)
-	reQOJNum      = regexp.MustCompile(`#?\s*(\d+)`)
-	reDigits      = regexp.MustCompile(`^\d+$`)
+	reCFProblem           = regexp.MustCompile(`^([A-Za-z0-9]+)\s*-\s*(.+)$`)
+	reLuoGuPID            = regexp.MustCompile(`^([A-Z]\d+)\s+(.+)$`)
+	reAtCoderTask         = regexp.MustCompile(`^[a-z0-9_]+$`)
+	reQOJNum              = regexp.MustCompile(`#?\s*(\d+)`)
+	reDigits              = regexp.MustCompile(`^\d+$`)
+	reNowCoderProblemURL  = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/acm/problem/(\d+)`)
 )
 
 // ParseProblemIdentity 从 SubmitLog 字段解析 (platform, external_id)
@@ -148,36 +149,61 @@ func parseLuoGu(problem string) (*ParsedProblem, error) {
 }
 
 func parseNowCoder(contest, problem string) (*ParsedProblem, error) {
-	// 常见 "题号 标题" 或纯标题；竞赛用 contest+title
-	title := problem
-	ext := sanitizeExternalID(problem)
-	// 若以数字开头
-	fields := strings.Fields(problem)
-	if len(fields) > 0 && reDigits.MatchString(fields[0]) {
-		ext = fields[0]
-		if len(fields) > 1 {
-			title = strings.Join(fields[1:], " ")
-		}
-	} else if contest != "" {
-		// 用 contest 前缀稳定化
-		ext = sanitizeExternalID(contest + "_" + problem)
-		if len(ext) > 120 {
-			ext = ext[:120]
-		}
+	// 正确 external_id = 牛客题库数字 id（/acm/problem/{id}）
+	// Problem 期望形如 "309177 【模板】高精度加法"；禁止用 questionNum(ACM3227) 或 main|uid 当 id
+	title := strings.TrimSpace(problem)
+	ext := ""
+
+	// 1) 文本里的 /acm/problem/123 或 /problem/123
+	if m := reNowCoderProblemURL.FindStringSubmatch(problem); m != nil {
+		ext = m[1]
+		// 标题尽量去掉 URL 残留
+		title = strings.TrimSpace(reNowCoderProblemURL.ReplaceAllString(problem, ""))
 	}
+
+	// 2) 以纯数字开头："309177 标题"
 	if ext == "" {
-		return nil, fmt.Errorf("nowcoder parse fail")
+		fields := strings.Fields(problem)
+		if len(fields) > 0 && reDigits.MatchString(fields[0]) {
+			ext = fields[0]
+			if len(fields) > 1 {
+				title = strings.Join(fields[1:], " ")
+			} else {
+				title = ext
+			}
+		}
 	}
-	url := ""
-	// 练习题号可直达题面；竞赛题可能无稳定 URL
-	if reDigits.MatchString(ext) {
-		url = "https://ac.nowcoder.com/acm/problem/" + ext
+
+	// 3) 整段纯数字
+	if ext == "" && reDigits.MatchString(strings.TrimSpace(problem)) {
+		ext = strings.TrimSpace(problem)
+		title = ext
+	}
+
+	// 4) contest 若是纯数字比赛 id 且 problem 无数字 id：竞赛题无稳定练习题号 → 跳过爬取
+	// 绝不使用 main|username / 标题 sanitize 当 external_id（会全站串题）
+	if ext == "" {
+		// 尝试从 contest 提取数字（真实 contest id，不是 main|uid）
+		c := contest
+		if i := strings.Index(c, "|"); i >= 0 {
+			// main|uid 不是比赛 id，忽略
+			c = ""
+		}
+		if reDigits.MatchString(c) {
+			// 竞赛提交但无题目数字 id：无法稳定去重，跳过题库
+			return nil, fmt.Errorf("nowcoder contest problem without numeric id")
+		}
+		return nil, fmt.Errorf("nowcoder missing numeric problem id: %q", problem)
+	}
+
+	if title == "" {
+		title = ext
 	}
 	return &ParsedProblem{
 		Platform:   spider.NowCoder,
 		ExternalID: ext,
 		Title:      title,
-		URL:        url,
+		URL:        "https://ac.nowcoder.com/acm/problem/" + ext,
 	}, nil
 }
 
