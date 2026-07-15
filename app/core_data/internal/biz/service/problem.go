@@ -848,28 +848,28 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	Count int64
 }, totalAC int64, err error) {
 
-	// AC 判定：与 isACStatus 一致（OK / Accepted / AC / 答案正确 等）
-	acCond := sqlACStatusCond("status")
+	// AC 判定必须用 s.status：JOIN problems 后裸 status 会与 p.status 歧义，SQL 失败被吞掉导致雷达/平台全空
+	acCond := sqlACStatusCond("s.status")
 
 	type tagRow struct {
 		Tag   string
 		Count int64
 	}
 	var tags []tagRow
-	// jsonb_array_elements_text
+	// jsonb_array_elements_text；仅 COMPLETED 有 AI 标签
 	err = uc.data.DB.Raw(`
 		SELECT tag, COUNT(DISTINCT p.id) AS count
 		FROM submit_logs s
 		JOIN problems p ON p.id = s.problem_id
 		CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(p.tags::jsonb, '[]'::jsonb)) AS tag
 		WHERE s.user_id = ? AND `+acCond+` AND p.status = ?
+		  AND p.tags IS NOT NULL AND p.tags::text NOT IN ('', '[]', 'null')
 		GROUP BY tag
 		ORDER BY count DESC
 		LIMIT 20
 	`, userID, model.ProblemStatusCompleted).Scan(&tags).Error
 	if err != nil {
-		// 兼容 tags 非 jsonb 的情况
-		log.Errorf("radar sql: %v", err)
+		log.Errorf("radar sql user=%d: %v", userID, err)
 		err = nil
 	}
 
@@ -897,13 +897,15 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 		Count int64
 	}
 	var plats []nc
-	_ = uc.data.DB.Raw(`
+	if e := uc.data.DB.Raw(`
 		SELECT p.platform AS name, COUNT(DISTINCT p.id) AS count
 		FROM submit_logs s
 		JOIN problems p ON p.id = s.problem_id
 		WHERE s.user_id = ? AND `+acCond+`
 		GROUP BY p.platform
-	`, userID).Scan(&plats).Error
+	`, userID).Scan(&plats).Error; e != nil {
+		log.Errorf("platforms sql user=%d: %v", userID, e)
+	}
 	for _, p := range plats {
 		platforms = append(platforms, struct {
 			Name  string
@@ -912,13 +914,15 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	}
 
 	var diffs []nc
-	_ = uc.data.DB.Raw(`
+	if e := uc.data.DB.Raw(`
 		SELECT COALESCE(NULLIF(p.difficulty,''),'Unknown') AS name, COUNT(DISTINCT p.id) AS count
 		FROM submit_logs s
 		JOIN problems p ON p.id = s.problem_id
 		WHERE s.user_id = ? AND `+acCond+`
 		GROUP BY 1
-	`, userID).Scan(&diffs).Error
+	`, userID).Scan(&diffs).Error; e != nil {
+		log.Errorf("difficulties sql user=%d: %v", userID, e)
+	}
 	for _, d := range diffs {
 		difficulties = append(difficulties, struct {
 			Name  string
@@ -928,7 +932,7 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 
 	_ = uc.data.DB.Raw(`
 		SELECT COUNT(DISTINCT s.problem_id) FROM submit_logs s
-		WHERE s.user_id = ? AND s.problem_id IS NOT NULL AND `+acCond+`
+		WHERE s.user_id = ? AND s.problem_id IS NOT NULL AND s.problem_id <> 0 AND `+acCond+`
 	`, userID).Scan(&totalAC).Error
 
 	return
