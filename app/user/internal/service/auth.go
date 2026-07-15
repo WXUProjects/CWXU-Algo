@@ -90,9 +90,10 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 		Email:        req.Email,
 		GroupId:      int64(defGID),
 		RoleID:       0,
-		IsSiteAdmin:  false,
-		CurrentOrgID: public.ID,
-		EmailEnabled: true,
+		IsSiteAdmin:        false,
+		CurrentOrgID:       public.ID,
+		EmailEnabled:       false,
+		EmailWeeklyEnabled: false,
 	}
 	if r := s.db.Create(&newUser); r.Error != nil {
 		res.Success = false

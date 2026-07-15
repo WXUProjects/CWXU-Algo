@@ -128,9 +128,10 @@ func seedGoAlgoFramework(db *gorm.DB) {
 			Name:         "站点管理员",
 			Email:        "admin@goalgo.local",
 			RoleID:       1,
-			IsSiteAdmin:  true,
-			CurrentOrgID: public.ID,
-			EmailEnabled: true,
+			IsSiteAdmin:        true,
+			CurrentOrgID:       public.ID,
+			EmailEnabled:       false,
+			EmailWeeklyEnabled: false,
 		}
 		if e := db.Create(&admin).Error; e != nil {
 			log.Errorf("seed admin user: %v", e)
@@ -206,6 +207,13 @@ func seedGoAlgoFramework(db *gorm.DB) {
 
 	// 删除历史虚拟「未分组」若存在 id=0 脏数据（一般无此行）
 	_ = db.Where("name = ? AND id = 0", "未分组").Delete(&model.Group{}).Error
+
+	// 7. 全站默认关闭个人日报/周报（迁移）
+	_ = db.Model(&model.User{}).Where("1 = 1").Updates(map[string]interface{}{
+		"email_enabled":        false,
+		"email_weekly_enabled": false,
+	}).Error
+	// 组织周报开关：新列默认 true（GORM AutoMigrate）；若列为 false 且从未设置过可保持
 
 	log.Infof("GoAlgo framework seed done public_org_id=%d users=%d fixed_groups=%d", public.ID, len(users), len(bad))
 }

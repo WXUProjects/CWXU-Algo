@@ -86,6 +86,10 @@ message GetByIdRes {
   string avatar = 6;
   bool emailEnabled = 8;
   int32 roleId = 9;
+  bool emailWeeklyEnabled = 10;
+  // 组织是否授权日报/周报（前端控制开关可开性）
+  bool emailAllowedByOrg = 11;
+  bool emailWeeklyAllowedByOrg = 12;
   message Spiders {
     string platform = 1;
     string username = 2;
@@ -161,6 +165,8 @@ message MoveGroupRes {
 message SetEmailEnabledReq {
   int64 userId = 1;
   bool enabled = 2;
+  // kind: daily(默认) | weekly
+  string kind = 3;
 }
 
 message SetEmailEnabledRes {
@@ -216,9 +222,13 @@ message UserSyncPolicy {
   int64 userId = 1;
   bool enableSpider = 2;
   bool enableAiSummary = 3;
-  bool enableAiEmail = 4;
-  int32 spiderIntervalMin = 5;   // 多组织取 MIN（仅统计开启爬虫的组织）
-  int32 aiSummaryIntervalMin = 6; // 多组织取 MIN（仅统计开启 AI 的组织）
+  bool enableAiEmail = 4;          // 组织授权日报
+  int32 spiderIntervalMin = 5;
+  int32 aiSummaryIntervalMin = 6;
+  bool enableAiWeeklyEmail = 7;    // 组织授权周报且本人 staff
+  bool isOrgStaff = 8;
+  bool emailEnabled = 9;           // 个人日报偏好
+  bool emailWeeklyEnabled = 10;    // 个人周报偏好
 }
 
 message GetSyncPoliciesRes {

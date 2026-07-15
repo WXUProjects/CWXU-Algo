@@ -54,6 +54,8 @@ func (c *Consumer) Consume() {
 				runErr = c.summary.PersonalLastDay(msg.UserId)
 			case "PersonalRecent":
 				runErr = c.summary.PersonalRecent(msg.UserId)
+			case "WeeklyStaff", "WeeklyReportForCoach":
+				runErr = c.summary.WeeklyStaff(msg.UserId)
 			default:
 				log.Errorf("RabbitMQ(Summary): 未知类型 %s", msg.Type)
 				// 未知类型：重试无意义，用 max retry 后 drop

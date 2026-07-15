@@ -213,7 +213,7 @@ func (d *ProfileDal) MoveGroup(ctx context.Context, userId uint64, groupId int64
 	return nil
 }
 
-// SetEmailEnabled 设置用户邮件发送开关
+// SetEmailEnabled 设置用户日报邮件开关
 func (d *ProfileDal) SetEmailEnabled(ctx context.Context, userId int64, enabled bool) error {
 	cacheKey := fmt.Sprintf("user:%d:profile", userId)
 	return data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
@@ -221,14 +221,59 @@ func (d *ProfileDal) SetEmailEnabled(ctx context.Context, userId int64, enabled 
 	})
 }
 
-// GetEmailEnabled 获取用户邮件发送开关
+// SetEmailWeeklyEnabled 设置用户周报邮件开关
+func (d *ProfileDal) SetEmailWeeklyEnabled(ctx context.Context, userId int64, enabled bool) error {
+	cacheKey := fmt.Sprintf("user:%d:profile", userId)
+	return data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
+		return d.db.Model(&model.User{}).Where("id = ?", userId).Update("email_weekly_enabled", enabled).Error
+	})
+}
+
+// GetEmailEnabled 获取用户日报邮件开关（失败默认关）
 func (d *ProfileDal) GetEmailEnabled(ctx context.Context, userId int64) (bool, error) {
 	var user model.User
-	err := d.db.Select("email_enabled").Where("id = ?", userId).First(&user).Error
+	err := d.db.Select("email_enabled, email_weekly_enabled").Where("id = ?", userId).First(&user).Error
 	if err != nil {
-		return true, err
+		return false, err
 	}
 	return user.EmailEnabled, nil
+}
+
+// UserHasOrgDailyEmailGrant 是否有任一组织授权日报邮件
+func (d *ProfileDal) UserHasOrgDailyEmailGrant(ctx context.Context, userID int64) bool {
+	var n int64
+	_ = d.db.WithContext(ctx).Table("org_members AS m").
+		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
+		Where("m.user_id = ? AND m.deleted_at IS NULL AND o.status = ? AND o.enable_ai_email = ?",
+			userID, model.OrgStatusActive, true).
+		Count(&n)
+	return n > 0
+}
+
+// UserHasOrgWeeklyEmailGrant 是否在授权周报的组织中担任 staff 角色
+func (d *ProfileDal) UserHasOrgWeeklyEmailGrant(ctx context.Context, userID int64) bool {
+	var n int64
+	_ = d.db.WithContext(ctx).Table("org_members AS m").
+		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
+		Where(`m.user_id = ? AND m.deleted_at IS NULL AND o.status = ?
+			AND o.enable_ai_weekly_email = ? AND m.role IN ?`,
+			userID, model.OrgStatusActive, true,
+			[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
+		Count(&n)
+	return n > 0
+}
+
+// StaffOrgIDsForWeekly 用户可收周报的组织（staff + 组织周报开）
+func (d *ProfileDal) StaffOrgIDsForWeekly(ctx context.Context, userID int64) ([]uint, error) {
+	var ids []uint
+	err := d.db.WithContext(ctx).Table("org_members AS m").
+		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
+		Where(`m.user_id = ? AND m.deleted_at IS NULL AND o.status = ?
+			AND o.enable_ai_weekly_email = ? AND m.role IN ?`,
+			userID, model.OrgStatusActive, true,
+			[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
+		Pluck("m.org_id", &ids).Error
+	return ids, err
 }
 
 // PublicOrgID 公共域 id
@@ -254,7 +299,11 @@ type UserSyncPolicy struct {
 	UserID               int64
 	EnableSpider         bool
 	EnableAISummary      bool
-	EnableAIEmail        bool
+	EnableAIEmail        bool // 组织授权日报（任一）
+	EnableAIWeeklyEmail  bool // 组织授权周报且本人为 staff
+	IsOrgStaff           bool // coach/captain/org_admin 任一
+	EmailEnabled         bool // 个人日报偏好
+	EmailWeeklyEnabled   bool // 个人周报偏好
 	SpiderIntervalMin    int
 	AISummaryIntervalMin int
 }
@@ -266,19 +315,22 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 	}
 	type row struct {
 		UserID               int64
+		Role                 string
 		EnableSpider         bool
 		EnableAISummary      bool
 		EnableAIEmail        bool
+		EnableAIWeeklyEmail  bool
 		SpiderIntervalMin    int
 		AISummaryIntervalMin int
 	}
 	var rows []row
 	err := d.db.WithContext(ctx).
 		Table("org_members AS m").
-		Select(`m.user_id AS user_id,
+		Select(`m.user_id AS user_id, m.role AS role,
 			o.enable_spider AS enable_spider,
 			o.enable_ai_summary AS enable_ai_summary,
 			o.enable_ai_email AS enable_ai_email,
+			o.enable_ai_weekly_email AS enable_ai_weekly_email,
 			o.spider_interval_min AS spider_interval_min,
 			o.ai_summary_interval_min AS ai_summary_interval_min`).
 		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
@@ -292,6 +344,8 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		spiderOn  bool
 		aiOn      bool
 		emailOn   bool
+		weeklyOn  bool
+		staff     bool
 		spiderMin int
 		aiMin     int
 	}
@@ -301,6 +355,10 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		if a == nil {
 			a = &acc{spiderMin: 0, aiMin: 0}
 			byUser[r.UserID] = a
+		}
+		isStaff := r.Role == model.OrgRoleCoach || r.Role == model.OrgRoleCaptain || r.Role == model.OrgRoleOrgAdmin
+		if isStaff {
+			a.staff = true
 		}
 		if r.EnableSpider {
 			a.spiderOn = true
@@ -325,14 +383,37 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		if r.EnableAIEmail {
 			a.emailOn = true
 		}
+		if r.EnableAIWeeklyEmail && isStaff {
+			a.weeklyOn = true
+		}
+	}
+
+	// 个人邮件偏好
+	type pref struct {
+		ID                 int64
+		EmailEnabled       bool
+		EmailWeeklyEnabled bool
+	}
+	var prefs []pref
+	_ = d.db.WithContext(ctx).Model(&model.User{}).
+		Select("id, email_enabled, email_weekly_enabled").
+		Where("id IN ?", userIDs).
+		Scan(&prefs).Error
+	prefMap := make(map[int64]pref, len(prefs))
+	for _, p := range prefs {
+		prefMap[p.ID] = p
 	}
 
 	out := make([]UserSyncPolicy, 0, len(userIDs))
 	for _, uid := range userIDs {
 		a := byUser[uid]
+		pr := prefMap[uid]
 		if a == nil {
-			// 无 membership：不跑定时（应至少有公共域）
-			out = append(out, UserSyncPolicy{UserID: uid})
+			out = append(out, UserSyncPolicy{
+				UserID:             uid,
+				EmailEnabled:       pr.EmailEnabled,
+				EmailWeeklyEnabled: pr.EmailWeeklyEnabled,
+			})
 			continue
 		}
 		sp := 60
@@ -348,6 +429,10 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 			EnableSpider:         a.spiderOn,
 			EnableAISummary:      a.aiOn,
 			EnableAIEmail:        a.emailOn,
+			EnableAIWeeklyEmail:  a.weeklyOn,
+			IsOrgStaff:           a.staff,
+			EmailEnabled:         pr.EmailEnabled,
+			EmailWeeklyEnabled:   pr.EmailWeeklyEnabled,
 			SpiderIntervalMin:    sp,
 			AISummaryIntervalMin: ai,
 		})

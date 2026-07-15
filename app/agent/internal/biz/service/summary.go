@@ -33,27 +33,11 @@ func NewSummaryUseCase(chat *agent.Chat, mailConf *conf.SMTP, reg *discovery.Reg
 	}
 }
 
+// PersonalLastDay 仅发个人日报（周报见 WeeklyStaff）
 func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
-	if !uc.checkEmailEnabled(userId) {
-		log.Infof("用户 %d 已关闭邮件发送，跳过", userId)
+	if !uc.canSendDailyEmail(userId) {
+		log.Infof("用户 %d 日报未开启或无组织授权，跳过", userId)
 		return nil
-	}
-
-	roleId := uc.checkRoleId(userId)
-	// RoleID=2 教练：仅周一发周报（无队员日报）
-	// RoleID=3 队长：日报 + 周一额外周报（教练+队员）
-	// RoleID=1 管理员：日报 + 周一额外周报
-	// RoleID=0 队员：只发日报
-	if roleId == 2 {
-		if time.Now().Weekday() == time.Monday {
-			return uc.WeeklyReportForCoach(userId)
-		}
-		return nil
-	}
-	if (roleId == 1 || roleId == 3) && time.Now().Weekday() == time.Monday {
-		if err := uc.WeeklyReportForCoach(userId); err != nil {
-			log.Errorf("用户 %d 周报发送失败: %v", userId, err)
-		}
 	}
 
 	lockKey := fmt.Sprintf("agent:lock:summary:daily:%d", userId)
@@ -89,7 +73,7 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 		return fmt.Errorf("生成日报失败: %w", err)
 	}
 
-	subject := fmt.Sprintf("【算法协会日报】%s · %s", formatCNDate(data.Yesterday), data.Name)
+	subject := fmt.Sprintf("【GoAlgo 日报】%s · %s", formatCNDate(data.Yesterday), data.Name)
 	if err := uc.sendHTMLEmail(data.Email, subject, html); err != nil {
 		return fmt.Errorf("发送日报失败: %w", err)
 	}
@@ -151,22 +135,23 @@ func (uc *SummaryUseCase) PersonalRecent(userId int64) error {
 	return nil
 }
 
-func (uc *SummaryUseCase) WeeklyReportForCoach(coachUserId int64) error {
-	if !uc.checkEmailEnabled(coachUserId) {
-		log.Infof("教练 %d 已关闭邮件发送，跳过周报", coachUserId)
+// WeeklyStaff 组织教练/队长/组织管理员周报（与日报独立）
+func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
+	if !uc.canSendWeeklyEmail(userId) {
+		log.Infof("用户 %d 周报未开启或无组织 staff 授权，跳过", userId)
 		return nil
 	}
 
-	lockKey := fmt.Sprintf("agent:lock:summary:weekly:%d", coachUserId)
+	lockKey := fmt.Sprintf("agent:lock:summary:weekly:%d", userId)
 	if !uc.tryAcquireLock(context.Background(), lockKey, 5*time.Minute) {
-		log.Infof("教练 %d 周报生成进行中，跳过", coachUserId)
+		log.Infof("用户 %d 周报生成进行中，跳过", userId)
 		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	data, err := uc.loadWeeklyReportData(ctx, coachUserId)
+	data, err := uc.loadWeeklyReportData(ctx, userId)
 	if err != nil {
 		return err
 	}
@@ -190,12 +175,17 @@ func (uc *SummaryUseCase) WeeklyReportForCoach(coachUserId int64) error {
 		return fmt.Errorf("生成周报失败: %w", err)
 	}
 
-	subject := fmt.Sprintf("【算法协会周报】%s-%s", formatCNDate(data.WeekStart), formatCNDate(data.WeekEnd))
+	subject := fmt.Sprintf("【GoAlgo 周报】%s-%s", formatCNDate(data.WeekStart), formatCNDate(data.WeekEnd))
 	if err := uc.sendHTMLEmail(data.CoachEmail, subject, html); err != nil {
 		return fmt.Errorf("发送周报失败: %w", err)
 	}
-	log.Infof("教练 %d 周报已发送至 %s", coachUserId, data.CoachEmail)
+	log.Infof("用户 %d 周报已发送至 %s", userId, data.CoachEmail)
 	return nil
+}
+
+// WeeklyReportForCoach 兼容旧调用名
+func (uc *SummaryUseCase) WeeklyReportForCoach(coachUserId int64) error {
+	return uc.WeeklyStaff(coachUserId)
 }
 
 func formatCNDate(ymd string) string {

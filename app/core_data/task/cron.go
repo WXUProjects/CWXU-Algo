@@ -25,6 +25,10 @@ type UserSyncPolicy struct {
 	EnableSpider         bool
 	EnableAISummary      bool
 	EnableAIEmail        bool
+	EnableAIWeeklyEmail  bool
+	IsOrgStaff           bool
+	EmailEnabled         bool
+	EmailWeeklyEnabled   bool
 	SpiderIntervalMin    int
 	AISummaryIntervalMin int
 }
@@ -89,7 +93,10 @@ func (t *CronTask) fetchPolicies(userIds []int64) map[int64]UserSyncPolicy {
 			UserID:               uid,
 			EnableSpider:         true,
 			EnableAISummary:      true,
-			EnableAIEmail:        true,
+			EnableAIEmail:        false, // 策略服务不可用时不入队邮件
+			EnableAIWeeklyEmail:  false,
+			EmailEnabled:         false,
+			EmailWeeklyEnabled:   false,
 			SpiderIntervalMin:    60,
 			AISummaryIntervalMin: 180,
 		}
@@ -137,6 +144,10 @@ func (t *CronTask) fetchPolicies(userIds []int64) map[int64]UserSyncPolicy {
 				EnableSpider:         p.GetEnableSpider(),
 				EnableAISummary:      p.GetEnableAiSummary(),
 				EnableAIEmail:        p.GetEnableAiEmail(),
+				EnableAIWeeklyEmail:  p.GetEnableAiWeeklyEmail(),
+				IsOrgStaff:           p.GetIsOrgStaff(),
+				EmailEnabled:         p.GetEmailEnabled(),
+				EmailWeeklyEnabled:   p.GetEmailWeeklyEnabled(),
 				SpiderIntervalMin:    sp,
 				AISummaryIntervalMin: ai,
 			}
@@ -241,21 +252,28 @@ func (t *CronTask) runDailySummaryTick() {
 	userIds := t.getBoundUserIds()
 	policies := t.fetchPolicies(userIds)
 	enqueued := 0
+	weekly := 0
 	seen := make(map[int64]struct{}, len(userIds))
+	isMonday := time.Now().Weekday() == time.Monday
 	for _, uid := range userIds {
 		if _, ok := seen[uid]; ok {
 			continue
 		}
 		seen[uid] = struct{}{}
 		p := policies[uid]
-		// 邮件日总结：需 AI 邮件开关（任一组织开启）
-		if !p.EnableAIEmail && !p.EnableAISummary {
-			continue
+		// 日报：组织授权 + 个人开
+		if p.EnableAIEmail && p.EmailEnabled {
+			t.summary.Do(uid, "PersonalLastDay")
+			enqueued++
 		}
-		t.summary.Do(uid, "PersonalLastDay")
-		enqueued++
+		// 周报：周一 + 组织 staff 授权 + 个人周报开
+		if isMonday && p.EnableAIWeeklyEmail && p.EmailWeeklyEnabled {
+			t.summary.Do(uid, "WeeklyStaff")
+			weekly++
+		}
 	}
-	log.Infof("CronTask summary PersonalLastDay: bound=%d unique=%d enqueued=%d", len(userIds), len(seen), enqueued)
+	log.Infof("CronTask mail: bound=%d unique=%d daily=%d weekly=%d monday=%v",
+		len(userIds), len(seen), enqueued, weekly, isMonday)
 }
 
 func (t *CronTask) Do() {

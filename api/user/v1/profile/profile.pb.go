@@ -67,18 +67,22 @@ func (x *GetByIdReq) GetUserId() int64 {
 }
 
 type GetByIdRes struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint64                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Email         string                 `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
-	GroupId       int64                  `protobuf:"varint,5,opt,name=groupId,proto3" json:"groupId,omitempty"`
-	Avatar        string                 `protobuf:"bytes,6,opt,name=avatar,proto3" json:"avatar,omitempty"`
-	EmailEnabled  bool                   `protobuf:"varint,8,opt,name=emailEnabled,proto3" json:"emailEnabled,omitempty"`
-	RoleId        int32                  `protobuf:"varint,9,opt,name=roleId,proto3" json:"roleId,omitempty"`
-	Spiders       []*GetByIdRes_Spiders  `protobuf:"bytes,7,rep,name=spiders,proto3" json:"spiders,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	UserId             uint64                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	Username           string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Name               string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Email              string                 `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
+	GroupId            int64                  `protobuf:"varint,5,opt,name=groupId,proto3" json:"groupId,omitempty"`
+	Avatar             string                 `protobuf:"bytes,6,opt,name=avatar,proto3" json:"avatar,omitempty"`
+	EmailEnabled       bool                   `protobuf:"varint,8,opt,name=emailEnabled,proto3" json:"emailEnabled,omitempty"`
+	RoleId             int32                  `protobuf:"varint,9,opt,name=roleId,proto3" json:"roleId,omitempty"`
+	EmailWeeklyEnabled bool                   `protobuf:"varint,10,opt,name=emailWeeklyEnabled,proto3" json:"emailWeeklyEnabled,omitempty"`
+	// 组织是否授权日报/周报（前端控制开关可开性）
+	EmailAllowedByOrg       bool                  `protobuf:"varint,11,opt,name=emailAllowedByOrg,proto3" json:"emailAllowedByOrg,omitempty"`
+	EmailWeeklyAllowedByOrg bool                  `protobuf:"varint,12,opt,name=emailWeeklyAllowedByOrg,proto3" json:"emailWeeklyAllowedByOrg,omitempty"`
+	Spiders                 []*GetByIdRes_Spiders `protobuf:"bytes,7,rep,name=spiders,proto3" json:"spiders,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *GetByIdRes) Reset() {
@@ -165,6 +169,27 @@ func (x *GetByIdRes) GetRoleId() int32 {
 		return x.RoleId
 	}
 	return 0
+}
+
+func (x *GetByIdRes) GetEmailWeeklyEnabled() bool {
+	if x != nil {
+		return x.EmailWeeklyEnabled
+	}
+	return false
+}
+
+func (x *GetByIdRes) GetEmailAllowedByOrg() bool {
+	if x != nil {
+		return x.EmailAllowedByOrg
+	}
+	return false
+}
+
+func (x *GetByIdRes) GetEmailWeeklyAllowedByOrg() bool {
+	if x != nil {
+		return x.EmailWeeklyAllowedByOrg
+	}
+	return false
 }
 
 func (x *GetByIdRes) GetSpiders() []*GetByIdRes_Spiders {
@@ -600,9 +625,11 @@ func (x *MoveGroupRes) GetMessage() string {
 }
 
 type SetEmailEnabledReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	Enabled       bool                   `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	UserId  int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	Enabled bool                   `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// kind: daily(默认) | weekly
+	Kind          string `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -649,6 +676,13 @@ func (x *SetEmailEnabledReq) GetEnabled() bool {
 		return x.Enabled
 	}
 	return false
+}
+
+func (x *SetEmailEnabledReq) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
 }
 
 type SetEmailEnabledRes struct {
@@ -1121,9 +1155,13 @@ type UserSyncPolicy struct {
 	UserId               int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
 	EnableSpider         bool                   `protobuf:"varint,2,opt,name=enableSpider,proto3" json:"enableSpider,omitempty"`
 	EnableAiSummary      bool                   `protobuf:"varint,3,opt,name=enableAiSummary,proto3" json:"enableAiSummary,omitempty"`
-	EnableAiEmail        bool                   `protobuf:"varint,4,opt,name=enableAiEmail,proto3" json:"enableAiEmail,omitempty"`
-	SpiderIntervalMin    int32                  `protobuf:"varint,5,opt,name=spiderIntervalMin,proto3" json:"spiderIntervalMin,omitempty"`       // 多组织取 MIN（仅统计开启爬虫的组织）
-	AiSummaryIntervalMin int32                  `protobuf:"varint,6,opt,name=aiSummaryIntervalMin,proto3" json:"aiSummaryIntervalMin,omitempty"` // 多组织取 MIN（仅统计开启 AI 的组织）
+	EnableAiEmail        bool                   `protobuf:"varint,4,opt,name=enableAiEmail,proto3" json:"enableAiEmail,omitempty"` // 组织授权日报
+	SpiderIntervalMin    int32                  `protobuf:"varint,5,opt,name=spiderIntervalMin,proto3" json:"spiderIntervalMin,omitempty"`
+	AiSummaryIntervalMin int32                  `protobuf:"varint,6,opt,name=aiSummaryIntervalMin,proto3" json:"aiSummaryIntervalMin,omitempty"`
+	EnableAiWeeklyEmail  bool                   `protobuf:"varint,7,opt,name=enableAiWeeklyEmail,proto3" json:"enableAiWeeklyEmail,omitempty"` // 组织授权周报且本人 staff
+	IsOrgStaff           bool                   `protobuf:"varint,8,opt,name=isOrgStaff,proto3" json:"isOrgStaff,omitempty"`
+	EmailEnabled         bool                   `protobuf:"varint,9,opt,name=emailEnabled,proto3" json:"emailEnabled,omitempty"`              // 个人日报偏好
+	EmailWeeklyEnabled   bool                   `protobuf:"varint,10,opt,name=emailWeeklyEnabled,proto3" json:"emailWeeklyEnabled,omitempty"` // 个人周报偏好
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -1198,6 +1236,34 @@ func (x *UserSyncPolicy) GetAiSummaryIntervalMin() int32 {
 		return x.AiSummaryIntervalMin
 	}
 	return 0
+}
+
+func (x *UserSyncPolicy) GetEnableAiWeeklyEmail() bool {
+	if x != nil {
+		return x.EnableAiWeeklyEmail
+	}
+	return false
+}
+
+func (x *UserSyncPolicy) GetIsOrgStaff() bool {
+	if x != nil {
+		return x.IsOrgStaff
+	}
+	return false
+}
+
+func (x *UserSyncPolicy) GetEmailEnabled() bool {
+	if x != nil {
+		return x.EmailEnabled
+	}
+	return false
+}
+
+func (x *UserSyncPolicy) GetEmailWeeklyEnabled() bool {
+	if x != nil {
+		return x.EmailWeeklyEnabled
+	}
+	return false
 }
 
 type GetSyncPoliciesRes struct {
@@ -1599,7 +1665,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x1duser/v1/profile/profile.proto\x12\vapi.user.v1\x1a\x1cgoogle/api/annotations.proto\"$\n" +
 	"\n" +
 	"GetByIdReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\xd6\x02\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\xee\x03\n" +
 	"\n" +
 	"GetByIdRes\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x1a\n" +
@@ -1609,7 +1675,11 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\agroupId\x18\x05 \x01(\x03R\agroupId\x12\x16\n" +
 	"\x06avatar\x18\x06 \x01(\tR\x06avatar\x12\"\n" +
 	"\femailEnabled\x18\b \x01(\bR\femailEnabled\x12\x16\n" +
-	"\x06roleId\x18\t \x01(\x05R\x06roleId\x129\n" +
+	"\x06roleId\x18\t \x01(\x05R\x06roleId\x12.\n" +
+	"\x12emailWeeklyEnabled\x18\n" +
+	" \x01(\bR\x12emailWeeklyEnabled\x12,\n" +
+	"\x11emailAllowedByOrg\x18\v \x01(\bR\x11emailAllowedByOrg\x128\n" +
+	"\x17emailWeeklyAllowedByOrg\x18\f \x01(\bR\x17emailWeeklyAllowedByOrg\x129\n" +
 	"\aspiders\x18\a \x03(\v2\x1f.api.user.v1.GetByIdRes.SpidersR\aspiders\x1aA\n" +
 	"\aSpiders\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1a\n" +
@@ -1662,10 +1732,11 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\agroupId\x18\x02 \x01(\x03R\agroupId\"<\n" +
 	"\fMoveGroupRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"F\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"Z\n" +
 	"\x12SetEmailEnabledReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x18\n" +
-	"\aenabled\x18\x02 \x01(\bR\aenabled\"B\n" +
+	"\aenabled\x18\x02 \x01(\bR\aenabled\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\"B\n" +
 	"\x12SetEmailEnabledRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"0\n" +
@@ -1692,14 +1763,21 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\".\n" +
 	"\x12GetSyncPoliciesReq\x12\x18\n" +
-	"\auserIds\x18\x01 \x03(\x03R\auserIds\"\xfe\x01\n" +
+	"\auserIds\x18\x01 \x03(\x03R\auserIds\"\xa4\x03\n" +
 	"\x0eUserSyncPolicy\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\"\n" +
 	"\fenableSpider\x18\x02 \x01(\bR\fenableSpider\x12(\n" +
 	"\x0fenableAiSummary\x18\x03 \x01(\bR\x0fenableAiSummary\x12$\n" +
 	"\renableAiEmail\x18\x04 \x01(\bR\renableAiEmail\x12,\n" +
 	"\x11spiderIntervalMin\x18\x05 \x01(\x05R\x11spiderIntervalMin\x122\n" +
-	"\x14aiSummaryIntervalMin\x18\x06 \x01(\x05R\x14aiSummaryIntervalMin\"M\n" +
+	"\x14aiSummaryIntervalMin\x18\x06 \x01(\x05R\x14aiSummaryIntervalMin\x120\n" +
+	"\x13enableAiWeeklyEmail\x18\a \x01(\bR\x13enableAiWeeklyEmail\x12\x1e\n" +
+	"\n" +
+	"isOrgStaff\x18\b \x01(\bR\n" +
+	"isOrgStaff\x12\"\n" +
+	"\femailEnabled\x18\t \x01(\bR\femailEnabled\x12.\n" +
+	"\x12emailWeeklyEnabled\x18\n" +
+	" \x01(\bR\x12emailWeeklyEnabled\"M\n" +
 	"\x12GetSyncPoliciesRes\x127\n" +
 	"\bpolicies\x18\x01 \x03(\v2\x1b.api.user.v1.UserSyncPolicyR\bpolicies2\xc0\t\n" +
 	"\aProfile\x12_\n" +

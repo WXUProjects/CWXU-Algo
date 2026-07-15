@@ -263,16 +263,30 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 			Username: v.Username,
 		})
 	}
+	dailyGrant := p.profileDal.UserHasOrgDailyEmailGrant(ctx, req.UserId)
+	weeklyGrant := p.profileDal.UserHasOrgWeeklyEmailGrant(ctx, req.UserId)
+	// 无组织授权时对外展示为关（并尽量写回，避免脏状态）
+	emailOn := pf.EmailEnabled && dailyGrant
+	weeklyOn := pf.EmailWeeklyEnabled && weeklyGrant
+	if pf.EmailEnabled && !dailyGrant {
+		_ = p.profileDal.SetEmailEnabled(ctx, req.UserId, false)
+	}
+	if pf.EmailWeeklyEnabled && !weeklyGrant {
+		_ = p.profileDal.SetEmailWeeklyEnabled(ctx, req.UserId, false)
+	}
 	return &profile.GetByIdRes{
-		UserId:       uint64(pf.ID),
-		Username:     pf.Username,
-		Name:         pf.Name,
-		Email:        pf.Email,
-		Avatar:       pf.Avatar,
-		GroupId:      pf.GroupId,
-		Spiders:      spiders,
-		EmailEnabled: pf.EmailEnabled,
-		RoleId:       int32(pf.RoleID),
+		UserId:                 uint64(pf.ID),
+		Username:               pf.Username,
+		Name:                   pf.Name,
+		Email:                  pf.Email,
+		Avatar:                 pf.Avatar,
+		GroupId:                pf.GroupId,
+		Spiders:                spiders,
+		EmailEnabled:           emailOn,
+		EmailWeeklyEnabled:     weeklyOn,
+		EmailAllowedByOrg:      dailyGrant,
+		EmailWeeklyAllowedByOrg: weeklyGrant,
+		RoleId:                 int32(pf.RoleID),
 	}, nil
 }
 
@@ -325,6 +339,10 @@ func (p *ProfileService) GetSyncPolicies(ctx context.Context, req *profile.GetSy
 			EnableSpider:         v.EnableSpider,
 			EnableAiSummary:      v.EnableAISummary,
 			EnableAiEmail:        v.EnableAIEmail,
+			EnableAiWeeklyEmail:  v.EnableAIWeeklyEmail,
+			IsOrgStaff:           v.IsOrgStaff,
+			EmailEnabled:         v.EmailEnabled,
+			EmailWeeklyEnabled:   v.EmailWeeklyEnabled,
 			SpiderIntervalMin:    int32(v.SpiderIntervalMin),
 			AiSummaryIntervalMin: int32(v.AISummaryIntervalMin),
 		})
@@ -403,12 +421,38 @@ func (p *ProfileService) Delete(ctx context.Context, req *profile.DeleteReq) (*p
 	}, nil
 }
 
-// SetEmailEnabled 设置用户邮件发送开关
+// SetEmailEnabled 设置用户日报/周报邮件开关（kind=daily|weekly）
 func (p *ProfileService) SetEmailEnabled(ctx context.Context, req *profile.SetEmailEnabledReq) (*profile.SetEmailEnabledRes, error) {
 	if !auth.VerifySelfOrAbove(ctx, uint(req.UserId)) {
 		return nil, UpdateForbidden
 	}
-	err := p.profileDal.SetEmailEnabled(ctx, req.UserId, req.Enabled)
+	kind := req.Kind
+	if kind == "" {
+		kind = "daily"
+	}
+	if req.Enabled {
+		if kind == "weekly" {
+			if !p.profileDal.UserHasOrgWeeklyEmailGrant(ctx, req.UserId) {
+				return &profile.SetEmailEnabledRes{
+					Code:    1,
+					Message: "当前没有组织为你开通周报权限（需为教练/队长/团队管理员，且组织开启周报）",
+				}, nil
+			}
+		} else {
+			if !p.profileDal.UserHasOrgDailyEmailGrant(ctx, req.UserId) {
+				return &profile.SetEmailEnabledRes{
+					Code:    1,
+					Message: "当前没有组织为你开通日报邮件权限，请联系组织管理员",
+				}, nil
+			}
+		}
+	}
+	var err error
+	if kind == "weekly" {
+		err = p.profileDal.SetEmailWeeklyEnabled(ctx, req.UserId, req.Enabled)
+	} else {
+		err = p.profileDal.SetEmailEnabled(ctx, req.UserId, req.Enabled)
+	}
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}

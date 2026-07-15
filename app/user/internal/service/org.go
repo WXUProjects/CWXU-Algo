@@ -65,6 +65,7 @@ func orgToMap(o *model.Org, includeInvite bool) map[string]interface{} {
 		"joinMode":             o.JoinMode,
 		"enableAiSummary":      o.EnableAISummary,
 		"enableAiEmail":        o.EnableAIEmail,
+		"enableAiWeeklyEmail":  o.EnableAIWeeklyEmail,
 		"enableSpider":         o.EnableSpider,
 		"spiderIntervalMin":    o.SpiderIntervalMin,
 		"aiSummaryIntervalMin": o.AISummaryIntervalMin,
@@ -261,6 +262,7 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 		InviteCode:           newInviteCode(),
 		EnableAISummary:      true,
 		EnableAIEmail:        true,
+		EnableAIWeeklyEmail:  true,
 		EnableSpider:         true,
 		SpiderIntervalMin:    60,
 		AISummaryIntervalMin: 180,
@@ -378,6 +380,7 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 		JoinMode             string `json:"joinMode"`
 		EnableAISummary      *bool  `json:"enableAiSummary"`
 		EnableAIEmail        *bool  `json:"enableAiEmail"`
+		EnableAIWeeklyEmail  *bool  `json:"enableAiWeeklyEmail"`
 		EnableSpider         *bool  `json:"enableSpider"`
 		SpiderIntervalMin    *int   `json:"spiderIntervalMin"`
 		AISummaryIntervalMin *int   `json:"aiSummaryIntervalMin"`
@@ -414,6 +417,9 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 	if req.EnableAIEmail != nil {
 		updates["enable_ai_email"] = *req.EnableAIEmail
 	}
+	if req.EnableAIWeeklyEmail != nil {
+		updates["enable_ai_weekly_email"] = *req.EnableAIWeeklyEmail
+	}
 	if req.EnableSpider != nil {
 		updates["enable_spider"] = *req.EnableSpider
 	}
@@ -447,11 +453,53 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
 		return nil
 	}
+	// 组织关闭日报授权后：无其它组织授权的用户强制关闭个人日报
+	if req.EnableAIEmail != nil && !*req.EnableAIEmail {
+		s.forceOffDailyEmailWithoutOrgGrant(req.ID)
+	}
+	if req.EnableAIWeeklyEmail != nil && !*req.EnableAIWeeklyEmail {
+		s.forceOffWeeklyEmailWithoutOrgGrant(req.ID)
+	}
 	_ = s.db.First(&o, req.ID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "success", "data": orgToMap(&o, siteAdmin || orgAdmin),
 	})
 	return nil
+}
+
+// forceOffDailyEmailWithoutOrgGrant 关闭日报组织授权后，对仅依赖该组织授权的用户关个人日报
+func (s *OrgService) forceOffDailyEmailWithoutOrgGrant(changedOrgID uint) {
+	var memberIDs []uint
+	_ = s.db.Model(&model.OrgMember{}).Where("org_id = ?", changedOrgID).Pluck("user_id", &memberIDs)
+	for _, uid := range memberIDs {
+		var n int64
+		s.db.Table("org_members AS m").
+			Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
+			Where("m.user_id = ? AND m.deleted_at IS NULL AND o.status = ? AND o.enable_ai_email = ?",
+				uid, model.OrgStatusActive, true).
+			Count(&n)
+		if n == 0 {
+			_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("email_enabled", false)
+		}
+	}
+}
+
+func (s *OrgService) forceOffWeeklyEmailWithoutOrgGrant(changedOrgID uint) {
+	var memberIDs []uint
+	_ = s.db.Model(&model.OrgMember{}).Where("org_id = ?", changedOrgID).Pluck("user_id", &memberIDs)
+	for _, uid := range memberIDs {
+		var n int64
+		s.db.Table("org_members AS m").
+			Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
+			Where(`m.user_id = ? AND m.deleted_at IS NULL AND o.status = ?
+				AND o.enable_ai_weekly_email = ? AND m.role IN ?`,
+				uid, model.OrgStatusActive, true,
+				[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
+			Count(&n)
+		if n == 0 {
+			_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("email_weekly_enabled", false)
+		}
+	}
 }
 
 func (s *OrgService) handleSwitch(ctx khttp.Context) error {

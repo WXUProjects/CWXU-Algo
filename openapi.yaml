@@ -1957,6 +1957,13 @@ components:
                 roleId:
                     type: integer
                     format: int32
+                emailWeeklyEnabled:
+                    type: boolean
+                emailAllowedByOrg:
+                    type: boolean
+                    description: 组织是否授权日报/周报（前端控制开关可开性）
+                emailWeeklyAllowedByOrg:
+                    type: boolean
                 spiders:
                     type: array
                     items:
@@ -2142,6 +2149,9 @@ components:
                     type: string
                 enabled:
                     type: boolean
+                kind:
+                    type: string
+                    description: 'kind: daily(默认) | weekly'
         api.user.v1.SetEmailEnabledRes:
             type: object
             properties:
@@ -2184,6 +2194,14 @@ components:
                 aiSummaryIntervalMin:
                     type: integer
                     format: int32
+                enableAiWeeklyEmail:
+                    type: boolean
+                isOrgStaff:
+                    type: boolean
+                emailEnabled:
+                    type: boolean
+                emailWeeklyEnabled:
+                    type: boolean
         api.user.v1.role.ListRes:
             type: object
             properties:

@@ -119,12 +119,26 @@ func (uc *SummaryUseCase) checkRoleId(userId int64) int {
 	return int(p.RoleId)
 }
 
-func (uc *SummaryUseCase) checkEmailEnabled(userId int64) bool {
+// canSendDailyEmail 个人日报开 AND 组织授权日报
+func (uc *SummaryUseCase) canSendDailyEmail(userId int64) bool {
 	p := uc.userProfile(userId)
 	if p == nil {
-		return true
+		return false
 	}
-	return p.EmailEnabled
+	return p.GetEmailEnabled() && p.GetEmailAllowedByOrg()
+}
+
+// canSendWeeklyEmail 个人周报开 AND 组织 staff 周报授权
+func (uc *SummaryUseCase) canSendWeeklyEmail(userId int64) bool {
+	p := uc.userProfile(userId)
+	if p == nil {
+		return false
+	}
+	return p.GetEmailWeeklyEnabled() && p.GetEmailWeeklyAllowedByOrg()
+}
+
+func (uc *SummaryUseCase) checkEmailEnabled(userId int64) bool {
+	return uc.canSendDailyEmail(userId)
 }
 
 func (uc *SummaryUseCase) getUserIds() []int64 {

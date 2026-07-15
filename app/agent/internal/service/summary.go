@@ -20,7 +20,7 @@ func (s SummaryService) GetRecentSummary(ctx context.Context, request *summary.G
 	key := fmt.Sprintf("agent:summary:%d:recent", request.UserId)
 	val, err := s.rdb.Get(ctx, key).Result()
 	if err != nil {
-		st := task.NewSummaryTask(s.rabbitMQ)
+		st := task.NewSummaryTask(s.rabbitMQ, s.rdb)
 		st.Do(request.UserId, "PersonalRecent")
 		return &summary.GetSummaryReply{
 			Code: 1,
