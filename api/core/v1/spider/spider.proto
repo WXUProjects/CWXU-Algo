@@ -28,6 +28,8 @@ service Spider {
       body: "*"
     };
   }
+  // 删除用户时清空该用户在 core 的全部数据（OJ 绑定 / 提交 / 比赛记录）
+  rpc PurgeUserData (PurgeUserDataReq) returns (PurgeUserDataRes) {}
 }
 
 message SetSpiderReq {
@@ -68,5 +70,14 @@ message UpdateAllRes {
   int64 code = 1;
   string message = 2;
   int64 count = 3; // 触发更新的用户数
+}
+
+message PurgeUserDataReq {
+  int64 userId = 1;
+}
+
+message PurgeUserDataRes {
+  int64 code = 1;
+  string message = 2;
 }
 

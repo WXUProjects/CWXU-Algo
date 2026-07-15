@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Spider_SetSpider_FullMethodName = "/api.core.v1.spider.Spider/SetSpider"
-	Spider_GetSpider_FullMethodName = "/api.core.v1.spider.Spider/GetSpider"
-	Spider_Update_FullMethodName    = "/api.core.v1.spider.Spider/Update"
-	Spider_UpdateAll_FullMethodName = "/api.core.v1.spider.Spider/UpdateAll"
+	Spider_SetSpider_FullMethodName     = "/api.core.v1.spider.Spider/SetSpider"
+	Spider_GetSpider_FullMethodName     = "/api.core.v1.spider.Spider/GetSpider"
+	Spider_Update_FullMethodName        = "/api.core.v1.spider.Spider/Update"
+	Spider_UpdateAll_FullMethodName     = "/api.core.v1.spider.Spider/UpdateAll"
+	Spider_PurgeUserData_FullMethodName = "/api.core.v1.spider.Spider/PurgeUserData"
 )
 
 // SpiderClient is the client API for Spider service.
@@ -34,6 +35,8 @@ type SpiderClient interface {
 	Update(ctx context.Context, in *UpdateReq, opts ...grpc.CallOption) (*UpdateRes, error)
 	// 管理员一键全量更新所有已绑定 OJ 的用户
 	UpdateAll(ctx context.Context, in *UpdateAllReq, opts ...grpc.CallOption) (*UpdateAllRes, error)
+	// 删除用户时清空该用户在 core 的全部数据（OJ 绑定 / 提交 / 比赛记录）
+	PurgeUserData(ctx context.Context, in *PurgeUserDataReq, opts ...grpc.CallOption) (*PurgeUserDataRes, error)
 }
 
 type spiderClient struct {
@@ -84,6 +87,16 @@ func (c *spiderClient) UpdateAll(ctx context.Context, in *UpdateAllReq, opts ...
 	return out, nil
 }
 
+func (c *spiderClient) PurgeUserData(ctx context.Context, in *PurgeUserDataReq, opts ...grpc.CallOption) (*PurgeUserDataRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PurgeUserDataRes)
+	err := c.cc.Invoke(ctx, Spider_PurgeUserData_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SpiderServer is the server API for Spider service.
 // All implementations must embed UnimplementedSpiderServer
 // for forward compatibility.
@@ -93,6 +106,8 @@ type SpiderServer interface {
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 	// 管理员一键全量更新所有已绑定 OJ 的用户
 	UpdateAll(context.Context, *UpdateAllReq) (*UpdateAllRes, error)
+	// 删除用户时清空该用户在 core 的全部数据（OJ 绑定 / 提交 / 比赛记录）
+	PurgeUserData(context.Context, *PurgeUserDataReq) (*PurgeUserDataRes, error)
 	mustEmbedUnimplementedSpiderServer()
 }
 
@@ -114,6 +129,9 @@ func (UnimplementedSpiderServer) Update(context.Context, *UpdateReq) (*UpdateRes
 }
 func (UnimplementedSpiderServer) UpdateAll(context.Context, *UpdateAllReq) (*UpdateAllRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateAll not implemented")
+}
+func (UnimplementedSpiderServer) PurgeUserData(context.Context, *PurgeUserDataReq) (*PurgeUserDataRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method PurgeUserData not implemented")
 }
 func (UnimplementedSpiderServer) mustEmbedUnimplementedSpiderServer() {}
 func (UnimplementedSpiderServer) testEmbeddedByValue()                {}
@@ -208,6 +226,24 @@ func _Spider_UpdateAll_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Spider_PurgeUserData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PurgeUserDataReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).PurgeUserData(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_PurgeUserData_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).PurgeUserData(ctx, req.(*PurgeUserDataReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Spider_ServiceDesc is the grpc.ServiceDesc for Spider service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -230,6 +266,10 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateAll",
 			Handler:    _Spider_UpdateAll_Handler,
+		},
+		{
+			MethodName: "PurgeUserData",
+			Handler:    _Spider_PurgeUserData_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

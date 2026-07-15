@@ -414,6 +414,102 @@ func (x *UpdateAllRes) GetCount() int64 {
 	return 0
 }
 
+type PurgeUserDataReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PurgeUserDataReq) Reset() {
+	*x = PurgeUserDataReq{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PurgeUserDataReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PurgeUserDataReq) ProtoMessage() {}
+
+func (x *PurgeUserDataReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PurgeUserDataReq.ProtoReflect.Descriptor instead.
+func (*PurgeUserDataReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *PurgeUserDataReq) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+type PurgeUserDataRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PurgeUserDataRes) Reset() {
+	*x = PurgeUserDataRes{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PurgeUserDataRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PurgeUserDataRes) ProtoMessage() {}
+
+func (x *PurgeUserDataRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PurgeUserDataRes.ProtoReflect.Descriptor instead.
+func (*PurgeUserDataRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *PurgeUserDataRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *PurgeUserDataRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 type GetSpiderRep_Data struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Platform      string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
@@ -424,7 +520,7 @@ type GetSpiderRep_Data struct {
 
 func (x *GetSpiderRep_Data) Reset() {
 	*x = GetSpiderRep_Data{}
-	mi := &file_core_v1_spider_spider_proto_msgTypes[8]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -436,7 +532,7 @@ func (x *GetSpiderRep_Data) String() string {
 func (*GetSpiderRep_Data) ProtoMessage() {}
 
 func (x *GetSpiderRep_Data) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_spider_spider_proto_msgTypes[8]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -494,12 +590,18 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\fUpdateAllRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x14\n" +
-	"\x05count\x18\x03 \x01(\x03R\x05count2\xaf\x03\n" +
+	"\x05count\x18\x03 \x01(\x03R\x05count\"*\n" +
+	"\x10PurgeUserDataReq\x12\x16\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\"@\n" +
+	"\x10PurgeUserDataRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\x8e\x04\n" +
 	"\x06Spider\x12o\n" +
 	"\tSetSpider\x12 .api.core.v1.spider.SetSpiderReq\x1a .api.core.v1.spider.SetSpiderRep\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/v1/core/spider/set\x12Q\n" +
 	"\tGetSpider\x12 .api.core.v1.spider.GetSpiderReq\x1a .api.core.v1.spider.GetSpiderRep\"\x00\x12i\n" +
 	"\x06Update\x12\x1d.api.core.v1.spider.UpdateReq\x1a\x1d.api.core.v1.spider.UpdateRes\"!\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/v1/core/spider/update\x12v\n" +
-	"\tUpdateAll\x12 .api.core.v1.spider.UpdateAllReq\x1a .api.core.v1.spider.UpdateAllRes\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/v1/core/spider/update-allB;\n" +
+	"\tUpdateAll\x12 .api.core.v1.spider.UpdateAllReq\x1a .api.core.v1.spider.UpdateAllRes\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/v1/core/spider/update-all\x12]\n" +
+	"\rPurgeUserData\x12$.api.core.v1.spider.PurgeUserDataReq\x1a$.api.core.v1.spider.PurgeUserDataRes\"\x00B;\n" +
 	"\x12api.core.v1.spiderP\x01Z#cwxu-algo/api/core/v1/spider;spiderb\x06proto3"
 
 var (
@@ -514,7 +616,7 @@ func file_core_v1_spider_spider_proto_rawDescGZIP() []byte {
 	return file_core_v1_spider_spider_proto_rawDescData
 }
 
-var file_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_core_v1_spider_spider_proto_goTypes = []any{
 	(*SetSpiderReq)(nil),      // 0: api.core.v1.spider.SetSpiderReq
 	(*SetSpiderRep)(nil),      // 1: api.core.v1.spider.SetSpiderRep
@@ -524,23 +626,27 @@ var file_core_v1_spider_spider_proto_goTypes = []any{
 	(*UpdateRes)(nil),         // 5: api.core.v1.spider.UpdateRes
 	(*UpdateAllReq)(nil),      // 6: api.core.v1.spider.UpdateAllReq
 	(*UpdateAllRes)(nil),      // 7: api.core.v1.spider.UpdateAllRes
-	(*GetSpiderRep_Data)(nil), // 8: api.core.v1.spider.GetSpiderRep.Data
+	(*PurgeUserDataReq)(nil),  // 8: api.core.v1.spider.PurgeUserDataReq
+	(*PurgeUserDataRes)(nil),  // 9: api.core.v1.spider.PurgeUserDataRes
+	(*GetSpiderRep_Data)(nil), // 10: api.core.v1.spider.GetSpiderRep.Data
 }
 var file_core_v1_spider_spider_proto_depIdxs = []int32{
-	8, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
-	0, // 1: api.core.v1.spider.Spider.SetSpider:input_type -> api.core.v1.spider.SetSpiderReq
-	2, // 2: api.core.v1.spider.Spider.GetSpider:input_type -> api.core.v1.spider.GetSpiderReq
-	4, // 3: api.core.v1.spider.Spider.Update:input_type -> api.core.v1.spider.UpdateReq
-	6, // 4: api.core.v1.spider.Spider.UpdateAll:input_type -> api.core.v1.spider.UpdateAllReq
-	1, // 5: api.core.v1.spider.Spider.SetSpider:output_type -> api.core.v1.spider.SetSpiderRep
-	3, // 6: api.core.v1.spider.Spider.GetSpider:output_type -> api.core.v1.spider.GetSpiderRep
-	5, // 7: api.core.v1.spider.Spider.Update:output_type -> api.core.v1.spider.UpdateRes
-	7, // 8: api.core.v1.spider.Spider.UpdateAll:output_type -> api.core.v1.spider.UpdateAllRes
-	5, // [5:9] is the sub-list for method output_type
-	1, // [1:5] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	10, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
+	0,  // 1: api.core.v1.spider.Spider.SetSpider:input_type -> api.core.v1.spider.SetSpiderReq
+	2,  // 2: api.core.v1.spider.Spider.GetSpider:input_type -> api.core.v1.spider.GetSpiderReq
+	4,  // 3: api.core.v1.spider.Spider.Update:input_type -> api.core.v1.spider.UpdateReq
+	6,  // 4: api.core.v1.spider.Spider.UpdateAll:input_type -> api.core.v1.spider.UpdateAllReq
+	8,  // 5: api.core.v1.spider.Spider.PurgeUserData:input_type -> api.core.v1.spider.PurgeUserDataReq
+	1,  // 6: api.core.v1.spider.Spider.SetSpider:output_type -> api.core.v1.spider.SetSpiderRep
+	3,  // 7: api.core.v1.spider.Spider.GetSpider:output_type -> api.core.v1.spider.GetSpiderRep
+	5,  // 8: api.core.v1.spider.Spider.Update:output_type -> api.core.v1.spider.UpdateRes
+	7,  // 9: api.core.v1.spider.Spider.UpdateAll:output_type -> api.core.v1.spider.UpdateAllRes
+	9,  // 10: api.core.v1.spider.Spider.PurgeUserData:output_type -> api.core.v1.spider.PurgeUserDataRes
+	6,  // [6:11] is the sub-list for method output_type
+	1,  // [1:6] is the sub-list for method input_type
+	1,  // [1:1] is the sub-list for extension type_name
+	1,  // [1:1] is the sub-list for extension extendee
+	0,  // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_core_v1_spider_spider_proto_init() }
@@ -554,7 +660,7 @@ func file_core_v1_spider_spider_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_spider_spider_proto_rawDesc), len(file_core_v1_spider_spider_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -607,17 +607,33 @@ func (d *ProfileDal) SetRoleId(ctx context.Context, userId int64, roleId int) er
 	})
 }
 
-// Delete 软删除用户，并清理 profile 缓存
+// Delete 删除用户：清空本库关联数据后硬删除用户行，并清理 profile 缓存
 func (d *ProfileDal) Delete(ctx context.Context, userId int64) error {
 	cacheKey := fmt.Sprintf("user:%d:profile", userId)
 	return data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
-		result := d.db.WithContext(ctx).Delete(&model.User{}, userId)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return fmt.Errorf("用户不存在")
-		}
-		return nil
+		return d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			uid := uint(userId)
+			// 组织成员（含软删记录）
+			if err := tx.Unscoped().Where("user_id = ?", uid).Delete(&model.OrgMember{}).Error; err != nil {
+				return err
+			}
+			// 加入申请
+			if err := tx.Unscoped().Where("user_id = ?", uid).Delete(&model.OrgJoinRequest{}).Error; err != nil {
+				return err
+			}
+			// 粘贴板
+			if err := tx.Unscoped().Where("user_id = ?", uid).Delete(&model.Paste{}).Error; err != nil {
+				return err
+			}
+			// 用户本身（硬删，释放用户名/邮箱）
+			result := tx.Unscoped().Delete(&model.User{}, userId)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return fmt.Errorf("用户不存在")
+			}
+			return nil
+		})
 	})
 }

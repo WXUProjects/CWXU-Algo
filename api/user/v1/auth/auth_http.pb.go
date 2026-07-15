@@ -19,6 +19,7 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
+const OperationAuthChangePassword = "/api.user.v1.Auth/ChangePassword"
 const OperationAuthLogin = "/api.user.v1.Auth/Login"
 const OperationAuthRefresh = "/api.user.v1.Auth/Refresh"
 const OperationAuthRegister = "/api.user.v1.Auth/Register"
@@ -26,6 +27,8 @@ const OperationAuthResetPassword = "/api.user.v1.Auth/ResetPassword"
 const OperationAuthSendCode = "/api.user.v1.Auth/SendCode"
 
 type AuthHTTPServer interface {
+	// ChangePassword 登录态修改密码（旧密码校验）
+	ChangePassword(context.Context, *ChangePasswordReq) (*ChangePasswordRes, error)
 	Login(context.Context, *LoginReq) (*LoginRes, error)
 	// Refresh 根据当前登录态重签 JWT（任命角色后刷新页面即可同步权限）
 	Refresh(context.Context, *RefreshReq) (*LoginRes, error)
@@ -43,6 +46,7 @@ func RegisterAuthHTTPServer(s *http.Server, srv AuthHTTPServer) {
 	r.POST("/v1/user/auth/refresh", _Auth_Refresh0_HTTP_Handler(srv))
 	r.POST("/v1/user/auth/send-code", _Auth_SendCode0_HTTP_Handler(srv))
 	r.POST("/v1/user/auth/reset-password", _Auth_ResetPassword0_HTTP_Handler(srv))
+	r.POST("/v1/user/auth/change-password", _Auth_ChangePassword0_HTTP_Handler(srv))
 }
 
 func _Auth_Login0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) error {
@@ -155,7 +159,31 @@ func _Auth_ResetPassword0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context
 	}
 }
 
+func _Auth_ChangePassword0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ChangePasswordReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationAuthChangePassword)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ChangePassword(ctx, req.(*ChangePasswordReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ChangePasswordRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type AuthHTTPClient interface {
+	// ChangePassword 登录态修改密码（旧密码校验）
+	ChangePassword(ctx context.Context, req *ChangePasswordReq, opts ...http.CallOption) (rsp *ChangePasswordRes, err error)
 	Login(ctx context.Context, req *LoginReq, opts ...http.CallOption) (rsp *LoginRes, err error)
 	// Refresh 根据当前登录态重签 JWT（任命角色后刷新页面即可同步权限）
 	Refresh(ctx context.Context, req *RefreshReq, opts ...http.CallOption) (rsp *LoginRes, err error)
@@ -172,6 +200,20 @@ type AuthHTTPClientImpl struct {
 
 func NewAuthHTTPClient(client *http.Client) AuthHTTPClient {
 	return &AuthHTTPClientImpl{client}
+}
+
+// ChangePassword 登录态修改密码（旧密码校验）
+func (c *AuthHTTPClientImpl) ChangePassword(ctx context.Context, in *ChangePasswordReq, opts ...http.CallOption) (*ChangePasswordRes, error) {
+	var out ChangePasswordRes
+	pattern := "/v1/user/auth/change-password"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationAuthChangePassword))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (c *AuthHTTPClientImpl) Login(ctx context.Context, in *LoginReq, opts ...http.CallOption) (*LoginRes, error) {

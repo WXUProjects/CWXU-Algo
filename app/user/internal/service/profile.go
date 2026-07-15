@@ -445,7 +445,7 @@ func (p *ProfileService) GetByIds(ctx context.Context, req *profile.GetByIdsReq)
 	return &profile.GetByIdsRes{Profiles: list}, nil
 }
 
-// Delete 管理员删除用户（软删除）
+// Delete 站点管理员删除用户：清空 core 训练数据 + user 库关联后硬删除账号
 func (p *ProfileService) Delete(ctx context.Context, req *profile.DeleteReq) (*profile.DeleteRes, error) {
 	if !auth.VerifyAdmin(ctx) {
 		return nil, errors.Forbidden("权限不足", "仅管理员可删除用户")
@@ -461,16 +461,30 @@ func (p *ProfileService) Delete(ctx context.Context, req *profile.DeleteReq) (*p
 	if err != nil {
 		return nil, errors.BadRequest("参数错误", "用户不存在")
 	}
-	// 禁止删除管理员账号
-	if target.RoleID == permission.RoleAdmin {
-		return nil, errors.Forbidden("权限不足", "不能删除管理员账号")
+	// 禁止删除站点管理员
+	if target.IsSiteAdmin || target.RoleID == permission.RoleAdmin {
+		return nil, errors.Forbidden("权限不足", "不能删除站点管理员账号")
+	}
+	// 先清 core_data（OJ 绑定 / 提交 / 比赛），失败则中止，避免半删
+	conn, err := p.coreDataRPC()
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", "无法连接数据服务: "+err.Error())
+	}
+	defer conn.Close()
+	sc := spider.NewSpiderClient(conn)
+	purgeRes, err := sc.PurgeUserData(ctx, &spider.PurgeUserDataReq{UserId: req.UserId})
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", "清空训练数据失败: "+err.Error())
+	}
+	if purgeRes != nil && purgeRes.Code != 0 {
+		return nil, errors.InternalServer("内部错误", purgeRes.Message)
 	}
 	if err := p.profileDal.Delete(ctx, req.UserId); err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
 	return &profile.DeleteRes{
 		Code:    0,
-		Message: "删除成功",
+		Message: "已删除用户并清空相关数据",
 	}, nil
 }
 

@@ -40,6 +40,13 @@ service Auth {
       body: "*"
     };
   }
+  // 登录态修改密码（旧密码校验）
+  rpc ChangePassword (ChangePasswordReq) returns (ChangePasswordRes) {
+    option (google.api.http) = {
+      post: "/v1/user/auth/change-password",
+      body: "*"
+    };
+  }
 }
 
 message LoginReq {
@@ -89,6 +96,17 @@ message ResetPasswordReq {
 }
 
 message ResetPasswordRes {
+  bool success = 1;
+  string message = 2;
+}
+
+// 客户端 SHA256 后传输
+message ChangePasswordReq {
+  string oldPassword = 1;
+  string newPassword = 2;
+}
+
+message ChangePasswordRes {
   bool success = 1;
   string message = 2;
 }

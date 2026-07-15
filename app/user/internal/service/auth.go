@@ -292,6 +292,48 @@ func (s *AuthService) SendCode(ctx context.Context, req *pb.SendCodeReq) (*pb.Se
 	return res, nil
 }
 
+// ChangePassword 登录态修改密码（校验旧密码）
+func (s *AuthService) ChangePassword(ctx context.Context, req *pb.ChangePasswordReq) (*pb.ChangePasswordRes, error) {
+	res := &pb.ChangePasswordRes{}
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		res.Success = false
+		res.Message = "请先登录"
+		return res, nil
+	}
+	oldPwd := strings.TrimSpace(req.OldPassword)
+	newPwd := strings.TrimSpace(req.NewPassword)
+	if oldPwd == "" || newPwd == "" {
+		res.Success = false
+		res.Message = "请填写当前密码和新密码"
+		return res, nil
+	}
+	if oldPwd == newPwd {
+		res.Success = false
+		res.Message = "新密码不能与当前密码相同"
+		return res, nil
+	}
+	var u model.User
+	if err := s.db.First(&u, pd.UserID).Error; err != nil {
+		res.Success = false
+		res.Message = "用户不存在"
+		return res, nil
+	}
+	if u.Password != oldPwd {
+		res.Success = false
+		res.Message = "当前密码不正确"
+		return res, nil
+	}
+	if err := s.db.Model(&u).Update("password", newPwd).Error; err != nil {
+		res.Success = false
+		res.Message = "修改失败，请稍后重试"
+		return res, nil
+	}
+	res.Success = true
+	res.Message = "密码已更新"
+	return res, nil
+}
+
 // ResetPassword 邮箱验证码重置密码
 func (s *AuthService) ResetPassword(ctx context.Context, req *pb.ResetPasswordReq) (*pb.ResetPasswordRes, error) {
 	res := &pb.ResetPasswordRes{}

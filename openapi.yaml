@@ -681,6 +681,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.submit_log.GetSubmitLogRes'
+    /v1/user/auth/change-password:
+        post:
+            tags:
+                - Auth
+            description: 登录态修改密码（旧密码校验）
+            operationId: Auth_ChangePassword
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.ChangePasswordReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ChangePasswordRes'
     /v1/user/auth/login:
         post:
             tags:
@@ -1994,6 +2013,21 @@ components:
                 avatar:
                     type: string
                 lastSubmit:
+                    type: string
+        api.user.v1.ChangePasswordReq:
+            type: object
+            properties:
+                oldPassword:
+                    type: string
+                newPassword:
+                    type: string
+            description: 客户端 SHA256 后传输
+        api.user.v1.ChangePasswordRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
                     type: string
         api.user.v1.DeleteReq:
             type: object

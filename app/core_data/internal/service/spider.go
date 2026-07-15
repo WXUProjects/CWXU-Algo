@@ -135,6 +135,44 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 	}, nil
 }
 
+// PurgeUserData 硬删除用户在 core 库的全部关联数据（删除用户时调用）
+func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserDataReq) (*spider.PurgeUserDataRes, error) {
+	if req.UserId <= 0 {
+		return &spider.PurgeUserDataRes{Code: 1, Message: "用户ID无效"}, nil
+	}
+	uid := req.UserId
+	if err := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.Platform{}).Error; err != nil {
+		log.Errorf("PurgeUserData: platform user=%d: %v", uid, err)
+		return nil, InternalError
+	}
+	if err := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.SubmitLog{}).Error; err != nil {
+		log.Errorf("PurgeUserData: submit_log user=%d: %v", uid, err)
+		return nil, InternalError
+	}
+	if err := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.ContestLog{}).Error; err != nil {
+		log.Errorf("PurgeUserData: contest_log user=%d: %v", uid, err)
+		return nil, InternalError
+	}
+	// 缓存 / 爬虫 inflight
+	keys := []string{
+		fmt.Sprintf("core:submit_log:user:%d", uid),
+		fmt.Sprintf("spider:pending:%d", uid),
+		fmt.Sprintf("spider:inflight:%d", uid),
+		fmt.Sprintf("user:%d:profile", uid),
+	}
+	if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
+		log.Warnf("PurgeUserData: redis del user=%d: %v", uid, err)
+	}
+	// 按平台的 pending/inflight 键（扫描可能较多，仅删常见平台前缀）
+	for _, p := range []string{"AtCoder", "Codeforces", "LuoGu", "NowCoder", "QOJ", "LeetCode"} {
+		_ = s.rdb.Del(ctx,
+			fmt.Sprintf("spider:pending:%d:%s", uid, p),
+			fmt.Sprintf("spider:inflight:%d:%s", uid, p),
+		).Err()
+	}
+	return &spider.PurgeUserDataRes{Code: 0, Message: "已清空该用户的训练与绑定数据"}, nil
+}
+
 func NewSpiderService(data *data.Data, spider *task.SpiderTask) *SpiderService {
 	return &SpiderService{
 		db:     data.DB,
