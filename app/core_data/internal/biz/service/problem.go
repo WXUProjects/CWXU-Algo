@@ -959,11 +959,13 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 
 	var diffs []nc
 	if e := uc.data.DB.Raw(`
-		SELECT COALESCE(NULLIF(p.difficulty,''),'Unknown') AS name, COUNT(DISTINCT p.id) AS count
+		SELECT p.difficulty AS name, COUNT(DISTINCT p.id) AS count
 		FROM submit_logs s
 		JOIN problems p ON p.id = s.problem_id
 		WHERE s.user_id = ? AND `+acCond+`
-		GROUP BY 1
+		  AND p.difficulty IS NOT NULL AND BTRIM(p.difficulty) <> ''
+		  AND UPPER(BTRIM(p.difficulty)) NOT IN ('UNKNOWN','NULL','NONE')
+		GROUP BY p.difficulty
 	`, userID).Scan(&diffs).Error; e != nil {
 		log.Errorf("difficulties sql user=%d: %v", userID, e)
 	}
