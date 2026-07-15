@@ -1,73 +1,52 @@
 package service
 
 import (
-	"cwxu-algo/app/common/event"
 	"encoding/json"
-	"time"
+	"fmt"
+	"sync"
+
+	"cwxu-algo/app/common/event"
+	"cwxu-algo/app/common/utils/mqconsume"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/streadway/amqp"
 )
 
+const summaryConcurrency = 2
+
 type Consumer struct {
-	mq      *event.RabbitMQ
-	summary *SummaryUseCase
+	mq       *event.RabbitMQ
+	summary  *SummaryUseCase
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 func NewConsumer(mq *event.RabbitMQ, summary *SummaryUseCase) *Consumer {
 	return &Consumer{
 		mq:      mq,
 		summary: summary,
+		stopCh:  make(chan struct{}),
 	}
+}
+
+func (c *Consumer) Stop() {
+	c.stopOnce.Do(func() { close(c.stopCh) })
 }
 
 func (c *Consumer) Consume() {
 	log.Infof("summary consumer 循环启动")
-	for {
-		if err := c.consumeOnce(); err != nil {
-			log.Errorf("summary consumer 退出: %v，5s 后重连", err)
-		} else {
-			log.Warnf("summary consumer 通道关闭，5s 后重连")
-		}
-		time.Sleep(5 * time.Second)
-	}
-}
-
-func (c *Consumer) consumeOnce() error {
-	ch, err := c.mq.OpenChannel()
-	if err != nil {
-		return err
-	}
-	if _, err := ch.QueueDeclarePassive("summary", true, false, false, false, nil); err != nil {
-		_ = ch.Close()
-		ch, err = c.mq.OpenChannel()
-		if err != nil {
-			return err
-		}
-		if _, err := ch.QueueDeclare("summary", true, false, false, false, nil); err != nil {
-			_ = ch.Close()
-			return err
-		}
-	}
-	defer ch.Close()
-
-	if err := ch.Qos(2, 0, false); err != nil {
-		return err
-	}
-	// tag 留空，避免多实例/重连 NOT_ALLOWED
-	msgs, err := ch.Consume("summary", "", false, false, false, false, nil)
-	if err != nil {
-		return err
-	}
-	log.Infof("summary consumer 已就绪")
-
-	for d := range msgs {
-		go func(d amqp.Delivery) {
+	_ = mqconsume.Run(c.mq, mqconsume.Options{
+		Name:             "summary",
+		Queue:            "summary",
+		Concurrency:      summaryConcurrency,
+		MaxRetry:         5,
+		DeclareOnMissing: true,
+		Stop:             c.stopCh,
+		Handler: func(body []byte, _ amqp.Table) error {
 			msg := event.SummaryEvent{}
-			if err := json.Unmarshal(d.Body, &msg); err != nil {
+			if err := json.Unmarshal(body, &msg); err != nil {
 				log.Errorf("RabbitMQ(Summary): 解析json出错 %s", err.Error())
-				_ = d.Nack(false, false)
-				return
+				return fmt.Errorf("bad json: %w", err)
 			}
 			var runErr error
 			switch msg.Type {
@@ -77,16 +56,14 @@ func (c *Consumer) consumeOnce() error {
 				runErr = c.summary.PersonalRecent(msg.UserId)
 			default:
 				log.Errorf("RabbitMQ(Summary): 未知类型 %s", msg.Type)
-				_ = d.Nack(false, false)
-				return
+				// 未知类型：重试无意义，用 max retry 后 drop
+				return fmt.Errorf("unknown type %s", msg.Type)
 			}
 			if runErr != nil {
 				log.Errorf("RabbitMQ(Summary) user=%d type=%s: %v", msg.UserId, msg.Type, runErr)
-				_ = d.Nack(false, true)
-				return
+				return runErr
 			}
-			_ = d.Ack(false)
-		}(d)
-	}
-	return nil
+			return nil
+		},
+	})
 }

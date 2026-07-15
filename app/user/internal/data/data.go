@@ -40,8 +40,28 @@ func migrateModels(db *gorm.DB) {
 		&model.User{},
 		&model.Group{},
 		&model.SiteConfig{},
+		// 商业化地基：组织/成员/套餐配额（当前无对外 API）
+		&model.Org{},
+		&model.OrgMember{},
+		&model.PlanQuota{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
+	}
+	seedPlanQuotas(db)
+}
+
+// seedPlanQuotas 幂等写入默认套餐配额模板
+func seedPlanQuotas(db *gorm.DB) {
+	defaults := []model.PlanQuota{
+		{Plan: "free", SeatLimit: 0, DailySyncPerUser: 4, AISummaryPerMonth: 5},
+		{Plan: "team", SeatLimit: 50, DailySyncPerUser: 24, AISummaryPerMonth: 200},
+		{Plan: "pro", SeatLimit: 200, DailySyncPerUser: 48, AISummaryPerMonth: 1000},
+	}
+	for _, p := range defaults {
+		var n int64
+		if db.Model(&model.PlanQuota{}).Where("plan = ?", p.Plan).Count(&n); n == 0 {
+			_ = db.Create(&p).Error
+		}
 	}
 }

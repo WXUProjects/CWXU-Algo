@@ -35,8 +35,14 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 	//migrateModels(data.DB)
 	cleanup := func() {
 		log.Info("closing the data resources")
-		sql, _ := data.DB.DB()
-		sql.Close()
+		if data.DB != nil {
+			if sql, err := data.DB.DB(); err == nil && sql != nil {
+				_ = sql.Close()
+			}
+		}
+		if data.RDB != nil {
+			_ = data.RDB.Close()
+		}
 	}
 	return data, cleanup, nil
 }

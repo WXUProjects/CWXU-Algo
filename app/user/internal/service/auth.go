@@ -7,7 +7,6 @@ import (
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 	"errors"
-	"os/user"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -50,9 +49,12 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 		"email":    u.Email,
 		"roleId":   u.RoleID,
 		"roleIds":  string(_roleIdsJSON),
-		"exp":      expire.Unix(),
-		"nbf":      time.Now().Unix(),
-	}).SignedString([]byte(_const.JWTSecret))
+		// 商业化预留：多租户 org 上下文，当前固定 0，业务暂不读取
+		"orgId":   uint(0),
+		"orgRole": "",
+		"exp":     expire.Unix(),
+		"nbf":     time.Now().Unix(),
+	}).SignedString([]byte(_const.JWTSecret()))
 	if err != nil {
 		res.Success = false
 		res.Message = "身份校验成功，但是jwt生成失败了." + err.Error()
@@ -71,9 +73,13 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 		Message: "注册成功",
 	}
 	// 是否已经用户名
-	users := make([]user.User, 0)
-	s.db.Where("username = ?", req.Username).Find(&users)
-	if len(users) >= 1 {
+	var count int64
+	if countErr := s.db.Model(&model.User{}).Where("username = ?", req.Username).Count(&count).Error; countErr != nil {
+		res.Success = false
+		res.Message = "注册失败，请稍后重试"
+		return res, nil
+	}
+	if count >= 1 {
 		res.Success = false
 		res.Message = "用户名已经存在"
 		return

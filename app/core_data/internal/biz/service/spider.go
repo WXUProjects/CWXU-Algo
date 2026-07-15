@@ -25,7 +25,7 @@ func NewSpiderUseCase(data *data.Data, problem *ProblemUseCase) *SpiderUseCase {
 	}
 }
 
-// LoadData 加载数据
+// LoadData 加载数据。无绑定平台时成功返回；有平台且全部失败则返回 error（consumer 可重试）。
 func (uc *SpiderUseCase) LoadData(userId int64, needAll bool) error {
 	// 无论如何，函数退出前一定删缓存
 	defer uc.invalidateCache(userId)
@@ -34,11 +34,21 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool) error {
 	if err := uc.data.DB.Where("user_id = ?", userId).Find(&platforms).Error; err != nil {
 		return err
 	}
-
-	for _, plat := range platforms {
-		uc.loadOnePlatform(userId, plat, needAll)
+	if len(platforms) == 0 {
+		return nil
 	}
 
+	var failCount int
+	var lastErr error
+	for _, plat := range platforms {
+		if err := uc.loadOnePlatform(userId, plat, needAll); err != nil {
+			failCount++
+			lastErr = err
+		}
+	}
+	if failCount == len(platforms) && lastErr != nil {
+		return fmt.Errorf("all platforms failed for user %d: %w", userId, lastErr)
+	}
 	return nil
 }
 func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll bool) error {
@@ -91,7 +101,7 @@ func (uc *SpiderUseCase) fetchAndSaveContest(userId int64, plat model.Platform, 
 		Save(&tmp).Error
 }
 
-func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, needAll bool) {
+func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, needAll bool) error {
 	// 限制最大重试次数
 	maxRetries := 12
 	for i := 0; i < maxRetries; i++ {
@@ -105,7 +115,7 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 			if uc.problem != nil {
 				uc.problem.BindSubmitsAfterSpider(userId)
 			}
-			return
+			return nil
 		}
 		if strings.Contains(err.Error(), "平台") {
 			log.Errorf(
@@ -114,7 +124,7 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 				plat.Username,
 				err,
 			)
-			return
+			return err
 		}
 		log.Errorf(
 			"Spider: %s %s 失败 (重试 %d/%d): %v",
@@ -126,7 +136,7 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 		)
 		// needAll=false，不重试
 		if !needAll {
-			return
+			return err
 		}
 		// needAll=true，重试最多12次
 		time.Sleep(5 * time.Second)
@@ -137,42 +147,45 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 		plat.Username,
 		maxRetries,
 	)
+	return fmt.Errorf("platform %s max retries exceeded", plat.Platform)
 }
 func (uc *SpiderUseCase) invalidateCache(userId int64) {
 	ctx := context.Background()
 	rdb := uc.data.RDB
-
-	// log.Infof("清理缓存")
 
 	// 1. 精确 key，直接删
 	_ = rdb.Del(
 		ctx,
 		fmt.Sprintf("core:submit_log:user:%d", userId),
 		fmt.Sprintf("user:%d:lastSubmitTime", userId),
-		fmt.Sprintf("statistic:period:%d", userId), // 用户统计缓存
-		fmt.Sprintf("statistic:period:-1"),         // 全局统计缓存
-		// Contest log 精确 key
+		fmt.Sprintf("statistic:period:%d", userId),
+		fmt.Sprintf("statistic:period:-1"),
 		fmt.Sprintf("core:contest_log:user:%d", userId),
 	).Err()
 
-	// 2. 模糊前缀，必须 SCAN
+	// 2. 用户级模糊前缀 SCAN；全局 heatmap 用版本号失效，避免每次爬虫扫全库
+	_ = rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
+
 	patterns := []string{
 		fmt.Sprintf("statistic:heatmap:%d:*:*:*", userId),
-		"statistic:heatmap:0:*:*:*",
-		// Contest log 相关的模糊 key
 		fmt.Sprintf("core:contest_log:user:%d:*", userId),
-		"core:contest_log:detail:*",
 	}
 
 	for _, pattern := range patterns {
-		iter := rdb.Scan(ctx, 0, pattern, 200).Iterator()
-		for iter.Next(ctx) {
-			key := iter.Val()
-			// 用 UNLINK，异步删除，不阻塞
-			_ = rdb.Unlink(ctx, key).Err()
-		}
-		if err := iter.Err(); err != nil {
-			log.Errorf("scan pattern %s failed: %v", pattern, err)
+		var cursor uint64
+		for {
+			keys, next, err := rdb.Scan(ctx, cursor, pattern, 100).Result()
+			if err != nil {
+				log.Errorf("scan pattern %s failed: %v", pattern, err)
+				break
+			}
+			if len(keys) > 0 {
+				_ = rdb.Unlink(ctx, keys...).Err()
+			}
+			cursor = next
+			if cursor == 0 {
+				break
+			}
 		}
 	}
 }

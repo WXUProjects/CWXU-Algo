@@ -10,6 +10,8 @@ import (
 	"cwxu-algo/api/core/v1/submit_log"
 	"cwxu-algo/app/common/conf"
 	_const "cwxu-algo/app/common/const"
+	"cwxu-algo/app/common/utils/health"
+	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/service"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -47,12 +49,12 @@ func NewWhiteListMatcher() selector.MatchFunc {
 }
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, logger log.Logger, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService, contestLogService *service.ContestLogService, bulletinService *service.BulletinService, problemService *service.ProblemService) *http.Server {
+func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService, contestLogService *service.ContestLogService, bulletinService *service.BulletinService, problemService *service.ProblemService) *http.Server {
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
 			selector.Server(jwt.Server(func(token *jwt2.Token) (interface{}, error) {
-				return []byte(_const.JWTSecret), nil
+				return []byte(_const.JWTSecret()), nil
 			})).Match(NewWhiteListMatcher()).Build(),
 		),
 	}
@@ -66,6 +68,7 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, submitService *service.Sub
 		opts = append(opts, http.Timeout(c.Http.Timeout.AsDuration()))
 	}
 	srv := http.NewServer(opts...)
+	health.Register(srv, health.Checker{DB: d.DB, RDB: d.RDB})
 	submit_log.RegisterSubmitHTTPServer(srv, submitService)
 	spider.RegisterSpiderHTTPServer(srv, spiderService)
 	statistic2.RegisterStatisticHTTPServer(srv, statisticService)

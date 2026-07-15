@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"cwxu-algo/app/agent/internal/biz/service"
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
@@ -19,9 +20,15 @@ import (
 	_ "go.uber.org/automaxprocs"
 )
 
-func runForever(name string, fn func()) {
+func runForever(name string, stop <-chan struct{}, fn func()) {
 	go func() {
 		for {
+			select {
+			case <-stop:
+				log.Infof("%s stopped", name)
+				return
+			default:
+			}
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -30,7 +37,12 @@ func runForever(name string, fn func()) {
 				}()
 				fn()
 			}()
-			time.Sleep(5 * time.Second)
+			select {
+			case <-stop:
+				log.Infof("%s stopped", name)
+				return
+			case <-time.After(5 * time.Second):
+			}
 		}
 	}()
 }
@@ -53,7 +65,8 @@ func init() {
 }
 
 func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, consumer *service.Consumer) *kratos.App {
-	runForever("summary-consumer", consumer.Consume)
+	stopCh := make(chan struct{})
+	runForever("summary-consumer", stopCh, consumer.Consume)
 	return kratos.New(
 		kratos.ID(id),
 		kratos.Name(Name),
@@ -65,6 +78,12 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.
 			hs,
 		),
 		kratos.Registrar(reg.Reg),
+		kratos.BeforeStop(func(ctx context.Context) error {
+			log.Info("stopping summary consumer...")
+			close(stopCh)
+			consumer.Stop()
+			return nil
+		}),
 	)
 }
 

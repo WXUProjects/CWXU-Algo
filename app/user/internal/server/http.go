@@ -9,6 +9,8 @@ import (
 	"cwxu-algo/api/user/v1/site"
 	"cwxu-algo/app/common/conf"
 	_const "cwxu-algo/app/common/const"
+	"cwxu-algo/app/common/utils/health"
+	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/service"
 	"strings"
 
@@ -48,6 +50,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 // NewHTTPServer new an HTTP server.
 func NewHTTPServer(
 	c *conf.Server,
+	d *data.Data,
 	authService *service.AuthService,
 	profileService *service.ProfileService,
 	groupService *service.GroupService,
@@ -60,7 +63,7 @@ func NewHTTPServer(
 		http.Middleware(
 			recovery.Recovery(),
 			selector.Server(jwt.Server(func(token *jwt2.Token) (interface{}, error) {
-				return []byte(_const.JWTSecret), nil
+				return []byte(_const.JWTSecret()), nil
 			})).Match(NewWhiteListMatcher()).Build(),
 		),
 	}
@@ -74,6 +77,7 @@ func NewHTTPServer(
 		opts = append(opts, http.Timeout(c.Http.Timeout.AsDuration()))
 	}
 	srv := http.NewServer(opts...)
+	health.Register(srv, health.Checker{DB: d.DB, RDB: d.RDB})
 	auth.RegisterAuthHTTPServer(srv, authService)
 	profile.RegisterProfileHTTPServer(srv, profileService)
 	group.RegisterGroupHTTPServer(srv, groupService)

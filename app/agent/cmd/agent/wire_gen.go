@@ -38,7 +38,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, sm
 		return nil, nil, err
 	}
 	summaryService := service.NewSummaryService(dataData, rabbitMQ)
-	httpServer := server.NewHTTPServer(confServer, logger, summaryService)
+	httpServer := server.NewHTTPServer(confServer, logger, dataData, summaryService)
 	register := discovery.NewConsulRegister(confServer)
 	chat := agent.NewChat(confAgent)
 	summaryUseCase := service2.NewSummaryUseCase(chat, smtp, register, dataData)

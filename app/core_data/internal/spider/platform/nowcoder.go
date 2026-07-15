@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"cwxu-algo/app/common/utils/ojhttp"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
 	"encoding/json"
@@ -32,7 +33,7 @@ type NewNowCoder struct{}
 // getSubLogResp 获取submissionLog信息
 func getSubLogResp(url string) (*goquery.Document, error) {
 	// 发起 Get 请求
-	resp, err := http.Get(url)
+	resp, err := ojhttp.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("发起http请求失败: %s", err.Error())
 	}
@@ -175,7 +176,7 @@ func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []mo
 		}
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := ojhttp.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -374,7 +375,7 @@ func (nc NewNowCoder) FetchContestLog(userId int64, username string, needAll boo
 		url := fmt.Sprintf("%s?token=&uid=%s&page=%d&onlyJoinedFilter=true&searchContestName=&onlyRatingFilter=false&contestEndFilter=true",
 			baseURL, username, page)
 
-		resp, err := http.Get(url)
+		resp, err := ojhttp.Get(url)
 		if err != nil {
 			return nil, err
 		}

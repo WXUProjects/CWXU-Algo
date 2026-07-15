@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"cwxu-algo/app/common/utils/ojhttp"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
 	"encoding/json"
@@ -25,7 +26,7 @@ type atcJson struct {
 
 func fetchLog(url string) ([]atcJson, error) {
 	// 发起 Get 请求
-	resp, err := http.Get(url)
+	resp, err := ojhttp.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("发起http请求失败: %s", err.Error())
 	}

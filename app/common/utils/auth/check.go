@@ -18,11 +18,21 @@ type JwtPayload struct {
 	Name     string `json:"name"`     // 姓名
 	Email    string `json:"email"`    // 邮箱
 	RoleID   int    `json:"roleId"`   // 0队员 1管理员 2教练 3队长
+	// 商业化预留：当前签发为 0，解析端兼容缺失字段
+	OrgID   uint   `json:"orgId,omitempty"`   // 当前组织 ID
+	OrgRole string `json:"orgRole,omitempty"` // owner|coach|member
 }
 
 func praseJwtToken(ctx context.Context) string {
-	header, _ := transport.FromServerContext(ctx)
-	auths := strings.SplitN(header.RequestHeader().Get("Authorization"), " ", 2)
+	header, ok := transport.FromServerContext(ctx)
+	if !ok || header == nil {
+		return ""
+	}
+	reqHeader := header.RequestHeader()
+	if reqHeader == nil {
+		return ""
+	}
+	auths := strings.SplitN(reqHeader.Get("Authorization"), " ", 2)
 	if len(auths) < 2 {
 		return ""
 	}
@@ -30,16 +40,22 @@ func praseJwtToken(ctx context.Context) string {
 }
 
 func parsePayload(ctx context.Context) *JwtPayload {
-	parts := strings.Split(praseJwtToken(ctx), ".")
+	token := praseJwtToken(ctx)
+	if token == "" {
+		return nil
+	}
+	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return nil
 	}
 	payloadBase64 := parts[1]
-	dstLen := base64.RawURLEncoding.DecodedLen(len(payloadBase64))
-	dst := make([]byte, dstLen)
-	_, err := base64.RawURLEncoding.Decode(dst, []byte(payloadBase64))
+	dst, err := base64.RawURLEncoding.DecodeString(payloadBase64)
 	if err != nil {
-		return nil
+		// 兼容带 padding 的 base64
+		dst, err = base64.URLEncoding.DecodeString(payloadBase64)
+		if err != nil {
+			return nil
+		}
 	}
 	pd := JwtPayload{}
 	if err := json.Unmarshal(dst, &pd); err != nil {

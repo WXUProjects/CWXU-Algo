@@ -41,7 +41,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	groupService := service.NewGroupService(register, groupUseCase, groupDal)
 	roleService := service.NewRoleService(profileDal)
 	siteService := service.NewSiteService(dataData)
-	httpServer := server.NewHTTPServer(confServer, authService, profileService, groupService, roleService, siteService, logger)
+	httpServer := server.NewHTTPServer(confServer, dataData, authService, profileService, groupService, roleService, siteService, logger)
 	app := newApp(logger, grpcServer, httpServer, register)
 	return app, func() {
 		cleanup()

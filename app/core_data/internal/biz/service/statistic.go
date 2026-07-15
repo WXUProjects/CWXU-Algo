@@ -38,7 +38,14 @@ func (uc *StatisticUseCase) Heatmap(ctx context.Context, req *statistic.HeatmapR
 		return nil, errors.BadRequest("参数错误", "日期参数错误")
 	}
 
-	cacheKey := fmt.Sprintf("statistic:heatmap:%d:%s:%s:%t", req.UserId, req.StartDate, req.EndDate, req.IsAc)
+	// 全局热力图带版本号，爬虫只 INCR 版本即可失效，无需 SCAN 全库
+	ver := "0"
+	if req.UserId == 0 {
+		if v, err := uc.rdb.Get(ctx, "statistic:heatmap:global:ver").Result(); err == nil && v != "" {
+			ver = v
+		}
+	}
+	cacheKey := fmt.Sprintf("statistic:heatmap:%d:%s:%s:%t:v%s", req.UserId, req.StartDate, req.EndDate, req.IsAc, ver)
 	result, _, err := data2.GetCacheDal[[]dal.DailyCount](ctx, uc.rdb, cacheKey, func(data *[]dal.DailyCount) error {
 		var err error
 		*data, err = uc.dal.HeatmapQuery(ctx, req.StartDate, req.EndDate, req.UserId, req.IsAc)

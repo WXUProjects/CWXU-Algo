@@ -1,97 +1,71 @@
 package service
 
 import (
-	"cwxu-algo/app/common/event"
 	"encoding/json"
-	"time"
+	"fmt"
+	"sync"
+
+	"cwxu-algo/app/common/event"
+	"cwxu-algo/app/common/utils/mqconsume"
+	"cwxu-algo/app/core_data/internal/spidermetrics"
+	"cwxu-algo/app/core_data/task"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/streadway/amqp"
 )
 
+const spiderConcurrency = 2
+
 type Consumer struct {
-	mq     *event.RabbitMQ
-	spider *SpiderUseCase
+	mq         *event.RabbitMQ
+	spider     *SpiderUseCase
+	spiderTask *task.SpiderTask
+	stopCh     chan struct{}
+	stopOnce   sync.Once
 }
 
-func NewConsumer(mq *event.RabbitMQ, spider *SpiderUseCase) *Consumer {
+func NewConsumer(mq *event.RabbitMQ, spider *SpiderUseCase, spiderTask *task.SpiderTask) *Consumer {
 	return &Consumer{
-		mq:     mq,
-		spider: spider,
+		mq:         mq,
+		spider:     spider,
+		spiderTask: spiderTask,
+		stopCh:     make(chan struct{}),
 	}
+}
+
+func (c *Consumer) Stop() {
+	c.stopOnce.Do(func() { close(c.stopCh) })
 }
 
 func (c *Consumer) Consume() {
 	log.Infof("spider consumer 循环启动")
-	for {
-		if err := c.consumeOnce(); err != nil {
-			log.Errorf("spider consumer 退出: %v，5s 后重连", err)
-		} else {
-			log.Warnf("spider consumer 通道关闭，5s 后重连")
-		}
-		time.Sleep(5 * time.Second)
-	}
-}
-
-func (c *Consumer) consumeOnce() error {
-	ch, err := c.mq.OpenChannel()
-	if err != nil {
-		return err
-	}
-	// 不在此 defer：失败路径会换 channel
-
-	if err := ch.Qos(2, 0, false); err != nil {
-		_ = ch.Close()
-		return err
-	}
-	msgs, err := ch.Consume("spider", "", false, false, false, false, nil)
-	if err != nil {
-		// 队列可能不存在：换新 channel 创建后再消费
-		_ = ch.Close()
-		ch, err = c.mq.OpenChannel()
-		if err != nil {
-			return err
-		}
-		if _, err := ch.QueueDeclare("spider", true, false, false, false, nil); err != nil {
-			_ = ch.Close()
-			return err
-		}
-		if err := ch.Qos(2, 0, false); err != nil {
-			_ = ch.Close()
-			return err
-		}
-		msgs, err = ch.Consume("spider", "", false, false, false, false, nil)
-		if err != nil {
-			_ = ch.Close()
-			return err
-		}
-	}
-	defer ch.Close()
-	log.Infof("spider consumer 已就绪")
-
-	for d := range msgs {
-		go func(d amqp.Delivery) {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Errorf("RabbitMQ(Spider): panic recovered: %v", r)
-					_ = d.Nack(false, false)
-				}
-			}()
+	_ = mqconsume.Run(c.mq, mqconsume.Options{
+		Name:             "spider",
+		Queue:            "spider",
+		Concurrency:      spiderConcurrency,
+		MaxRetry:         3,
+		DeclareOnMissing: true,
+		Stop:             c.stopCh,
+		Handler: func(body []byte, _ amqp.Table) error {
 			msg := event.SpiderEvent{}
-			err := json.Unmarshal(d.Body, &msg)
-			if err != nil {
+			if err := json.Unmarshal(body, &msg); err != nil {
 				log.Errorf("RabbitMQ(Spider): 解析json出错 %s", err.Error())
-				_ = d.Nack(false, false)
-				return
+				// 坏消息：返回 nil 让上层 Ack？不，返回特殊——这里返回 error 会重试；
+				// 解析失败应直接丢弃：用不可重试错误由 MaxRetry 后 drop
+				return fmt.Errorf("bad json: %w", err)
 			}
-			err = c.spider.LoadData(msg.UserId, msg.NeedAll)
+			if c.spiderTask != nil {
+				c.spiderTask.MarkInflight(msg.UserId)
+				defer c.spiderTask.ClearInflight(msg.UserId)
+			}
+			start := spidermetrics.RecordStart(msg.NeedAll)
+			err := c.spider.LoadData(msg.UserId, msg.NeedAll)
+			spidermetrics.RecordEnd(start, err)
 			if err != nil {
 				log.Errorf("RabbitMQ(Spider): %v", err)
-				_ = d.Nack(false, false)
-				return
+				return err
 			}
-			_ = d.Ack(false)
-		}(d)
-	}
-	return nil
+			return nil
+		},
+	})
 }

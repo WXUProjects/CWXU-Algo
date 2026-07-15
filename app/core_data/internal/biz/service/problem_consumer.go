@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"cwxu-algo/app/common/event"
+	"cwxu-algo/app/common/utils/mqconsume"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +19,61 @@ const (
 	problemFetchConcurrency = 4
 	// AI 分析并发
 	problemAnalyzeConcurrency = 8
+	problemMaxRetry           = 5
 )
+
+func retryCount(h amqp.Table) int {
+	if h == nil {
+		return 0
+	}
+	v, ok := h[mqconsume.RetryHeader]
+	if !ok || v == nil {
+		return 0
+	}
+	switch t := v.(type) {
+	case int:
+		return t
+	case int32:
+		return int(t)
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	case string:
+		n, _ := strconv.Atoi(t)
+		return n
+	case []byte:
+		n, _ := strconv.Atoi(string(t))
+		return n
+	default:
+		return 0
+	}
+}
+
+func requeueWithRetry(mq *event.RabbitMQ, queue string, d amqp.Delivery, max int) {
+	n := retryCount(d.Headers)
+	if n >= max {
+		log.Errorf("queue=%s drop after %d retries", queue, n)
+		_ = d.Nack(false, false)
+		return
+	}
+	headers := amqp.Table{}
+	for k, v := range d.Headers {
+		headers[k] = v
+	}
+	headers[mqconsume.RetryHeader] = n + 1
+	if err := mq.Publish("", queue, false, false, amqp.Publishing{
+		ContentType:  d.ContentType,
+		Body:         d.Body,
+		DeliveryMode: amqp.Persistent,
+		Headers:      headers,
+	}); err != nil {
+		log.Errorf("queue=%s requeue publish failed: %v", queue, err)
+		_ = d.Nack(false, true)
+		return
+	}
+	_ = d.Ack(false)
+}
 
 // ProblemFetchConsumer 消费 problem_fetch：仅爬取，并发 4
 type ProblemFetchConsumer struct {
@@ -98,7 +154,7 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 					return
 				}
 				log.Errorf("RabbitMQ(problem_fetch) id=%d: %v", msg.ProblemID, err)
-				_ = d.Nack(false, true)
+				requeueWithRetry(c.mq, "problem_fetch", d, problemMaxRetry)
 				return
 			}
 			_ = d.Ack(false)
@@ -176,8 +232,11 @@ func (c *ProblemAnalyzeConsumer) consumeOnce() error {
 				_ = d.Nack(false, true)
 				return
 			}
-			// 流式 AI：不设整体超时，避免长翻译被 240s/网关切断
-			if err := c.problem.ProcessAnalyze(context.Background(), msg); err != nil {
+			// 流式 AI：整体上限 10 分钟，避免 worker 永久占用
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			err := c.problem.ProcessAnalyze(ctx, msg)
+			cancel()
+			if err != nil {
 				if strings.Contains(err.Error(), "paused") {
 					log.Warnf("RabbitMQ(problem_analyze) id=%d requeue paused: %v", msg.ProblemID, err)
 					time.Sleep(2 * time.Second)
@@ -185,7 +244,7 @@ func (c *ProblemAnalyzeConsumer) consumeOnce() error {
 					return
 				}
 				log.Errorf("RabbitMQ(problem_analyze) id=%d: %v", msg.ProblemID, err)
-				_ = d.Nack(false, true)
+				requeueWithRetry(c.mq, "problem_analyze", d, problemMaxRetry)
 				return
 			}
 			_ = d.Ack(false)

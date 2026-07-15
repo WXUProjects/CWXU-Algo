@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"cwxu-algo/app/common/utils/ojhttp"
 	"bytes"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
@@ -92,7 +93,7 @@ func (lg *NewLuoGu) login(username, password string) (*http.Client, error) {
 	)
 
 	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Jar: jar}
+	client := ojhttp.NewWithJar(jar)
 
 	for attempt := 1; attempt <= maxRetry; attempt++ {
 		// 1. 拉验证码（cookie 在这里生成）

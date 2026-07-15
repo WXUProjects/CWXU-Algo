@@ -25,10 +25,16 @@ import (
 	_ "cwxu-algo/app/core_data/internal/spider/platform"
 )
 
-// runForever 后台常驻任务：panic 后自动重启，避免 consumer 永久消失
-func runForever(name string, fn func()) {
+// runForever 后台常驻任务：panic 后自动重启，直到 stop 关闭
+func runForever(name string, stop <-chan struct{}, fn func()) {
 	go func() {
 		for {
+			select {
+			case <-stop:
+				log.Infof("%s stopped", name)
+				return
+			default:
+			}
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -37,7 +43,12 @@ func runForever(name string, fn func()) {
 				}()
 				fn()
 			}()
-			time.Sleep(5 * time.Second)
+			select {
+			case <-stop:
+				log.Infof("%s stopped", name)
+				return
+			case <-time.After(5 * time.Second):
+			}
 		}
 	}()
 }
@@ -60,10 +71,11 @@ func init() {
 }
 
 func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, cm *service.Consumer, pfc *service.ProblemFetchConsumer, pac *service.ProblemAnalyzeConsumer, cron *task.CronTask) *kratos.App {
-	runForever("spider-consumer", cm.Consume)
-	runForever("problem-fetch-consumer", pfc.Consume)
-	runForever("problem-analyze-consumer", pac.Consume)
-	runForever("cron", cron.Do)
+	stopCh := make(chan struct{})
+	runForever("spider-consumer", stopCh, cm.Consume)
+	runForever("problem-fetch-consumer", stopCh, pfc.Consume)
+	runForever("problem-analyze-consumer", stopCh, pac.Consume)
+	runForever("cron", stopCh, cron.Do)
 	return kratos.New(
 		kratos.ID(fmt.Sprintf("%s-%s-%s", id, Name, Version)),
 		kratos.Name(Name),
@@ -76,9 +88,12 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.
 		),
 		kratos.Registrar(reg.Reg),
 		kratos.BeforeStop(func(ctx context.Context) error {
+			log.Info("stopping background workers...")
+			close(stopCh)
+			cm.Stop()
 			log.Info("stopping cron task...")
 			cron.Stop()
-			log.Info("cron task stopped")
+			log.Info("background workers stop signal sent")
 			return nil
 		}),
 	)

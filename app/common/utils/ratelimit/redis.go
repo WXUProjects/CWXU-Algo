@@ -1,0 +1,41 @@
+package ratelimit
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+)
+
+// Allow 基于 Redis SETNX 的固定窗口限流：interval 内同一 key 只允许 1 次。
+// 与原先进程内 rate.Limiter(Every(interval), 1) 语义一致，且多实例共享。
+func Allow(ctx context.Context, rdb *redis.Client, key string, interval time.Duration) (bool, error) {
+	if rdb == nil {
+		return true, nil
+	}
+	if interval <= 0 {
+		return true, nil
+	}
+	ok, err := rdb.SetNX(ctx, key, "1", interval).Result()
+	if err != nil {
+		// Redis 故障时放行，避免拖垮业务（与可观测日志配合）
+		return true, err
+	}
+	return ok, nil
+}
+
+// SpiderUpdateKey 手动全量更新限流 key
+func SpiderUpdateKey(userId int64) string {
+	return fmt.Sprintf("ratelimit:spider:update:%d", userId)
+}
+
+// SpiderSetKey 绑定 OJ 限流 key
+func SpiderSetKey(userId int64) string {
+	return fmt.Sprintf("ratelimit:spider:set:%d", userId)
+}
+
+// SpiderUpdateAllKey 管理员全站更新限流 key
+func SpiderUpdateAllKey(adminId int64) string {
+	return fmt.Sprintf("ratelimit:spider:update_all:%d", adminId)
+}

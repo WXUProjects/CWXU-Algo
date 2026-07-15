@@ -1,25 +1,60 @@
 package task
 
 import (
-	"cwxu-algo/app/common/event"
+	"context"
 	"encoding/json"
+	"fmt"
+	"time"
+
+	"cwxu-algo/app/common/event"
+	"cwxu-algo/app/core_data/internal/spidermetrics"
 
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/redis/go-redis/v9"
 	"github.com/streadway/amqp"
 )
 
+const (
+	// pendingTTL 待处理去重窗口：同用户在此时间内重复入队会被跳过
+	pendingTTL = 15 * time.Minute
+	// inflightTTL 执行中标记，防止重复消费叠跑
+	inflightTTL = 45 * time.Minute
+)
+
 type SpiderTask struct {
-	mq *event.RabbitMQ
+	mq  *event.RabbitMQ
+	rdb *redis.Client
 }
 
-func NewSpiderTask(mq *event.RabbitMQ) *SpiderTask {
-	return &SpiderTask{mq: mq}
+func NewSpiderTask(mq *event.RabbitMQ, rdb *redis.Client) *SpiderTask {
+	return &SpiderTask{mq: mq, rdb: rdb}
 }
 
+func pendingKey(userId int64) string {
+	return fmt.Sprintf("spider:pending:%d", userId)
+}
+
+func InflightKey(userId int64) string {
+	return fmt.Sprintf("spider:inflight:%d", userId)
+}
+
+// Do 入队爬虫任务。同 user 在 pending/inflight 窗口内去重（功能结果仍是「会同步」，只是不重复堆队列）。
 func (t *SpiderTask) Do(userId int64, needAll bool) {
 	if t.mq == nil {
 		log.Errorf("SpiderTask: mq not ready")
 		return
+	}
+	if t.rdb != nil {
+		ctx := context.Background()
+		// 执行中或已在队列：跳过重复入队
+		if n, err := t.rdb.Exists(ctx, InflightKey(userId), pendingKey(userId)).Result(); err == nil && n > 0 {
+			spidermetrics.IncDedupSkipped()
+			log.Debugf("SpiderTask: dedup skip user=%d needAll=%v", userId, needAll)
+			return
+		}
+		if err := t.rdb.Set(ctx, pendingKey(userId), "1", pendingTTL).Err(); err != nil {
+			log.Warnf("SpiderTask: set pending key failed: %v", err)
+		}
 	}
 	if _, err := t.mq.QueueDeclare("spider", true, false, false, false, nil); err != nil {
 		log.Errorf("SpiderTask: QueueDeclare failed: %v", err)
@@ -37,5 +72,55 @@ func (t *SpiderTask) Do(userId int64, needAll bool) {
 		DeliveryMode: amqp.Persistent,
 	}); err != nil {
 		log.Errorf("SpiderTask: Publish failed: %v", err)
+		return
+	}
+	spidermetrics.IncEnqueued()
+}
+
+// MarkInflight 消费开始时调用
+func (t *SpiderTask) MarkInflight(userId int64) {
+	if t.rdb == nil {
+		return
+	}
+	ctx := context.Background()
+	_ = t.rdb.Del(ctx, pendingKey(userId)).Err()
+	_ = t.rdb.Set(ctx, InflightKey(userId), "1", inflightTTL).Err()
+}
+
+// ClearInflight 消费结束时调用
+func (t *SpiderTask) ClearInflight(userId int64) {
+	if t.rdb == nil {
+		return
+	}
+	_ = t.rdb.Del(context.Background(), InflightKey(userId)).Err()
+}
+
+// DoBatch 分批入队，避免 UpdateAll 瞬时打满队列（功能仍是「全部触发」）。
+// ctx 取消时提前结束（进程停机）。
+func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool, batchSize int, interval time.Duration) {
+	if batchSize <= 0 {
+		batchSize = 20
+	}
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for i, uid := range userIds {
+		select {
+		case <-ctx.Done():
+			log.Warnf("SpiderTask: DoBatch cancelled at %d/%d", i, len(userIds))
+			return
+		default:
+		}
+		t.Do(uid, needAll)
+		if (i+1)%batchSize == 0 && i+1 < len(userIds) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+		}
 	}
 }

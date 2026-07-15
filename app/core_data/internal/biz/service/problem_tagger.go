@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -28,8 +29,8 @@ func NewProblemTagger(c *conf.AiAnalyze) *ProblemTagger {
 		return t
 	}
 	base := normalizeOpenAIBaseURL(c.Endpoint)
-	// 流式传输：不设整体 Timeout（0=无限制），靠 SSE 持续收 chunk
-	httpClient := &http.Client{Timeout: 0}
+	// 流式 AI：给整体上限，避免 worker 永久占用
+	httpClient := &http.Client{Timeout: 10 * time.Minute}
 	t.client = openai.NewClient(
 		option.WithAPIKey(c.Secret),
 		option.WithBaseURL(base),

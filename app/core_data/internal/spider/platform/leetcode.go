@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"cwxu-algo/app/common/utils/ojhttp"
 	"bytes"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
@@ -137,7 +138,7 @@ func fetchLeetCodeCalendar(username string) (map[int64]int, error) {
 	}
 	setLCHeaders(req, username)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := ojhttp.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("leetcode calendar 请求失败: %w", err)
 	}
@@ -201,7 +202,7 @@ func fetchLeetCodeAcTotal(username string) (int, error) {
 	setLCHeaders(req, username)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := ojhttp.Do(req)
 	if err != nil {
 		return 0, fmt.Errorf("leetcode profile 请求失败: %w", err)
 	}

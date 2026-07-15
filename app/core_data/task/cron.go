@@ -1,17 +1,14 @@
 package task
 
 import (
-	"context"
-	profile2 "cwxu-algo/api/user/v1/profile"
-	"cwxu-algo/app/common/discovery"
-	"cwxu-algo/app/core_data/internal/data"
 	"sync"
 	"time"
 
-	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
+	"cwxu-algo/app/core_data/internal/data"
+	"cwxu-algo/app/core_data/internal/data/model"
+
+	"github.com/go-kratos/kratos/v2/log"
 	"github.com/robfig/cron/v3"
-	grpc2 "google.golang.org/grpc"
 	"gorm.io/gorm"
 )
 
@@ -19,29 +16,18 @@ type CronTask struct {
 	spider  *SpiderTask
 	summary *SummaryTask
 	db      *gorm.DB
-	reg     *registry.Registrar
 	cron    *cron.Cron
 	stopCh  chan struct{}
 	mu      sync.RWMutex
 }
 
-func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, reg *discovery.Register) *CronTask {
+func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask) *CronTask {
 	return &CronTask{
 		spider:  spider,
 		db:      data.DB,
 		summary: summary,
-		reg:     &reg.Reg,
 		stopCh:  make(chan struct{}),
 	}
-}
-
-func (t *CronTask) userRPC() (*grpc2.ClientConn, error) {
-	return grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery((*t.reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
 }
 
 func (t *CronTask) Stop() {
@@ -52,44 +38,21 @@ func (t *CronTask) Stop() {
 		t.cron.Stop()
 		t.cron = nil
 	}
-	close(t.stopCh)
+	select {
+	case <-t.stopCh:
+	default:
+		close(t.stopCh)
+	}
 }
 
-func (t *CronTask) getUserIds() []int64 {
-	userRpc, err := t.userRPC()
-	if err != nil {
-		return make([]int64, 0)
-	}
-	defer userRpc.Close()
-	profile := profile2.NewProfileClient(userRpc)
-	getUsers := func(pageNum int) (*profile2.GetListRes, error) {
-		return profile.GetList(context.Background(), &profile2.GetListReq{
-			PageSize: 100,
-			PageNum:  int64(pageNum),
-		})
-	}
-	res, err := getUsers(1)
-	if err != nil {
-		return make([]int64, 0)
-	}
-	rList := make([]*profile2.GetListRes, 1)
-	rList[0] = res
-	totalPage := (res.Total + 99) / 100
-	for i := 2; i <= int(totalPage); i++ {
-		r, err := getUsers(i)
-		if err != nil {
-			continue
-		}
-		rList = append(rList, r)
-	}
+// getBoundUserIds 仅返回 platform 表中已绑定 OJ 的用户（去重）
+func (t *CronTask) getBoundUserIds() []int64 {
 	var userIds []int64
-	//t.db.Model(&model.Platform{}).
-	//	Select("DISTINCT user_id").
-	//	Pluck("user_id", &userIds)
-	for _, v := range rList {
-		for _, u := range v.List {
-			userIds = append(userIds, int64(u.UserId))
-		}
+	if err := t.db.Model(&model.Platform{}).
+		Distinct("user_id").
+		Pluck("user_id", &userIds).Error; err != nil {
+		log.Errorf("CronTask: query bound users failed: %v", err)
+		return nil
 	}
 	return userIds
 }
@@ -101,23 +64,25 @@ func (t *CronTask) Do() {
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 	t.cron = cron.New(cron.WithLocation(loc))
 	_, _ = t.cron.AddFunc("1 * * * *", func() {
-		// 增量查询
-		// 获取所有platform表中存在的userid
-		userIds := t.getUserIds()
+		// 增量同步：只爬已绑定 OJ 的用户
+		userIds := t.getBoundUserIds()
+		log.Infof("CronTask spider incremental: bound_users=%d", len(userIds))
 		for _, v := range userIds {
 			t.spider.Do(v, false)
 		}
 	})
 	_, _ = t.cron.AddFunc("30 7 * * *", func() {
-		// 早7点半进行一次总结
-		userIds := t.getUserIds()
+		// 早 7:30 日总结：仅已绑定用户
+		userIds := t.getBoundUserIds()
+		log.Infof("CronTask summary PersonalLastDay: bound_users=%d", len(userIds))
 		for _, v := range userIds {
 			t.summary.Do(v, "PersonalLastDay")
 		}
 	})
 	_, _ = t.cron.AddFunc("1 6,9,12,15,18,21,0 * * *", func() {
-		// 每6 9 12 15 18 21 24 进行一次总结
-		userIds := t.getUserIds()
+		// 时段总结：仅已绑定用户
+		userIds := t.getBoundUserIds()
+		log.Infof("CronTask summary PersonalRecent: bound_users=%d", len(userIds))
 		for _, v := range userIds {
 			t.summary.Do(v, "PersonalRecent")
 		}

@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"cwxu-algo/app/common/utils/ojhttp"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -117,7 +118,7 @@ func (q *NewQOJ) doLogin(
 func (q *NewQOJ) login(username, password string) (*http.Client, error) {
 	const maxRetry = 20
 	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Jar: jar}
+	client := ojhttp.NewWithJar(jar)
 
 	for attempt := 1; attempt <= maxRetry; attempt++ {
 		ok, body, err := q.doLogin(client, username, password)

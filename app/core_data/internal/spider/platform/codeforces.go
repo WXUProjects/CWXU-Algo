@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"cwxu-algo/app/common/utils/ojhttp"
 	"bytes"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
@@ -46,7 +47,7 @@ func (p NewCodeforces) FetchSubmitLog(userId int64, username string, needAll boo
 		"https://codeforces.com/api/user.status?handle=%s&from=%d&count=%d",
 		handle, last_commit, need,
 	)
-	resp, err := http.Get(url)
+	resp, err := ojhttp.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("发起http请求失败: %s", err.Error())
 	}
@@ -98,7 +99,7 @@ func (p NewCodeforces) FetchContestLog(userId int64, username string, needAll bo
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := ojhttp.Do(req)
 	if err != nil {
 		return nil, err
 	}

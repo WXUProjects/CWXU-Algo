@@ -2,19 +2,19 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"time"
+
 	"cwxu-algo/api/core/v1/spider"
 	"cwxu-algo/app/common/utils/auth"
+	"cwxu-algo/app/common/utils/ratelimit"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/task"
-	"fmt"
-	"sync"
-	"time"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
-	"golang.org/x/time/rate"
 	"gorm.io/gorm"
 )
 
@@ -27,28 +27,25 @@ var (
 
 type SpiderService struct {
 	spider.UnimplementedSpiderServer
-	db          *gorm.DB
-	rdb         *redis.Client
-	spider      *task.SpiderTask
-	limiterMap  sync.Map // map[int64]*rate.Limiter
+	db     *gorm.DB
+	rdb    *redis.Client
+	spider *task.SpiderTask
 }
 
-func (s *SpiderService) getLimiter(userId int64, interval time.Duration) *rate.Limiter {
-	if l, ok := s.limiterMap.Load(userId); ok {
-		return l.(*rate.Limiter)
+func (s SpiderService) allow(ctx context.Context, key string, interval time.Duration) bool {
+	ok, err := ratelimit.Allow(ctx, s.rdb, key, interval)
+	if err != nil {
+		log.Warnf("spider rate limit redis error (allow): %v", err)
 	}
-	// 1 request per interval, burst 1
-	l := rate.NewLimiter(rate.Every(interval), 1)
-	actual, _ := s.limiterMap.LoadOrStore(userId, l)
-	return actual.(*rate.Limiter)
+	return ok
 }
 
 func (s SpiderService) Update(ctx context.Context, req *spider.UpdateReq) (*spider.UpdateRes, error) {
-	//if !auth.VerifyById(ctx, uint(req.UserId)) {
-	//	return nil, UpdateForbidden
-	//}
-	limiter := s.getLimiter(req.UserId, 60*time.Second)
-	if !limiter.Allow() {
+	// 本人或管理员可触发；避免任意登录用户刷他人全量爬虫
+	if !auth.VerifySelfOrAbove(ctx, uint(req.UserId)) {
+		return nil, UpdateForbidden
+	}
+	if !s.allow(ctx, ratelimit.SpiderUpdateKey(req.UserId), 60*time.Second) {
 		return nil, RateLimitError
 	}
 	s.spider.Do(req.UserId, true) // 全量更新
@@ -58,15 +55,13 @@ func (s SpiderService) Update(ctx context.Context, req *spider.UpdateReq) (*spid
 	}, nil
 }
 
-// UpdateAll 管理员一键触发所有已绑定 OJ 用户的全量更新
+// UpdateAll 管理员一键触发所有已绑定 OJ 用户的全量更新（分批入队，削峰）
 func (s SpiderService) UpdateAll(ctx context.Context, _ *spider.UpdateAllReq) (*spider.UpdateAllRes, error) {
 	if !auth.VerifyAdmin(ctx) {
 		return nil, SetForbidden
 	}
-	// 全站按钮限流：同一管理员 5 分钟内只能点一次
 	adminId := int64(auth.GetCurrentUserId(ctx))
-	limiter := s.getLimiter(-adminId, 5*time.Minute) // 负 id 与用户更新限流隔离
-	if !limiter.Allow() {
+	if !s.allow(ctx, ratelimit.SpiderUpdateAllKey(adminId), 5*time.Minute) {
 		return nil, RateLimitError
 	}
 
@@ -78,9 +73,8 @@ func (s SpiderService) UpdateAll(ctx context.Context, _ *spider.UpdateAllReq) (*
 		return nil, InternalError
 	}
 
-	for _, uid := range userIds {
-		s.spider.Do(uid, true)
-	}
+	// 异步分批：API 立即返回，后台按 20 人/分钟 入队
+	go s.spider.DoBatch(context.Background(), userIds, true, 20, time.Minute)
 
 	return &spider.UpdateAllRes{
 		Code:    0,
@@ -108,16 +102,12 @@ func (s SpiderService) GetSpider(ctx context.Context, req *spider.GetSpiderReq) 
 }
 
 func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) (*spider.SetSpiderRep, error) {
-	// 校验JWT：只能设置自己的 spider，或者管理员可以设置任何人
 	if !auth.VerifySelfOrAbove(ctx, uint(req.UserId)) {
 		return nil, SetForbidden
 	}
-	// Rate limit
-	limiter := s.getLimiter(req.UserId, 30*time.Second)
-	if !limiter.Allow() {
+	if !s.allow(ctx, ratelimit.SpiderSetKey(req.UserId), 30*time.Second) {
 		return nil, RateLimitError
 	}
-	// 直接设置进去 构建Platform
 	platform := model.Platform{
 		UserID:   req.UserId,
 		Platform: req.Platform,
@@ -137,7 +127,7 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 		log.Errorf("SetSpider: save platform failed: %v", err)
 		return nil, InternalError
 	}
-	s.spider.Do(req.UserId, true) // 全量更新
+	s.spider.Do(req.UserId, true)
 	return &spider.SetSpiderRep{
 		Code:    0,
 		Message: "设置成功，请稍等片刻，您的全量OJ数据正在更新",
