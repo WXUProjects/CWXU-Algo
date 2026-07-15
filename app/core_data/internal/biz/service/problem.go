@@ -717,7 +717,9 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 	}
 	if len(f.Tags) > 0 {
 		// jsonb 数组包含任一 tag（OR）
-		// 禁止写 tags::jsonb ? ? —— GORM 的 ? 占位符与 PG jsonb ? 运算符冲突，会报 syntax error near $1
+		// 禁止 tags::jsonb ? ?（GORM 占位符冲突）
+		// 禁止 jsonb_build_array(?)（PG 无法推断 $1 类型 → 42P18）
+		// 用 CAST(? AS jsonb) 传入 JSON 数组字面量，类型明确
 		ors := make([]string, 0, len(f.Tags))
 		args := make([]interface{}, 0, len(f.Tags))
 		for _, t := range f.Tags {
@@ -725,8 +727,12 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 			if t == "" {
 				continue
 			}
-			ors = append(ors, "tags::jsonb @> jsonb_build_array(?)")
-			args = append(args, t)
+			b, err := json.Marshal([]string{t})
+			if err != nil {
+				continue
+			}
+			ors = append(ors, "tags::jsonb @> CAST(? AS jsonb)")
+			args = append(args, string(b))
 		}
 		if len(ors) > 0 {
 			q = q.Where(strings.Join(ors, " OR "), args...)
@@ -775,18 +781,8 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 	if err := q.Count(&total).Error; err != nil {
 		return nil, nil, 0, err
 	}
-	// 默认按最近提交倒序；兼容 latest_* / id_*
+	// 固定：最近提交降序（不再提供其它排序）
 	order := "last_submitted_at DESC NULLS LAST, id DESC"
-	switch strings.TrimSpace(f.Sort) {
-	case "id_asc":
-		order = "id ASC"
-	case "id_desc":
-		order = "id DESC"
-	case "latest_asc":
-		order = "last_submitted_at ASC NULLS LAST, id ASC"
-	case "latest_desc", "":
-		order = "last_submitted_at DESC NULLS LAST, id DESC"
-	}
 	var list []model.Problem
 	err := q.Order(order).Offset(int((f.Page - 1) * f.PageSize)).Limit(int(f.PageSize)).Find(&list).Error
 	if err != nil {
