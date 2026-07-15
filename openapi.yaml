@@ -1004,6 +1004,37 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.role.SetUserRoleRes'
+    /v1/user/site/config:
+        get:
+            tags:
+                - Site
+            description: 公开：站点品牌配置
+            operationId: Site_GetConfig
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.site.GetConfigRes'
+        post:
+            tags:
+                - Site
+            description: 管理员：更新站点标题 / logo / favicon
+            operationId: Site_UpdateConfig
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.site.UpdateConfigReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.site.UpdateConfigRes'
 components:
     schemas:
         api.agent.v1.summary.GetSummaryReply:
@@ -2058,6 +2089,41 @@ components:
                     type: string
                 message:
                     type: string
+        api.user.v1.site.GetConfigRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                siteTitle:
+                    type: string
+                siteLogo:
+                    type: string
+                favicon:
+                    type: string
+        api.user.v1.site.UpdateConfigReq:
+            type: object
+            properties:
+                siteTitle:
+                    type: string
+                siteLogo:
+                    type: string
+                favicon:
+                    type: string
+        api.user.v1.site.UpdateConfigRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                siteTitle:
+                    type: string
+                siteLogo:
+                    type: string
+                favicon:
+                    type: string
 tags:
     - name: Auth
       description: Auth 认证服务
@@ -2070,6 +2136,7 @@ tags:
     - name: Profile
     - name: Role
       description: 角色服务：查看角色列表、设置用户角色
+    - name: Site
     - name: Spider
     - name: Statistic
     - name: Submit

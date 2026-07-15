@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package api.user.v1.site;
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/user/v1/site;site";
+option java_multiple_files = true;
+option java_package = "api.user.v1.site";
+
+service Site {
+  // 公开：站点品牌配置
+  rpc GetConfig (GetConfigReq) returns (GetConfigRes) {
+    option (google.api.http) = {
+      get: "/v1/user/site/config"
+    };
+  }
+  // 管理员：更新站点标题 / logo / favicon
+  rpc UpdateConfig (UpdateConfigReq) returns (UpdateConfigRes) {
+    option (google.api.http) = {
+      post: "/v1/user/site/config"
+      body: "*"
+    };
+  }
+}
+
+message GetConfigReq {}
+
+message GetConfigRes {
+  int64 code = 1;
+  string message = 2;
+  string site_title = 3;
+  string site_logo = 4;
+  string favicon = 5;
+}
+
+message UpdateConfigReq {
+  string site_title = 1;
+  string site_logo = 2;
+  string favicon = 3;
+}
+
+message UpdateConfigRes {
+  int64 code = 1;
+  string message = 2;
+  string site_title = 3;
+  string site_logo = 4;
+  string favicon = 5;
+}
