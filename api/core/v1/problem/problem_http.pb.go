@@ -24,6 +24,7 @@ const OperationProblemEmergencyStop = "/api.core.v1.problem.Problem/EmergencySto
 const OperationProblemGet = "/api.core.v1.problem.Problem/Get"
 const OperationProblemList = "/api.core.v1.problem.Problem/List"
 const OperationProblemListSubmissions = "/api.core.v1.problem.Problem/ListSubmissions"
+const OperationProblemListTags = "/api.core.v1.problem.Problem/ListTags"
 const OperationProblemProgress = "/api.core.v1.problem.Problem/Progress"
 const OperationProblemResetAll = "/api.core.v1.problem.Problem/ResetAll"
 const OperationProblemResetQueues = "/api.core.v1.problem.Problem/ResetQueues"
@@ -40,6 +41,8 @@ type ProblemHTTPServer interface {
 	Get(context.Context, *GetProblemReq) (*GetProblemRes, error)
 	List(context.Context, *ListProblemReq) (*ListProblemRes, error)
 	ListSubmissions(context.Context, *ListSubmissionsReq) (*ListSubmissionsRes, error)
+	// ListTags 标签聚合（名称 + 题量），供筛选器选择
+	ListTags(context.Context, *ListTagsReq) (*ListTagsRes, error)
 	Progress(context.Context, *ProgressReq) (*ProgressRes, error)
 	// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(context.Context, *ResetAllReq) (*ResetAllRes, error)
@@ -59,6 +62,7 @@ type ProblemHTTPServer interface {
 func RegisterProblemHTTPServer(s *http.Server, srv ProblemHTTPServer) {
 	r := s.Route("/")
 	r.GET("/v1/core/problem/list", _Problem_List0_HTTP_Handler(srv))
+	r.GET("/v1/core/problem/tags", _Problem_ListTags0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/get", _Problem_Get0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/submissions", _Problem_ListSubmissions0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/user-profile", _Problem_UserProfile0_HTTP_Handler(srv))
@@ -88,6 +92,25 @@ func _Problem_List0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) e
 			return err
 		}
 		reply := out.(*ListProblemRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problem_ListTags0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ListTagsReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemListTags)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ListTags(ctx, req.(*ListTagsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ListTagsRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -351,6 +374,8 @@ type ProblemHTTPClient interface {
 	Get(ctx context.Context, req *GetProblemReq, opts ...http.CallOption) (rsp *GetProblemRes, err error)
 	List(ctx context.Context, req *ListProblemReq, opts ...http.CallOption) (rsp *ListProblemRes, err error)
 	ListSubmissions(ctx context.Context, req *ListSubmissionsReq, opts ...http.CallOption) (rsp *ListSubmissionsRes, err error)
+	// ListTags 标签聚合（名称 + 题量），供筛选器选择
+	ListTags(ctx context.Context, req *ListTagsReq, opts ...http.CallOption) (rsp *ListTagsRes, err error)
 	Progress(ctx context.Context, req *ProgressReq, opts ...http.CallOption) (rsp *ProgressRes, err error)
 	// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(ctx context.Context, req *ResetAllReq, opts ...http.CallOption) (rsp *ResetAllRes, err error)
@@ -433,6 +458,20 @@ func (c *ProblemHTTPClientImpl) ListSubmissions(ctx context.Context, in *ListSub
 	pattern := "/v1/core/problem/submissions"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationProblemListSubmissions))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListTags 标签聚合（名称 + 题量），供筛选器选择
+func (c *ProblemHTTPClientImpl) ListTags(ctx context.Context, in *ListTagsReq, opts ...http.CallOption) (*ListTagsRes, error) {
+	var out ListTagsRes
+	pattern := "/v1/core/problem/tags"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProblemListTags))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {

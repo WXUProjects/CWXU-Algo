@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	Problem_List_FullMethodName            = "/api.core.v1.problem.Problem/List"
+	Problem_ListTags_FullMethodName        = "/api.core.v1.problem.Problem/ListTags"
 	Problem_Get_FullMethodName             = "/api.core.v1.problem.Problem/Get"
 	Problem_ListSubmissions_FullMethodName = "/api.core.v1.problem.Problem/ListSubmissions"
 	Problem_UserProfile_FullMethodName     = "/api.core.v1.problem.Problem/UserProfile"
@@ -39,6 +40,8 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ProblemClient interface {
 	List(ctx context.Context, in *ListProblemReq, opts ...grpc.CallOption) (*ListProblemRes, error)
+	// 标签聚合（名称 + 题量），供筛选器选择
+	ListTags(ctx context.Context, in *ListTagsReq, opts ...grpc.CallOption) (*ListTagsRes, error)
 	Get(ctx context.Context, in *GetProblemReq, opts ...grpc.CallOption) (*GetProblemRes, error)
 	ListSubmissions(ctx context.Context, in *ListSubmissionsReq, opts ...grpc.CallOption) (*ListSubmissionsRes, error)
 	UserProfile(ctx context.Context, in *UserProfileReq, opts ...grpc.CallOption) (*UserProfileRes, error)
@@ -72,6 +75,16 @@ func (c *problemClient) List(ctx context.Context, in *ListProblemReq, opts ...gr
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListProblemRes)
 	err := c.cc.Invoke(ctx, Problem_List_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) ListTags(ctx context.Context, in *ListTagsReq, opts ...grpc.CallOption) (*ListTagsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTagsRes)
+	err := c.cc.Invoke(ctx, Problem_ListTags_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -203,6 +216,8 @@ func (c *problemClient) ResetQueues(ctx context.Context, in *ResetQueuesReq, opt
 // for forward compatibility.
 type ProblemServer interface {
 	List(context.Context, *ListProblemReq) (*ListProblemRes, error)
+	// 标签聚合（名称 + 题量），供筛选器选择
+	ListTags(context.Context, *ListTagsReq) (*ListTagsRes, error)
 	Get(context.Context, *GetProblemReq) (*GetProblemRes, error)
 	ListSubmissions(context.Context, *ListSubmissionsReq) (*ListSubmissionsRes, error)
 	UserProfile(context.Context, *UserProfileReq) (*UserProfileRes, error)
@@ -234,6 +249,9 @@ type UnimplementedProblemServer struct{}
 
 func (UnimplementedProblemServer) List(context.Context, *ListProblemReq) (*ListProblemRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method List not implemented")
+}
+func (UnimplementedProblemServer) ListTags(context.Context, *ListTagsReq) (*ListTagsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTags not implemented")
 }
 func (UnimplementedProblemServer) Get(context.Context, *GetProblemReq) (*GetProblemRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Get not implemented")
@@ -306,6 +324,24 @@ func _Problem_List_Handler(srv interface{}, ctx context.Context, dec func(interf
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProblemServer).List(ctx, req.(*ListProblemReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_ListTags_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTagsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).ListTags(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_ListTags_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).ListTags(ctx, req.(*ListTagsReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -536,6 +572,10 @@ var Problem_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "List",
 			Handler:    _Problem_List_Handler,
+		},
+		{
+			MethodName: "ListTags",
+			Handler:    _Problem_ListTags_Handler,
 		},
 		{
 			MethodName: "Get",

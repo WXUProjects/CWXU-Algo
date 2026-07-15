@@ -32,6 +32,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.core.v1.bulletin.Bulletin/Get":                  "",
 		"/api.core.v1.bulletin.Bulletin/List":                 "",
 		"/api.core.v1.problem.Problem/List":                   "",
+		"/api.core.v1.problem.Problem/ListTags":               "",
 		"/api.core.v1.problem.Problem/Get":                    "",
 		"/api.core.v1.problem.Problem/ListSubmissions":        "",
 		"/api.core.v1.problem.Problem/UserProfile":            "",

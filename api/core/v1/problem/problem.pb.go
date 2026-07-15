@@ -437,6 +437,163 @@ func (x *ListProblemRes) GetPageSize() int64 {
 	return 0
 }
 
+type ListTagsReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 返回条数上限，默认 100，最大 300
+	Limit         int32 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTagsReq) Reset() {
+	*x = ListTagsReq{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTagsReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTagsReq) ProtoMessage() {}
+
+func (x *ListTagsReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTagsReq.ProtoReflect.Descriptor instead.
+func (*ListTagsReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ListTagsReq) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type TagCount struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tag           string                 `protobuf:"bytes,1,opt,name=tag,proto3" json:"tag,omitempty"`
+	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TagCount) Reset() {
+	*x = TagCount{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TagCount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TagCount) ProtoMessage() {}
+
+func (x *TagCount) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TagCount.ProtoReflect.Descriptor instead.
+func (*TagCount) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *TagCount) GetTag() string {
+	if x != nil {
+		return x.Tag
+	}
+	return ""
+}
+
+func (x *TagCount) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+type ListTagsRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          []*TagCount            `protobuf:"bytes,3,rep,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTagsRes) Reset() {
+	*x = ListTagsRes{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTagsRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTagsRes) ProtoMessage() {}
+
+func (x *ListTagsRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTagsRes.ProtoReflect.Descriptor instead.
+func (*ListTagsRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ListTagsRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *ListTagsRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *ListTagsRes) GetData() []*TagCount {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
 type GetProblemReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -446,7 +603,7 @@ type GetProblemReq struct {
 
 func (x *GetProblemReq) Reset() {
 	*x = GetProblemReq{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[4]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -458,7 +615,7 @@ func (x *GetProblemReq) String() string {
 func (*GetProblemReq) ProtoMessage() {}
 
 func (x *GetProblemReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[4]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -471,7 +628,7 @@ func (x *GetProblemReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProblemReq.ProtoReflect.Descriptor instead.
 func (*GetProblemReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{4}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetProblemReq) GetId() uint32 {
@@ -492,7 +649,7 @@ type GetProblemRes struct {
 
 func (x *GetProblemRes) Reset() {
 	*x = GetProblemRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[5]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -504,7 +661,7 @@ func (x *GetProblemRes) String() string {
 func (*GetProblemRes) ProtoMessage() {}
 
 func (x *GetProblemRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[5]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -517,7 +674,7 @@ func (x *GetProblemRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProblemRes.ProtoReflect.Descriptor instead.
 func (*GetProblemRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{5}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetProblemRes) GetCode() int64 {
@@ -558,7 +715,7 @@ type SubmissionInfo struct {
 
 func (x *SubmissionInfo) Reset() {
 	*x = SubmissionInfo{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[6]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -570,7 +727,7 @@ func (x *SubmissionInfo) String() string {
 func (*SubmissionInfo) ProtoMessage() {}
 
 func (x *SubmissionInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[6]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -583,7 +740,7 @@ func (x *SubmissionInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmissionInfo.ProtoReflect.Descriptor instead.
 func (*SubmissionInfo) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{6}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SubmissionInfo) GetId() uint32 {
@@ -661,7 +818,7 @@ type ListSubmissionsReq struct {
 
 func (x *ListSubmissionsReq) Reset() {
 	*x = ListSubmissionsReq{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[7]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -673,7 +830,7 @@ func (x *ListSubmissionsReq) String() string {
 func (*ListSubmissionsReq) ProtoMessage() {}
 
 func (x *ListSubmissionsReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[7]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -686,7 +843,7 @@ func (x *ListSubmissionsReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSubmissionsReq.ProtoReflect.Descriptor instead.
 func (*ListSubmissionsReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{7}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ListSubmissionsReq) GetProblemId() uint32 {
@@ -729,7 +886,7 @@ type ListSubmissionsRes struct {
 
 func (x *ListSubmissionsRes) Reset() {
 	*x = ListSubmissionsRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[8]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -741,7 +898,7 @@ func (x *ListSubmissionsRes) String() string {
 func (*ListSubmissionsRes) ProtoMessage() {}
 
 func (x *ListSubmissionsRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[8]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -754,7 +911,7 @@ func (x *ListSubmissionsRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSubmissionsRes.ProtoReflect.Descriptor instead.
 func (*ListSubmissionsRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{8}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ListSubmissionsRes) GetCode() int64 {
@@ -796,7 +953,7 @@ type TagScore struct {
 
 func (x *TagScore) Reset() {
 	*x = TagScore{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[9]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -808,7 +965,7 @@ func (x *TagScore) String() string {
 func (*TagScore) ProtoMessage() {}
 
 func (x *TagScore) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[9]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -821,7 +978,7 @@ func (x *TagScore) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TagScore.ProtoReflect.Descriptor instead.
 func (*TagScore) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{9}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *TagScore) GetTag() string {
@@ -855,7 +1012,7 @@ type NamedCount struct {
 
 func (x *NamedCount) Reset() {
 	*x = NamedCount{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[10]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -867,7 +1024,7 @@ func (x *NamedCount) String() string {
 func (*NamedCount) ProtoMessage() {}
 
 func (x *NamedCount) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[10]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -880,7 +1037,7 @@ func (x *NamedCount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NamedCount.ProtoReflect.Descriptor instead.
 func (*NamedCount) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{10}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *NamedCount) GetName() string {
@@ -906,7 +1063,7 @@ type UserProfileReq struct {
 
 func (x *UserProfileReq) Reset() {
 	*x = UserProfileReq{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[11]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -918,7 +1075,7 @@ func (x *UserProfileReq) String() string {
 func (*UserProfileReq) ProtoMessage() {}
 
 func (x *UserProfileReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[11]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -931,7 +1088,7 @@ func (x *UserProfileReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserProfileReq.ProtoReflect.Descriptor instead.
 func (*UserProfileReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{11}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *UserProfileReq) GetUserId() int64 {
@@ -955,7 +1112,7 @@ type UserProfileRes struct {
 
 func (x *UserProfileRes) Reset() {
 	*x = UserProfileRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[12]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -967,7 +1124,7 @@ func (x *UserProfileRes) String() string {
 func (*UserProfileRes) ProtoMessage() {}
 
 func (x *UserProfileRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[12]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -980,7 +1137,7 @@ func (x *UserProfileRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserProfileRes.ProtoReflect.Descriptor instead.
 func (*UserProfileRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{12}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *UserProfileRes) GetCode() int64 {
@@ -1033,7 +1190,7 @@ type ProgressReq struct {
 
 func (x *ProgressReq) Reset() {
 	*x = ProgressReq{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[13]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1045,7 +1202,7 @@ func (x *ProgressReq) String() string {
 func (*ProgressReq) ProtoMessage() {}
 
 func (x *ProgressReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[13]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1058,7 +1215,7 @@ func (x *ProgressReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProgressReq.ProtoReflect.Descriptor instead.
 func (*ProgressReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{13}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{16}
 }
 
 type ProgressItem struct {
@@ -1071,7 +1228,7 @@ type ProgressItem struct {
 
 func (x *ProgressItem) Reset() {
 	*x = ProgressItem{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[14]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1083,7 +1240,7 @@ func (x *ProgressItem) String() string {
 func (*ProgressItem) ProtoMessage() {}
 
 func (x *ProgressItem) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[14]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1096,7 +1253,7 @@ func (x *ProgressItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProgressItem.ProtoReflect.Descriptor instead.
 func (*ProgressItem) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{14}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ProgressItem) GetStatus() string {
@@ -1129,7 +1286,7 @@ type FailedProblem struct {
 
 func (x *FailedProblem) Reset() {
 	*x = FailedProblem{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[15]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1141,7 +1298,7 @@ func (x *FailedProblem) String() string {
 func (*FailedProblem) ProtoMessage() {}
 
 func (x *FailedProblem) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[15]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1154,7 +1311,7 @@ func (x *FailedProblem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailedProblem.ProtoReflect.Descriptor instead.
 func (*FailedProblem) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{15}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *FailedProblem) GetId() uint32 {
@@ -1227,7 +1384,7 @@ type ActiveJob struct {
 
 func (x *ActiveJob) Reset() {
 	*x = ActiveJob{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[16]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1239,7 +1396,7 @@ func (x *ActiveJob) String() string {
 func (*ActiveJob) ProtoMessage() {}
 
 func (x *ActiveJob) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[16]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1252,7 +1409,7 @@ func (x *ActiveJob) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActiveJob.ProtoReflect.Descriptor instead.
 func (*ActiveJob) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{16}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ActiveJob) GetProblemId() uint32 {
@@ -1309,7 +1466,7 @@ type QueueStatus struct {
 
 func (x *QueueStatus) Reset() {
 	*x = QueueStatus{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[17]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1321,7 +1478,7 @@ func (x *QueueStatus) String() string {
 func (*QueueStatus) ProtoMessage() {}
 
 func (x *QueueStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[17]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1334,7 +1491,7 @@ func (x *QueueStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueStatus.ProtoReflect.Descriptor instead.
 func (*QueueStatus) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{17}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *QueueStatus) GetName() string {
@@ -1385,7 +1542,7 @@ type ProgressRes struct {
 
 func (x *ProgressRes) Reset() {
 	*x = ProgressRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[18]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1397,7 +1554,7 @@ func (x *ProgressRes) String() string {
 func (*ProgressRes) ProtoMessage() {}
 
 func (x *ProgressRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[18]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1410,7 +1567,7 @@ func (x *ProgressRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProgressRes.ProtoReflect.Descriptor instead.
 func (*ProgressRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{18}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ProgressRes) GetCode() int64 {
@@ -1507,7 +1664,7 @@ type BackfillReq struct {
 
 func (x *BackfillReq) Reset() {
 	*x = BackfillReq{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[19]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1519,7 +1676,7 @@ func (x *BackfillReq) String() string {
 func (*BackfillReq) ProtoMessage() {}
 
 func (x *BackfillReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[19]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1532,7 +1689,7 @@ func (x *BackfillReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackfillReq.ProtoReflect.Descriptor instead.
 func (*BackfillReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{19}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *BackfillReq) GetLimit() int64 {
@@ -1559,7 +1716,7 @@ type BackfillRes struct {
 
 func (x *BackfillRes) Reset() {
 	*x = BackfillRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[20]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1571,7 +1728,7 @@ func (x *BackfillRes) String() string {
 func (*BackfillRes) ProtoMessage() {}
 
 func (x *BackfillRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[20]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1584,7 +1741,7 @@ func (x *BackfillRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackfillRes.ProtoReflect.Descriptor instead.
 func (*BackfillRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{20}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *BackfillRes) GetCode() int64 {
@@ -1652,7 +1809,7 @@ type ResetQueuesReq struct {
 
 func (x *ResetQueuesReq) Reset() {
 	*x = ResetQueuesReq{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[21]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1664,7 +1821,7 @@ func (x *ResetQueuesReq) String() string {
 func (*ResetQueuesReq) ProtoMessage() {}
 
 func (x *ResetQueuesReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[21]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1677,7 +1834,7 @@ func (x *ResetQueuesReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResetQueuesReq.ProtoReflect.Descriptor instead.
 func (*ResetQueuesReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{21}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{24}
 }
 
 type ResetQueuesRes struct {
@@ -1694,7 +1851,7 @@ type ResetQueuesRes struct {
 
 func (x *ResetQueuesRes) Reset() {
 	*x = ResetQueuesRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[22]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1706,7 +1863,7 @@ func (x *ResetQueuesRes) String() string {
 func (*ResetQueuesRes) ProtoMessage() {}
 
 func (x *ResetQueuesRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[22]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1719,7 +1876,7 @@ func (x *ResetQueuesRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResetQueuesRes.ProtoReflect.Descriptor instead.
 func (*ResetQueuesRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{22}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ResetQueuesRes) GetCode() int64 {
@@ -1772,7 +1929,7 @@ type EmergencyStopReq struct {
 
 func (x *EmergencyStopReq) Reset() {
 	*x = EmergencyStopReq{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[23]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1784,7 +1941,7 @@ func (x *EmergencyStopReq) String() string {
 func (*EmergencyStopReq) ProtoMessage() {}
 
 func (x *EmergencyStopReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[23]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1797,7 +1954,7 @@ func (x *EmergencyStopReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmergencyStopReq.ProtoReflect.Descriptor instead.
 func (*EmergencyStopReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{23}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{26}
 }
 
 type EmergencyStopRes struct {
@@ -1812,7 +1969,7 @@ type EmergencyStopRes struct {
 
 func (x *EmergencyStopRes) Reset() {
 	*x = EmergencyStopRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[24]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1824,7 +1981,7 @@ func (x *EmergencyStopRes) String() string {
 func (*EmergencyStopRes) ProtoMessage() {}
 
 func (x *EmergencyStopRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[24]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1837,7 +1994,7 @@ func (x *EmergencyStopRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmergencyStopRes.ProtoReflect.Descriptor instead.
 func (*EmergencyStopRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{24}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *EmergencyStopRes) GetCode() int64 {
@@ -1880,7 +2037,7 @@ type ResetAllReq struct {
 
 func (x *ResetAllReq) Reset() {
 	*x = ResetAllReq{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[25]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1892,7 +2049,7 @@ func (x *ResetAllReq) String() string {
 func (*ResetAllReq) ProtoMessage() {}
 
 func (x *ResetAllReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[25]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1905,7 +2062,7 @@ func (x *ResetAllReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResetAllReq.ProtoReflect.Descriptor instead.
 func (*ResetAllReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{25}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ResetAllReq) GetRequeue() bool {
@@ -1936,7 +2093,7 @@ type ResetAllRes struct {
 
 func (x *ResetAllRes) Reset() {
 	*x = ResetAllRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[26]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1948,7 +2105,7 @@ func (x *ResetAllRes) String() string {
 func (*ResetAllRes) ProtoMessage() {}
 
 func (x *ResetAllRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[26]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1961,7 +2118,7 @@ func (x *ResetAllRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResetAllRes.ProtoReflect.Descriptor instead.
 func (*ResetAllRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{26}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ResetAllRes) GetCode() int64 {
@@ -2014,7 +2171,7 @@ type ResumeReq struct {
 
 func (x *ResumeReq) Reset() {
 	*x = ResumeReq{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[27]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2026,7 +2183,7 @@ func (x *ResumeReq) String() string {
 func (*ResumeReq) ProtoMessage() {}
 
 func (x *ResumeReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[27]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2039,7 +2196,7 @@ func (x *ResumeReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeReq.ProtoReflect.Descriptor instead.
 func (*ResumeReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{27}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{30}
 }
 
 type ResumeRes struct {
@@ -2052,7 +2209,7 @@ type ResumeRes struct {
 
 func (x *ResumeRes) Reset() {
 	*x = ResumeRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[28]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2064,7 +2221,7 @@ func (x *ResumeRes) String() string {
 func (*ResumeRes) ProtoMessage() {}
 
 func (x *ResumeRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[28]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2077,7 +2234,7 @@ func (x *ResumeRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeRes.ProtoReflect.Descriptor instead.
 func (*ResumeRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{28}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ResumeRes) GetCode() int64 {
@@ -2104,7 +2261,7 @@ type RetryFailedReq struct {
 
 func (x *RetryFailedReq) Reset() {
 	*x = RetryFailedReq{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[29]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2116,7 +2273,7 @@ func (x *RetryFailedReq) String() string {
 func (*RetryFailedReq) ProtoMessage() {}
 
 func (x *RetryFailedReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[29]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2129,7 +2286,7 @@ func (x *RetryFailedReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetryFailedReq.ProtoReflect.Descriptor instead.
 func (*RetryFailedReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{29}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *RetryFailedReq) GetLimit() int64 {
@@ -2155,7 +2312,7 @@ type RetryFailedRes struct {
 
 func (x *RetryFailedRes) Reset() {
 	*x = RetryFailedRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[30]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2167,7 +2324,7 @@ func (x *RetryFailedRes) String() string {
 func (*RetryFailedRes) ProtoMessage() {}
 
 func (x *RetryFailedRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[30]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2180,7 +2337,7 @@ func (x *RetryFailedRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetryFailedRes.ProtoReflect.Descriptor instead.
 func (*RetryFailedRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{30}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *RetryFailedRes) GetCode() int64 {
@@ -2229,7 +2386,7 @@ type TogglePipelineReq struct {
 
 func (x *TogglePipelineReq) Reset() {
 	*x = TogglePipelineReq{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[31]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2241,7 +2398,7 @@ func (x *TogglePipelineReq) String() string {
 func (*TogglePipelineReq) ProtoMessage() {}
 
 func (x *TogglePipelineReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[31]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2254,7 +2411,7 @@ func (x *TogglePipelineReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TogglePipelineReq.ProtoReflect.Descriptor instead.
 func (*TogglePipelineReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{31}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *TogglePipelineReq) GetPause() bool {
@@ -2284,7 +2441,7 @@ type TogglePipelineRes struct {
 
 func (x *TogglePipelineRes) Reset() {
 	*x = TogglePipelineRes{}
-	mi := &file_core_v1_problem_problem_proto_msgTypes[32]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2296,7 +2453,7 @@ func (x *TogglePipelineRes) String() string {
 func (*TogglePipelineRes) ProtoMessage() {}
 
 func (x *TogglePipelineRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problem_problem_proto_msgTypes[32]
+	mi := &file_core_v1_problem_problem_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2309,7 +2466,7 @@ func (x *TogglePipelineRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TogglePipelineRes.ProtoReflect.Descriptor instead.
 func (*TogglePipelineRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{32}
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *TogglePipelineRes) GetCode() int64 {
@@ -2390,7 +2547,16 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x04data\x18\x03 \x03(\v2 .api.core.v1.problem.ProblemInfoR\x04data\x12\x14\n" +
 	"\x05total\x18\x04 \x01(\x03R\x05total\x12\x12\n" +
 	"\x04page\x18\x05 \x01(\x03R\x04page\x12\x1b\n" +
-	"\tpage_size\x18\x06 \x01(\x03R\bpageSize\"\x1f\n" +
+	"\tpage_size\x18\x06 \x01(\x03R\bpageSize\"#\n" +
+	"\vListTagsReq\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\"2\n" +
+	"\bTagCount\x12\x10\n" +
+	"\x03tag\x18\x01 \x01(\tR\x03tag\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\"n\n" +
+	"\vListTagsRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x121\n" +
+	"\x04data\x18\x03 \x03(\v2\x1d.api.core.v1.problem.TagCountR\x04data\"\x1f\n" +
 	"\rGetProblemReq\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\"s\n" +
 	"\rGetProblemRes\x12\x12\n" +
@@ -2536,9 +2702,10 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
 	"\x06paused\x18\x03 \x01(\bR\x06paused\x12\x16\n" +
-	"\x06purged\x18\x04 \x01(\x03R\x06purged2\xed\f\n" +
+	"\x06purged\x18\x04 \x01(\x03R\x06purged2\xdc\r\n" +
 	"\aProblem\x12o\n" +
-	"\x04List\x12#.api.core.v1.problem.ListProblemReq\x1a#.api.core.v1.problem.ListProblemRes\"\x1d\x82\xd3\xe4\x93\x02\x17\x12\x15/v1/core/problem/list\x12k\n" +
+	"\x04List\x12#.api.core.v1.problem.ListProblemReq\x1a#.api.core.v1.problem.ListProblemRes\"\x1d\x82\xd3\xe4\x93\x02\x17\x12\x15/v1/core/problem/list\x12m\n" +
+	"\bListTags\x12 .api.core.v1.problem.ListTagsReq\x1a .api.core.v1.problem.ListTagsRes\"\x1d\x82\xd3\xe4\x93\x02\x17\x12\x15/v1/core/problem/tags\x12k\n" +
 	"\x03Get\x12\".api.core.v1.problem.GetProblemReq\x1a\".api.core.v1.problem.GetProblemRes\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1/core/problem/get\x12\x89\x01\n" +
 	"\x0fListSubmissions\x12'.api.core.v1.problem.ListSubmissionsReq\x1a'.api.core.v1.problem.ListSubmissionsRes\"$\x82\xd3\xe4\x93\x02\x1e\x12\x1c/v1/core/problem/submissions\x12~\n" +
 	"\vUserProfile\x12#.api.core.v1.problem.UserProfileReq\x1a#.api.core.v1.problem.UserProfileRes\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/core/problem/user-profile\x12q\n" +
@@ -2565,87 +2732,93 @@ func file_core_v1_problem_problem_proto_rawDescGZIP() []byte {
 	return file_core_v1_problem_problem_proto_rawDescData
 }
 
-var file_core_v1_problem_problem_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_core_v1_problem_problem_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_core_v1_problem_problem_proto_goTypes = []any{
 	(*SolutionMeta)(nil),       // 0: api.core.v1.problem.SolutionMeta
 	(*ProblemInfo)(nil),        // 1: api.core.v1.problem.ProblemInfo
 	(*ListProblemReq)(nil),     // 2: api.core.v1.problem.ListProblemReq
 	(*ListProblemRes)(nil),     // 3: api.core.v1.problem.ListProblemRes
-	(*GetProblemReq)(nil),      // 4: api.core.v1.problem.GetProblemReq
-	(*GetProblemRes)(nil),      // 5: api.core.v1.problem.GetProblemRes
-	(*SubmissionInfo)(nil),     // 6: api.core.v1.problem.SubmissionInfo
-	(*ListSubmissionsReq)(nil), // 7: api.core.v1.problem.ListSubmissionsReq
-	(*ListSubmissionsRes)(nil), // 8: api.core.v1.problem.ListSubmissionsRes
-	(*TagScore)(nil),           // 9: api.core.v1.problem.TagScore
-	(*NamedCount)(nil),         // 10: api.core.v1.problem.NamedCount
-	(*UserProfileReq)(nil),     // 11: api.core.v1.problem.UserProfileReq
-	(*UserProfileRes)(nil),     // 12: api.core.v1.problem.UserProfileRes
-	(*ProgressReq)(nil),        // 13: api.core.v1.problem.ProgressReq
-	(*ProgressItem)(nil),       // 14: api.core.v1.problem.ProgressItem
-	(*FailedProblem)(nil),      // 15: api.core.v1.problem.FailedProblem
-	(*ActiveJob)(nil),          // 16: api.core.v1.problem.ActiveJob
-	(*QueueStatus)(nil),        // 17: api.core.v1.problem.QueueStatus
-	(*ProgressRes)(nil),        // 18: api.core.v1.problem.ProgressRes
-	(*BackfillReq)(nil),        // 19: api.core.v1.problem.BackfillReq
-	(*BackfillRes)(nil),        // 20: api.core.v1.problem.BackfillRes
-	(*ResetQueuesReq)(nil),     // 21: api.core.v1.problem.ResetQueuesReq
-	(*ResetQueuesRes)(nil),     // 22: api.core.v1.problem.ResetQueuesRes
-	(*EmergencyStopReq)(nil),   // 23: api.core.v1.problem.EmergencyStopReq
-	(*EmergencyStopRes)(nil),   // 24: api.core.v1.problem.EmergencyStopRes
-	(*ResetAllReq)(nil),        // 25: api.core.v1.problem.ResetAllReq
-	(*ResetAllRes)(nil),        // 26: api.core.v1.problem.ResetAllRes
-	(*ResumeReq)(nil),          // 27: api.core.v1.problem.ResumeReq
-	(*ResumeRes)(nil),          // 28: api.core.v1.problem.ResumeRes
-	(*RetryFailedReq)(nil),     // 29: api.core.v1.problem.RetryFailedReq
-	(*RetryFailedRes)(nil),     // 30: api.core.v1.problem.RetryFailedRes
-	(*TogglePipelineReq)(nil),  // 31: api.core.v1.problem.TogglePipelineReq
-	(*TogglePipelineRes)(nil),  // 32: api.core.v1.problem.TogglePipelineRes
+	(*ListTagsReq)(nil),        // 4: api.core.v1.problem.ListTagsReq
+	(*TagCount)(nil),           // 5: api.core.v1.problem.TagCount
+	(*ListTagsRes)(nil),        // 6: api.core.v1.problem.ListTagsRes
+	(*GetProblemReq)(nil),      // 7: api.core.v1.problem.GetProblemReq
+	(*GetProblemRes)(nil),      // 8: api.core.v1.problem.GetProblemRes
+	(*SubmissionInfo)(nil),     // 9: api.core.v1.problem.SubmissionInfo
+	(*ListSubmissionsReq)(nil), // 10: api.core.v1.problem.ListSubmissionsReq
+	(*ListSubmissionsRes)(nil), // 11: api.core.v1.problem.ListSubmissionsRes
+	(*TagScore)(nil),           // 12: api.core.v1.problem.TagScore
+	(*NamedCount)(nil),         // 13: api.core.v1.problem.NamedCount
+	(*UserProfileReq)(nil),     // 14: api.core.v1.problem.UserProfileReq
+	(*UserProfileRes)(nil),     // 15: api.core.v1.problem.UserProfileRes
+	(*ProgressReq)(nil),        // 16: api.core.v1.problem.ProgressReq
+	(*ProgressItem)(nil),       // 17: api.core.v1.problem.ProgressItem
+	(*FailedProblem)(nil),      // 18: api.core.v1.problem.FailedProblem
+	(*ActiveJob)(nil),          // 19: api.core.v1.problem.ActiveJob
+	(*QueueStatus)(nil),        // 20: api.core.v1.problem.QueueStatus
+	(*ProgressRes)(nil),        // 21: api.core.v1.problem.ProgressRes
+	(*BackfillReq)(nil),        // 22: api.core.v1.problem.BackfillReq
+	(*BackfillRes)(nil),        // 23: api.core.v1.problem.BackfillRes
+	(*ResetQueuesReq)(nil),     // 24: api.core.v1.problem.ResetQueuesReq
+	(*ResetQueuesRes)(nil),     // 25: api.core.v1.problem.ResetQueuesRes
+	(*EmergencyStopReq)(nil),   // 26: api.core.v1.problem.EmergencyStopReq
+	(*EmergencyStopRes)(nil),   // 27: api.core.v1.problem.EmergencyStopRes
+	(*ResetAllReq)(nil),        // 28: api.core.v1.problem.ResetAllReq
+	(*ResetAllRes)(nil),        // 29: api.core.v1.problem.ResetAllRes
+	(*ResumeReq)(nil),          // 30: api.core.v1.problem.ResumeReq
+	(*ResumeRes)(nil),          // 31: api.core.v1.problem.ResumeRes
+	(*RetryFailedReq)(nil),     // 32: api.core.v1.problem.RetryFailedReq
+	(*RetryFailedRes)(nil),     // 33: api.core.v1.problem.RetryFailedRes
+	(*TogglePipelineReq)(nil),  // 34: api.core.v1.problem.TogglePipelineReq
+	(*TogglePipelineRes)(nil),  // 35: api.core.v1.problem.TogglePipelineRes
 }
 var file_core_v1_problem_problem_proto_depIdxs = []int32{
 	0,  // 0: api.core.v1.problem.ProblemInfo.solutions:type_name -> api.core.v1.problem.SolutionMeta
 	1,  // 1: api.core.v1.problem.ListProblemRes.data:type_name -> api.core.v1.problem.ProblemInfo
-	1,  // 2: api.core.v1.problem.GetProblemRes.data:type_name -> api.core.v1.problem.ProblemInfo
-	6,  // 3: api.core.v1.problem.ListSubmissionsRes.data:type_name -> api.core.v1.problem.SubmissionInfo
-	9,  // 4: api.core.v1.problem.UserProfileRes.radar:type_name -> api.core.v1.problem.TagScore
-	10, // 5: api.core.v1.problem.UserProfileRes.platforms:type_name -> api.core.v1.problem.NamedCount
-	10, // 6: api.core.v1.problem.UserProfileRes.difficulties:type_name -> api.core.v1.problem.NamedCount
-	14, // 7: api.core.v1.problem.ProgressRes.items:type_name -> api.core.v1.problem.ProgressItem
-	15, // 8: api.core.v1.problem.ProgressRes.recent_failed:type_name -> api.core.v1.problem.FailedProblem
-	16, // 9: api.core.v1.problem.ProgressRes.active_jobs:type_name -> api.core.v1.problem.ActiveJob
-	17, // 10: api.core.v1.problem.ProgressRes.queues:type_name -> api.core.v1.problem.QueueStatus
-	15, // 11: api.core.v1.problem.ProgressRes.in_progress:type_name -> api.core.v1.problem.FailedProblem
-	15, // 12: api.core.v1.problem.ProgressRes.recent_failed_perm:type_name -> api.core.v1.problem.FailedProblem
-	2,  // 13: api.core.v1.problem.Problem.List:input_type -> api.core.v1.problem.ListProblemReq
-	4,  // 14: api.core.v1.problem.Problem.Get:input_type -> api.core.v1.problem.GetProblemReq
-	7,  // 15: api.core.v1.problem.Problem.ListSubmissions:input_type -> api.core.v1.problem.ListSubmissionsReq
-	11, // 16: api.core.v1.problem.Problem.UserProfile:input_type -> api.core.v1.problem.UserProfileReq
-	13, // 17: api.core.v1.problem.Problem.Progress:input_type -> api.core.v1.problem.ProgressReq
-	19, // 18: api.core.v1.problem.Problem.Backfill:input_type -> api.core.v1.problem.BackfillReq
-	23, // 19: api.core.v1.problem.Problem.EmergencyStop:input_type -> api.core.v1.problem.EmergencyStopReq
-	25, // 20: api.core.v1.problem.Problem.ResetAll:input_type -> api.core.v1.problem.ResetAllReq
-	27, // 21: api.core.v1.problem.Problem.Resume:input_type -> api.core.v1.problem.ResumeReq
-	29, // 22: api.core.v1.problem.Problem.RetryFailed:input_type -> api.core.v1.problem.RetryFailedReq
-	31, // 23: api.core.v1.problem.Problem.ToggleAnalyze:input_type -> api.core.v1.problem.TogglePipelineReq
-	31, // 24: api.core.v1.problem.Problem.ToggleFetch:input_type -> api.core.v1.problem.TogglePipelineReq
-	21, // 25: api.core.v1.problem.Problem.ResetQueues:input_type -> api.core.v1.problem.ResetQueuesReq
-	3,  // 26: api.core.v1.problem.Problem.List:output_type -> api.core.v1.problem.ListProblemRes
-	5,  // 27: api.core.v1.problem.Problem.Get:output_type -> api.core.v1.problem.GetProblemRes
-	8,  // 28: api.core.v1.problem.Problem.ListSubmissions:output_type -> api.core.v1.problem.ListSubmissionsRes
-	12, // 29: api.core.v1.problem.Problem.UserProfile:output_type -> api.core.v1.problem.UserProfileRes
-	18, // 30: api.core.v1.problem.Problem.Progress:output_type -> api.core.v1.problem.ProgressRes
-	20, // 31: api.core.v1.problem.Problem.Backfill:output_type -> api.core.v1.problem.BackfillRes
-	24, // 32: api.core.v1.problem.Problem.EmergencyStop:output_type -> api.core.v1.problem.EmergencyStopRes
-	26, // 33: api.core.v1.problem.Problem.ResetAll:output_type -> api.core.v1.problem.ResetAllRes
-	28, // 34: api.core.v1.problem.Problem.Resume:output_type -> api.core.v1.problem.ResumeRes
-	30, // 35: api.core.v1.problem.Problem.RetryFailed:output_type -> api.core.v1.problem.RetryFailedRes
-	32, // 36: api.core.v1.problem.Problem.ToggleAnalyze:output_type -> api.core.v1.problem.TogglePipelineRes
-	32, // 37: api.core.v1.problem.Problem.ToggleFetch:output_type -> api.core.v1.problem.TogglePipelineRes
-	22, // 38: api.core.v1.problem.Problem.ResetQueues:output_type -> api.core.v1.problem.ResetQueuesRes
-	26, // [26:39] is the sub-list for method output_type
-	13, // [13:26] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	5,  // 2: api.core.v1.problem.ListTagsRes.data:type_name -> api.core.v1.problem.TagCount
+	1,  // 3: api.core.v1.problem.GetProblemRes.data:type_name -> api.core.v1.problem.ProblemInfo
+	9,  // 4: api.core.v1.problem.ListSubmissionsRes.data:type_name -> api.core.v1.problem.SubmissionInfo
+	12, // 5: api.core.v1.problem.UserProfileRes.radar:type_name -> api.core.v1.problem.TagScore
+	13, // 6: api.core.v1.problem.UserProfileRes.platforms:type_name -> api.core.v1.problem.NamedCount
+	13, // 7: api.core.v1.problem.UserProfileRes.difficulties:type_name -> api.core.v1.problem.NamedCount
+	17, // 8: api.core.v1.problem.ProgressRes.items:type_name -> api.core.v1.problem.ProgressItem
+	18, // 9: api.core.v1.problem.ProgressRes.recent_failed:type_name -> api.core.v1.problem.FailedProblem
+	19, // 10: api.core.v1.problem.ProgressRes.active_jobs:type_name -> api.core.v1.problem.ActiveJob
+	20, // 11: api.core.v1.problem.ProgressRes.queues:type_name -> api.core.v1.problem.QueueStatus
+	18, // 12: api.core.v1.problem.ProgressRes.in_progress:type_name -> api.core.v1.problem.FailedProblem
+	18, // 13: api.core.v1.problem.ProgressRes.recent_failed_perm:type_name -> api.core.v1.problem.FailedProblem
+	2,  // 14: api.core.v1.problem.Problem.List:input_type -> api.core.v1.problem.ListProblemReq
+	4,  // 15: api.core.v1.problem.Problem.ListTags:input_type -> api.core.v1.problem.ListTagsReq
+	7,  // 16: api.core.v1.problem.Problem.Get:input_type -> api.core.v1.problem.GetProblemReq
+	10, // 17: api.core.v1.problem.Problem.ListSubmissions:input_type -> api.core.v1.problem.ListSubmissionsReq
+	14, // 18: api.core.v1.problem.Problem.UserProfile:input_type -> api.core.v1.problem.UserProfileReq
+	16, // 19: api.core.v1.problem.Problem.Progress:input_type -> api.core.v1.problem.ProgressReq
+	22, // 20: api.core.v1.problem.Problem.Backfill:input_type -> api.core.v1.problem.BackfillReq
+	26, // 21: api.core.v1.problem.Problem.EmergencyStop:input_type -> api.core.v1.problem.EmergencyStopReq
+	28, // 22: api.core.v1.problem.Problem.ResetAll:input_type -> api.core.v1.problem.ResetAllReq
+	30, // 23: api.core.v1.problem.Problem.Resume:input_type -> api.core.v1.problem.ResumeReq
+	32, // 24: api.core.v1.problem.Problem.RetryFailed:input_type -> api.core.v1.problem.RetryFailedReq
+	34, // 25: api.core.v1.problem.Problem.ToggleAnalyze:input_type -> api.core.v1.problem.TogglePipelineReq
+	34, // 26: api.core.v1.problem.Problem.ToggleFetch:input_type -> api.core.v1.problem.TogglePipelineReq
+	24, // 27: api.core.v1.problem.Problem.ResetQueues:input_type -> api.core.v1.problem.ResetQueuesReq
+	3,  // 28: api.core.v1.problem.Problem.List:output_type -> api.core.v1.problem.ListProblemRes
+	6,  // 29: api.core.v1.problem.Problem.ListTags:output_type -> api.core.v1.problem.ListTagsRes
+	8,  // 30: api.core.v1.problem.Problem.Get:output_type -> api.core.v1.problem.GetProblemRes
+	11, // 31: api.core.v1.problem.Problem.ListSubmissions:output_type -> api.core.v1.problem.ListSubmissionsRes
+	15, // 32: api.core.v1.problem.Problem.UserProfile:output_type -> api.core.v1.problem.UserProfileRes
+	21, // 33: api.core.v1.problem.Problem.Progress:output_type -> api.core.v1.problem.ProgressRes
+	23, // 34: api.core.v1.problem.Problem.Backfill:output_type -> api.core.v1.problem.BackfillRes
+	27, // 35: api.core.v1.problem.Problem.EmergencyStop:output_type -> api.core.v1.problem.EmergencyStopRes
+	29, // 36: api.core.v1.problem.Problem.ResetAll:output_type -> api.core.v1.problem.ResetAllRes
+	31, // 37: api.core.v1.problem.Problem.Resume:output_type -> api.core.v1.problem.ResumeRes
+	33, // 38: api.core.v1.problem.Problem.RetryFailed:output_type -> api.core.v1.problem.RetryFailedRes
+	35, // 39: api.core.v1.problem.Problem.ToggleAnalyze:output_type -> api.core.v1.problem.TogglePipelineRes
+	35, // 40: api.core.v1.problem.Problem.ToggleFetch:output_type -> api.core.v1.problem.TogglePipelineRes
+	25, // 41: api.core.v1.problem.Problem.ResetQueues:output_type -> api.core.v1.problem.ResetQueuesRes
+	28, // [28:42] is the sub-list for method output_type
+	14, // [14:28] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_core_v1_problem_problem_proto_init() }
@@ -2659,7 +2832,7 @@ func file_core_v1_problem_problem_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_problem_problem_proto_rawDesc), len(file_core_v1_problem_problem_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   33,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -142,6 +142,18 @@ func splitCSV(s string) []string {
 	return out
 }
 
+func (s *ProblemService) ListTags(ctx context.Context, req *problem.ListTagsReq) (*problem.ListTagsRes, error) {
+	rows, err := s.uc.ListTags(int(req.Limit))
+	if err != nil {
+		return nil, errors.InternalServer("list tags failed", err.Error())
+	}
+	data := make([]*problem.TagCount, 0, len(rows))
+	for _, r := range rows {
+		data = append(data, &problem.TagCount{Tag: r.Tag, Count: r.Count})
+	}
+	return &problem.ListTagsRes{Code: 0, Message: "success", Data: data}, nil
+}
+
 func (s *ProblemService) List(ctx context.Context, req *problem.ListProblemReq) (*problem.ListProblemRes, error) {
 	list, statusMap, total, err := s.uc.List(biz.ListProblemFilter{
 		Page:       req.Page,

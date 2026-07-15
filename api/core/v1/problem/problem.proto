@@ -13,6 +13,12 @@ service Problem {
       get: "/v1/core/problem/list"
     };
   }
+  // 标签聚合（名称 + 题量），供筛选器选择
+  rpc ListTags (ListTagsReq) returns (ListTagsRes) {
+    option (google.api.http) = {
+      get: "/v1/core/problem/tags"
+    };
+  }
   rpc Get (GetProblemReq) returns (GetProblemRes) {
     option (google.api.http) = {
       get: "/v1/core/problem/get"
@@ -140,6 +146,22 @@ message ListProblemRes {
   int64 total = 4;
   int64 page = 5;
   int64 page_size = 6;
+}
+
+message ListTagsReq {
+  // 返回条数上限，默认 100，最大 300
+  int32 limit = 1;
+}
+
+message TagCount {
+  string tag = 1;
+  int64 count = 2;
+}
+
+message ListTagsRes {
+  int64 code = 1;
+  string message = 2;
+  repeated TagCount data = 3;
 }
 
 message GetProblemReq {

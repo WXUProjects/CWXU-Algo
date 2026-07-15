@@ -437,6 +437,26 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.ListSubmissionsRes'
+    /v1/core/problem/tags:
+        get:
+            tags:
+                - Problem
+            description: 标签聚合（名称 + 题量），供筛选器选择
+            operationId: Problem_ListTags
+            parameters:
+                - name: limit
+                  in: query
+                  description: 返回条数上限，默认 100，最大 300
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ListTagsRes'
     /v1/core/problem/toggle-analyze:
         post:
             tags:
@@ -1287,6 +1307,17 @@ components:
                         $ref: '#/components/schemas/api.core.v1.problem.SubmissionInfo'
                 total:
                     type: string
+        api.core.v1.problem.ListTagsRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.TagCount'
         api.core.v1.problem.NamedCount:
             type: object
             properties:
@@ -1495,6 +1526,13 @@ components:
                 contest:
                     type: string
                 userName:
+                    type: string
+        api.core.v1.problem.TagCount:
+            type: object
+            properties:
+                tag:
+                    type: string
+                count:
                     type: string
         api.core.v1.problem.TagScore:
             type: object

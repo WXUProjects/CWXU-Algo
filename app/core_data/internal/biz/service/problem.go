@@ -716,14 +716,21 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 		q = q.Where("platform IN ?", f.Platforms)
 	}
 	if len(f.Tags) > 0 {
-		// jsonb 包含任一 tag（OR）
+		// jsonb 数组包含任一 tag（OR）
+		// 禁止写 tags::jsonb ? ? —— GORM 的 ? 占位符与 PG jsonb ? 运算符冲突，会报 syntax error near $1
 		ors := make([]string, 0, len(f.Tags))
 		args := make([]interface{}, 0, len(f.Tags))
 		for _, t := range f.Tags {
-			ors = append(ors, "tags::jsonb ? ?")
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			ors = append(ors, "tags::jsonb @> jsonb_build_array(?)")
 			args = append(args, t)
 		}
-		q = q.Where(strings.Join(ors, " OR "), args...)
+		if len(ors) > 0 {
+			q = q.Where(strings.Join(ors, " OR "), args...)
+		}
 	}
 	if kw := strings.TrimSpace(f.Keyword); kw != "" {
 		like := "%" + kw + "%"
@@ -813,6 +820,39 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 		}
 	}
 	return list, userStatusMap, total, nil
+}
+
+// TagCount 标签及题目数（用于筛选器）
+type TagCount struct {
+	Tag   string
+	Count int64
+}
+
+// ListTags 聚合已有算法标签及题量，按 count 降序
+func (uc *ProblemUseCase) ListTags(limit int) ([]TagCount, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 300 {
+		limit = 300
+	}
+	var rows []TagCount
+	err := uc.data.DB.Raw(`
+		SELECT tag, COUNT(DISTINCT p.id) AS count
+		FROM problems p
+		CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(p.tags::jsonb, '[]'::jsonb)) AS tag
+		WHERE p.status = ?
+		  AND p.tags IS NOT NULL
+		  AND p.tags::text NOT IN ('', '[]', 'null')
+		  AND BTRIM(tag) <> ''
+		GROUP BY tag
+		ORDER BY count DESC, tag ASC
+		LIMIT ?
+	`, model.ProblemStatusCompleted, limit).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (uc *ProblemUseCase) Get(id uint) (*model.Problem, error) {
