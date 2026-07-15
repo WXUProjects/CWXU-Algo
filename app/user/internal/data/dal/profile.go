@@ -103,6 +103,41 @@ func (d *ProfileDal) GetEmailEnabled(ctx context.Context, userId int64) (bool, e
 	return user.EmailEnabled, nil
 }
 
+// PublicOrgID 公共域 id
+func (d *ProfileDal) PublicOrgID(ctx context.Context) (uint, error) {
+	var o model.Org
+	if err := d.db.WithContext(ctx).Where("slug = ?", model.PublicOrgSlug).First(&o).Error; err != nil {
+		return 0, err
+	}
+	return o.ID, nil
+}
+
+// GetUserIdsByOrg 组织成员 userId 列表
+func (d *ProfileDal) GetUserIdsByOrg(ctx context.Context, orgID uint) ([]int64, error) {
+	var ids []int64
+	err := d.db.WithContext(ctx).Model(&model.OrgMember{}).
+		Where("org_id = ?", orgID).
+		Pluck("user_id", &ids).Error
+	return ids, err
+}
+
+// GetListByOrg 分页列出组织成员用户
+func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pageNum int64) ([]model.User, int64, error) {
+	var total int64
+	sub := d.db.WithContext(ctx).Model(&model.OrgMember{}).Select("user_id").Where("org_id = ?", orgID)
+	if err := d.db.WithContext(ctx).Model(&model.User{}).Where("id IN (?)", sub).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var list []model.User
+	err := d.db.WithContext(ctx).
+		Select("id", "username", "name", "group_id", "avatar", "role_id", "is_site_admin").
+		Where("id IN (?)", sub).
+		Order("id").
+		Limit(int(pageSize)).Offset(int(pageNum-1)*int(pageSize)).
+		Find(&list).Error
+	return list, total, err
+}
+
 // GetUserIdsByGroup 根据组ID获取用户ID列表
 func (d *ProfileDal) GetUserIdsByGroup(ctx context.Context, groupId int64) ([]int64, error) {
 	var ids []int64

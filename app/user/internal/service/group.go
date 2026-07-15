@@ -67,6 +67,9 @@ func (g *GroupService) Delete(ctx context.Context, request *group.DeleteRequest)
 	if request.Id == 0 {
 		return nil, errors.BadRequest("参数错误", "组ID不能为空")
 	}
+	if err := g.assertGroupInCurrentOrg(ctx, request.Id); err != nil {
+		return nil, err
+	}
 	err := g.groupUseCase.Delete(ctx, request.Id)
 	if err != nil {
 		return nil, errors.InternalServer("删除失败", err.Error())
@@ -169,6 +172,9 @@ func (g *GroupService) Update(ctx context.Context, request *group.UpdateRequest)
 	if request.Id == 0 {
 		return nil, errors.BadRequest("参数错误", "组ID不能为空")
 	}
+	if err := g.assertGroupInCurrentOrg(ctx, request.Id); err != nil {
+		return nil, err
+	}
 	if request.Name == "" && request.Describe == "" {
 		return nil, errors.BadRequest("参数错误", "至少更新一个字段")
 	}
@@ -177,6 +183,24 @@ func (g *GroupService) Update(ctx context.Context, request *group.UpdateRequest)
 		return nil, errors.InternalServer("更新失败", err.Error())
 	}
 	return &group.UpdateReply{Success: true}, nil
+}
+
+func (g *GroupService) assertGroupInCurrentOrg(ctx context.Context, groupID int64) error {
+	if auth.VerifySiteAdmin(ctx) {
+		return nil
+	}
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.OrgID == 0 {
+		return errors.Forbidden("权限不足", "请先选择组织")
+	}
+	grp, err := g.groupUseCase.Get(ctx, groupID)
+	if err != nil {
+		return errors.NotFound("不存在", "分组不存在")
+	}
+	if grp.OrgID != pd.OrgID {
+		return errors.Forbidden("权限不足", "不能操作其他组织的分组")
+	}
+	return nil
 }
 
 func NewGroupService(reg *discovery.Register, groupUseCase *biz.GroupUseCase, groupDal *dal.GroupDal) *GroupService {

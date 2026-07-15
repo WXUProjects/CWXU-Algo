@@ -76,7 +76,29 @@ func (p *ProfileService) coreDataRPC() (*grpc2.ClientConn, error) {
 }
 
 func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (*profile.GetListRes, error) {
-	pf, total, err := p.profileUseCase.GetList(ctx, req.PageSize, req.PageNum)
+	pageSize, pageNum := req.PageSize, req.PageNum
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageNum < 1 {
+		pageNum = 1
+	}
+	var pf []model.User
+	var total int64
+	var err error
+	// 非站点管理员：仅当前组织成员；站点管理员默认全站
+	if !auth.VerifySiteAdmin(ctx) {
+		orgID := uint(0)
+		if pd := auth.GetCurrentUser(ctx); pd != nil {
+			orgID = pd.OrgID
+		}
+		if orgID == 0 {
+			orgID, _ = p.profileDal.PublicOrgID(ctx)
+		}
+		pf, total, err = p.profileDal.GetListByOrg(ctx, orgID, pageSize, pageNum)
+	} else {
+		pf, total, err = p.profileUseCase.GetList(ctx, pageSize, pageNum)
+	}
 	if err != nil {
 		return nil, InternalServer
 	}
@@ -202,6 +224,31 @@ func (p *ProfileService) GetUserIdsByGroup(ctx context.Context, req *profile.Get
 	return &profile.GetUserIdsByGroupRes{
 		UserIds: ids,
 	}, nil
+}
+
+// GetUserIdsByOrg 组织成员 ID（数据隔离）
+func (p *ProfileService) GetUserIdsByOrg(ctx context.Context, req *profile.GetUserIdsByOrgReq) (*profile.GetUserIdsByOrgRes, error) {
+	orgID := uint(req.OrgId)
+	if orgID == 0 {
+		if pd := auth.GetCurrentUser(ctx); pd != nil && pd.OrgID > 0 {
+			orgID = pd.OrgID
+		}
+	}
+	if orgID == 0 {
+		// 无 org 时回落公共域
+		id, err := p.profileDal.PublicOrgID(ctx)
+		if err == nil {
+			orgID = id
+		}
+	}
+	if orgID == 0 {
+		return &profile.GetUserIdsByOrgRes{UserIds: []int64{}, OrgId: 0}, nil
+	}
+	ids, err := p.profileDal.GetUserIdsByOrg(ctx, orgID)
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	return &profile.GetUserIdsByOrgRes{UserIds: ids, OrgId: int64(orgID)}, nil
 }
 
 // GetByIds 批量获取用户简要信息（供排行榜等场景使用）

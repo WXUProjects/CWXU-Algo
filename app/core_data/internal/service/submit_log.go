@@ -52,7 +52,17 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 	if fetchLimit < 30 {
 		fetchLimit = 30
 	}
-	d, err := s.sbDal.GetByUserId(ctx, req.UserId, req.Cursor, fetchLimit)
+	var memberIDs []int64
+	if req.UserId == -1 {
+		// 组织聚合动态：仅当前组织成员
+		ids, _, _, err := ResolveOrgMemberIDs(ctx, s.reg, 0, false)
+		if err != nil {
+			log.Warnf("org members for submit feed: %v", err)
+			ids = []int64{}
+		}
+		memberIDs = ids
+	}
+	d, err := s.sbDal.GetByUserIdScoped(ctx, req.UserId, req.Cursor, fetchLimit, memberIDs)
 	if err != nil {
 		return nil, errors.InternalServer("内部服务器错误", err.Error())
 	}

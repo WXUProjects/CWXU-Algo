@@ -45,6 +45,12 @@ service Profile {
       get: "/v1/user/profile/ids-by-group"
     };
   }
+  // 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
+  rpc GetUserIdsByOrg (GetUserIdsByOrgReq) returns (GetUserIdsByOrgRes) {
+    option (google.api.http) = {
+      get: "/v1/user/profile/ids-by-org"
+    };
+  }
   rpc GetByIds (GetByIdsReq) returns (GetByIdsRes) {
     option (google.api.http) = {
       post: "/v1/user/profile/get-by-ids",
@@ -150,6 +156,15 @@ message GetUserIdsByGroupReq {
 
 message GetUserIdsByGroupRes {
   repeated int64 userIds = 1;
+}
+
+message GetUserIdsByOrgReq {
+  int64 orgId = 1; // 0 = 调用方 JWT 当前组织
+}
+
+message GetUserIdsByOrgRes {
+  repeated int64 userIds = 1;
+  int64 orgId = 2;
 }
 
 message GetByIdsReq {

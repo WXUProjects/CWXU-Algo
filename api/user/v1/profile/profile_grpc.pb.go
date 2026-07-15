@@ -26,6 +26,7 @@ const (
 	Profile_MoveGroup_FullMethodName         = "/api.user.v1.Profile/MoveGroup"
 	Profile_SetEmailEnabled_FullMethodName   = "/api.user.v1.Profile/SetEmailEnabled"
 	Profile_GetUserIdsByGroup_FullMethodName = "/api.user.v1.Profile/GetUserIdsByGroup"
+	Profile_GetUserIdsByOrg_FullMethodName   = "/api.user.v1.Profile/GetUserIdsByOrg"
 	Profile_GetByIds_FullMethodName          = "/api.user.v1.Profile/GetByIds"
 	Profile_Delete_FullMethodName            = "/api.user.v1.Profile/Delete"
 )
@@ -41,6 +42,8 @@ type ProfileClient interface {
 	MoveGroup(ctx context.Context, in *MoveGroupReq, opts ...grpc.CallOption) (*MoveGroupRes, error)
 	SetEmailEnabled(ctx context.Context, in *SetEmailEnabledReq, opts ...grpc.CallOption) (*SetEmailEnabledRes, error)
 	GetUserIdsByGroup(ctx context.Context, in *GetUserIdsByGroupReq, opts ...grpc.CallOption) (*GetUserIdsByGroupRes, error)
+	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
+	GetUserIdsByOrg(ctx context.Context, in *GetUserIdsByOrgReq, opts ...grpc.CallOption) (*GetUserIdsByOrgRes, error)
 	GetByIds(ctx context.Context, in *GetByIdsReq, opts ...grpc.CallOption) (*GetByIdsRes, error)
 	// 管理员删除用户（软删除）
 	Delete(ctx context.Context, in *DeleteReq, opts ...grpc.CallOption) (*DeleteRes, error)
@@ -124,6 +127,16 @@ func (c *profileClient) GetUserIdsByGroup(ctx context.Context, in *GetUserIdsByG
 	return out, nil
 }
 
+func (c *profileClient) GetUserIdsByOrg(ctx context.Context, in *GetUserIdsByOrgReq, opts ...grpc.CallOption) (*GetUserIdsByOrgRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUserIdsByOrgRes)
+	err := c.cc.Invoke(ctx, Profile_GetUserIdsByOrg_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *profileClient) GetByIds(ctx context.Context, in *GetByIdsReq, opts ...grpc.CallOption) (*GetByIdsRes, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetByIdsRes)
@@ -155,6 +168,8 @@ type ProfileServer interface {
 	MoveGroup(context.Context, *MoveGroupReq) (*MoveGroupRes, error)
 	SetEmailEnabled(context.Context, *SetEmailEnabledReq) (*SetEmailEnabledRes, error)
 	GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error)
+	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
+	GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error)
 	GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error)
 	// 管理员删除用户（软删除）
 	Delete(context.Context, *DeleteReq) (*DeleteRes, error)
@@ -188,6 +203,9 @@ func (UnimplementedProfileServer) SetEmailEnabled(context.Context, *SetEmailEnab
 }
 func (UnimplementedProfileServer) GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUserIdsByGroup not implemented")
+}
+func (UnimplementedProfileServer) GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetUserIdsByOrg not implemented")
 }
 func (UnimplementedProfileServer) GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetByIds not implemented")
@@ -342,6 +360,24 @@ func _Profile_GetUserIdsByGroup_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Profile_GetUserIdsByOrg_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUserIdsByOrgReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).GetUserIdsByOrg(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_GetUserIdsByOrg_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).GetUserIdsByOrg(ctx, req.(*GetUserIdsByOrgReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Profile_GetByIds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetByIdsReq)
 	if err := dec(in); err != nil {
@@ -412,6 +448,10 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetUserIdsByGroup",
 			Handler:    _Profile_GetUserIdsByGroup_Handler,
+		},
+		{
+			MethodName: "GetUserIdsByOrg",
+			Handler:    _Profile_GetUserIdsByOrg_Handler,
 		},
 		{
 			MethodName: "GetByIds",

@@ -28,11 +28,14 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.user.v1.Auth/Register":       "",
 		"/api.user.v1.Profile/GetById":     "",
 		"/api.user.v1.Profile/GetByName":   "",
-		"/api.user.v1.Profile/GetList":     "",
-		"/api.user.v1.role.Role/List":      "",
-		"/api.user.group.Group/Get":        "",
-		"/api.user.group.Group/List":       "",
-		"/api.user.v1.site.Site/GetConfig": "",
+		"/api.user.v1.Profile/GetList":          "",
+		"/api.user.v1.Profile/GetUserIdsByGroup": "",
+		"/api.user.v1.Profile/GetUserIdsByOrg":   "",
+		"/api.user.v1.Profile/GetByIds":          "",
+		"/api.user.v1.role.Role/List":            "",
+		"/api.user.group.Group/Get":             "",
+		"/api.user.group.Group/List":             "",
+		"/api.user.v1.site.Site/GetConfig":       "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		log.Info(operation)

@@ -31,6 +31,11 @@ type DailyCount struct {
 
 // HeatmapQuery 查询热力图数据
 func (d *StatisticDal) HeatmapQuery(ctx context.Context, startDate, endDate string, userId int64, isAc bool) ([]DailyCount, error) {
+	return d.HeatmapQueryScoped(ctx, startDate, endDate, userId, isAc, nil)
+}
+
+// HeatmapQueryScoped userId=0 时 memberIDs 限制组织；nil 表示不限制（全站）
+func (d *StatisticDal) HeatmapQueryScoped(ctx context.Context, startDate, endDate string, userId int64, isAc bool, memberIDs []int64) ([]DailyCount, error) {
 	sub := d.db.
 		Table("submit_logs").
 		Select("id, time")
@@ -42,6 +47,11 @@ func (d *StatisticDal) HeatmapQuery(ctx context.Context, startDate, endDate stri
 	}
 	if userId != 0 {
 		sub = sub.Where("user_id = ?", userId)
+	} else if memberIDs != nil {
+		if len(memberIDs) == 0 {
+			return []DailyCount{}, nil
+		}
+		sub = sub.Where("user_id IN ?", memberIDs)
 	}
 
 	var result []DailyCount
@@ -90,6 +100,11 @@ type PeriodAcCount struct {
 
 // GetPeriodCount 获取时间段统计数据
 func (d *StatisticDal) GetPeriodCount(userId int64) (PeriodSubmitCount, PeriodAcCount, error) {
+	return d.GetPeriodCountScoped(userId, nil)
+}
+
+// GetPeriodCountScoped userId=-1 时 memberIDs 限制组织
+func (d *StatisticDal) GetPeriodCountScoped(userId int64, memberIDs []int64) (PeriodSubmitCount, PeriodAcCount, error) {
 	now := time.Now()
 
 	// 日期范围计算
@@ -103,26 +118,26 @@ func (d *StatisticDal) GetPeriodCount(userId int64) (PeriodSubmitCount, PeriodAc
 
 	// 提交次数统计
 	submit := PeriodSubmitCount{
-		Today:     d.countQuery(userId, todayStart, now),
-		ThisWeek:  d.countQuery(userId, thisWeekStart, now),
-		LastWeek:  d.countQuery(userId, lastWeekStart, thisWeekStart),
-		ThisMonth: d.countQuery(userId, thisMonthStart, now),
-		LastMonth: d.countQuery(userId, lastMonthStart, thisMonthStart),
-		ThisYear:  d.countQuery(userId, thisYearStart, now),
-		LastYear:  d.countQuery(userId, lastYearStart, thisYearStart),
-		Total:     d.countQueryTotal(userId),
+		Today:     d.countQueryScoped(userId, todayStart, now, memberIDs),
+		ThisWeek:  d.countQueryScoped(userId, thisWeekStart, now, memberIDs),
+		LastWeek:  d.countQueryScoped(userId, lastWeekStart, thisWeekStart, memberIDs),
+		ThisMonth: d.countQueryScoped(userId, thisMonthStart, now, memberIDs),
+		LastMonth: d.countQueryScoped(userId, lastMonthStart, thisMonthStart, memberIDs),
+		ThisYear:  d.countQueryScoped(userId, thisYearStart, now, memberIDs),
+		LastYear:  d.countQueryScoped(userId, lastYearStart, thisYearStart, memberIDs),
+		Total:     d.countQueryTotalScoped(userId, memberIDs),
 	}
 
 	// AC 次数统计（去重）
 	ac := PeriodAcCount{
-		Today:     d.countAcDistinctQuery(userId, todayStart, now),
-		ThisWeek:  d.countAcDistinctQuery(userId, thisWeekStart, now),
-		LastWeek:  d.countAcDistinctQuery(userId, lastWeekStart, thisWeekStart),
-		ThisMonth: d.countAcDistinctQuery(userId, thisMonthStart, now),
-		LastMonth: d.countAcDistinctQuery(userId, lastMonthStart, thisMonthStart),
-		ThisYear:  d.countAcDistinctQuery(userId, thisYearStart, now),
-		LastYear:  d.countAcDistinctQuery(userId, lastYearStart, thisYearStart),
-		Total:     d.countAcDistinctTotal(userId),
+		Today:     d.countAcDistinctQueryScoped(userId, todayStart, now, memberIDs),
+		ThisWeek:  d.countAcDistinctQueryScoped(userId, thisWeekStart, now, memberIDs),
+		LastWeek:  d.countAcDistinctQueryScoped(userId, lastWeekStart, thisWeekStart, memberIDs),
+		ThisMonth: d.countAcDistinctQueryScoped(userId, thisMonthStart, now, memberIDs),
+		LastMonth: d.countAcDistinctQueryScoped(userId, lastMonthStart, thisMonthStart, memberIDs),
+		ThisYear:  d.countAcDistinctQueryScoped(userId, thisYearStart, now, memberIDs),
+		LastYear:  d.countAcDistinctQueryScoped(userId, lastYearStart, thisYearStart, memberIDs),
+		Total:     d.countAcDistinctTotalScoped(userId, memberIDs),
 	}
 
 	return submit, ac, nil
@@ -158,6 +173,11 @@ func (d *StatisticDal) GetRank(ctx context.Context, userId int64, timeType, scor
 
 // GetRankByRange 按绝对时间区间排行（end 为开区间上界）
 func (d *StatisticDal) GetRankByRange(ctx context.Context, startTime, endTime time.Time, scoreType string, groupId int64, page, pageSize int64) ([]RankItem, int64, error) {
+	return d.GetRankByRangeScoped(ctx, startTime, endTime, scoreType, groupId, page, pageSize, nil)
+}
+
+// GetRankByRangeScoped memberIDs 非 nil 时限制组织成员
+func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endTime time.Time, scoreType string, groupId int64, page, pageSize int64, memberIDs []int64) ([]RankItem, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -166,6 +186,9 @@ func (d *StatisticDal) GetRankByRange(ctx context.Context, startTime, endTime ti
 	}
 	if pageSize > 100 {
 		pageSize = 100
+	}
+	if memberIDs != nil && len(memberIDs) == 0 {
+		return []RankItem{}, 0, nil
 	}
 
 	type RankQueryResult struct {
@@ -178,6 +201,9 @@ func (d *StatisticDal) GetRankByRange(ctx context.Context, startTime, endTime ti
 		q = q.Where("time >= ? AND time < ?", startTime, endTime)
 		if groupId != -1 && groupId != 0 {
 			q = q.Where("group_id = ?", groupId)
+		}
+		if memberIDs != nil {
+			q = q.Where("user_id IN ?", memberIDs)
 		}
 		if scoreType == "ac" {
 			q = q.Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
@@ -225,15 +251,22 @@ func (d *StatisticDal) GetRankByRange(ctx context.Context, startTime, endTime ti
 	return items, total, nil
 }
 
-// countQuery 统计指定时间范围内的记录数
 func (d *StatisticDal) countQuery(userId int64, start, end time.Time) int64 {
+	return d.countQueryScoped(userId, start, end, nil)
+}
+
+func (d *StatisticDal) countQueryScoped(userId int64, start, end time.Time, memberIDs []int64) int64 {
+	if userId == -1 && memberIDs != nil && len(memberIDs) == 0 {
+		return 0
+	}
 	var count int64
 	query := d.db.Table("submit_logs").
 		Where("time >= ? AND time < ?", start, end).
-		// 力扣合成 AC 不计入提交次数
 		Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
+	} else if memberIDs != nil {
+		query = query.Where("user_id IN ?", memberIDs)
 	}
 	if err := query.Count(&count).Error; err != nil {
 		log.Errorf("countQuery error: %v", err)
@@ -241,13 +274,21 @@ func (d *StatisticDal) countQuery(userId int64, start, end time.Time) int64 {
 	return count
 }
 
-// countQueryTotal 统计所有记录数
 func (d *StatisticDal) countQueryTotal(userId int64) int64 {
+	return d.countQueryTotalScoped(userId, nil)
+}
+
+func (d *StatisticDal) countQueryTotalScoped(userId int64, memberIDs []int64) int64 {
+	if userId == -1 && memberIDs != nil && len(memberIDs) == 0 {
+		return 0
+	}
 	var count int64
 	query := d.db.Table("submit_logs").
 		Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
+	} else if memberIDs != nil {
+		query = query.Where("user_id IN ?", memberIDs)
 	}
 	if err := query.Count(&count).Error; err != nil {
 		log.Errorf("countQueryTotal error: %v", err)
@@ -255,8 +296,14 @@ func (d *StatisticDal) countQueryTotal(userId int64) int64 {
 	return count
 }
 
-// countAcDistinctQuery 统计指定时间范围内的 AC 记录数（按 user_id, platform, problem 去重）
 func (d *StatisticDal) countAcDistinctQuery(userId int64, start, end time.Time) int64 {
+	return d.countAcDistinctQueryScoped(userId, start, end, nil)
+}
+
+func (d *StatisticDal) countAcDistinctQueryScoped(userId int64, start, end time.Time, memberIDs []int64) int64 {
+	if userId == -1 && memberIDs != nil && len(memberIDs) == 0 {
+		return 0
+	}
 	var count int64
 	query := d.db.Table("submit_logs").
 		Select("DISTINCT user_id, platform, problem").
@@ -264,6 +311,8 @@ func (d *StatisticDal) countAcDistinctQuery(userId int64, start, end time.Time) 
 		Where("time >= ? AND time < ?", start, end)
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
+	} else if memberIDs != nil {
+		query = query.Where("user_id IN ?", memberIDs)
 	}
 	if err := query.Count(&count).Error; err != nil {
 		log.Errorf("countAcDistinctQuery error: %v", err)
@@ -271,14 +320,22 @@ func (d *StatisticDal) countAcDistinctQuery(userId int64, start, end time.Time) 
 	return count
 }
 
-// countAcDistinctTotal 统计所有 AC 记录数（按 user_id, platform, problem 去重）
 func (d *StatisticDal) countAcDistinctTotal(userId int64) int64 {
+	return d.countAcDistinctTotalScoped(userId, nil)
+}
+
+func (d *StatisticDal) countAcDistinctTotalScoped(userId int64, memberIDs []int64) int64 {
+	if userId == -1 && memberIDs != nil && len(memberIDs) == 0 {
+		return 0
+	}
 	var count int64
 	query := d.db.Table("submit_logs").
 		Select("DISTINCT user_id, platform, problem").
 		Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
+	} else if memberIDs != nil {
+		query = query.Where("user_id IN ?", memberIDs)
 	}
 	if err := query.Count(&count).Error; err != nil {
 		log.Errorf("countAcDistinctTotal error: %v", err)

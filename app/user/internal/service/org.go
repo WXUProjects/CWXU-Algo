@@ -111,6 +111,8 @@ func RegisterOrgRoutes(srv *khttp.Server, org *OrgService) {
 	r.GET("/v1/user/org/members", org.handleMembers)
 	r.POST("/v1/user/org/members/set-role", org.handleSetRole)
 	r.POST("/v1/user/org/members/remove", org.handleRemoveMember)
+	r.POST("/v1/user/org/members/add", org.handleAddMember)
+	r.GET("/v1/user/org/member-ids", org.handleMemberIds)
 	r.GET("/v1/user/org/invite", org.handleInviteGet)
 	r.POST("/v1/user/org/invite/rotate", org.handleInviteRotate)
 	r.GET("/v1/user/org/join-requests", org.handleJoinRequests)
@@ -527,6 +529,83 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 		list = append(list, item)
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "list": list})
+	return nil
+}
+
+func (s *OrgService) handleMemberIds(ctx khttp.Context) error {
+	id64, _ := strconv.ParseUint(ctx.Request().URL.Query().Get("orgId"), 10, 64)
+	orgID := uint(id64)
+	pd := auth.GetCurrentUser(ctx)
+	if orgID == 0 && pd != nil {
+		orgID = pd.OrgID
+	}
+	if orgID == 0 {
+		var pub model.Org
+		if s.db.Where("slug = ?", model.PublicOrgSlug).First(&pub).Error == nil {
+			orgID = pub.ID
+		}
+	}
+	var ids []int64
+	_ = s.db.Model(&model.OrgMember{}).Where("org_id = ?", orgID).Pluck("user_id", &ids)
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "success", "userIds": ids, "orgId": orgID,
+	})
+	return nil
+}
+
+// handleAddMember 站点管理员搜索加入：按 userId 或 username
+func (s *OrgService) handleAddMember(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
+		return nil
+	}
+	var req struct {
+		OrgID    uint   `json:"orgId"`
+		UserID   uint   `json:"userId"`
+		Username string `json:"username"`
+		Role     string `json:"role"`
+	}
+	if err := readJSON(ctx.Request(), &req); err != nil || req.OrgID == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
+		return nil
+	}
+	// 站点管理员可操作任意 org；组织管理员仅本 org
+	if !auth.VerifySiteAdmin(ctx) && !s.isOrgAdminDB(pd.UserID, req.OrgID) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
+		return nil
+	}
+	uid := req.UserID
+	if uid == 0 && strings.TrimSpace(req.Username) != "" {
+		var u model.User
+		if s.db.Where("username = ?", strings.TrimSpace(req.Username)).First(&u).Error != nil {
+			// 尝试按姓名模糊
+			if s.db.Where("name LIKE ?", "%"+strings.TrimSpace(req.Username)+"%").First(&u).Error != nil {
+				writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
+				return nil
+			}
+		}
+		uid = u.ID
+	}
+	if uid == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请提供 userId 或 username"})
+		return nil
+	}
+	role := req.Role
+	if role != model.OrgRoleOrgAdmin {
+		role = model.OrgRoleMember
+	}
+	if s.isMemberDB(uid, req.OrgID) {
+		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "用户已在组织中", "userId": uid})
+		return nil
+	}
+	if err := s.db.Create(&model.OrgMember{
+		OrgID: req.OrgID, UserID: uid, Role: role, JoinedAt: time.Now(),
+	}).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
+		return nil
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已加入组织", "userId": uid})
 	return nil
 }
 

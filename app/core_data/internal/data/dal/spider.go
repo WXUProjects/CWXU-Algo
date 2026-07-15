@@ -36,8 +36,28 @@ func NewSpiderDal(data *data.Data) *SpiderDal {
 //   - lastTimeUnix 上次获取的时间戳
 //   - limit 获取数量
 func (s *SpiderDal) GetByUserId(ctx context.Context, userId int64, lastTimeUnix int64, limit int64) ([]model.SubmitLog, error) {
+	return s.GetByUserIdScoped(ctx, userId, lastTimeUnix, limit, nil)
+}
+
+// GetByUserIdScoped userId=-1 时用 memberIDs 限制组织；memberIDs 为空切片表示无数据；nil 且 userId=-1 表示旧全站（应避免）
+func (s *SpiderDal) GetByUserIdScoped(ctx context.Context, userId int64, lastTimeUnix int64, limit int64, memberIDs []int64) ([]model.SubmitLog, error) {
 	if lastTimeUnix == -1 {
 		lastTimeUnix = 33325619029
+	}
+
+	// 组织聚合流不做 redis 缓存（成员集合会变）
+	if userId == -1 {
+		t := time.Unix(lastTimeUnix, 0)
+		var sbLog []model.SubmitLog
+		q := s.db.WithContext(ctx).Order("time DESC").Where("time < ?", t)
+		if memberIDs != nil {
+			if len(memberIDs) == 0 {
+				return []model.SubmitLog{}, nil
+			}
+			q = q.Where("user_id IN ?", memberIDs)
+		}
+		err := q.Limit(int(limit)).Find(&sbLog).Error
+		return sbLog, err
 	}
 
 	cacheKey := fmt.Sprintf("core:submit_log:user:%d", userId)
@@ -49,14 +69,8 @@ func (s *SpiderDal) GetByUserId(ctx context.Context, userId int64, lastTimeUnix 
 	var sbLog []model.SubmitLog
 	ids, err := res.Result()
 	t := time.Unix(lastTimeUnix, 0)
-	q := s.db.Order("time DESC")
-	if userId != -1 {
-		q.Where("user_id = ? AND time < ?", userId, t)
-	} else {
-		q.Where("time < ?", t)
-	}
+	q := s.db.Order("time DESC").Where("user_id = ? AND time < ?", userId, t)
 	dbFunc := func() ([]model.SubmitLog, error) {
-		// 降级到纯db
 		err := q.Limit(int(limit)).Find(&sbLog).Error
 		go func() {
 			ctx2, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -196,11 +210,21 @@ func (s *SpiderDal) GetContestByUserId(ctx context.Context, userId int64, cursor
 }
 
 // GetContestList 获取比赛列表（按 contest_id 去重）
-func (s *SpiderDal) GetContestList(_ context.Context, userId int64, offset int64, limit int64, platform string) ([]model.ContestLog, int64, error) {
+func (s *SpiderDal) GetContestList(ctx context.Context, userId int64, offset int64, limit int64, platform string) ([]model.ContestLog, int64, error) {
+	return s.GetContestListScoped(ctx, userId, offset, limit, platform, nil)
+}
+
+// GetContestListScoped userId=-1 时 memberIDs 限制组织成员
+func (s *SpiderDal) GetContestListScoped(_ context.Context, userId int64, offset int64, limit int64, platform string, memberIDs []int64) ([]model.ContestLog, int64, error) {
 	// 先构建基础条件
 	baseQuery := s.db.Model(&model.ContestLog{})
 	if userId != -1 {
 		baseQuery = baseQuery.Where("user_id = ?", userId)
+	} else if memberIDs != nil {
+		if len(memberIDs) == 0 {
+			return []model.ContestLog{}, 0, nil
+		}
+		baseQuery = baseQuery.Where("user_id IN ?", memberIDs)
 	}
 	if platform != "" {
 		baseQuery = baseQuery.Where("platform = ?", platform)
@@ -248,6 +272,8 @@ func (s *SpiderDal) GetContestList(_ context.Context, userId int64, offset int64
 		Where("contest_id IN ?", contestIds)
 	if userId != -1 {
 		finalQuery = finalQuery.Where("user_id = ?", userId)
+	} else if memberIDs != nil && len(memberIDs) > 0 {
+		finalQuery = finalQuery.Where("user_id IN ?", memberIDs)
 	}
 	if platform != "" {
 		finalQuery = finalQuery.Where("platform = ?", platform)

@@ -37,7 +37,18 @@ func (c ContestLogService) userRPC() (*grpc2.ClientConn, error) {
 }
 
 func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.GetContestListReq) (*contest_log.GetContestListRes, error) {
-	logs, total, err := c.sbDal.GetContestList(ctx, req.UserId, req.Offset, req.Limit, req.Platform)
+	var memberIDs []int64
+	if req.UserId == -1 {
+		ids, _, unrestricted, err := ResolveOrgMemberIDs(ctx, c.reg, 0, false)
+		if err != nil {
+			log.Warnf("org members for contest list: %v", err)
+			ids = []int64{}
+		}
+		if !unrestricted {
+			memberIDs = ids
+		}
+	}
+	logs, total, err := c.sbDal.GetContestListScoped(ctx, req.UserId, req.Offset, req.Limit, req.Platform, memberIDs)
 	if err != nil {
 		return nil, errors.InternalServer("内部服务器错误", err.Error())
 	}
@@ -108,6 +119,25 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 				Data:    make([]*contest_log.RankingItem, 0),
 				Total:   0,
 			}, nil
+		}
+	} else if userClient != nil {
+		// 默认队内榜：当前组织成员
+		ids, _, unrestricted, err := ResolveOrgMemberIDsFromConn(ctx, userClient, 0, false)
+		if err != nil {
+			log.Warnf("org members for ranking: %v", err)
+			ids = []int64{}
+		}
+		if !unrestricted {
+			userIds = ids
+			if len(userIds) == 0 {
+				return &contest_log.GetContestRankingRes{
+					Code:    0,
+					Message: "OK",
+					Contest: contestProto,
+					Data:    make([]*contest_log.RankingItem, 0),
+					Total:   0,
+				}, nil
+			}
 		}
 	}
 

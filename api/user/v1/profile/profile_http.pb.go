@@ -25,6 +25,7 @@ const OperationProfileGetByIds = "/api.user.v1.Profile/GetByIds"
 const OperationProfileGetByName = "/api.user.v1.Profile/GetByName"
 const OperationProfileGetList = "/api.user.v1.Profile/GetList"
 const OperationProfileGetUserIdsByGroup = "/api.user.v1.Profile/GetUserIdsByGroup"
+const OperationProfileGetUserIdsByOrg = "/api.user.v1.Profile/GetUserIdsByOrg"
 const OperationProfileMoveGroup = "/api.user.v1.Profile/MoveGroup"
 const OperationProfileSetEmailEnabled = "/api.user.v1.Profile/SetEmailEnabled"
 const OperationProfileUpdate = "/api.user.v1.Profile/Update"
@@ -37,6 +38,8 @@ type ProfileHTTPServer interface {
 	GetByName(context.Context, *GetByNameReq) (*GetByNameRes, error)
 	GetList(context.Context, *GetListReq) (*GetListRes, error)
 	GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error)
+	// GetUserIdsByOrg 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
+	GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error)
 	MoveGroup(context.Context, *MoveGroupReq) (*MoveGroupRes, error)
 	SetEmailEnabled(context.Context, *SetEmailEnabledReq) (*SetEmailEnabledRes, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
@@ -47,12 +50,13 @@ func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r.GET("/v1/user/profile/get-by-id", _Profile_GetById0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/get-by-name", _Profile_GetByName0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/list", _Profile_GetList0_HTTP_Handler(srv))
-	r.POST("/v1/user/profile/update", _Profile_Update3_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/update", _Profile_Update0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/move-group", _Profile_MoveGroup0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-email-enabled", _Profile_SetEmailEnabled0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-group", _Profile_GetUserIdsByGroup0_HTTP_Handler(srv))
+	r.GET("/v1/user/profile/ids-by-org", _Profile_GetUserIdsByOrg0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/get-by-ids", _Profile_GetByIds0_HTTP_Handler(srv))
-	r.POST("/v1/user/profile/delete", _Profile_Delete2_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/delete", _Profile_Delete0_HTTP_Handler(srv))
 }
 
 func _Profile_GetById0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
@@ -112,7 +116,7 @@ func _Profile_GetList0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context
 	}
 }
 
-func _Profile_Update3_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+func _Profile_Update0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in UpdateReq
 		if err := ctx.Bind(&in); err != nil {
@@ -197,6 +201,25 @@ func _Profile_GetUserIdsByGroup0_HTTP_Handler(srv ProfileHTTPServer) func(ctx ht
 	}
 }
 
+func _Profile_GetUserIdsByOrg0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetUserIdsByOrgReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileGetUserIdsByOrg)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetUserIdsByOrg(ctx, req.(*GetUserIdsByOrgReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetUserIdsByOrgRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 func _Profile_GetByIds0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in GetByIdsReq
@@ -219,7 +242,7 @@ func _Profile_GetByIds0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Contex
 	}
 }
 
-func _Profile_Delete2_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+func _Profile_Delete0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in DeleteReq
 		if err := ctx.Bind(&in); err != nil {
@@ -249,6 +272,8 @@ type ProfileHTTPClient interface {
 	GetByName(ctx context.Context, req *GetByNameReq, opts ...http.CallOption) (rsp *GetByNameRes, err error)
 	GetList(ctx context.Context, req *GetListReq, opts ...http.CallOption) (rsp *GetListRes, err error)
 	GetUserIdsByGroup(ctx context.Context, req *GetUserIdsByGroupReq, opts ...http.CallOption) (rsp *GetUserIdsByGroupRes, err error)
+	// GetUserIdsByOrg 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
+	GetUserIdsByOrg(ctx context.Context, req *GetUserIdsByOrgReq, opts ...http.CallOption) (rsp *GetUserIdsByOrgRes, err error)
 	MoveGroup(ctx context.Context, req *MoveGroupReq, opts ...http.CallOption) (rsp *MoveGroupRes, err error)
 	SetEmailEnabled(ctx context.Context, req *SetEmailEnabledReq, opts ...http.CallOption) (rsp *SetEmailEnabledRes, err error)
 	Update(ctx context.Context, req *UpdateReq, opts ...http.CallOption) (rsp *UpdateRes, err error)
@@ -333,6 +358,20 @@ func (c *ProfileHTTPClientImpl) GetUserIdsByGroup(ctx context.Context, in *GetUs
 	pattern := "/v1/user/profile/ids-by-group"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationProfileGetUserIdsByGroup))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetUserIdsByOrg 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
+func (c *ProfileHTTPClientImpl) GetUserIdsByOrg(ctx context.Context, in *GetUserIdsByOrgReq, opts ...http.CallOption) (*GetUserIdsByOrgRes, error) {
+	var out GetUserIdsByOrgRes
+	pattern := "/v1/user/profile/ids-by-org"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProfileGetUserIdsByOrg))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {
