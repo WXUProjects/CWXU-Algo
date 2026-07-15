@@ -55,6 +55,23 @@ func seedGoAlgoFramework(db *gorm.DB) {
 		return
 	}
 
+	// 各组织若无任何分组则补「默认分组」（含公共域与已有校队）
+	var allOrgs []model.Org
+	if e := db.Find(&allOrgs).Error; e == nil {
+		for _, o := range allOrgs {
+			var n int64
+			db.Model(&model.Group{}).Where("org_id = ?", o.ID).Count(&n)
+			if n == 0 {
+				defName := "默认分组"
+				_ = db.Create(&model.Group{
+					Name:     &defName,
+					Describe: "组织默认分组",
+					OrgID:    o.ID,
+				}).Error
+			}
+		}
+	}
+
 	// 2. 旧 group 挂到公共域
 	_ = db.Model(&model.Group{}).Where("org_id = 0 OR org_id IS NULL").Update("org_id", public.ID).Error
 

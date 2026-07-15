@@ -248,6 +248,13 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "创建失败: " + err.Error()})
 		return nil
 	}
+	// 新建组织默认分组，便于成员管理
+	defaultName := "默认分组"
+	_ = s.db.Create(&model.Group{
+		Name:     &defaultName,
+		Describe: "组织默认分组",
+		OrgID:    o.ID,
+	}).Error
 	adminUID := req.AdminUserID
 	if adminUID == 0 {
 		adminUID = pd.UserID

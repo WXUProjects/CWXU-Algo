@@ -36,8 +36,9 @@ func (g *GroupService) coreDataRPC() (*grpc2.ClientConn, error) {
 }
 
 func (g *GroupService) Create(ctx context.Context, request *group.CreateRequest) (*group.CreateReply, error) {
-	if !auth.VerifyOrgAdmin(ctx) && !auth.VerifySiteAdmin(ctx) {
-		return nil, errors.Forbidden("权限不足", "需要团队管理员或站点管理员权限")
+	// 教练/队长/团队管理员/站点管理员均可建组
+	if !auth.VerifyStaff(ctx) {
+		return nil, errors.Forbidden("权限不足", "需要教练、队长、团队管理员或站点管理员权限")
 	}
 	if request.Name == "" {
 		return nil, errors.BadRequest("参数错误", "组名称不能为空")
@@ -48,7 +49,7 @@ func (g *GroupService) Create(ctx context.Context, request *group.CreateRequest)
 		orgID = pd.OrgID
 	}
 	if orgID == 0 {
-		return nil, errors.BadRequest("参数错误", "请先选择组织")
+		return nil, errors.BadRequest("参数错误", "请先切换到目标组织后再创建分组")
 	}
 	id, err := g.groupUseCase.Create(ctx, request.Name, request.Describe, orgID)
 	if err != nil {
@@ -61,8 +62,8 @@ func (g *GroupService) Create(ctx context.Context, request *group.CreateRequest)
 }
 
 func (g *GroupService) Delete(ctx context.Context, request *group.DeleteRequest) (*group.DeleteReply, error) {
-	if !auth.VerifyOrgAdmin(ctx) && !auth.VerifySiteAdmin(ctx) {
-		return nil, errors.Forbidden("权限不足", "需要团队管理员或站点管理员权限")
+	if !auth.VerifyStaff(ctx) {
+		return nil, errors.Forbidden("权限不足", "需要教练、队长、团队管理员或站点管理员权限")
 	}
 	if request.Id == 0 {
 		return nil, errors.BadRequest("参数错误", "组ID不能为空")
@@ -166,8 +167,8 @@ func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*g
 }
 
 func (g *GroupService) Update(ctx context.Context, request *group.UpdateRequest) (*group.UpdateReply, error) {
-	if !auth.VerifyOrgAdmin(ctx) && !auth.VerifySiteAdmin(ctx) {
-		return nil, errors.Forbidden("权限不足", "需要团队管理员或站点管理员权限")
+	if !auth.VerifyStaff(ctx) {
+		return nil, errors.Forbidden("权限不足", "需要教练、队长、团队管理员或站点管理员权限")
 	}
 	if request.Id == 0 {
 		return nil, errors.BadRequest("参数错误", "组ID不能为空")
