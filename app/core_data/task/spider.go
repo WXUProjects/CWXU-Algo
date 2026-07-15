@@ -50,31 +50,41 @@ func (t *SpiderTask) Do(userId int64, needAll bool) {
 }
 
 // DoPlatform 入队爬虫任务；platform 非空时只抓该平台。
+// 去重：inflight 存在则跳过；pending 用 SetNX 原子占坑（多实例/并发安全）。
 func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) {
 	if t.mq == nil {
 		log.Errorf("SpiderTask: mq not ready")
 		return
 	}
+	pk := pendingKey(userId, platform)
 	if t.rdb != nil {
 		ctx := context.Background()
-		// 执行中或已在队列：跳过重复入队（按 user+platform 维度）
-		if n, err := t.rdb.Exists(ctx, InflightKey(userId, platform), pendingKey(userId, platform)).Result(); err == nil && n > 0 {
+		// 正在执行：不重复入队
+		if n, err := t.rdb.Exists(ctx, InflightKey(userId, platform)).Result(); err == nil && n > 0 {
 			spidermetrics.IncDedupSkipped()
-			log.Debugf("SpiderTask: dedup skip user=%d platform=%q needAll=%v", userId, platform, needAll)
+			log.Debugf("SpiderTask: dedup skip inflight user=%d platform=%q needAll=%v", userId, platform, needAll)
 			return
 		}
-		if err := t.rdb.Set(ctx, pendingKey(userId, platform), "1", pendingTTL).Err(); err != nil {
-			log.Warnf("SpiderTask: set pending key failed: %v", err)
+		// 原子占 pending；Exists+Set 有竞态，多副本会各塞一条
+		ok, err := t.rdb.SetNX(ctx, pk, "1", pendingTTL).Result()
+		if err != nil {
+			log.Warnf("SpiderTask: setnx pending failed (allow): %v", err)
+		} else if !ok {
+			spidermetrics.IncDedupSkipped()
+			log.Debugf("SpiderTask: dedup skip pending user=%d platform=%q needAll=%v", userId, platform, needAll)
+			return
 		}
 	}
 	if _, err := t.mq.QueueDeclare("spider", true, false, false, false, nil); err != nil {
 		log.Errorf("SpiderTask: QueueDeclare failed: %v", err)
+		t.clearPending(userId, platform)
 		return
 	}
 	e := event.SpiderEvent{UserId: userId, NeedAll: needAll, Platform: platform}
 	body, err := json.Marshal(e)
 	if err != nil {
 		log.Errorf("SpiderTask: json.Marshal failed: %v", err)
+		t.clearPending(userId, platform)
 		return
 	}
 	if err := t.mq.Publish("", "spider", false, false, amqp.Publishing{
@@ -83,9 +93,17 @@ func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) {
 		DeliveryMode: amqp.Persistent,
 	}); err != nil {
 		log.Errorf("SpiderTask: Publish failed: %v", err)
+		t.clearPending(userId, platform)
 		return
 	}
 	spidermetrics.IncEnqueued()
+}
+
+func (t *SpiderTask) clearPending(userId int64, platform string) {
+	if t.rdb == nil {
+		return
+	}
+	_ = t.rdb.Del(context.Background(), pendingKey(userId, platform)).Err()
 }
 
 // MarkInflight 消费开始时调用

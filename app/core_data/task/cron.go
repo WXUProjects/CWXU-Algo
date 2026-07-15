@@ -160,40 +160,53 @@ func lastKey(kind string, userId int64) string {
 	return fmt.Sprintf("cron:last:%s:%d", kind, userId)
 }
 
-// due 距上次成功入队是否已超过 intervalMin 分钟
-func (t *CronTask) due(kind string, userId int64, intervalMin int) bool {
-	if intervalMin <= 0 {
-		intervalMin = 60
-	}
-	if t.rdb == nil {
-		return true
-	}
-	ctx := context.Background()
-	key := lastKey(kind, userId)
-	v, err := t.rdb.Get(ctx, key).Result()
-	if err == redis.Nil || v == "" {
-		return true
-	}
-	ts, err := time.Parse(time.RFC3339, v)
-	if err != nil {
-		return true
-	}
-	return time.Since(ts) >= time.Duration(intervalMin)*time.Minute
+func cronLockKey(kind string) string {
+	return fmt.Sprintf("cron:lock:%s", kind)
 }
 
-func (t *CronTask) markDone(kind string, userId int64, intervalMin int) {
+// tryCronLock 多 core_data 实例下同一 tick 只跑一次（TTL < 调度间隔）
+func (t *CronTask) tryCronLock(kind string, ttl time.Duration) bool {
 	if t.rdb == nil {
-		return
+		return true
 	}
+	if ttl <= 0 {
+		ttl = 4 * time.Minute
+	}
+	ok, err := t.rdb.SetNX(context.Background(), cronLockKey(kind), "1", ttl).Result()
+	if err != nil {
+		// Redis 故障：跳过本轮定时入队，避免多副本把队列打满
+		log.Warnf("CronTask: lock %s failed, skip tick: %v", kind, err)
+		return false
+	}
+	if !ok {
+		log.Debugf("CronTask: skip tick %s (another instance holds lock)", kind)
+		return false
+	}
+	return true
+}
+
+// tryClaim 原子占用本用户本周期：interval 内只入队一次（多实例安全）
+// Redis 故障时跳过，避免 stampede。
+func (t *CronTask) tryClaim(kind string, userId int64, intervalMin int) bool {
 	if intervalMin <= 0 {
 		intervalMin = 60
 	}
-	// TTL 略大于间隔，避免键无限堆积
-	ttl := time.Duration(intervalMin)*time.Minute + 2*time.Hour
-	_ = t.rdb.Set(context.Background(), lastKey(kind, userId), time.Now().Format(time.RFC3339), ttl).Err()
+	if t.rdb == nil {
+		return true
+	}
+	ttl := time.Duration(intervalMin) * time.Minute
+	ok, err := t.rdb.SetNX(context.Background(), lastKey(kind, userId), time.Now().Format(time.RFC3339), ttl).Result()
+	if err != nil {
+		log.Warnf("CronTask: claim %s user=%d failed, skip: %v", kind, userId, err)
+		return false
+	}
+	return ok
 }
 
 func (t *CronTask) runSpiderTick() {
+	if !t.tryCronLock("spider", 4*time.Minute) {
+		return
+	}
 	userIds := t.getBoundUserIds()
 	policies := t.fetchPolicies(userIds)
 	// 去重：bound 用户列表已 DISTINCT；策略 map 按 user 一条
@@ -210,18 +223,20 @@ func (t *CronTask) runSpiderTick() {
 			skipped++
 			continue
 		}
-		if !t.due("spider", uid, p.SpiderIntervalMin) {
+		if !t.tryClaim("spider", uid, p.SpiderIntervalMin) {
 			skipped++
 			continue
 		}
 		t.spider.Do(uid, false)
-		t.markDone("spider", uid, p.SpiderIntervalMin)
 		enqueued++
 	}
 	log.Infof("CronTask spider: bound=%d unique=%d enqueued=%d skipped=%d", len(userIds), len(seen), enqueued, skipped)
 }
 
 func (t *CronTask) runRecentSummaryTick() {
+	if !t.tryCronLock("summary_recent", 4*time.Minute) {
+		return
+	}
 	userIds := t.getBoundUserIds()
 	policies := t.fetchPolicies(userIds)
 	enqueued := 0
@@ -237,18 +252,20 @@ func (t *CronTask) runRecentSummaryTick() {
 			skipped++
 			continue
 		}
-		if !t.due("summary_recent", uid, p.AISummaryIntervalMin) {
+		if !t.tryClaim("summary_recent", uid, p.AISummaryIntervalMin) {
 			skipped++
 			continue
 		}
 		t.summary.Do(uid, "PersonalRecent")
-		t.markDone("summary_recent", uid, p.AISummaryIntervalMin)
 		enqueued++
 	}
 	log.Infof("CronTask summary PersonalRecent: bound=%d unique=%d enqueued=%d skipped=%d", len(userIds), len(seen), enqueued, skipped)
 }
 
 func (t *CronTask) runDailySummaryTick() {
+	if !t.tryCronLock("summary_mail", 30*time.Minute) {
+		return
+	}
 	userIds := t.getBoundUserIds()
 	policies := t.fetchPolicies(userIds)
 	enqueued := 0
