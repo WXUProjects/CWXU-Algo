@@ -6,6 +6,7 @@ import (
 	"cwxu-algo/app/user/internal/data/model"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"gorm.io/gorm"
@@ -112,6 +113,29 @@ func (d *GroupDal) Get(ctx context.Context, id int64) (*model.Group, error) {
 	return &group, nil
 }
 
+// OrgDisplayNames 批量取组织内名称
+func (d *GroupDal) OrgDisplayNames(ctx context.Context, orgID uint, userIDs []uint) map[uint]string {
+	out := make(map[uint]string)
+	if orgID == 0 || len(userIDs) == 0 {
+		return out
+	}
+	type row struct {
+		UserID         uint
+		OrgDisplayName string
+	}
+	var rows []row
+	_ = d.db.WithContext(ctx).Model(&model.OrgMember{}).
+		Select("user_id, org_display_name").
+		Where("org_id = ? AND user_id IN ?", orgID, userIDs).
+		Find(&rows).Error
+	for _, r := range rows {
+		if n := strings.TrimSpace(r.OrgDisplayName); n != "" {
+			out[r.UserID] = n
+		}
+	}
+	return out
+}
+
 func (d *GroupDal) GetWithUsers(ctx context.Context, id int64) (*model.Group, []model.User, error) {
 	var group model.Group
 	err := d.db.WithContext(ctx).Preload("Users").First(&group, id).Error
@@ -133,7 +157,8 @@ func (d *GroupDal) List(ctx context.Context, page, size int64, orgID uint) ([]mo
 	var list []model.Group
 	var total int64
 
-	q := d.db.WithContext(ctx).Model(&model.Group{})
+	// id=0 为历史虚拟「未分组」，不计入列表
+	q := d.db.WithContext(ctx).Model(&model.Group{}).Where("id > 0")
 	if orgID > 0 {
 		q = q.Where("org_id = ?", orgID)
 	}
@@ -142,7 +167,7 @@ func (d *GroupDal) List(ctx context.Context, page, size int64, orgID uint) ([]mo
 	}
 
 	offset := (page - 1) * size
-	lq := d.db.WithContext(ctx).Order("id DESC").Limit(int(size)).Offset(int(offset))
+	lq := d.db.WithContext(ctx).Where("id > 0").Order("id DESC").Limit(int(size)).Offset(int(offset))
 	if orgID > 0 {
 		lq = lq.Where("org_id = ?", orgID)
 	}

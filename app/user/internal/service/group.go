@@ -98,10 +98,16 @@ func (g *GroupService) Get(ctx context.Context, request *group.GetRequest) (*gro
 
 	if len(users) > 0 {
 		userIds := make([]int64, 0, len(users))
+		uids := make([]uint, 0, len(users))
 		for _, u := range users {
 			userIds = append(userIds, int64(u.ID))
+			uids = append(uids, u.ID)
 		}
 
+		// 组内展示优先组织内名称
+		displayByUID := g.groupDal.OrgDisplayNames(ctx, groupModel.OrgID, uids)
+
+		timeMap := map[int64]int64{}
 		conn, err := g.coreDataRPC()
 		if err != nil {
 			log.Info(err.Error())
@@ -110,24 +116,26 @@ func (g *GroupService) Get(ctx context.Context, request *group.GetRequest) (*gro
 			sb := submit_log.NewSubmitClient(conn)
 			sp, err := sb.LastSubmitTime(ctx, &submit_log.LastSubmitTimeReq{UserIds: userIds})
 			if err == nil {
-				var timeMap map[int64]int64
-				if err := utils.GobDecoder(sp.TimeMap, &timeMap); err == nil {
-					for _, u := range users {
-						lastSubmit := ""
-						if t, ok := timeMap[int64(u.ID)]; ok {
-							lastSubmit = strconv.Itoa(int(t))
-						}
-						reply.Users = append(reply.Users, &group.User{
-							UserId:     uint64(u.ID),
-							Username:   u.Username,
-							Name:       u.Name,
-							GroupId:    u.GroupId,
-							Avatar:     u.Avatar,
-							LastSubmit: lastSubmit,
-						})
-					}
-				}
+				_ = utils.GobDecoder(sp.TimeMap, &timeMap)
 			}
+		}
+		for _, u := range users {
+			lastSubmit := ""
+			if t, ok := timeMap[int64(u.ID)]; ok {
+				lastSubmit = strconv.Itoa(int(t))
+			}
+			display := displayByUID[u.ID]
+			if display == "" {
+				display = u.Username
+			}
+			reply.Users = append(reply.Users, &group.User{
+				UserId:     uint64(u.ID),
+				Username:   u.Username,
+				Name:       display,
+				GroupId:    u.GroupId,
+				Avatar:     u.Avatar,
+				LastSubmit: lastSubmit,
+			})
 		}
 	}
 
@@ -155,12 +163,8 @@ func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*g
 	if err != nil {
 		return nil, errors.InternalServer("查询失败", err.Error())
 	}
-	reply := &group.ListReply{List: make([]*group.GetReply, 0), Total: total}
+	reply := &group.ListReply{List: make([]*group.GetReply, 0, len(list)), Total: total}
 	for _, gr := range list {
-		if gr.ID == 0 {
-			// 不展示历史虚拟「未分组」id=0
-			continue
-		}
 		name := ""
 		if gr.Name != nil {
 			name = *gr.Name
@@ -174,7 +178,7 @@ func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*g
 			Describe: gr.Describe,
 		})
 	}
-	// 若过滤后空且有 org，再确保默认分组
+	// 若列表空且有 org，再确保默认分组
 	if len(reply.List) == 0 && orgID > 0 {
 		if id, e := g.groupDal.EnsureDefaultGroup(ctx, orgID); e == nil && id > 0 {
 			reply.List = append(reply.List, &group.GetReply{

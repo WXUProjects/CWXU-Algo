@@ -6,6 +6,7 @@ import (
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/utils"
+	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -143,8 +144,12 @@ func (s SubmitLogService) fetchUserNames(ctx context.Context, logs []*submit_log
 	}
 	defer conn.Close()
 
+	var orgID int64
+	if pd := auth.GetCurrentUser(ctx); pd != nil {
+		orgID = int64(pd.OrgID)
+	}
 	client := profile.NewProfileClient(conn)
-	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIds})
+	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIds, OrgId: orgID})
 	if err != nil {
 		log.Errorf("submit_log GetByIds: %v", err)
 		return result

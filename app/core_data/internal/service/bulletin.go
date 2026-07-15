@@ -80,6 +80,7 @@ func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBullet
 		return &bulletin.CreateBulletinRes{Code: 3, Message: "内容不能为空"}, nil
 	}
 
+	// 作者展示名：JWT name 为全局昵称（≡公共域称呼）；组织公告后续可再解析 org_display_name
 	m := &model.Bulletin{
 		Title:      req.Title,
 		Content:    req.Content,

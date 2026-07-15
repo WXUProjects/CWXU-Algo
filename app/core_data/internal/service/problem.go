@@ -52,8 +52,12 @@ func (s *ProblemService) fetchUserNames(ctx context.Context, userIDs []int64) ma
 		return out
 	}
 	defer conn.Close()
+	var orgID int64
+	if pd := auth.GetCurrentUser(ctx); pd != nil {
+		orgID = int64(pd.OrgID)
+	}
 	client := profile.NewProfileClient(conn)
-	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIDs})
+	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIDs, OrgId: orgID})
 	if err != nil {
 		log.Errorf("problem GetByIds: %v", err)
 		return out

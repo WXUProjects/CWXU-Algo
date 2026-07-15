@@ -10,6 +10,7 @@ import (
 	"cwxu-algo/api/core/v1/submit_log"
 	profile2 "cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/utils"
+	"cwxu-algo/app/common/utils/auth"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
@@ -481,7 +482,11 @@ func (uc *SummaryUseCase) loadWeeklyReportData(ctx context.Context, coachUserId 
 					if j > len(userIds) {
 						j = len(userIds)
 					}
-					res, err := cli.GetByIds(ctx, &profile2.GetByIdsReq{UserIds: userIds[i:j]})
+					var orgID int64
+					if pd := auth.GetCurrentUser(ctx); pd != nil {
+						orgID = int64(pd.OrgID)
+					}
+					res, err := cli.GetByIds(ctx, &profile2.GetByIdsReq{UserIds: userIds[i:j], OrgId: orgID})
 					if err == nil {
 						for _, p := range res.Profiles {
 							nameMap[p.UserId] = p.Name

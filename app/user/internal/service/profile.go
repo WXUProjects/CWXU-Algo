@@ -13,6 +13,7 @@ import (
 	"cwxu-algo/app/user/internal/data/dal"
 	"cwxu-algo/app/user/internal/data/model"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/errors"
@@ -171,6 +172,21 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 	orgMap, _ := p.profileDal.GetOrgBriefsByUserIDs(ctx, uids)
 	groupNames, _ := p.profileDal.GetGroupNamesByIDs(ctx, gids)
 
+	// 组织视图：列表名称优先组织内称呼
+	displayByUID := map[uint]string{}
+	if !useSite {
+		orgID := uint(0)
+		if pd := auth.GetCurrentUser(ctx); pd != nil {
+			orgID = pd.OrgID
+		}
+		if orgID == 0 {
+			orgID, _ = p.profileDal.PublicOrgID(ctx)
+		}
+		if m, e := p.profileDal.OrgDisplayNamesByUserIDs(ctx, orgID, uids); e == nil {
+			displayByUID = m
+		}
+	}
+
 	res := &profile.GetListRes{
 		List:  make([]*profile.GetListRes_List, 0),
 		Total: total,
@@ -191,10 +207,18 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		} else {
 			gName = "默认分组"
 		}
+		displayName := v.Name
+		if !useSite {
+			if d := displayByUID[v.ID]; d != "" {
+				displayName = d
+			} else if v.Username != "" {
+				displayName = v.Username
+			}
+		}
 		item := &profile.GetListRes_List{
 			UserId:      uint64(v.ID),
 			Username:    v.Username,
-			Name:        v.Name,
+			Name:        displayName,
 			Avatar:      v.Avatar,
 			GroupId:     v.GroupId,
 			RoleId:      int32(v.RoleID),
@@ -274,10 +298,23 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 	if pf.EmailWeeklyEnabled && !weeklyGrant {
 		_ = p.profileDal.SetEmailWeeklyEnabled(ctx, req.UserId, false)
 	}
+	// 当前组织视图：展示组织内名称（空则 username）
+	displayName := strings.TrimSpace(pf.Name)
+	if pd := auth.GetCurrentUser(ctx); pd != nil && pd.OrgID > 0 {
+		if m, e := p.profileDal.OrgDisplayNamesByUserIDs(ctx, pd.OrgID, []uint{pf.ID}); e == nil {
+			if d := m[pf.ID]; d != "" {
+				displayName = d
+			} else if pf.Username != "" {
+				displayName = pf.Username
+			}
+		}
+	} else if displayName == "" {
+		displayName = pf.Username
+	}
 	return &profile.GetByIdRes{
 		UserId:                 uint64(pf.ID),
 		Username:               pf.Username,
-		Name:                   pf.Name,
+		Name:                   displayName,
 		Email:                  pf.Email,
 		Avatar:                 pf.Avatar,
 		GroupId:                pf.GroupId,
@@ -375,9 +412,18 @@ func (p *ProfileService) GetUserIdsByOrg(ctx context.Context, req *profile.GetUs
 	return &profile.GetUserIdsByOrgRes{UserIds: ids, OrgId: int64(orgID)}, nil
 }
 
-// GetByIds 批量获取用户简要信息（供排行榜等场景使用）
+// GetByIds 批量获取用户展示名（当前组织 / 指定 org 的组织内名称）
 func (p *ProfileService) GetByIds(ctx context.Context, req *profile.GetByIdsReq) (*profile.GetByIdsRes, error) {
-	profiles, err := p.profileUseCase.GetByIds(ctx, req.UserIds)
+	orgID := uint(req.OrgId)
+	if orgID == 0 {
+		if pd := auth.GetCurrentUser(ctx); pd != nil && pd.OrgID > 0 {
+			orgID = pd.OrgID
+		}
+	}
+	if orgID == 0 {
+		orgID, _ = p.profileDal.PublicOrgID(ctx)
+	}
+	profiles, err := p.profileDal.GetByIdsForOrg(ctx, orgID, req.UserIds)
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}

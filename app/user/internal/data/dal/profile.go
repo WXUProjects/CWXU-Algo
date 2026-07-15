@@ -57,17 +57,57 @@ func (d *ProfileDal) GetByName(ctx context.Context, name string) ([]*model.User,
 }
 
 // Update 更新用户信息
+// users.name（全局昵称）与公共域 org_display_name 为同一语义，改昵称时同步公共域称呼
 func (d *ProfileDal) Update(ctx context.Context, profile model.User) error {
 	cacheKey := fmt.Sprintf("user:%d:profile", profile.ID)
 	err := data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
-		d.db.Model(&model.User{}).Where("id = ?", profile.ID).Updates(map[string]interface{}{
+		if err := d.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", profile.ID).Updates(map[string]interface{}{
 			"avatar": profile.Avatar,
 			"email":  profile.Email,
 			"name":   profile.Name,
-		})
+		}).Error; err != nil {
+			return err
+		}
+		name := strings.TrimSpace(profile.Name)
+		if name == "" {
+			return nil
+		}
+		var publicID uint
+		if err := d.db.WithContext(ctx).Model(&model.Org{}).
+			Select("id").Where("slug = ?", model.PublicOrgSlug).
+			Scan(&publicID).Error; err != nil || publicID == 0 {
+			return nil
+		}
+		_ = d.db.WithContext(ctx).Model(&model.OrgMember{}).
+			Where("org_id = ? AND user_id = ?", publicID, profile.ID).
+			Update("org_display_name", name).Error
 		return nil
 	})
 	return err
+}
+
+// OrgDisplayNamesByUserIDs 批量取某组织内的组织内名称
+func (d *ProfileDal) OrgDisplayNamesByUserIDs(ctx context.Context, orgID uint, userIDs []uint) (map[uint]string, error) {
+	out := make(map[uint]string)
+	if orgID == 0 || len(userIDs) == 0 {
+		return out, nil
+	}
+	type row struct {
+		UserID         uint
+		OrgDisplayName string
+	}
+	var rows []row
+	err := d.db.WithContext(ctx).Model(&model.OrgMember{}).
+		Select("user_id, org_display_name").
+		Where("org_id = ? AND user_id IN ?", orgID, userIDs).
+		Find(&rows).Error
+	if err != nil {
+		return out, err
+	}
+	for _, r := range rows {
+		out[r.UserID] = strings.TrimSpace(r.OrgDisplayName)
+	}
+	return out, nil
 }
 
 func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64) ([]model.User, int64, error) {
@@ -468,19 +508,49 @@ func (d *ProfileDal) GetUserIdsByGroup(ctx context.Context, groupId int64) ([]in
 
 // UserProfile 用户简要信息（供批量查询用）
 type UserProfile struct {
-	ID     uint
-	Name   string
-	Avatar string
+	ID       uint
+	Name     string // 展示名（调用方按组织解析后写入）
+	Username string
+	Avatar   string
 }
 
-// GetByIds 批量获取用户简要信息
+// GetByIds 批量获取用户简要信息（原始 users 字段，Name=全局昵称）
 func (d *ProfileDal) GetByIds(ctx context.Context, userIds []int64) ([]UserProfile, error) {
+	if len(userIds) == 0 {
+		return nil, nil
+	}
 	var profiles []UserProfile
-	err := d.db.Model(&model.User{}).
-		Select("id, name, avatar").
+	err := d.db.WithContext(ctx).Model(&model.User{}).
+		Select("id, name, username, avatar").
 		Where("id IN ?", userIds).
 		Find(&profiles).Error
 	return profiles, err
+}
+
+// GetByIdsForOrg 批量展示名：组织内名称 → username（不用全局昵称）
+func (d *ProfileDal) GetByIdsForOrg(ctx context.Context, orgID uint, userIds []int64) ([]UserProfile, error) {
+	profiles, err := d.GetByIds(ctx, userIds)
+	if err != nil || len(profiles) == 0 {
+		return profiles, err
+	}
+	if orgID == 0 {
+		if pub, e := d.PublicOrgID(ctx); e == nil {
+			orgID = pub
+		}
+	}
+	uids := make([]uint, 0, len(profiles))
+	for _, p := range profiles {
+		uids = append(uids, p.ID)
+	}
+	displayMap, _ := d.OrgDisplayNamesByUserIDs(ctx, orgID, uids)
+	for i := range profiles {
+		if dname := displayMap[profiles[i].ID]; dname != "" {
+			profiles[i].Name = dname
+		} else if profiles[i].Username != "" {
+			profiles[i].Name = profiles[i].Username
+		}
+	}
+	return profiles, nil
 }
 
 // SetRoleId 设置用户角色ID

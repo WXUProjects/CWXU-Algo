@@ -2,14 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	pb "cwxu-algo/api/user/v1/auth"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
-
-	"errors"
 
 	"gorm.io/gorm"
 )
@@ -105,11 +105,12 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 		memGid = &defGID
 	}
 	_ = s.db.Create(&model.OrgMember{
-		OrgID:    public.ID,
-		UserID:   newUser.ID,
-		Role:     model.OrgRoleMember,
-		GroupID:  memGid,
-		JoinedAt: time.Now(),
+		OrgID:          public.ID,
+		UserID:         newUser.ID,
+		Role:           model.OrgRoleMember,
+		GroupID:        memGid,
+		OrgDisplayName: strings.TrimSpace(req.Name),
+		JoinedAt:       time.Now(),
 	}).Error
 	return
 }

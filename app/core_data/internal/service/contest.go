@@ -5,6 +5,7 @@ import (
 	"cwxu-algo/api/core/v1/contest_log"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -195,7 +196,11 @@ func (c ContestLogService) fetchUserNames(ctx context.Context, client profile.Pr
 		userIds = append(userIds, id)
 	}
 
-	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIds})
+	var orgID int64
+	if pd := auth.GetCurrentUser(ctx); pd != nil {
+		orgID = int64(pd.OrgID)
+	}
+	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIds, OrgId: orgID})
 	if err != nil {
 		log.Errorf("GetByIds batch failed: %v", err)
 		return result

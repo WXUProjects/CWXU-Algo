@@ -106,11 +106,16 @@ func seedGoAlgoFramework(db *gorm.DB) {
 		var n int64
 		db.Model(&model.OrgMember{}).Where("org_id = ? AND user_id = ?", public.ID, u.ID).Count(&n)
 		if n == 0 {
+			display := strings.TrimSpace(u.Name)
+			if display == "" {
+				display = u.Username
+			}
 			m := model.OrgMember{
-				OrgID:    public.ID,
-				UserID:   u.ID,
-				Role:     model.OrgRoleMember,
-				JoinedAt: now,
+				OrgID:          public.ID,
+				UserID:         u.ID,
+				Role:           model.OrgRoleMember,
+				OrgDisplayName: display,
+				JoinedAt:       now,
 			}
 			_ = db.Create(&m).Error
 		}
@@ -220,7 +225,30 @@ func seedGoAlgoFramework(db *gorm.DB) {
 	// 幂等：仅当 org_display_name 为空且 name≠username 时拷贝；之后 name 统一为 username
 	migrateNameToOrgDisplay(db, public.ID)
 
+	// 9. 公共域称呼 ≡ 全局昵称：空 org_display_name 回填 users.name
+	syncPublicOrgDisplayFromName(db, public.ID)
+
 	log.Infof("GoAlgo framework seed done public_org_id=%d users=%d fixed_groups=%d", public.ID, len(users), len(bad))
+}
+
+// syncPublicOrgDisplayFromName 将公共域空称呼回填为 users.name（与全局昵称合并）
+func syncPublicOrgDisplayFromName(db *gorm.DB, publicOrgID uint) {
+	res := db.Exec(`
+		UPDATE org_members m
+		SET org_display_name = u.name
+		FROM users u
+		WHERE m.user_id = u.id
+		  AND m.org_id = ?
+		  AND m.deleted_at IS NULL
+		  AND u.deleted_at IS NULL
+		  AND (m.org_display_name IS NULL OR TRIM(m.org_display_name) = '')
+		  AND COALESCE(TRIM(u.name), '') <> ''
+	`, publicOrgID)
+	n := int64(0)
+	if res != nil {
+		n = res.RowsAffected
+	}
+	log.Infof("sync public org_display from name: updated=%d", n)
 }
 
 // migrateNameToOrgDisplay 一次性迁移：

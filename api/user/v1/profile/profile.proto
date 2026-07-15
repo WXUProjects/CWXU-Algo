@@ -193,6 +193,8 @@ message GetUserIdsByOrgRes {
 
 message GetByIdsReq {
   repeated int64 userIds = 1;
+  // 组织内展示名：>0 用该组织 org_display_name；0 则优先 JWT 当前 orgId；仍无则公共域
+  int64 orgId = 2;
 }
 
 message GetByIdsRes {

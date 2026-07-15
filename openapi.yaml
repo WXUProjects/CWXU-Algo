@@ -1982,6 +1982,9 @@ components:
                     type: array
                     items:
                         type: string
+                orgId:
+                    type: string
+                    description: 组织内展示名：>0 用该组织 org_display_name；0 则优先 JWT 当前 orgId；仍无则公共域
         api.user.v1.GetByIdsRes:
             type: object
             properties:

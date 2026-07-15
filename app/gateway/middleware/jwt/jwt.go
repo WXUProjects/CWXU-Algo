@@ -29,6 +29,8 @@ var publicExact = map[string]struct{}{
 	"/v1/user/auth/login":    {},
 	"/v1/user/auth/register": {},
 	"/v1/user/role/list":     {},
+	"/v1/user/paste/get":     {},
+	"/api/user/paste/get":    {},
 }
 
 // Middleware jwt 校验中间件

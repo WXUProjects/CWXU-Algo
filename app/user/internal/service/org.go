@@ -190,9 +190,11 @@ func (s *OrgService) handleList(ctx khttp.Context) error {
 		_ = s.db.Where("user_id = ?", pd.UserID).Find(&mems).Error
 		ids := make([]uint, 0, len(mems))
 		roleMap := map[uint]string{}
+		displayMap := map[uint]string{}
 		for _, m := range mems {
 			ids = append(ids, m.OrgID)
 			roleMap[m.OrgID] = m.Role
+			displayMap[m.OrgID] = strings.TrimSpace(m.OrgDisplayName)
 		}
 		if len(ids) > 0 {
 			_ = s.db.Where("id IN ?", ids).Order("is_system DESC, id ASC").Find(&orgs).Error
@@ -201,6 +203,7 @@ func (s *OrgService) handleList(ctx khttp.Context) error {
 		for i := range orgs {
 			item := orgToMap(&orgs[i], false)
 			item["myRole"] = roleMap[orgs[i].ID]
+			item["orgDisplayName"] = displayMap[orgs[i].ID]
 			item["isCurrent"] = orgs[i].ID == pd.OrgID
 			list = append(list, item)
 		}
@@ -241,6 +244,7 @@ func (s *OrgService) handleGet(ctx khttp.Context) error {
 		var m model.OrgMember
 		if s.db.Where("org_id = ? AND user_id = ?", orgID, pd.UserID).First(&m).Error == nil {
 			item["myRole"] = m.Role
+			item["orgDisplayName"] = strings.TrimSpace(m.OrgDisplayName)
 		}
 		item["isCurrent"] = orgID == pd.OrgID
 	}
@@ -792,11 +796,8 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 
 	list := make([]map[string]interface{}, 0, len(rows))
 	for _, r := range rows {
-		// name = 组织内展示名（有则用 org_display_name，否则全局昵称）
+		// 组织内展示仅用 org_display_name；空则回退 username（不再回退全局昵称）
 		display := strings.TrimSpace(r.OrgDisplayName)
-		if display == "" {
-			display = r.Name
-		}
 		if display == "" {
 			display = r.Username
 		}
@@ -804,7 +805,6 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 			"userId":         r.UserID,
 			"username":       r.Username,
 			"name":           display,
-			"nickname":       r.Name,
 			"orgDisplayName": r.OrgDisplayName,
 			"avatar":         r.Avatar,
 			"role":           r.Role,
@@ -958,6 +958,12 @@ func (s *OrgService) handleSetDisplayName(ctx khttp.Context) error {
 		Update("org_display_name", displayName).Error; err != nil {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
 		return nil
+	}
+	// 公共域称呼 ≡ 全局昵称 users.name
+	var o model.Org
+	if s.db.Select("id", "slug", "is_system").First(&o, req.OrgID).Error == nil &&
+		(o.IsSystem || o.Slug == model.PublicOrgSlug) {
+		_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("name", displayName).Error
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更新组织内名称"})
 	return nil
@@ -1124,10 +1130,15 @@ func (s *OrgService) handleJoinRequests(ctx khttp.Context) error {
 	for _, r := range reqs {
 		var u model.User
 		_ = s.db.First(&u, r.UserID)
+		display := strings.TrimSpace(r.OrgDisplayName)
+		if display == "" {
+			display = u.Username
+		}
 		list = append(list, map[string]interface{}{
-			"id": r.ID, "userId": r.UserID, "username": u.Username, "name": u.Name,
+			"id": r.ID, "userId": r.UserID, "username": u.Username,
+			"name":            display,
 			"orgDisplayName": r.OrgDisplayName,
-			"status": r.Status, "createdAt": r.CreatedAt.Unix(),
+			"status":          r.Status, "createdAt": r.CreatedAt.Unix(),
 		})
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "list": list})

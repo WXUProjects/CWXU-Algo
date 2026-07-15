@@ -922,8 +922,10 @@ func (x *GetUserIdsByOrgRes) GetOrgId() int64 {
 }
 
 type GetByIdsReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserIds       []int64                `protobuf:"varint,1,rep,packed,name=userIds,proto3" json:"userIds,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	UserIds []int64                `protobuf:"varint,1,rep,packed,name=userIds,proto3" json:"userIds,omitempty"`
+	// 组织内展示名：>0 用该组织 org_display_name；0 则优先 JWT 当前 orgId；仍无则公共域
+	OrgId         int64 `protobuf:"varint,2,opt,name=orgId,proto3" json:"orgId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -963,6 +965,13 @@ func (x *GetByIdsReq) GetUserIds() []int64 {
 		return x.UserIds
 	}
 	return nil
+}
+
+func (x *GetByIdsReq) GetOrgId() int64 {
+	if x != nil {
+		return x.OrgId
+	}
+	return 0
 }
 
 type GetByIdsRes struct {
@@ -1748,9 +1757,10 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x05orgId\x18\x01 \x01(\x03R\x05orgId\"D\n" +
 	"\x12GetUserIdsByOrgRes\x12\x18\n" +
 	"\auserIds\x18\x01 \x03(\x03R\auserIds\x12\x14\n" +
-	"\x05orgId\x18\x02 \x01(\x03R\x05orgId\"'\n" +
+	"\x05orgId\x18\x02 \x01(\x03R\x05orgId\"=\n" +
 	"\vGetByIdsReq\x12\x18\n" +
-	"\auserIds\x18\x01 \x03(\x03R\auserIds\"\xa2\x01\n" +
+	"\auserIds\x18\x01 \x03(\x03R\auserIds\x12\x14\n" +
+	"\x05orgId\x18\x02 \x01(\x03R\x05orgId\"\xa2\x01\n" +
 	"\vGetByIdsRes\x12@\n" +
 	"\bprofiles\x18\x01 \x03(\v2$.api.user.v1.GetByIdsRes.UserProfileR\bprofiles\x1aQ\n" +
 	"\vUserProfile\x12\x16\n" +

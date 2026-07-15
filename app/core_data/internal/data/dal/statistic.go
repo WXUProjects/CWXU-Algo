@@ -193,7 +193,6 @@ func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endT
 
 	type RankQueryResult struct {
 		UserID int64
-		Name   string
 		Score  int64
 	}
 
@@ -228,9 +227,10 @@ func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endT
 	}
 
 	var results []RankQueryResult
+	// 名称由上层按当前组织 org_display_name 填充，不读 submit_logs 上的 name
 	err := applyFilters(d.db.WithContext(ctx).Table("submit_logs")).
-		Select("user_id, name, " + selectClause + " as score").
-		Group("user_id, name").
+		Select("user_id, " + selectClause + " as score").
+		Group("user_id").
 		Order("score DESC").
 		Offset(int(offset)).
 		Limit(int(pageSize)).
@@ -244,7 +244,7 @@ func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endT
 		items[i] = RankItem{
 			Rank:   offset + int64(i+1),
 			UserID: r.UserID,
-			Name:   r.Name,
+			Name:   "",
 			Score:  r.Score,
 		}
 	}

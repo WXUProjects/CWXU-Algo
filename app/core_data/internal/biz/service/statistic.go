@@ -133,12 +133,24 @@ func (uc *StatisticUseCase) Rank(ctx context.Context, req *statistic.RankReq) (*
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
 
+	uids := make([]int64, 0, len(items))
+	for _, v := range items {
+		if v.UserID > 0 {
+			uids = append(uids, v.UserID)
+		}
+	}
+	nameMap := fetchDisplayNames(ctx, uc.reg, uids)
+
 	data := make([]*statistic.RankItem, len(items))
 	for i, v := range items {
+		name := nameMap[v.UserID]
+		if name == "" {
+			name = v.Name
+		}
 		data[i] = &statistic.RankItem{
 			Rank:   v.Rank,
 			UserId: v.UserID,
-			Name:   v.Name,
+			Name:   name,
 			Score:  v.Score,
 		}
 	}

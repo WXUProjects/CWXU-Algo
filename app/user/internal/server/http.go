@@ -44,6 +44,10 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		if strings.Contains(operation, "static") {
 			return false
 		}
+		// 粘贴板公开查看
+		if strings.Contains(operation, "paste/get") {
+			return false
+		}
 		if _, ok := whiteList[operation]; ok {
 			return false
 		}
@@ -61,6 +65,7 @@ func NewHTTPServer(
 	roleService *service.RoleService,
 	siteService *service.SiteService,
 	orgService *service.OrgService,
+	pasteService *service.PasteService,
 	logger log.Logger,
 
 ) *http.Server {
@@ -90,5 +95,6 @@ func NewHTTPServer(
 	site.RegisterSiteHTTPServer(srv, siteService)
 	service.RegisterUploadRoutes(srv)
 	service.RegisterOrgRoutes(srv, orgService)
+	service.RegisterPasteRoutes(srv, pasteService)
 	return srv
 }
