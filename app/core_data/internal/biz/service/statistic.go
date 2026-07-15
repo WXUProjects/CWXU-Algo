@@ -162,8 +162,8 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 	var memberIDs []int64
 	queryUserId := req.UserId
 	// 个人 period 也带全局版本，避免与组织统计共用脏缓存语义
-	// schema v2：Ac 增加 TotalRaw；旧缓存缺字段会反序列化为 0，必须换 key
-	const periodCacheSchema = "2"
+	// schema v3：组织/全站 AC 改为条数不去重
+	const periodCacheSchema = "3"
 	ver := "0"
 	if v, err := uc.rdb.Get(ctx, "statistic:period:global:ver").Result(); err == nil && v != "" {
 		ver = v
