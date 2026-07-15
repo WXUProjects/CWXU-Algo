@@ -86,7 +86,7 @@ type PeriodSubmitCount struct {
 	Total     int64
 }
 
-// PeriodAcCount AC 题数统计（按题去重，非提交次数）
+// PeriodAcCount AC 统计：时段字段为按题去重；Total=累计题数；TotalRaw=累计 AC 次数
 type PeriodAcCount struct {
 	Today     int64
 	ThisWeek  int64
@@ -95,7 +95,8 @@ type PeriodAcCount struct {
 	LastMonth int64
 	ThisYear  int64
 	LastYear  int64
-	Total     int64
+	Total     int64 // 去重题数
+	TotalRaw  int64 // 不去重 AC 次数
 }
 
 // acProblemKeySQL 同一用户下 AC 去重键：优先 problem_id，其次 external_id，最后 problem 文本。
@@ -136,7 +137,7 @@ func (d *StatisticDal) GetPeriodCountScoped(userId int64, memberIDs []int64) (Pe
 		Total:     d.countQueryTotalScoped(userId, memberIDs),
 	}
 
-	// AC 题数（按 problem_id / external_id 去重，同一题多次 AC 只计 1）
+	// AC：时段=按题去重；Total=累计题数；TotalRaw=累计 AC 次数（不去重）
 	ac := PeriodAcCount{
 		Today:     d.countAcDistinctQueryScoped(userId, todayStart, now, memberIDs),
 		ThisWeek:  d.countAcDistinctQueryScoped(userId, thisWeekStart, now, memberIDs),
@@ -146,6 +147,7 @@ func (d *StatisticDal) GetPeriodCountScoped(userId int64, memberIDs []int64) (Pe
 		ThisYear:  d.countAcDistinctQueryScoped(userId, thisYearStart, now, memberIDs),
 		LastYear:  d.countAcDistinctQueryScoped(userId, lastYearStart, thisYearStart, memberIDs),
 		Total:     d.countAcDistinctTotalScoped(userId, memberIDs),
+		TotalRaw:  d.countAcRawTotalScoped(userId, memberIDs),
 	}
 
 	return submit, ac, nil
@@ -349,6 +351,25 @@ func (d *StatisticDal) countAcDistinct(userId int64, memberIDs []int64, start, e
 	}
 	if err := query.Scan(&count).Error; err != nil {
 		log.Errorf("countAcDistinct error: %v", err)
+	}
+	return count
+}
+
+// countAcRawTotalScoped 累计 AC 次数（不去重，每条 AC 记录计 1）
+func (d *StatisticDal) countAcRawTotalScoped(userId int64, memberIDs []int64) int64 {
+	if userId == -1 && memberIDs != nil && len(memberIDs) == 0 {
+		return 0
+	}
+	var count int64
+	query := d.db.Table("submit_logs").
+		Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
+	if userId != -1 {
+		query = query.Where("user_id = ?", userId)
+	} else if memberIDs != nil {
+		query = query.Where("user_id IN ?", memberIDs)
+	}
+	if err := query.Count(&count).Error; err != nil {
+		log.Errorf("countAcRawTotal error: %v", err)
 	}
 	return count
 }

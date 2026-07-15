@@ -391,15 +391,19 @@ func (x *SubmitCount) GetTotal() int64 {
 }
 
 type AcCount struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Today         int64                  `protobuf:"varint,1,opt,name=today,proto3" json:"today,omitempty"`
-	ThisWeek      int64                  `protobuf:"varint,2,opt,name=thisWeek,proto3" json:"thisWeek,omitempty"`
-	LastWeek      int64                  `protobuf:"varint,3,opt,name=lastWeek,proto3" json:"lastWeek,omitempty"`
-	ThisMonth     int64                  `protobuf:"varint,4,opt,name=thisMonth,proto3" json:"thisMonth,omitempty"`
-	LastMonth     int64                  `protobuf:"varint,5,opt,name=lastMonth,proto3" json:"lastMonth,omitempty"`
-	ThisYear      int64                  `protobuf:"varint,6,opt,name=thisYear,proto3" json:"thisYear,omitempty"`
-	LastYear      int64                  `protobuf:"varint,7,opt,name=lastYear,proto3" json:"lastYear,omitempty"`
-	Total         int64                  `protobuf:"varint,8,opt,name=total,proto3" json:"total,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// today…thisYear：按题去重后的 AC 题数（时段内做过的题）
+	Today     int64 `protobuf:"varint,1,opt,name=today,proto3" json:"today,omitempty"`
+	ThisWeek  int64 `protobuf:"varint,2,opt,name=thisWeek,proto3" json:"thisWeek,omitempty"`
+	LastWeek  int64 `protobuf:"varint,3,opt,name=lastWeek,proto3" json:"lastWeek,omitempty"`
+	ThisMonth int64 `protobuf:"varint,4,opt,name=thisMonth,proto3" json:"thisMonth,omitempty"`
+	LastMonth int64 `protobuf:"varint,5,opt,name=lastMonth,proto3" json:"lastMonth,omitempty"`
+	ThisYear  int64 `protobuf:"varint,6,opt,name=thisYear,proto3" json:"thisYear,omitempty"`
+	LastYear  int64 `protobuf:"varint,7,opt,name=lastYear,proto3" json:"lastYear,omitempty"`
+	// total：生涯按题去重（累计题数）
+	Total int64 `protobuf:"varint,8,opt,name=total,proto3" json:"total,omitempty"`
+	// totalRaw：生涯 AC 次数（不去重，同一题多次 AC 全计）
+	TotalRaw      int64 `protobuf:"varint,9,opt,name=totalRaw,proto3" json:"totalRaw,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -486,6 +490,13 @@ func (x *AcCount) GetLastYear() int64 {
 func (x *AcCount) GetTotal() int64 {
 	if x != nil {
 		return x.Total
+	}
+	return 0
+}
+
+func (x *AcCount) GetTotalRaw() int64 {
+	if x != nil {
+		return x.TotalRaw
 	}
 	return 0
 }
@@ -793,7 +804,7 @@ const file_core_v1_statistic_statistic_proto_rawDesc = "" +
 	"\tlastMonth\x18\x05 \x01(\x03R\tlastMonth\x12\x1a\n" +
 	"\bthisYear\x18\x06 \x01(\x03R\bthisYear\x12\x1a\n" +
 	"\blastYear\x18\a \x01(\x03R\blastYear\x12\x14\n" +
-	"\x05total\x18\b \x01(\x03R\x05total\"\xe1\x01\n" +
+	"\x05total\x18\b \x01(\x03R\x05total\"\xfd\x01\n" +
 	"\aAcCount\x12\x14\n" +
 	"\x05today\x18\x01 \x01(\x03R\x05today\x12\x1a\n" +
 	"\bthisWeek\x18\x02 \x01(\x03R\bthisWeek\x12\x1a\n" +
@@ -802,7 +813,8 @@ const file_core_v1_statistic_statistic_proto_rawDesc = "" +
 	"\tlastMonth\x18\x05 \x01(\x03R\tlastMonth\x12\x1a\n" +
 	"\bthisYear\x18\x06 \x01(\x03R\bthisYear\x12\x1a\n" +
 	"\blastYear\x18\a \x01(\x03R\blastYear\x12\x14\n" +
-	"\x05total\x18\b \x01(\x03R\x05total\"\xa9\x01\n" +
+	"\x05total\x18\b \x01(\x03R\x05total\x12\x1a\n" +
+	"\btotalRaw\x18\t \x01(\x03R\btotalRaw\"\xa9\x01\n" +
 	"\aRankReq\x12\x1c\n" +
 	"\tstartDate\x18\x01 \x01(\tR\tstartDate\x12\x18\n" +
 	"\aendDate\x18\x02 \x01(\tR\aendDate\x12\x1c\n" +

@@ -219,6 +219,7 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 				ThisYear:  result.Ac.ThisYear,
 				LastYear:  result.Ac.LastYear,
 				Total:     result.Ac.Total,
+				TotalRaw:  result.Ac.TotalRaw,
 			},
 		},
 	}, nil
