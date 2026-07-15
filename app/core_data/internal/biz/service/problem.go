@@ -768,9 +768,17 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 	if err := q.Count(&total).Error; err != nil {
 		return nil, nil, 0, err
 	}
-	order := "last_submitted_at DESC NULLS LAST, id DESC"
-	if f.Sort == "latest_asc" {
+	// 默认按 id 倒序；兼容 latest_* / id_*
+	order := "id DESC"
+	switch strings.TrimSpace(f.Sort) {
+	case "id_asc":
+		order = "id ASC"
+	case "id_desc", "":
+		order = "id DESC"
+	case "latest_asc":
 		order = "last_submitted_at ASC NULLS LAST, id ASC"
+	case "latest_desc":
+		order = "last_submitted_at DESC NULLS LAST, id DESC"
 	}
 	var list []model.Problem
 	err := q.Order(order).Offset(int((f.Page - 1) * f.PageSize)).Limit(int(f.PageSize)).Find(&list).Error
