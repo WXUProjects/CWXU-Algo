@@ -62,16 +62,60 @@ func (d *ProfileDal) Update(ctx context.Context, profile model.User) error {
 
 func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64) ([]model.User, int64, error) {
 	var list []model.User
-	err :=	d.db.Select("id", "username", "name", "groupId", "avatar", "roleId").
+	err := d.db.WithContext(ctx).
+		Select("id", "username", "name", "group_id", "avatar", "role_id", "is_site_admin").
 		Order("id").
 		Limit(int(pageSize)).Offset(int(pageNum-1) * int(pageSize)).
 		Find(&list).Error
-	var total int64
-	err = d.db.Model(&model.User{}).Count(&total).Error
 	if err != nil {
 		return nil, 0, err
 	}
+	var total int64
+	if err = d.db.WithContext(ctx).Model(&model.User{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
 	return list, total, nil
+}
+
+// OrgBrief 用户所属组织摘要（列表 Badge）
+type OrgBrief struct {
+	OrgID uint
+	Name  string
+	Role  string
+}
+
+// GetOrgBriefsByUserIDs 批量查询用户所属组织
+func (d *ProfileDal) GetOrgBriefsByUserIDs(ctx context.Context, userIDs []uint) (map[uint][]OrgBrief, error) {
+	out := make(map[uint][]OrgBrief)
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	type row struct {
+		UserID  uint
+		OrgID   uint
+		Name    string
+		Role    string
+		IsSystem bool
+	}
+	var rows []row
+	err := d.db.WithContext(ctx).
+		Table("org_members AS m").
+		Select("m.user_id AS user_id, m.org_id AS org_id, o.name AS name, m.role AS role, o.is_system AS is_system").
+		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
+		Where("m.user_id IN ? AND m.deleted_at IS NULL", userIDs).
+		Order("o.is_system DESC, o.id ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.UserID] = append(out[r.UserID], OrgBrief{
+			OrgID: r.OrgID,
+			Name:  r.Name,
+			Role:  r.Role,
+		})
+	}
+	return out, nil
 }
 
 func (d *ProfileDal) MoveGroup(ctx context.Context, userId uint64, groupId int64) error {

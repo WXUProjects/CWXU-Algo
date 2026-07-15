@@ -19,6 +19,13 @@ service Auth {
       body:"*"
     };
   }
+  // 根据当前登录态重签 JWT（任命角色后刷新页面即可同步权限）
+  rpc Refresh (RefreshReq) returns (LoginRes) {
+    option (google.api.http) = {
+      post: "/v1/user/auth/refresh",
+      body: "*"
+    };
+  }
 }
 
 message LoginReq {
@@ -43,3 +50,5 @@ message RegisterRes {
   bool success = 1;
   string message = 2;
 }
+
+message RefreshReq {}

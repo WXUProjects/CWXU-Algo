@@ -8,6 +8,8 @@ import (
 
 const (
 	OrgRoleMember   = "member"
+	OrgRoleCoach    = "coach"
+	OrgRoleCaptain  = "captain"
 	OrgRoleOrgAdmin = "org_admin"
 
 	OrgJoinAuto   = "auto"
@@ -59,9 +61,24 @@ type OrgMember struct {
 	gorm.Model
 	OrgID    uint       `gorm:"uniqueIndex:idx_org_user;not null;comment:组织ID"`
 	UserID   uint       `gorm:"uniqueIndex:idx_org_user;index;not null;comment:用户ID"`
-	Role     string     `gorm:"size:16;default:member;comment:member|org_admin"`
+	Role     string     `gorm:"size:16;default:member;comment:member|coach|captain|org_admin"`
 	GroupID  *uint      `gorm:"index;comment:组织内分组"`
 	JoinedAt time.Time  `gorm:"comment:加入时间"`
+}
+
+// ValidOrgRole 组织内角色是否合法
+func ValidOrgRole(role string) bool {
+	switch role {
+	case OrgRoleMember, OrgRoleCoach, OrgRoleCaptain, OrgRoleOrgAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsOrgStaffRole 组织内可进管理端的角色（教练/队长/组织管理员）
+func IsOrgStaffRole(role string) bool {
+	return role == OrgRoleCoach || role == OrgRoleCaptain || role == OrgRoleOrgAdmin
 }
 
 // OrgJoinRequest 团队识别码加入申请（join_mode=review）

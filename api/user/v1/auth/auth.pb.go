@@ -262,6 +262,42 @@ func (x *RegisterRes) GetMessage() string {
 	return ""
 }
 
+type RefreshReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefreshReq) Reset() {
+	*x = RefreshReq{}
+	mi := &file_user_v1_auth_auth_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefreshReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefreshReq) ProtoMessage() {}
+
+func (x *RefreshReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_auth_auth_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefreshReq.ProtoReflect.Descriptor instead.
+func (*RefreshReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_auth_auth_proto_rawDescGZIP(), []int{4}
+}
+
 var File_user_v1_auth_auth_proto protoreflect.FileDescriptor
 
 const file_user_v1_auth_auth_proto_rawDesc = "" +
@@ -282,10 +318,13 @@ const file_user_v1_auth_auth_proto_rawDesc = "" +
 	"\agroupId\x18\x05 \x01(\x03R\agroupId\"A\n" +
 	"\vRegisterRes\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage2\xc0\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\f\n" +
+	"\n" +
+	"RefreshReq2\x9d\x02\n" +
 	"\x04Auth\x12U\n" +
 	"\x05Login\x12\x15.api.user.v1.LoginReq\x1a\x15.api.user.v1.LoginRes\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/v1/user/auth/login\x12a\n" +
-	"\bRegister\x12\x18.api.user.v1.RegisterReq\x1a\x18.api.user.v1.RegisterRes\"!\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/v1/user/auth/registerB0\n" +
+	"\bRegister\x12\x18.api.user.v1.RegisterReq\x1a\x18.api.user.v1.RegisterRes\"!\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/v1/user/auth/register\x12[\n" +
+	"\aRefresh\x12\x17.api.user.v1.RefreshReq\x1a\x15.api.user.v1.LoginRes\" \x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/v1/user/auth/refreshB0\n" +
 	"\vapi.user.v1P\x01Z\x1fcwxu-algo/api/user/v1/auth;authb\x06proto3"
 
 var (
@@ -300,20 +339,23 @@ func file_user_v1_auth_auth_proto_rawDescGZIP() []byte {
 	return file_user_v1_auth_auth_proto_rawDescData
 }
 
-var file_user_v1_auth_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_user_v1_auth_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_user_v1_auth_auth_proto_goTypes = []any{
 	(*LoginReq)(nil),    // 0: api.user.v1.LoginReq
 	(*LoginRes)(nil),    // 1: api.user.v1.LoginRes
 	(*RegisterReq)(nil), // 2: api.user.v1.RegisterReq
 	(*RegisterRes)(nil), // 3: api.user.v1.RegisterRes
+	(*RefreshReq)(nil),  // 4: api.user.v1.RefreshReq
 }
 var file_user_v1_auth_auth_proto_depIdxs = []int32{
 	0, // 0: api.user.v1.Auth.Login:input_type -> api.user.v1.LoginReq
 	2, // 1: api.user.v1.Auth.Register:input_type -> api.user.v1.RegisterReq
-	1, // 2: api.user.v1.Auth.Login:output_type -> api.user.v1.LoginRes
-	3, // 3: api.user.v1.Auth.Register:output_type -> api.user.v1.RegisterRes
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
+	4, // 2: api.user.v1.Auth.Refresh:input_type -> api.user.v1.RefreshReq
+	1, // 3: api.user.v1.Auth.Login:output_type -> api.user.v1.LoginRes
+	3, // 4: api.user.v1.Auth.Register:output_type -> api.user.v1.RegisterRes
+	1, // 5: api.user.v1.Auth.Refresh:output_type -> api.user.v1.LoginRes
+	3, // [3:6] is the sub-list for method output_type
+	0, // [0:3] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -330,7 +372,7 @@ func file_user_v1_auth_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_v1_auth_auth_proto_rawDesc), len(file_user_v1_auth_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

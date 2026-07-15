@@ -699,6 +699,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.LoginRes'
+    /v1/user/auth/refresh:
+        post:
+            tags:
+                - Auth
+            description: 根据当前登录态重签 JWT（任命角色后刷新页面即可同步权限）
+            operationId: Auth_Refresh
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.RefreshReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.LoginRes'
     /v1/user/auth/register:
         post:
             tags:
@@ -897,6 +916,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.GetUserIdsByGroupRes'
+    /v1/user/profile/ids-by-org:
+        get:
+            tags:
+                - Profile
+            description: 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
+            operationId: Profile_GetUserIdsByOrg
+            parameters:
+                - name: orgId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.GetUserIdsByOrgRes'
     /v1/user/profile/list:
         get:
             tags:
@@ -1971,6 +2008,21 @@ components:
                 roleId:
                     type: integer
                     format: int32
+                isSiteAdmin:
+                    type: boolean
+                orgs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.GetListRes_OrgBrief'
+        api.user.v1.GetListRes_OrgBrief:
+            type: object
+            properties:
+                orgId:
+                    type: string
+                name:
+                    type: string
+                role:
+                    type: string
         api.user.v1.GetUserIdsByGroupRes:
             type: object
             properties:
@@ -1978,6 +2030,15 @@ components:
                     type: array
                     items:
                         type: string
+        api.user.v1.GetUserIdsByOrgRes:
+            type: object
+            properties:
+                userIds:
+                    type: array
+                    items:
+                        type: string
+                orgId:
+                    type: string
         api.user.v1.LoginReq:
             type: object
             properties:
@@ -2008,6 +2069,9 @@ components:
                     type: string
                 message:
                     type: string
+        api.user.v1.RefreshReq:
+            type: object
+            properties: {}
         api.user.v1.RegisterReq:
             type: object
             properties:

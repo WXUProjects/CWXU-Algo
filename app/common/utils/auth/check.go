@@ -20,7 +20,7 @@ type JwtPayload struct {
 	RoleID      int    `json:"roleId"` // 兼容旧字段
 	IsSiteAdmin bool   `json:"isSiteAdmin"`
 	OrgID       uint   `json:"orgId"`
-	OrgRole     string `json:"orgRole"` // member | org_admin
+	OrgRole     string `json:"orgRole"` // member | coach | captain | org_admin
 }
 
 func praseJwtToken(ctx context.Context) string {
@@ -67,11 +67,15 @@ func VerifyMinRole(ctx context.Context, minRole int) bool {
 	if pd.IsSiteAdmin {
 		return true
 	}
-	// 组织管理员 ≈ 旧教练级（管理端）
-	if pd.OrgRole == "org_admin" && permission.RoleRank(minRole) <= permission.RoleRank(permission.RoleCoach) {
+	// 组织 staff（教练/队长/组织管理员）≈ 旧教练级（管理端）
+	if isOrgStaffRole(pd.OrgRole) && permission.RoleRank(minRole) <= permission.RoleRank(permission.RoleCoach) {
 		return true
 	}
 	return permission.RoleRank(pd.RoleID) >= permission.RoleRank(minRole)
+}
+
+func isOrgStaffRole(role string) bool {
+	return role == "coach" || role == "captain" || role == "org_admin"
 }
 
 // VerifySelfOrAbove 自己或站点管理员
@@ -143,22 +147,33 @@ func VerifyCoach(ctx context.Context) bool {
 	return pd.RoleID == permission.RoleCoach
 }
 
-// VerifyStaff 管理端：站点管理员 或 当前组织管理员 或 旧 staff role
+// VerifyStaff 管理端：站点管理员 或 当前组织教练/队长/组织管理员 或 旧 staff role
 func VerifyStaff(ctx context.Context) bool {
 	pd := parsePayload(ctx)
 	if pd == nil {
 		return false
 	}
-	if pd.IsSiteAdmin || pd.OrgRole == "org_admin" {
+	if pd.IsSiteAdmin || isOrgStaffRole(pd.OrgRole) {
 		return true
 	}
 	return permission.IsStaff(pd.RoleID)
+}
+
+// VerifyOrgCoach 当前组织教练及以上（coach/captain/org_admin）或站点管理员
+func VerifyOrgCoach(ctx context.Context) bool {
+	return VerifyStaff(ctx)
 }
 
 func VerifyCaptain(ctx context.Context) bool {
 	pd := parsePayload(ctx)
 	if pd == nil {
 		return false
+	}
+	if pd.IsSiteAdmin {
+		return true
+	}
+	if pd.OrgRole == "captain" || pd.OrgRole == "org_admin" {
+		return true
 	}
 	return pd.RoleID == permission.RoleCaptain
 }

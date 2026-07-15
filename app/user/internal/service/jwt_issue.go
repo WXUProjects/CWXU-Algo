@@ -47,7 +47,7 @@ func IssueJWT(db *gorm.DB, u *model.User) (string, error) {
 	}
 
 	roleIdsJSON := []byte("[0]")
-	if u.IsSiteAdmin || orgRole == model.OrgRoleOrgAdmin {
+	if u.IsSiteAdmin || model.IsOrgStaffRole(orgRole) {
 		roleIdsJSON = []byte("[1]")
 	}
 

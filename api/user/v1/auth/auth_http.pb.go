@@ -20,10 +20,13 @@ var _ = binding.EncodeURL
 const _ = http.SupportPackageIsVersion1
 
 const OperationAuthLogin = "/api.user.v1.Auth/Login"
+const OperationAuthRefresh = "/api.user.v1.Auth/Refresh"
 const OperationAuthRegister = "/api.user.v1.Auth/Register"
 
 type AuthHTTPServer interface {
 	Login(context.Context, *LoginReq) (*LoginRes, error)
+	// Refresh 根据当前登录态重签 JWT（任命角色后刷新页面即可同步权限）
+	Refresh(context.Context, *RefreshReq) (*LoginRes, error)
 	Register(context.Context, *RegisterReq) (*RegisterRes, error)
 }
 
@@ -31,6 +34,7 @@ func RegisterAuthHTTPServer(s *http.Server, srv AuthHTTPServer) {
 	r := s.Route("/")
 	r.POST("/v1/user/auth/login", _Auth_Login0_HTTP_Handler(srv))
 	r.POST("/v1/user/auth/register", _Auth_Register0_HTTP_Handler(srv))
+	r.POST("/v1/user/auth/refresh", _Auth_Refresh0_HTTP_Handler(srv))
 }
 
 func _Auth_Login0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) error {
@@ -77,8 +81,32 @@ func _Auth_Register0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) err
 	}
 }
 
+func _Auth_Refresh0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in RefreshReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationAuthRefresh)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.Refresh(ctx, req.(*RefreshReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*LoginRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type AuthHTTPClient interface {
 	Login(ctx context.Context, req *LoginReq, opts ...http.CallOption) (rsp *LoginRes, err error)
+	// Refresh 根据当前登录态重签 JWT（任命角色后刷新页面即可同步权限）
+	Refresh(ctx context.Context, req *RefreshReq, opts ...http.CallOption) (rsp *LoginRes, err error)
 	Register(ctx context.Context, req *RegisterReq, opts ...http.CallOption) (rsp *RegisterRes, err error)
 }
 
@@ -95,6 +123,20 @@ func (c *AuthHTTPClientImpl) Login(ctx context.Context, in *LoginReq, opts ...ht
 	pattern := "/v1/user/auth/login"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationAuthLogin))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Refresh 根据当前登录态重签 JWT（任命角色后刷新页面即可同步权限）
+func (c *AuthHTTPClientImpl) Refresh(ctx context.Context, in *RefreshReq, opts ...http.CallOption) (*LoginRes, error) {
+	var out LoginRes
+	pattern := "/v1/user/auth/refresh"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationAuthRefresh))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

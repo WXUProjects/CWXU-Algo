@@ -5,6 +5,7 @@ import (
 	"time"
 
 	pb "cwxu-algo/api/user/v1/auth"
+	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 
@@ -14,6 +15,7 @@ import (
 )
 
 type AuthService struct {
+	pb.UnimplementedAuthServer
 	db *gorm.DB
 }
 
@@ -86,4 +88,31 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 		JoinedAt: time.Now(),
 	}).Error
 	return
+}
+
+// Refresh 根据当前 JWT 用户从 DB 重签 token（角色/组织变更后 F5 即可同步）
+func (s *AuthService) Refresh(ctx context.Context, _ *pb.RefreshReq) (*pb.LoginRes, error) {
+	res := &pb.LoginRes{}
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		res.Success = false
+		res.Message = "请先登录"
+		return res, nil
+	}
+	var u model.User
+	if err := s.db.First(&u, pd.UserID).Error; err != nil {
+		res.Success = false
+		res.Message = "用户不存在"
+		return res, nil
+	}
+	token, err := IssueJWT(s.db, &u)
+	if err != nil {
+		res.Success = false
+		res.Message = "jwt 生成失败: " + err.Error()
+		return res, nil
+	}
+	res.Success = true
+	res.Message = "已刷新"
+	res.JwtToken = token
+	return res, nil
 }

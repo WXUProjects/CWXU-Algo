@@ -592,7 +592,7 @@ func (s *OrgService) handleAddMember(ctx khttp.Context) error {
 		return nil
 	}
 	role := req.Role
-	if role != model.OrgRoleOrgAdmin {
+	if !model.ValidOrgRole(role) {
 		role = model.OrgRoleMember
 	}
 	if s.isMemberDB(uid, req.OrgID) {
@@ -624,8 +624,8 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
 		return nil
 	}
-	if req.Role != model.OrgRoleMember && req.Role != model.OrgRoleOrgAdmin {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "角色无效"})
+	if !model.ValidOrgRole(req.Role) {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "角色无效（member|coach|captain|org_admin）"})
 		return nil
 	}
 	// 站点管理员可任命任意组织；组织管理员可任命本组织

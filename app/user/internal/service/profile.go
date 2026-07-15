@@ -126,24 +126,42 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		return nil, InternalServer
 	}
 
+	uids := make([]uint, 0, len(pf))
+	for _, v := range pf {
+		uids = append(uids, v.ID)
+	}
+	orgMap, _ := p.profileDal.GetOrgBriefsByUserIDs(ctx, uids)
+
 	res := &profile.GetListRes{
 		List:  make([]*profile.GetListRes_List, 0),
 		Total: total,
 	}
 	for _, v := range pf {
 		var t string
-		if v, ok := timeMap[int64(v.ID)]; ok {
-			t = strconv.Itoa(int(v))
+		if ts, ok := timeMap[int64(v.ID)]; ok {
+			t = strconv.Itoa(int(ts))
 		}
-		res.List = append(res.List, &profile.GetListRes_List{
-			UserId:     uint64(v.ID),
-			Username:   v.Username,
-			Name:       v.Name,
-			Avatar:     v.Avatar,
-			GroupId:    v.GroupId,
-			RoleId:     int32(v.RoleID),
-			LastSubmit: t,
-		})
+		item := &profile.GetListRes_List{
+			UserId:      uint64(v.ID),
+			Username:    v.Username,
+			Name:        v.Name,
+			Avatar:      v.Avatar,
+			GroupId:     v.GroupId,
+			RoleId:      int32(v.RoleID),
+			LastSubmit:  t,
+			IsSiteAdmin: v.IsSiteAdmin,
+		}
+		if briefs := orgMap[v.ID]; len(briefs) > 0 {
+			item.Orgs = make([]*profile.GetListRes_OrgBrief, 0, len(briefs))
+			for _, b := range briefs {
+				item.Orgs = append(item.Orgs, &profile.GetListRes_OrgBrief{
+					OrgId: uint64(b.OrgID),
+					Name:  b.Name,
+					Role:  b.Role,
+				})
+			}
+		}
+		res.List = append(res.List, item)
 	}
 	return res, nil
 }
