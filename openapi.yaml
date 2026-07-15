@@ -948,6 +948,11 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: scope
+                  in: query
+                  description: 'scope: org=当前组织成员；site=全站（仅站点管理员）；空=兼容旧逻辑（站管全站/否则组织）'
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK

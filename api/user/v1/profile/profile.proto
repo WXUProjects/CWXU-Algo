@@ -101,6 +101,8 @@ message GetByNameRes {
 message GetListReq {
   int64 pageSize = 1;
   int64 pageNum = 2;
+  // scope: org=当前组织成员；site=全站（仅站点管理员）；空=兼容旧逻辑（站管全站/否则组织）
+  string scope = 3;
 }
 
 message GetListRes {

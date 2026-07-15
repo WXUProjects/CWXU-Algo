@@ -86,8 +86,23 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 	var pf []model.User
 	var total int64
 	var err error
-	// 非站点管理员：仅当前组织成员；站点管理员默认全站
-	if !auth.VerifySiteAdmin(ctx) {
+	// scope=org：当前组织；scope=site：全站（仅站管）；空：兼容（站管全站/否则组织）
+	scope := req.Scope
+	useSite := false
+	if scope == "site" {
+		if !auth.VerifySiteAdmin(ctx) {
+			return nil, errors.Forbidden("权限不足", "仅站点管理员可查看全站用户")
+		}
+		useSite = true
+	} else if scope == "org" {
+		useSite = false
+	} else {
+		// 兼容旧客户端
+		useSite = auth.VerifySiteAdmin(ctx)
+	}
+	if useSite {
+		pf, total, err = p.profileUseCase.GetList(ctx, pageSize, pageNum)
+	} else {
 		orgID := uint(0)
 		if pd := auth.GetCurrentUser(ctx); pd != nil {
 			orgID = pd.OrgID
@@ -96,8 +111,6 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			orgID, _ = p.profileDal.PublicOrgID(ctx)
 		}
 		pf, total, err = p.profileDal.GetListByOrg(ctx, orgID, pageSize, pageNum)
-	} else {
-		pf, total, err = p.profileUseCase.GetList(ctx, pageSize, pageNum)
 	}
 	if err != nil {
 		return nil, InternalServer

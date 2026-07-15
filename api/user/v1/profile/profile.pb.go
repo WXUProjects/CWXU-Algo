@@ -263,9 +263,11 @@ func (x *GetByNameRes) GetList() []*GetByNameRes_UserList {
 }
 
 type GetListReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PageSize      int64                  `protobuf:"varint,1,opt,name=pageSize,proto3" json:"pageSize,omitempty"`
-	PageNum       int64                  `protobuf:"varint,2,opt,name=pageNum,proto3" json:"pageNum,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	PageSize int64                  `protobuf:"varint,1,opt,name=pageSize,proto3" json:"pageSize,omitempty"`
+	PageNum  int64                  `protobuf:"varint,2,opt,name=pageNum,proto3" json:"pageNum,omitempty"`
+	// scope: org=当前组织成员；site=全站（仅站点管理员）；空=兼容旧逻辑（站管全站/否则组织）
+	Scope         string `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -312,6 +314,13 @@ func (x *GetListReq) GetPageNum() int64 {
 		return x.PageNum
 	}
 	return 0
+}
+
+func (x *GetListReq) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
 }
 
 type GetListRes struct {
@@ -1422,11 +1431,12 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x04list\x18\x01 \x03(\v2\".api.user.v1.GetByNameRes.UserListR\x04list\x1a6\n" +
 	"\bUserList\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"B\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"X\n" +
 	"\n" +
 	"GetListReq\x12\x1a\n" +
 	"\bpageSize\x18\x01 \x01(\x03R\bpageSize\x12\x18\n" +
-	"\apageNum\x18\x02 \x01(\x03R\apageNum\"\xb1\x03\n" +
+	"\apageNum\x18\x02 \x01(\x03R\apageNum\x12\x14\n" +
+	"\x05scope\x18\x03 \x01(\tR\x05scope\"\xb1\x03\n" +
 	"\n" +
 	"GetListRes\x120\n" +
 	"\x04list\x18\x01 \x03(\v2\x1c.api.user.v1.GetListRes.ListR\x04list\x12\x14\n" +
