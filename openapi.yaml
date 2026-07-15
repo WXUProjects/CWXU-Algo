@@ -996,6 +996,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.SetEmailEnabledRes'
+    /v1/user/profile/sync-policies:
+        post:
+            tags:
+                - Profile
+            description: 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
+            operationId: Profile_GetSyncPolicies
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.GetSyncPoliciesReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.GetSyncPoliciesRes'
     /v1/user/profile/update:
         post:
             tags:
@@ -2028,6 +2047,21 @@ components:
                     type: string
                 role:
                     type: string
+        api.user.v1.GetSyncPoliciesReq:
+            type: object
+            properties:
+                userIds:
+                    type: array
+                    items:
+                        type: string
+            description: 爬虫/AI 定时策略（core_data cron 用）
+        api.user.v1.GetSyncPoliciesRes:
+            type: object
+            properties:
+                policies:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.UserSyncPolicy'
         api.user.v1.GetUserIdsByGroupRes:
             type: object
             properties:
@@ -2129,6 +2163,23 @@ components:
                     type: string
                 message:
                     type: string
+        api.user.v1.UserSyncPolicy:
+            type: object
+            properties:
+                userId:
+                    type: string
+                enableSpider:
+                    type: boolean
+                enableAiSummary:
+                    type: boolean
+                enableAiEmail:
+                    type: boolean
+                spiderIntervalMin:
+                    type: integer
+                    format: int32
+                aiSummaryIntervalMin:
+                    type: integer
+                    format: int32
         api.user.v1.role.ListRes:
             type: object
             properties:

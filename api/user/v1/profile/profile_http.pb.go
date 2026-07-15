@@ -24,6 +24,7 @@ const OperationProfileGetById = "/api.user.v1.Profile/GetById"
 const OperationProfileGetByIds = "/api.user.v1.Profile/GetByIds"
 const OperationProfileGetByName = "/api.user.v1.Profile/GetByName"
 const OperationProfileGetList = "/api.user.v1.Profile/GetList"
+const OperationProfileGetSyncPolicies = "/api.user.v1.Profile/GetSyncPolicies"
 const OperationProfileGetUserIdsByGroup = "/api.user.v1.Profile/GetUserIdsByGroup"
 const OperationProfileGetUserIdsByOrg = "/api.user.v1.Profile/GetUserIdsByOrg"
 const OperationProfileMoveGroup = "/api.user.v1.Profile/MoveGroup"
@@ -37,6 +38,8 @@ type ProfileHTTPServer interface {
 	GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error)
 	GetByName(context.Context, *GetByNameReq) (*GetByNameRes, error)
 	GetList(context.Context, *GetListReq) (*GetListRes, error)
+	// GetSyncPolicies 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
+	GetSyncPolicies(context.Context, *GetSyncPoliciesReq) (*GetSyncPoliciesRes, error)
 	GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error)
 	// GetUserIdsByOrg 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error)
@@ -56,6 +59,7 @@ func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r.GET("/v1/user/profile/ids-by-group", _Profile_GetUserIdsByGroup0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-org", _Profile_GetUserIdsByOrg0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/get-by-ids", _Profile_GetByIds0_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/sync-policies", _Profile_GetSyncPolicies0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/delete", _Profile_Delete2_HTTP_Handler(srv))
 }
 
@@ -242,6 +246,28 @@ func _Profile_GetByIds0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Contex
 	}
 }
 
+func _Profile_GetSyncPolicies0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetSyncPoliciesReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileGetSyncPolicies)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetSyncPolicies(ctx, req.(*GetSyncPoliciesReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetSyncPoliciesRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 func _Profile_Delete2_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in DeleteReq
@@ -271,6 +297,8 @@ type ProfileHTTPClient interface {
 	GetByIds(ctx context.Context, req *GetByIdsReq, opts ...http.CallOption) (rsp *GetByIdsRes, err error)
 	GetByName(ctx context.Context, req *GetByNameReq, opts ...http.CallOption) (rsp *GetByNameRes, err error)
 	GetList(ctx context.Context, req *GetListReq, opts ...http.CallOption) (rsp *GetListRes, err error)
+	// GetSyncPolicies 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
+	GetSyncPolicies(ctx context.Context, req *GetSyncPoliciesReq, opts ...http.CallOption) (rsp *GetSyncPoliciesRes, err error)
 	GetUserIdsByGroup(ctx context.Context, req *GetUserIdsByGroupReq, opts ...http.CallOption) (rsp *GetUserIdsByGroupRes, err error)
 	// GetUserIdsByOrg 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(ctx context.Context, req *GetUserIdsByOrgReq, opts ...http.CallOption) (rsp *GetUserIdsByOrgRes, err error)
@@ -347,6 +375,20 @@ func (c *ProfileHTTPClientImpl) GetList(ctx context.Context, in *GetListReq, opt
 	opts = append(opts, http.Operation(OperationProfileGetList))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetSyncPolicies 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
+func (c *ProfileHTTPClientImpl) GetSyncPolicies(ctx context.Context, in *GetSyncPoliciesReq, opts ...http.CallOption) (*GetSyncPoliciesRes, error) {
+	var out GetSyncPoliciesRes
+	pattern := "/v1/user/profile/sync-policies"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProfileGetSyncPolicies))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {
 		return nil, err
 	}

@@ -28,6 +28,7 @@ const (
 	Profile_GetUserIdsByGroup_FullMethodName = "/api.user.v1.Profile/GetUserIdsByGroup"
 	Profile_GetUserIdsByOrg_FullMethodName   = "/api.user.v1.Profile/GetUserIdsByOrg"
 	Profile_GetByIds_FullMethodName          = "/api.user.v1.Profile/GetByIds"
+	Profile_GetSyncPolicies_FullMethodName   = "/api.user.v1.Profile/GetSyncPolicies"
 	Profile_Delete_FullMethodName            = "/api.user.v1.Profile/Delete"
 )
 
@@ -45,6 +46,8 @@ type ProfileClient interface {
 	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(ctx context.Context, in *GetUserIdsByOrgReq, opts ...grpc.CallOption) (*GetUserIdsByOrgRes, error)
 	GetByIds(ctx context.Context, in *GetByIdsReq, opts ...grpc.CallOption) (*GetByIdsRes, error)
+	// 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
+	GetSyncPolicies(ctx context.Context, in *GetSyncPoliciesReq, opts ...grpc.CallOption) (*GetSyncPoliciesRes, error)
 	// 管理员删除用户（软删除）
 	Delete(ctx context.Context, in *DeleteReq, opts ...grpc.CallOption) (*DeleteRes, error)
 }
@@ -147,6 +150,16 @@ func (c *profileClient) GetByIds(ctx context.Context, in *GetByIdsReq, opts ...g
 	return out, nil
 }
 
+func (c *profileClient) GetSyncPolicies(ctx context.Context, in *GetSyncPoliciesReq, opts ...grpc.CallOption) (*GetSyncPoliciesRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSyncPoliciesRes)
+	err := c.cc.Invoke(ctx, Profile_GetSyncPolicies_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *profileClient) Delete(ctx context.Context, in *DeleteReq, opts ...grpc.CallOption) (*DeleteRes, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteRes)
@@ -171,6 +184,8 @@ type ProfileServer interface {
 	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error)
 	GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error)
+	// 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
+	GetSyncPolicies(context.Context, *GetSyncPoliciesReq) (*GetSyncPoliciesRes, error)
 	// 管理员删除用户（软删除）
 	Delete(context.Context, *DeleteReq) (*DeleteRes, error)
 	mustEmbedUnimplementedProfileServer()
@@ -209,6 +224,9 @@ func (UnimplementedProfileServer) GetUserIdsByOrg(context.Context, *GetUserIdsBy
 }
 func (UnimplementedProfileServer) GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetByIds not implemented")
+}
+func (UnimplementedProfileServer) GetSyncPolicies(context.Context, *GetSyncPoliciesReq) (*GetSyncPoliciesRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSyncPolicies not implemented")
 }
 func (UnimplementedProfileServer) Delete(context.Context, *DeleteReq) (*DeleteRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Delete not implemented")
@@ -396,6 +414,24 @@ func _Profile_GetByIds_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Profile_GetSyncPolicies_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSyncPoliciesReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).GetSyncPolicies(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_GetSyncPolicies_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).GetSyncPolicies(ctx, req.(*GetSyncPoliciesReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Profile_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteReq)
 	if err := dec(in); err != nil {
@@ -456,6 +492,10 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetByIds",
 			Handler:    _Profile_GetByIds_Handler,
+		},
+		{
+			MethodName: "GetSyncPolicies",
+			Handler:    _Profile_GetSyncPolicies_Handler,
 		},
 		{
 			MethodName: "Delete",

@@ -165,6 +165,112 @@ func (d *ProfileDal) GetUserIdsByOrg(ctx context.Context, orgID uint) ([]int64, 
 	return ids, err
 }
 
+// UserSyncPolicy 一人多组织聚合后的定时策略
+type UserSyncPolicy struct {
+	UserID               int64
+	EnableSpider         bool
+	EnableAISummary      bool
+	EnableAIEmail        bool
+	SpiderIntervalMin    int
+	AISummaryIntervalMin int
+}
+
+// GetSyncPolicies 对每个用户：取其所属 active 组织，开关=任一开启，间隔=开启组织中的 MIN
+func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]UserSyncPolicy, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	type row struct {
+		UserID               int64
+		EnableSpider         bool
+		EnableAISummary      bool
+		EnableAIEmail        bool
+		SpiderIntervalMin    int
+		AISummaryIntervalMin int
+	}
+	var rows []row
+	err := d.db.WithContext(ctx).
+		Table("org_members AS m").
+		Select(`m.user_id AS user_id,
+			o.enable_spider AS enable_spider,
+			o.enable_ai_summary AS enable_ai_summary,
+			o.enable_ai_email AS enable_ai_email,
+			o.spider_interval_min AS spider_interval_min,
+			o.ai_summary_interval_min AS ai_summary_interval_min`).
+		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
+		Where("m.user_id IN ? AND m.deleted_at IS NULL AND o.status = ?", userIDs, model.OrgStatusActive).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	type acc struct {
+		spiderOn  bool
+		aiOn      bool
+		emailOn   bool
+		spiderMin int
+		aiMin     int
+	}
+	byUser := make(map[int64]*acc)
+	for _, r := range rows {
+		a := byUser[r.UserID]
+		if a == nil {
+			a = &acc{spiderMin: 0, aiMin: 0}
+			byUser[r.UserID] = a
+		}
+		if r.EnableSpider {
+			a.spiderOn = true
+			iv := r.SpiderIntervalMin
+			if iv <= 0 {
+				iv = 60
+			}
+			if a.spiderMin == 0 || iv < a.spiderMin {
+				a.spiderMin = iv
+			}
+		}
+		if r.EnableAISummary {
+			a.aiOn = true
+			iv := r.AISummaryIntervalMin
+			if iv <= 0 {
+				iv = 180
+			}
+			if a.aiMin == 0 || iv < a.aiMin {
+				a.aiMin = iv
+			}
+		}
+		if r.EnableAIEmail {
+			a.emailOn = true
+		}
+	}
+
+	out := make([]UserSyncPolicy, 0, len(userIDs))
+	for _, uid := range userIDs {
+		a := byUser[uid]
+		if a == nil {
+			// 无 membership：不跑定时（应至少有公共域）
+			out = append(out, UserSyncPolicy{UserID: uid})
+			continue
+		}
+		sp := 60
+		if a.spiderMin > 0 {
+			sp = a.spiderMin
+		}
+		ai := 180
+		if a.aiMin > 0 {
+			ai = a.aiMin
+		}
+		out = append(out, UserSyncPolicy{
+			UserID:               uid,
+			EnableSpider:         a.spiderOn,
+			EnableAISummary:      a.aiOn,
+			EnableAIEmail:        a.emailOn,
+			SpiderIntervalMin:    sp,
+			AISummaryIntervalMin: ai,
+		})
+	}
+	return out, nil
+}
+
 // GetListByOrg 分页列出组织成员用户
 func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pageNum int64) ([]model.User, int64, error) {
 	var total int64

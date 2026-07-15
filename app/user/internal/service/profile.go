@@ -257,6 +257,43 @@ func (p *ProfileService) GetUserIdsByGroup(ctx context.Context, req *profile.Get
 	}, nil
 }
 
+// GetSyncPolicies 定时任务用：多组织 MIN 间隔 + 开关任一开启
+func (p *ProfileService) GetSyncPolicies(ctx context.Context, req *profile.GetSyncPoliciesReq) (*profile.GetSyncPoliciesRes, error) {
+	ids := req.UserIds
+	if len(ids) == 0 {
+		return &profile.GetSyncPoliciesRes{Policies: nil}, nil
+	}
+	// 去重
+	seen := make(map[int64]struct{}, len(ids))
+	uniq := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniq = append(uniq, id)
+	}
+	list, err := p.profileDal.GetSyncPolicies(ctx, uniq)
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	res := &profile.GetSyncPoliciesRes{Policies: make([]*profile.UserSyncPolicy, 0, len(list))}
+	for _, v := range list {
+		res.Policies = append(res.Policies, &profile.UserSyncPolicy{
+			UserId:               v.UserID,
+			EnableSpider:         v.EnableSpider,
+			EnableAiSummary:      v.EnableAISummary,
+			EnableAiEmail:        v.EnableAIEmail,
+			SpiderIntervalMin:    int32(v.SpiderIntervalMin),
+			AiSummaryIntervalMin: int32(v.AISummaryIntervalMin),
+		})
+	}
+	return res, nil
+}
+
 // GetUserIdsByOrg 组织成员 ID（数据隔离）
 func (p *ProfileService) GetUserIdsByOrg(ctx context.Context, req *profile.GetUserIdsByOrgReq) (*profile.GetUserIdsByOrgRes, error) {
 	orgID := uint(req.OrgId)

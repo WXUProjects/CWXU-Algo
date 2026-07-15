@@ -57,6 +57,13 @@ service Profile {
       body: "*",
     };
   }
+  // 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
+  rpc GetSyncPolicies (GetSyncPoliciesReq) returns (GetSyncPoliciesRes) {
+    option (google.api.http) = {
+      post: "/v1/user/profile/sync-policies",
+      body: "*",
+    };
+  }
   // 管理员删除用户（软删除）
   rpc Delete (DeleteReq) returns (DeleteRes) {
     option (google.api.http) = {
@@ -196,4 +203,22 @@ message DeleteReq {
 message DeleteRes {
   int64 code = 1;
   string message = 2;
+}
+
+// 爬虫/AI 定时策略（core_data cron 用）
+message GetSyncPoliciesReq {
+  repeated int64 userIds = 1; // 空 = 返回全站有 membership 的用户策略（慎用；一般传 bound 用户）
+}
+
+message UserSyncPolicy {
+  int64 userId = 1;
+  bool enableSpider = 2;
+  bool enableAiSummary = 3;
+  bool enableAiEmail = 4;
+  int32 spiderIntervalMin = 5;   // 多组织取 MIN（仅统计开启爬虫的组织）
+  int32 aiSummaryIntervalMin = 6; // 多组织取 MIN（仅统计开启 AI 的组织）
+}
+
+message GetSyncPoliciesRes {
+  repeated UserSyncPolicy policies = 1;
 }

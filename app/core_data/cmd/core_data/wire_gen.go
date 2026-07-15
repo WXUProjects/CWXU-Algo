@@ -60,8 +60,8 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, ai
 	consumer := service2.NewConsumer(rabbitMQ, spiderUseCase, spiderTask)
 	problemFetchConsumer := service2.NewProblemFetchConsumer(rabbitMQ, problemUseCase)
 	problemAnalyzeConsumer := service2.NewProblemAnalyzeConsumer(rabbitMQ, problemUseCase)
-	summaryTask := task.NewSummaryTask(rabbitMQ)
-	cronTask := task.NewCronTask(spiderTask, dataData, summaryTask)
+	summaryTask := task.NewSummaryTask(rabbitMQ, client)
+	cronTask := task.NewCronTask(spiderTask, dataData, summaryTask, register)
 	app := newApp(logger, grpcServer, httpServer, register, consumer, problemFetchConsumer, problemAnalyzeConsumer, cronTask)
 	return app, func() {
 		cleanup2()
