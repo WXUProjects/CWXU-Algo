@@ -86,17 +86,25 @@ type PeriodSubmitCount struct {
 	Total     int64
 }
 
-// PeriodAcCount AC次数统计
+// PeriodAcCount AC 题数统计（按题去重，非提交次数）
 type PeriodAcCount struct {
 	Today     int64
 	ThisWeek  int64
-	LastWeek int64
+	LastWeek  int64
 	ThisMonth int64
 	LastMonth int64
 	ThisYear  int64
 	LastYear  int64
 	Total     int64
 }
+
+// acProblemKeySQL 同一用户下 AC 去重键：优先 problem_id，其次 external_id，最后 problem 文本。
+// 力扣合成 AC 无 problem_id，依赖 external_id / problem（每题一条，本身已去重）。
+const acProblemKeySQL = `COALESCE(
+	CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 'p:' || problem_id::text END,
+	CASE WHEN external_id IS NOT NULL AND btrim(external_id) <> '' THEN 'e:' || platform || ':' || external_id END,
+	'n:' || platform || ':' || COALESCE(problem, '')
+)`
 
 // GetPeriodCount 获取时间段统计数据
 func (d *StatisticDal) GetPeriodCount(userId int64) (PeriodSubmitCount, PeriodAcCount, error) {
@@ -128,7 +136,7 @@ func (d *StatisticDal) GetPeriodCountScoped(userId int64, memberIDs []int64) (Pe
 		Total:     d.countQueryTotalScoped(userId, memberIDs),
 	}
 
-	// AC 次数统计（去重）
+	// AC 题数（按 problem_id / external_id 去重，同一题多次 AC 只计 1）
 	ac := PeriodAcCount{
 		Today:     d.countAcDistinctQueryScoped(userId, todayStart, now, memberIDs),
 		ThisWeek:  d.countAcDistinctQueryScoped(userId, thisWeekStart, now, memberIDs),
@@ -221,7 +229,8 @@ func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endT
 	offset := (page - 1) * pageSize
 	var selectClause string
 	if scoreType == "ac" {
-		selectClause = "COUNT(DISTINCT problem)"
+		// 按题去重，不按提交条数
+		selectClause = "COUNT(DISTINCT " + acProblemKeySQL + ")"
 	} else {
 		selectClause = "COUNT(*)"
 	}
@@ -304,20 +313,7 @@ func (d *StatisticDal) countAcDistinctQueryScoped(userId int64, start, end time.
 	if userId == -1 && memberIDs != nil && len(memberIDs) == 0 {
 		return 0
 	}
-	var count int64
-	query := d.db.Table("submit_logs").
-		Select("DISTINCT user_id, platform, problem").
-		Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%").
-		Where("time >= ? AND time < ?", start, end)
-	if userId != -1 {
-		query = query.Where("user_id = ?", userId)
-	} else if memberIDs != nil {
-		query = query.Where("user_id IN ?", memberIDs)
-	}
-	if err := query.Count(&count).Error; err != nil {
-		log.Errorf("countAcDistinctQuery error: %v", err)
-	}
-	return count
+	return d.countAcDistinct(userId, memberIDs, start, end, true)
 }
 
 func (d *StatisticDal) countAcDistinctTotal(userId int64) int64 {
@@ -328,17 +324,31 @@ func (d *StatisticDal) countAcDistinctTotalScoped(userId int64, memberIDs []int6
 	if userId == -1 && memberIDs != nil && len(memberIDs) == 0 {
 		return 0
 	}
+	return d.countAcDistinct(userId, memberIDs, time.Time{}, time.Time{}, false)
+}
+
+// countAcDistinct 统计 AC 题数：按题去重。
+// 时间窗内：该题在窗内有过 AC 即计 1（同一题多次提交只算一题）。
+func (d *StatisticDal) countAcDistinct(userId int64, memberIDs []int64, start, end time.Time, useRange bool) int64 {
 	var count int64
+	// 组织合计：user_id + 题键；个人：仅题键
+	key := acProblemKeySQL
+	if userId == -1 {
+		key = `(user_id::text || '|' || ` + acProblemKeySQL + `)`
+	}
 	query := d.db.Table("submit_logs").
-		Select("DISTINCT user_id, platform, problem").
+		Select("COUNT(DISTINCT " + key + ")").
 		Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
+	if useRange {
+		query = query.Where("time >= ? AND time < ?", start, end)
+	}
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
 	} else if memberIDs != nil {
 		query = query.Where("user_id IN ?", memberIDs)
 	}
-	if err := query.Count(&count).Error; err != nil {
-		log.Errorf("countAcDistinctTotal error: %v", err)
+	if err := query.Scan(&count).Error; err != nil {
+		log.Errorf("countAcDistinct error: %v", err)
 	}
 	return count
 }

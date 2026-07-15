@@ -89,6 +89,7 @@ func (p NewLeetCode) FetchSubmitLog(userId int64, username string, needAll bool)
 				// 稳定 ID：同一天同一序号永远相同，便于全量/增量幂等
 				SubmitID: fmt.Sprintf("lc-cal-%d-%s-%d", userId, dayLocal.Format("20060102"), i),
 				Contest:  "leetcode",
+				// 日历提交不是题级记录：固定 problem，且不写 external_id，避免误入 AC 题数
 				Problem:  "leetcode-submit",
 				Lang:     "LeetCode",
 				Status:   "SUBMIT",
@@ -97,33 +98,31 @@ func (p NewLeetCode) FetchSubmitLog(userId int64, username string, needAll bool)
 		}
 	}
 
-	// 2) 累计 AC 题数 → 合成 AC 记录（status 含 AC，进「AC 热力图 / 做题数」）
-	//    - 全量初始化：历史 AC 全部锚到 baseline 日，只保证 Total 正确，不污染 Today
-	//    - 增量：额外产出「今日可能的新 AC」槽位；真正的「今日增量」依赖：
-	//      已有 lc-ac-{userId}-{i} 数量 vs 当前 acTotal 的差，OnConflict 只插入新的 i
-	//
-	//    problem 用 lc-ac-problem-{i}，保证 COUNT(DISTINCT problem) = acTotal
+	// 2) 累计 AC 题数 → 合成 AC 记录（status=AC，进「AC 热力图 / 做题数」）
+	//    力扣接口只给已去重的 acTotal，每题对应一条 submit，不再二次按提交去重。
+	//    - 全量：历史 AC 锚到 baseline，只保证 Total，不污染 Today
+	//    - 增量：稳定 submit_id；已存在 DoNothing，仅新增 i 记到今天
+	//    external_id / problem 均为题级稳定键（与统计 AC 去重键一致）
 	baselineDay, _ := time.ParseInLocation("2006-01-02", lcACBaselineDay, loc)
 	baselineDay = time.Date(baselineDay.Year(), baselineDay.Month(), baselineDay.Day(), 12, 0, 0, 0, loc)
 
 	for i := 0; i < acTotal; i++ {
-		// 增量模式下，历史 AC（除了最近可能新增的一小段）也照样生成；
-		// 已存在的 submit_id 会被 DoNothing 忽略，只有 i >= 旧总量 的新记录会插入。
-		// 新记录时间用「今天」，这样 Today/本周 AC 增量正确。
 		t := baselineDay
 		if !needAll {
 			// 增量：统一标今天；旧 ID 冲突忽略，新 ID 记到今天
 			t = today
 		}
+		ext := fmt.Sprintf("ac-%d", i)
 		res = append(res, model.SubmitLog{
-			UserID:   userId,
-			Platform: spider.LeetCode,
-			SubmitID: fmt.Sprintf("lc-ac-%d-%d", userId, i),
-			Contest:  "leetcode",
-			Problem:  fmt.Sprintf("lc-ac-problem-%d", i),
-			Lang:     "LeetCode",
-			Status:   "AC",
-			Time:     t.Add(time.Duration(i%60) * time.Second),
+			UserID:     userId,
+			Platform:   spider.LeetCode,
+			SubmitID:   fmt.Sprintf("lc-ac-%d-%d", userId, i),
+			Contest:    "leetcode",
+			Problem:    fmt.Sprintf("lc-ac-problem-%d", i),
+			ExternalID: ext,
+			Lang:       "LeetCode",
+			Status:     "AC",
+			Time:       t.Add(time.Duration(i%60) * time.Second),
 		})
 	}
 
