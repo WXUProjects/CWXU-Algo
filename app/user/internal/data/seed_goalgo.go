@@ -191,9 +191,9 @@ func seedGoAlgoFramework(db *gorm.DB) {
 	_ = db.Raw(`
 		SELECT u.id, COALESCE(u.group_id, 0) AS group_id, COALESCE(u.current_org_id, 0) AS current_org_id
 		FROM users u
-		WHERE u.deleted_at IS NULL AND (
+		WHERE (
 			u.group_id IS NULL OR u.group_id = 0
-			OR u.group_id NOT IN (SELECT id FROM groups WHERE deleted_at IS NULL)
+			OR u.group_id NOT IN (SELECT id FROM groups)
 		)
 	`).Scan(&bad).Error
 	for _, u := range bad {
@@ -243,8 +243,6 @@ func syncPublicOrgDisplayFromName(db *gorm.DB, publicOrgID uint) {
 		FROM users u
 		WHERE m.user_id = u.id
 		  AND m.org_id = ?
-		  AND m.deleted_at IS NULL
-		  AND u.deleted_at IS NULL
 		  AND (m.org_display_name IS NULL OR TRIM(m.org_display_name) = '')
 		  AND COALESCE(TRIM(u.name), '') <> ''
 	`, publicOrgID)
@@ -270,11 +268,10 @@ func migrateNameToOrgDisplay(db *gorm.DB, publicOrgID uint) {
 	_ = db.Raw(`
 		SELECT u.id AS user_id, COALESCE(u.name,'') AS name, COALESCE(u.username,'') AS uname,
 			(SELECT COUNT(*) FROM org_members m
-			 JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL
-			 WHERE m.user_id = u.id AND m.deleted_at IS NULL
+			 JOIN orgs o ON o.id = m.org_id
+			 WHERE m.user_id = u.id
 			   AND o.id <> ? AND COALESCE(o.is_system,false) = false) AS cnt
 		FROM users u
-		WHERE u.deleted_at IS NULL
 	`, publicOrgID).Scan(&rows).Error
 
 	copied := 0
@@ -289,8 +286,8 @@ func migrateNameToOrgDisplay(db *gorm.DB, publicOrgID uint) {
 		// 找到那一条非公共域 membership
 		var m model.OrgMember
 		err := db.Table("org_members AS m").
-			Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
-			Where("m.user_id = ? AND m.deleted_at IS NULL AND o.id <> ? AND COALESCE(o.is_system,false) = false",
+			Joins("JOIN orgs o ON o.id = m.org_id").
+			Where("m.user_id = ? AND o.id <> ? AND COALESCE(o.is_system,false) = false",
 				r.UserID, publicOrgID).
 			Select("m.*").
 			First(&m).Error
@@ -307,7 +304,7 @@ func migrateNameToOrgDisplay(db *gorm.DB, publicOrgID uint) {
 	}
 
 	// 全局昵称 = 用户名（覆盖旧真实姓名）
-	res := db.Exec(`UPDATE users SET name = username WHERE deleted_at IS NULL AND (name IS DISTINCT FROM username)`)
+	res := db.Exec(`UPDATE users SET name = username WHERE name IS DISTINCT FROM username`)
 	nChanged := int64(0)
 	if res != nil {
 		nChanged = res.RowsAffected

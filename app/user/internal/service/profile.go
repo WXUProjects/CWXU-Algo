@@ -21,7 +21,6 @@ import (
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/go-kratos/kratos/v2/transport/grpc"
 	grpc2 "google.golang.org/grpc"
-	"gorm.io/gorm"
 )
 
 var (
@@ -255,7 +254,7 @@ func (p *ProfileService) Update(ctx context.Context, req *profile.UpdateReq) (*p
 	}
 	// 构建 User
 	pro := model.User{
-		Model:  gorm.Model{ID: uint(req.UserId)},
+		ID:     uint(req.UserId),
 		Avatar: req.Avatar,
 		Name:   req.Name,
 		Email:  req.Email,

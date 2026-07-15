@@ -64,7 +64,7 @@ service Profile {
       body: "*",
     };
   }
-  // 管理员删除用户（软删除）
+  // 管理员删除用户（硬删除）
   rpc Delete (DeleteReq) returns (DeleteRes) {
     option (google.api.http) = {
       post: "/v1/user/profile/delete",

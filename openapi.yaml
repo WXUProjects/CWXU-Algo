@@ -889,7 +889,7 @@ paths:
         post:
             tags:
                 - Profile
-            description: 管理员删除用户（软删除）
+            description: 管理员删除用户（硬删除）
             operationId: Profile_Delete
             requestBody:
                 content:

@@ -48,7 +48,7 @@ type ProfileClient interface {
 	GetByIds(ctx context.Context, in *GetByIdsReq, opts ...grpc.CallOption) (*GetByIdsRes, error)
 	// 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
 	GetSyncPolicies(ctx context.Context, in *GetSyncPoliciesReq, opts ...grpc.CallOption) (*GetSyncPoliciesRes, error)
-	// 管理员删除用户（软删除）
+	// 管理员删除用户（硬删除）
 	Delete(ctx context.Context, in *DeleteReq, opts ...grpc.CallOption) (*DeleteRes, error)
 }
 
@@ -186,7 +186,7 @@ type ProfileServer interface {
 	GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error)
 	// 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
 	GetSyncPolicies(context.Context, *GetSyncPoliciesReq) (*GetSyncPoliciesRes, error)
-	// 管理员删除用户（软删除）
+	// 管理员删除用户（硬删除）
 	Delete(context.Context, *DeleteReq) (*DeleteRes, error)
 	mustEmbedUnimplementedProfileServer()
 }

@@ -73,12 +73,11 @@ func countOrgSeats(db *gorm.DB, o *model.Org) int64 {
 		var n int64
 		_ = db.Raw(`
 			SELECT COUNT(*) FROM org_members m
-			WHERE m.org_id = ? AND m.deleted_at IS NULL
+			WHERE m.org_id = ?
 			AND NOT EXISTS (
 				SELECT 1 FROM org_members m2
 				WHERE m2.user_id = m.user_id
 				  AND m2.org_id <> m.org_id
-				  AND m2.deleted_at IS NULL
 			)
 		`, o.ID).Scan(&n).Error
 		return n
@@ -159,8 +158,7 @@ func (s *OrgService) isMemberDB(userID, orgID uint) bool {
 	return n > 0
 }
 
-// ensureOrgMember 保证用户为组织活跃成员。
-// 若曾退出/被移出（软删除），恢复并更新字段，避免唯一索引 (org_id,user_id) 导致 Create 静默失败。
+// ensureOrgMember 保证用户为组织成员；已存在则更新角色/分组/称呼，否则创建。
 func (s *OrgService) ensureOrgMember(orgID, userID uint, role string, groupID *uint, displayName string) error {
 	if orgID == 0 || userID == 0 {
 		return errors.New("invalid org or user")
@@ -172,16 +170,14 @@ func (s *OrgService) ensureOrgMember(orgID, userID uint, role string, groupID *u
 	now := time.Now()
 
 	var m model.OrgMember
-	err := s.db.Unscoped().Where("org_id = ? AND user_id = ?", orgID, userID).First(&m).Error
+	err := s.db.Where("org_id = ? AND user_id = ?", orgID, userID).First(&m).Error
 	if err == nil {
-		updates := map[string]interface{}{
-			"deleted_at":       nil,
+		return s.db.Model(&m).Updates(map[string]interface{}{
 			"role":             role,
 			"group_id":         groupID,
 			"org_display_name": displayName,
 			"joined_at":        now,
-		}
-		return s.db.Unscoped().Model(&m).Updates(updates).Error
+		}).Error
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
@@ -443,7 +439,7 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 	return nil
 }
 
-// handleDelete 站点管理员删除组织（软删除）；公共域不可删
+// handleDelete 站点管理员硬删除组织；公共域不可删
 func (s *OrgService) handleDelete(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || !auth.VerifySiteAdmin(ctx) {
@@ -490,7 +486,7 @@ func (s *OrgService) handleDelete(ctx khttp.Context) error {
 			return err
 		}
 
-		// 组织内分组 id（先迁用户，再软删分组，避免 users.group_id 悬空）
+		// 组织内分组 id（先迁用户，再删分组，避免 users.group_id 悬空）
 		var groupIDs []uint
 		if err := tx.Model(&model.Group{}).Where("org_id = ?", o.ID).Pluck("id", &groupIDs).Error; err != nil {
 			return err
@@ -503,27 +499,15 @@ func (s *OrgService) handleDelete(ctx khttp.Context) error {
 			}
 		}
 
-		// 成员关系
 		if err := tx.Where("org_id = ?", o.ID).Delete(&model.OrgMember{}).Error; err != nil {
 			return err
 		}
-		// 加入申请
 		if err := tx.Where("org_id = ?", o.ID).Delete(&model.OrgJoinRequest{}).Error; err != nil {
 			return err
 		}
-		// 组织内分组
 		if err := tx.Where("org_id = ?", o.ID).Delete(&model.Group{}).Error; err != nil {
 			return err
 		}
-		// 释放 slug / invite_code 唯一约束，避免软删后无法复用
-		suffix := fmt.Sprintf("-del-%d", o.ID)
-		if err := tx.Model(&o).Updates(map[string]interface{}{
-			"slug":        o.Slug + suffix,
-			"invite_code": o.InviteCode + suffix,
-		}).Error; err != nil {
-			return err
-		}
-		// 组织本身（软删除）
 		if err := tx.Delete(&o).Error; err != nil {
 			return err
 		}
@@ -655,8 +639,8 @@ func (s *OrgService) forceOffDailyEmailWithoutOrgGrant(changedOrgID uint) {
 	for _, uid := range memberIDs {
 		var n int64
 		s.db.Table("org_members AS m").
-			Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
-			Where("m.user_id = ? AND m.deleted_at IS NULL AND o.status = ? AND o.enable_ai_email = ?",
+			Joins("JOIN orgs o ON o.id = m.org_id").
+			Where("m.user_id = ? AND o.status = ? AND o.enable_ai_email = ?",
 				uid, model.OrgStatusActive, true).
 			Count(&n)
 		if n == 0 {
@@ -671,8 +655,8 @@ func (s *OrgService) forceOffWeeklyEmailWithoutOrgGrant(changedOrgID uint) {
 	for _, uid := range memberIDs {
 		var n int64
 		s.db.Table("org_members AS m").
-			Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
-			Where(`m.user_id = ? AND m.deleted_at IS NULL AND o.status = ?
+			Joins("JOIN orgs o ON o.id = m.org_id").
+			Where(`m.user_id = ? AND o.status = ?
 				AND o.enable_ai_weekly_email = ? AND m.role IN ?`,
 				uid, model.OrgStatusActive, true,
 				[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
@@ -879,8 +863,8 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 		Select(`m.user_id AS user_id, u.username AS username, u.name AS name,
 			COALESCE(m.org_display_name,'') AS org_display_name,
 			u.avatar AS avatar, m.role AS role, m.group_id AS group_id, m.joined_at AS joined_at`).
-		Joins("JOIN users u ON u.id = m.user_id AND u.deleted_at IS NULL").
-		Where("m.org_id = ? AND m.deleted_at IS NULL", orgID)
+		Joins("JOIN users u ON u.id = m.user_id").
+		Where("m.org_id = ?", orgID)
 	if keyword != "" {
 		like := "%" + keyword + "%"
 		base = base.Where("u.name LIKE ? OR u.username LIKE ? OR m.org_display_name LIKE ?", like, like, like)
@@ -888,8 +872,8 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 
 	var total int64
 	countQ := s.db.Table("org_members AS m").
-		Joins("JOIN users u ON u.id = m.user_id AND u.deleted_at IS NULL").
-		Where("m.org_id = ? AND m.deleted_at IS NULL", orgID)
+		Joins("JOIN users u ON u.id = m.user_id").
+		Where("m.org_id = ?", orgID)
 	if keyword != "" {
 		like := "%" + keyword + "%"
 		countQ = countQ.Where("u.name LIKE ? OR u.username LIKE ? OR m.org_display_name LIKE ?", like, like, like)
@@ -1110,7 +1094,7 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 	}
 	var m model.OrgMember
 	if err := s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).First(&m).Error; err != nil {
-		// 不在组织中则加入（占席位；含软删除后恢复）
+		// 不在组织中则加入（占席位）
 		var roleOrg model.Org
 		if s.db.First(&roleOrg, req.OrgID).Error != nil {
 			writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})

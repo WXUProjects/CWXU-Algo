@@ -194,7 +194,7 @@ func (d *ProfileDal) GetGroupNamesByIDs(ctx context.Context, groupIDs []int64) (
 	err := d.db.WithContext(ctx).
 		Table("groups").
 		Select("id, name").
-		Where("id IN ? AND deleted_at IS NULL", uniq).
+		Where("id IN ?", uniq).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -226,8 +226,8 @@ func (d *ProfileDal) GetOrgBriefsByUserIDs(ctx context.Context, userIDs []uint) 
 	err := d.db.WithContext(ctx).
 		Table("org_members AS m").
 		Select("m.user_id AS user_id, m.org_id AS org_id, o.name AS name, m.role AS role, o.is_system AS is_system").
-		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
-		Where("m.user_id IN ? AND m.deleted_at IS NULL", userIDs).
+		Joins("JOIN orgs o ON o.id = m.org_id").
+		Where("m.user_id IN ?", userIDs).
 		Order("o.is_system DESC, o.id ASC").
 		Scan(&rows).Error
 	if err != nil {
@@ -284,8 +284,8 @@ func (d *ProfileDal) GetEmailEnabled(ctx context.Context, userId int64) (bool, e
 func (d *ProfileDal) UserHasOrgDailyEmailGrant(ctx context.Context, userID int64) bool {
 	var n int64
 	_ = d.db.WithContext(ctx).Table("org_members AS m").
-		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
-		Where("m.user_id = ? AND m.deleted_at IS NULL AND o.status = ? AND o.enable_ai_email = ?",
+		Joins("JOIN orgs o ON o.id = m.org_id").
+		Where("m.user_id = ? AND o.status = ? AND o.enable_ai_email = ?",
 			userID, model.OrgStatusActive, true).
 		Count(&n)
 	return n > 0
@@ -295,8 +295,8 @@ func (d *ProfileDal) UserHasOrgDailyEmailGrant(ctx context.Context, userID int64
 func (d *ProfileDal) UserHasOrgWeeklyEmailGrant(ctx context.Context, userID int64) bool {
 	var n int64
 	_ = d.db.WithContext(ctx).Table("org_members AS m").
-		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
-		Where(`m.user_id = ? AND m.deleted_at IS NULL AND o.status = ?
+		Joins("JOIN orgs o ON o.id = m.org_id").
+		Where(`m.user_id = ? AND o.status = ?
 			AND o.enable_ai_weekly_email = ? AND m.role IN ?`,
 			userID, model.OrgStatusActive, true,
 			[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
@@ -308,8 +308,8 @@ func (d *ProfileDal) UserHasOrgWeeklyEmailGrant(ctx context.Context, userID int6
 func (d *ProfileDal) StaffOrgIDsForWeekly(ctx context.Context, userID int64) ([]uint, error) {
 	var ids []uint
 	err := d.db.WithContext(ctx).Table("org_members AS m").
-		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
-		Where(`m.user_id = ? AND m.deleted_at IS NULL AND o.status = ?
+		Joins("JOIN orgs o ON o.id = m.org_id").
+		Where(`m.user_id = ? AND o.status = ?
 			AND o.enable_ai_weekly_email = ? AND m.role IN ?`,
 			userID, model.OrgStatusActive, true,
 			[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
@@ -374,8 +374,8 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 			o.enable_ai_weekly_email AS enable_ai_weekly_email,
 			o.spider_interval_min AS spider_interval_min,
 			o.ai_summary_interval_min AS ai_summary_interval_min`).
-		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
-		Where("m.user_id IN ? AND m.deleted_at IS NULL AND o.status = ?", userIDs, model.OrgStatusActive).
+		Joins("JOIN orgs o ON o.id = m.org_id").
+		Where("m.user_id IN ? AND o.status = ?", userIDs, model.OrgStatusActive).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -506,7 +506,7 @@ func (d *ProfileDal) IsMemberOfOrg(ctx context.Context, userID int64, orgID uint
 	}
 	var n int64
 	_ = d.db.WithContext(ctx).Model(&model.OrgMember{}).
-		Where("user_id = ? AND org_id = ? AND deleted_at IS NULL", userID, orgID).
+		Where("user_id = ? AND org_id = ?", userID, orgID).
 		Count(&n)
 	return n > 0
 }
@@ -520,8 +520,8 @@ func (d *ProfileDal) BatchEmailGrants(ctx context.Context, userIDs []int64) (dai
 	}
 	var dailyIDs []int64
 	_ = d.db.WithContext(ctx).Table("org_members AS m").
-		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
-		Where("m.user_id IN ? AND m.deleted_at IS NULL AND o.status = ? AND o.enable_ai_email = ?",
+		Joins("JOIN orgs o ON o.id = m.org_id").
+		Where("m.user_id IN ? AND o.status = ? AND o.enable_ai_email = ?",
 			userIDs, model.OrgStatusActive, true).
 		Distinct("m.user_id").
 		Pluck("m.user_id", &dailyIDs)
@@ -530,8 +530,8 @@ func (d *ProfileDal) BatchEmailGrants(ctx context.Context, userIDs []int64) (dai
 	}
 	var weeklyIDs []int64
 	_ = d.db.WithContext(ctx).Table("org_members AS m").
-		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
-		Where(`m.user_id IN ? AND m.deleted_at IS NULL AND o.status = ?
+		Joins("JOIN orgs o ON o.id = m.org_id").
+		Where(`m.user_id IN ? AND o.status = ?
 			AND o.enable_ai_weekly_email = ? AND m.role IN ?`,
 			userIDs, model.OrgStatusActive, true,
 			[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
@@ -613,20 +613,16 @@ func (d *ProfileDal) Delete(ctx context.Context, userId int64) error {
 	return data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
 		return d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			uid := uint(userId)
-			// 组织成员（含软删记录）
-			if err := tx.Unscoped().Where("user_id = ?", uid).Delete(&model.OrgMember{}).Error; err != nil {
+			if err := tx.Where("user_id = ?", uid).Delete(&model.OrgMember{}).Error; err != nil {
 				return err
 			}
-			// 加入申请
-			if err := tx.Unscoped().Where("user_id = ?", uid).Delete(&model.OrgJoinRequest{}).Error; err != nil {
+			if err := tx.Where("user_id = ?", uid).Delete(&model.OrgJoinRequest{}).Error; err != nil {
 				return err
 			}
-			// 粘贴板
-			if err := tx.Unscoped().Where("user_id = ?", uid).Delete(&model.Paste{}).Error; err != nil {
+			if err := tx.Where("user_id = ?", uid).Delete(&model.Paste{}).Error; err != nil {
 				return err
 			}
-			// 用户本身（硬删，释放用户名/邮箱）
-			result := tx.Unscoped().Delete(&model.User{}, userId)
+			result := tx.Delete(&model.User{}, userId)
 			if result.Error != nil {
 				return result.Error
 			}

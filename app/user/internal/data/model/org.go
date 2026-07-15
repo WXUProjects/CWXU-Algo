@@ -1,10 +1,6 @@
 package model
 
-import (
-	"time"
-
-	"gorm.io/gorm"
-)
+import "time"
 
 const (
 	OrgRoleMember   = "member"
@@ -28,7 +24,9 @@ const (
 
 // Org 组织/校队（含系统「公共域」）
 type Org struct {
-	gorm.Model
+	ID        uint      `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	Name      string     `gorm:"size:128;not null;comment:组织名称"`
 	Slug      string     `gorm:"size:64;uniqueIndex;comment:URL 标识"`
 	Plan      string     `gorm:"size:32;default:free;comment:套餐 free|team|pro"`
@@ -50,16 +48,18 @@ type Org struct {
 	EnableAIWeeklyEmail bool `gorm:"default:true;comment:AI周报邮件(组织授权,staff)"`
 	EnableSpider        bool `gorm:"default:true;comment:爬虫定时开关"`
 
-	SpiderIntervalMin   int    `gorm:"default:60;comment:爬虫间隔分钟(站点写)"`
-	AISummaryIntervalMin int   `gorm:"default:180;comment:AI总结间隔分钟(站点写)"`
-	AIEmailSchedule     string `gorm:"size:64;default:30 7 * * *;comment:邮件 cron(站点写)"`
+	SpiderIntervalMin    int    `gorm:"default:60;comment:爬虫间隔分钟(站点写)"`
+	AISummaryIntervalMin int    `gorm:"default:180;comment:AI总结间隔分钟(站点写)"`
+	AIEmailSchedule      string `gorm:"size:64;default:30 7 * * *;comment:邮件 cron(站点写)"`
 
 	DailySyncLimit int `gorm:"default:0;comment:组织日同步上限 0=未启用"`
 }
 
 // OrgMember 用户与组织关系
 type OrgMember struct {
-	gorm.Model
+	ID        uint      `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	OrgID          uint      `gorm:"uniqueIndex:idx_org_user;not null;comment:组织ID"`
 	UserID         uint      `gorm:"uniqueIndex:idx_org_user;index;not null;comment:用户ID"`
 	Role           string    `gorm:"size:16;default:member;comment:member|coach|captain|org_admin"`
@@ -85,7 +85,9 @@ func IsOrgStaffRole(role string) bool {
 
 // OrgJoinRequest 团队识别码加入申请（join_mode=review）
 type OrgJoinRequest struct {
-	gorm.Model
+	ID        uint      `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	OrgID          uint   `gorm:"index;not null"`
 	UserID         uint   `gorm:"index;not null"`
 	Status         string `gorm:"size:16;default:pending;comment:pending|approved|rejected"`
@@ -96,7 +98,9 @@ type OrgJoinRequest struct {
 
 // PlanQuota 套餐配额模板
 type PlanQuota struct {
-	gorm.Model
+	ID        uint      `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	Plan              string `gorm:"size:32;uniqueIndex;not null"`
 	SeatLimit         int    `gorm:"default:20"`
 	DailySyncPerUser  int    `gorm:"default:24"`

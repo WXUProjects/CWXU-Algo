@@ -32,7 +32,7 @@ const OperationProfileSetEmailEnabled = "/api.user.v1.Profile/SetEmailEnabled"
 const OperationProfileUpdate = "/api.user.v1.Profile/Update"
 
 type ProfileHTTPServer interface {
-	// Delete 管理员删除用户（软删除）
+	// Delete 管理员删除用户（硬删除）
 	Delete(context.Context, *DeleteReq) (*DeleteRes, error)
 	GetById(context.Context, *GetByIdReq) (*GetByIdRes, error)
 	GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error)
@@ -291,7 +291,7 @@ func _Profile_Delete2_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context)
 }
 
 type ProfileHTTPClient interface {
-	// Delete 管理员删除用户（软删除）
+	// Delete 管理员删除用户（硬删除）
 	Delete(ctx context.Context, req *DeleteReq, opts ...http.CallOption) (rsp *DeleteRes, err error)
 	GetById(ctx context.Context, req *GetByIdReq, opts ...http.CallOption) (rsp *GetByIdRes, err error)
 	GetByIds(ctx context.Context, req *GetByIdsReq, opts ...http.CallOption) (rsp *GetByIdsRes, err error)
@@ -315,7 +315,7 @@ func NewProfileHTTPClient(client *http.Client) ProfileHTTPClient {
 	return &ProfileHTTPClientImpl{client}
 }
 
-// Delete 管理员删除用户（软删除）
+// Delete 管理员删除用户（硬删除）
 func (c *ProfileHTTPClientImpl) Delete(ctx context.Context, in *DeleteReq, opts ...http.CallOption) (*DeleteRes, error) {
 	var out DeleteRes
 	pattern := "/v1/user/profile/delete"
