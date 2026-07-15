@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -156,6 +157,43 @@ func (s *OrgService) isMemberDB(userID, orgID uint) bool {
 	var n int64
 	s.db.Model(&model.OrgMember{}).Where("org_id = ? AND user_id = ?", orgID, userID).Count(&n)
 	return n > 0
+}
+
+// ensureOrgMember 保证用户为组织活跃成员。
+// 若曾退出/被移出（软删除），恢复并更新字段，避免唯一索引 (org_id,user_id) 导致 Create 静默失败。
+func (s *OrgService) ensureOrgMember(orgID, userID uint, role string, groupID *uint, displayName string) error {
+	if orgID == 0 || userID == 0 {
+		return errors.New("invalid org or user")
+	}
+	if !model.ValidOrgRole(role) {
+		role = model.OrgRoleMember
+	}
+	displayName = strings.TrimSpace(displayName)
+	now := time.Now()
+
+	var m model.OrgMember
+	err := s.db.Unscoped().Where("org_id = ? AND user_id = ?", orgID, userID).First(&m).Error
+	if err == nil {
+		updates := map[string]interface{}{
+			"deleted_at":       nil,
+			"role":             role,
+			"group_id":         groupID,
+			"org_display_name": displayName,
+			"joined_at":        now,
+		}
+		return s.db.Unscoped().Model(&m).Updates(updates).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return s.db.Create(&model.OrgMember{
+		OrgID:          orgID,
+		UserID:         userID,
+		Role:           role,
+		GroupID:        groupID,
+		OrgDisplayName: displayName,
+		JoinedAt:       now,
+	}).Error
 }
 
 // setDefaultOrg 将组织设为用户默认（current_org_id）；登录/打开站点自动进入该组织。
@@ -381,9 +419,7 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 		adminUID = pd.UserID
 	}
 	// 确保目标用户存在且加入组织为管理员，并挂到默认分组（不改 users.group_id：分组以当前组织为准）
-	if u, err := s.loadUser(adminUID); err == nil {
-		_ = u
-		_ = s.db.Where("org_id = ? AND user_id = ?", o.ID, adminUID).Delete(&model.OrgMember{}).Error
+	if _, err := s.loadUser(adminUID); err == nil {
 		var gid *uint
 		if defID > 0 {
 			gid = &defID
@@ -395,14 +431,9 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 				displayName = au.Username
 			}
 		}
-		_ = s.db.Create(&model.OrgMember{
-			OrgID:          o.ID,
-			UserID:         adminUID,
-			Role:           model.OrgRoleOrgAdmin,
-			GroupID:        gid,
-			OrgDisplayName: displayName,
-			JoinedAt:       time.Now(),
-		}).Error
+		if err := s.ensureOrgMember(o.ID, adminUID, model.OrgRoleOrgAdmin, gid, displayName); err != nil {
+			log.Errorf("org create admin member: %v", err)
+		}
 		// 拉入/任命为首任组织管理员时，设为该用户默认组织
 		s.setDefaultOrg(adminUID, o.ID)
 	}
@@ -751,14 +782,11 @@ func (s *OrgService) handleJoin(ctx khttp.Context) error {
 		gid = &defID
 		_ = s.db.Model(&model.User{}).Where("id = ?", pd.UserID).Update("group_id", defID).Error
 	}
-	_ = s.db.Create(&model.OrgMember{
-		OrgID:          o.ID,
-		UserID:         pd.UserID,
-		Role:           model.OrgRoleMember,
-		GroupID:        gid,
-		OrgDisplayName: displayName,
-		JoinedAt:       time.Now(),
-	}).Error
+	if err := s.ensureOrgMember(o.ID, pd.UserID, model.OrgRoleMember, gid, displayName); err != nil {
+		log.Errorf("org join ensure member: %v", err)
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加入失败，请稍后重试"})
+		return nil
+	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "加入成功", "data": s.orgToMapWithSeats(&o, false)})
 	return nil
 }
@@ -992,11 +1020,9 @@ func (s *OrgService) handleAddMember(ctx khttp.Context) error {
 		gid = &defID
 		_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("group_id", defID).Error
 	}
-	if err := s.db.Create(&model.OrgMember{
-		OrgID: req.OrgID, UserID: uid, Role: role, GroupID: gid,
-		OrgDisplayName: displayName, JoinedAt: time.Now(),
-	}).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
+	if err := s.ensureOrgMember(req.OrgID, uid, role, gid, displayName); err != nil {
+		log.Errorf("org add member: %v", err)
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加入失败，请稍后重试"})
 		return nil
 	}
 	// 管理员拉入 → 设为默认组织（下次打开自动进入；用户之后 switch 即记忆）
@@ -1084,7 +1110,7 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 	}
 	var m model.OrgMember
 	if err := s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).First(&m).Error; err != nil {
-		// 不在组织中则加入（占席位）
+		// 不在组织中则加入（占席位；含软删除后恢复）
 		var roleOrg model.Org
 		if s.db.First(&roleOrg, req.OrgID).Error != nil {
 			writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
@@ -1102,12 +1128,14 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 				displayName = u.Username
 			}
 		}
-		m = model.OrgMember{
-			OrgID: req.OrgID, UserID: req.UserID, Role: req.Role,
-			OrgDisplayName: displayName, JoinedAt: time.Now(),
+		defID := s.ensureDefaultGroupID(req.OrgID)
+		var gid *uint
+		if defID > 0 {
+			gid = &defID
 		}
-		if err := s.db.Create(&m).Error; err != nil {
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
+		if err := s.ensureOrgMember(req.OrgID, req.UserID, req.Role, gid, displayName); err != nil {
+			log.Errorf("org set role ensure member: %v", err)
+			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加入失败，请稍后重试"})
 			return nil
 		}
 		// 任命时顺带拉入 → 设为默认组织
@@ -1278,11 +1306,6 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
 				return nil
 			}
-		}
-		_ = s.db.Model(&jr).Updates(map[string]interface{}{
-			"status": model.JoinReqApproved, "reviewed_by": uid,
-		}).Error
-		if !s.isMemberDB(jr.UserID, jr.OrgID) {
 			defID := s.ensureDefaultGroupID(jr.OrgID)
 			var gid *uint
 			if defID > 0 {
@@ -1299,13 +1322,17 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 					}
 				}
 			}
-			_ = s.db.Create(&model.OrgMember{
-				OrgID: jr.OrgID, UserID: jr.UserID, Role: model.OrgRoleMember, GroupID: gid,
-				OrgDisplayName: displayName, JoinedAt: time.Now(),
-			}).Error
-			// 审批通过 = 管理员侧拉入 → 设为默认组织
+			// 先写入/恢复成员，成功后再标记申请通过，避免“已通过却未入组”
+			if err := s.ensureOrgMember(jr.OrgID, jr.UserID, model.OrgRoleMember, gid, displayName); err != nil {
+				log.Errorf("org join review ensure member: %v", err)
+				writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加入失败，请稍后重试"})
+				return nil
+			}
 			s.setDefaultOrg(jr.UserID, jr.OrgID)
 		}
+		_ = s.db.Model(&jr).Updates(map[string]interface{}{
+			"status": model.JoinReqApproved, "reviewed_by": uid,
+		}).Error
 		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已通过"})
 		return nil
 	}
