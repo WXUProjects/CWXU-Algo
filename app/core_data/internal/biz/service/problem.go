@@ -775,16 +775,16 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 	if err := q.Count(&total).Error; err != nil {
 		return nil, nil, 0, err
 	}
-	// 默认按 id 倒序；兼容 latest_* / id_*
-	order := "id DESC"
+	// 默认按最近提交倒序；兼容 latest_* / id_*
+	order := "last_submitted_at DESC NULLS LAST, id DESC"
 	switch strings.TrimSpace(f.Sort) {
 	case "id_asc":
 		order = "id ASC"
-	case "id_desc", "":
+	case "id_desc":
 		order = "id DESC"
 	case "latest_asc":
 		order = "last_submitted_at ASC NULLS LAST, id ASC"
-	case "latest_desc":
+	case "latest_desc", "":
 		order = "last_submitted_at DESC NULLS LAST, id DESC"
 	}
 	var list []model.Problem
