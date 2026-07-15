@@ -40,15 +40,16 @@ func migrateModels(db *gorm.DB) {
 		&model.User{},
 		&model.Group{},
 		&model.SiteConfig{},
-		// 商业化地基：组织/成员/套餐配额（当前无对外 API）
 		&model.Org{},
 		&model.OrgMember{},
+		&model.OrgJoinRequest{},
 		&model.PlanQuota{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
 	}
 	seedPlanQuotas(db)
+	seedGoAlgoFramework(db)
 }
 
 // seedPlanQuotas 幂等写入默认套餐配额模板

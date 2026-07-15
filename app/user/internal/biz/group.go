@@ -16,8 +16,8 @@ func NewGroupUseCase(groupDal *dal.GroupDal) *GroupUseCase {
 	}
 }
 
-func (uc *GroupUseCase) Create(ctx context.Context, name, describe string) (int64, error) {
-	return uc.groupDal.Create(ctx, name, describe)
+func (uc *GroupUseCase) Create(ctx context.Context, name, describe string, orgID uint) (int64, error) {
+	return uc.groupDal.Create(ctx, name, describe, orgID)
 }
 
 func (uc *GroupUseCase) Delete(ctx context.Context, id int64) error {
@@ -32,8 +32,8 @@ func (uc *GroupUseCase) GetWithUsers(ctx context.Context, id int64) (*model.Grou
 	return uc.groupDal.GetWithUsers(ctx, id)
 }
 
-func (uc *GroupUseCase) List(ctx context.Context, page, size int64) ([]model.Group, int64, error) {
-	return uc.groupDal.List(ctx, page, size)
+func (uc *GroupUseCase) List(ctx context.Context, page, size int64, orgID uint) ([]model.Group, int64, error) {
+	return uc.groupDal.List(ctx, page, size, orgID)
 }
 
 func (uc *GroupUseCase) Update(ctx context.Context, id int64, name, describe string) error {

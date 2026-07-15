@@ -5,7 +5,6 @@ import (
 	"cwxu-algo/api/core/v1/submit_log"
 	"cwxu-algo/api/user/v1/group"
 	"cwxu-algo/app/common/discovery"
-	"cwxu-algo/app/common/permission"
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/biz"
@@ -37,13 +36,21 @@ func (g *GroupService) coreDataRPC() (*grpc2.ClientConn, error) {
 }
 
 func (g *GroupService) Create(ctx context.Context, request *group.CreateRequest) (*group.CreateReply, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
-		return nil, errors.Forbidden("权限不足", "需要教练、队长或管理员权限")
+	if !auth.VerifyOrgAdmin(ctx) && !auth.VerifySiteAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "需要团队管理员或站点管理员权限")
 	}
 	if request.Name == "" {
 		return nil, errors.BadRequest("参数错误", "组名称不能为空")
 	}
-	id, err := g.groupUseCase.Create(ctx, request.Name, request.Describe)
+	pd := auth.GetCurrentUser(ctx)
+	orgID := uint(0)
+	if pd != nil {
+		orgID = pd.OrgID
+	}
+	if orgID == 0 {
+		return nil, errors.BadRequest("参数错误", "请先选择组织")
+	}
+	id, err := g.groupUseCase.Create(ctx, request.Name, request.Describe, orgID)
 	if err != nil {
 		return nil, errors.InternalServer("创建失败", err.Error())
 	}
@@ -54,8 +61,8 @@ func (g *GroupService) Create(ctx context.Context, request *group.CreateRequest)
 }
 
 func (g *GroupService) Delete(ctx context.Context, request *group.DeleteRequest) (*group.DeleteReply, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
-		return nil, errors.Forbidden("权限不足", "需要教练、队长或管理员权限")
+	if !auth.VerifyOrgAdmin(ctx) && !auth.VerifySiteAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "需要团队管理员或站点管理员权限")
 	}
 	if request.Id == 0 {
 		return nil, errors.BadRequest("参数错误", "组ID不能为空")
@@ -132,7 +139,11 @@ func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*g
 	if size < 1 {
 		size = 10
 	}
-	list, total, err := g.groupUseCase.List(ctx, page, size)
+	orgID := uint(0)
+	if pd := auth.GetCurrentUser(ctx); pd != nil {
+		orgID = pd.OrgID
+	}
+	list, total, err := g.groupUseCase.List(ctx, page, size, orgID)
 	if err != nil {
 		return nil, errors.InternalServer("查询失败", err.Error())
 	}
@@ -152,8 +163,8 @@ func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*g
 }
 
 func (g *GroupService) Update(ctx context.Context, request *group.UpdateRequest) (*group.UpdateReply, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
-		return nil, errors.Forbidden("权限不足", "需要教练、队长或管理员权限")
+	if !auth.VerifyOrgAdmin(ctx) && !auth.VerifySiteAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "需要团队管理员或站点管理员权限")
 	}
 	if request.Id == 0 {
 		return nil, errors.BadRequest("参数错误", "组ID不能为空")

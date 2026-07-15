@@ -34,36 +34,50 @@ func (s *BulletinService) modelToProto(m *model.Bulletin) *bulletin.BulletinInfo
 	}
 }
 
-// Create 创建公告（管理员 / 教练 / 队长）
+func canManageBulletin(ctx context.Context, user *auth.JwtPayload, m *model.Bulletin) bool {
+	if user == nil {
+		return false
+	}
+	if auth.VerifySiteAdmin(ctx) {
+		return true
+	}
+	// 组织公告：当前组织管理员且 org 匹配
+	if m.Scope == model.BulletinScopeOrg && m.OrgID != nil {
+		return auth.VerifyOrgAdmin(ctx) && user.OrgID == *m.OrgID
+	}
+	// 全站公告仅站点管理员
+	return false
+}
+
+// Create 创建公告：站点管理员可发全站；组织管理员默认发当前组织公告
 func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBulletinReq) (*bulletin.CreateBulletinRes, error) {
-	if !auth.VerifyStaff(ctx) {
-		return &bulletin.CreateBulletinRes{
-			Code:    1,
-			Message: "权限不足，仅教练、队长和管理员可发布公告",
-		}, nil
-	}
-
-	// 参数校验
-	if req.Title == "" {
-		return &bulletin.CreateBulletinRes{
-			Code:    2,
-			Message: "标题不能为空",
-		}, nil
-	}
-	if req.Content == "" {
-		return &bulletin.CreateBulletinRes{
-			Code:    3,
-			Message: "内容不能为空",
-		}, nil
-	}
-
-	// 获取当前用户信息
 	user := auth.GetCurrentUser(ctx)
 	if user == nil {
+		return &bulletin.CreateBulletinRes{Code: 1, Message: "未获取到用户信息"}, nil
+	}
+
+	scope := model.BulletinScopeOrg
+	var orgID *uint
+	if auth.VerifySiteAdmin(ctx) {
+		// 站点管理员默认全站；若 JWT 有 org 且非仅站点场景，仍发全站（规格：全站仅站点管理员）
+		scope = model.BulletinScopeSite
+		orgID = nil
+	} else if auth.VerifyOrgAdmin(ctx) && user.OrgID > 0 {
+		scope = model.BulletinScopeOrg
+		oid := user.OrgID
+		orgID = &oid
+	} else {
 		return &bulletin.CreateBulletinRes{
 			Code:    1,
-			Message: "未获取到用户信息",
+			Message: "权限不足，仅站点管理员或团队管理员可发布公告",
 		}, nil
+	}
+
+	if req.Title == "" {
+		return &bulletin.CreateBulletinRes{Code: 2, Message: "标题不能为空"}, nil
+	}
+	if req.Content == "" {
+		return &bulletin.CreateBulletinRes{Code: 3, Message: "内容不能为空"}, nil
 	}
 
 	m := &model.Bulletin{
@@ -72,6 +86,8 @@ func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBullet
 		AuthorID:   int64(user.UserID),
 		AuthorName: user.Name,
 		IsPinned:   req.IsPinned,
+		Scope:      scope,
+		OrgID:      orgID,
 	}
 	if err := s.bulletinDal.Create(m); err != nil {
 		return nil, errors.InternalServer("创建失败", err.Error())
@@ -84,25 +100,21 @@ func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBullet
 	}, nil
 }
 
-// Update 更新公告：管理员 / 教练 / 队长可改任意公告
+// Update 更新公告
 func (s *BulletinService) Update(ctx context.Context, req *bulletin.UpdateBulletinReq) (*bulletin.UpdateBulletinRes, error) {
-	if !auth.VerifyStaff(ctx) {
-		return &bulletin.UpdateBulletinRes{
-			Code:    1,
-			Message: "权限不足，仅教练、队长和管理员可管理公告",
-		}, nil
-	}
-
-	// 验证存在性
-	_, err := s.bulletinDal.GetById(req.Id)
+	user := auth.GetCurrentUser(ctx)
+	existing, err := s.bulletinDal.GetById(req.Id)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return &bulletin.UpdateBulletinRes{
-				Code:    2,
-				Message: "公告不存在",
-			}, nil
+			return &bulletin.UpdateBulletinRes{Code: 2, Message: "公告不存在"}, nil
 		}
 		return nil, errors.InternalServer("查询失败", err.Error())
+	}
+	if !canManageBulletin(ctx, user, existing) {
+		return &bulletin.UpdateBulletinRes{
+			Code:    1,
+			Message: "权限不足",
+		}, nil
 	}
 
 	// 构建更新字段（管理员/教练均可改任意字段，不校验作者）
@@ -139,25 +151,18 @@ func (s *BulletinService) Update(ctx context.Context, req *bulletin.UpdateBullet
 	}, nil
 }
 
-// Delete 删除公告：管理员 / 教练 / 队长可删任意公告
+// Delete 删除公告
 func (s *BulletinService) Delete(ctx context.Context, req *bulletin.DeleteBulletinReq) (*bulletin.DeleteBulletinRes, error) {
-	if !auth.VerifyStaff(ctx) {
-		return &bulletin.DeleteBulletinRes{
-			Code:    1,
-			Message: "权限不足，仅教练、队长和管理员可管理公告",
-		}, nil
-	}
-
-	// 验证存在性
-	_, err := s.bulletinDal.GetById(req.Id)
+	user := auth.GetCurrentUser(ctx)
+	existing, err := s.bulletinDal.GetById(req.Id)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return &bulletin.DeleteBulletinRes{
-				Code:    2,
-				Message: "公告不存在",
-			}, nil
+			return &bulletin.DeleteBulletinRes{Code: 2, Message: "公告不存在"}, nil
 		}
 		return nil, errors.InternalServer("查询失败", err.Error())
+	}
+	if !canManageBulletin(ctx, user, existing) {
+		return &bulletin.DeleteBulletinRes{Code: 1, Message: "权限不足"}, nil
 	}
 
 	if err := s.bulletinDal.Delete(req.Id); err != nil {
@@ -204,7 +209,11 @@ func (s *BulletinService) List(ctx context.Context, req *bulletin.ListBulletinRe
 		pageSize = 50
 	}
 
-	bulletins, total, err := s.bulletinDal.List(page, pageSize)
+	orgID := uint(0)
+	if u := auth.GetCurrentUser(ctx); u != nil {
+		orgID = u.OrgID
+	}
+	bulletins, total, err := s.bulletinDal.List(page, pageSize, orgID)
 	if err != nil {
 		return nil, errors.InternalServer("查询失败", err.Error())
 	}

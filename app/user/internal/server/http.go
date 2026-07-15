@@ -56,6 +56,7 @@ func NewHTTPServer(
 	groupService *service.GroupService,
 	roleService *service.RoleService,
 	siteService *service.SiteService,
+	orgService *service.OrgService,
 	logger log.Logger,
 
 ) *http.Server {
@@ -84,5 +85,6 @@ func NewHTTPServer(
 	role.RegisterRoleHTTPServer(srv, roleService)
 	site.RegisterSiteHTTPServer(srv, siteService)
 	service.RegisterUploadRoutes(srv)
+	service.RegisterOrgRoutes(srv, orgService)
 	return srv
 }

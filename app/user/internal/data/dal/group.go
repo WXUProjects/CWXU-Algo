@@ -19,10 +19,11 @@ func NewGroupDal(data *data.Data) *GroupDal {
 	return &GroupDal{db: data.DB}
 }
 
-func (d *GroupDal) Create(ctx context.Context, name, describe string) (int64, error) {
+func (d *GroupDal) Create(ctx context.Context, name, describe string, orgID uint) (int64, error) {
 	group := model.Group{
 		Name:     &name,
 		Describe: describe,
+		OrgID:    orgID,
 	}
 	if err := d.db.WithContext(ctx).Create(&group).Error; err != nil {
 		return 0, fmt.Errorf("创建组失败: %w", err)
@@ -73,20 +74,24 @@ func (d *GroupDal) GetWithUsers(ctx context.Context, id int64) (*model.Group, []
 	return &group, group.Users, nil
 }
 
-func (d *GroupDal) List(ctx context.Context, page, size int64) ([]model.Group, int64, error) {
+func (d *GroupDal) List(ctx context.Context, page, size int64, orgID uint) ([]model.Group, int64, error) {
 	var list []model.Group
 	var total int64
 
-	if err := d.db.WithContext(ctx).Model(&model.Group{}).Count(&total).Error; err != nil {
+	q := d.db.WithContext(ctx).Model(&model.Group{})
+	if orgID > 0 {
+		q = q.Where("org_id = ?", orgID)
+	}
+	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("查询组总数失败: %w", err)
 	}
 
 	offset := (page - 1) * size
-	if err := d.db.WithContext(ctx).
-		Order("id DESC").
-		Limit(int(size)).
-		Offset(int(offset)).
-		Find(&list).Error; err != nil {
+	lq := d.db.WithContext(ctx).Order("id DESC").Limit(int(size)).Offset(int(offset))
+	if orgID > 0 {
+		lq = lq.Where("org_id = ?", orgID)
+	}
+	if err := lq.Find(&list).Error; err != nil {
 		return nil, 0, fmt.Errorf("查询组列表失败: %w", err)
 	}
 

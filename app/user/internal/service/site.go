@@ -28,7 +28,7 @@ func (s *SiteService) ensureRow(ctx context.Context) (*model.SiteConfig, error) 
 	}
 	row = model.SiteConfig{
 		ID:        1,
-		SiteTitle: "Algo-CWUX",
+		SiteTitle: "GoAlgo",
 	}
 	if e := s.data.DB.WithContext(ctx).Create(&row).Error; e != nil {
 		// 并发创建时再读
@@ -55,8 +55,8 @@ func (s *SiteService) GetConfig(ctx context.Context, _ *site.GetConfigReq) (*sit
 }
 
 func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigReq) (*site.UpdateConfigRes, error) {
-	if !auth.VerifyAdmin(ctx) {
-		return &site.UpdateConfigRes{Code: 1, Message: "仅管理员可修改站点配置"}, nil
+	if !auth.VerifySiteAdmin(ctx) {
+		return &site.UpdateConfigRes{Code: 1, Message: "仅站点管理员可修改站点配置"}, nil
 	}
 	row, err := s.ensureRow(ctx)
 	if err != nil {
