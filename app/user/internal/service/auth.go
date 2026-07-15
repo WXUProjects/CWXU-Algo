@@ -65,12 +65,30 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 		return
 	}
 
+	// 公共域默认分组
+	var defG model.Group
+	defGID := uint(0)
+	if e := s.db.Where("org_id = ? AND name IN ?", public.ID, []string{model.DefaultGroupName, "未分组"}).
+		Order("id ASC").First(&defG).Error; e == nil {
+		defGID = defG.ID
+		if defG.Name != nil && *defG.Name == "未分组" {
+			n := model.DefaultGroupName
+			_ = s.db.Model(&defG).Updates(map[string]interface{}{"name": n, "describe": model.DefaultGroupDesc}).Error
+		}
+	} else {
+		n := model.DefaultGroupName
+		defG = model.Group{Name: &n, Describe: model.DefaultGroupDesc, OrgID: public.ID}
+		if s.db.Create(&defG).Error == nil {
+			defGID = defG.ID
+		}
+	}
+
 	newUser := &model.User{
 		Username:     req.Username,
 		Password:     req.Password,
 		Name:         req.Name,
 		Email:        req.Email,
-		GroupId:      0,
+		GroupId:      int64(defGID),
 		RoleID:       0,
 		IsSiteAdmin:  false,
 		CurrentOrgID: public.ID,
@@ -81,10 +99,15 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 		res.Message = r.Error.Error()
 		return
 	}
+	var memGid *uint
+	if defGID > 0 {
+		memGid = &defGID
+	}
 	_ = s.db.Create(&model.OrgMember{
 		OrgID:    public.ID,
 		UserID:   newUser.ID,
 		Role:     model.OrgRoleMember,
+		GroupID:  memGid,
 		JoinedAt: time.Now(),
 	}).Error
 	return

@@ -31,16 +31,71 @@ func (d *GroupDal) Create(ctx context.Context, name, describe string, orgID uint
 	return int64(group.ID), nil
 }
 
+// EnsureDefaultGroup 确保组织有「默认分组」，返回其 ID
+func (d *GroupDal) EnsureDefaultGroup(ctx context.Context, orgID uint) (uint, error) {
+	if orgID == 0 {
+		return 0, fmt.Errorf("orgID 无效")
+	}
+	var g model.Group
+	err := d.db.WithContext(ctx).
+		Where("org_id = ? AND name IN ?", orgID, []string{model.DefaultGroupName, "未分组"}).
+		Order("id ASC").
+		First(&g).Error
+	if err == nil {
+		if g.Name != nil && *g.Name == "未分组" {
+			name := model.DefaultGroupName
+			_ = d.db.WithContext(ctx).Model(&g).Updates(map[string]interface{}{
+				"name":     name,
+				"describe": model.DefaultGroupDesc,
+			}).Error
+		}
+		return g.ID, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+	name := model.DefaultGroupName
+	g = model.Group{
+		Name:     &name,
+		Describe: model.DefaultGroupDesc,
+		OrgID:    orgID,
+	}
+	if err := d.db.WithContext(ctx).Create(&g).Error; err != nil {
+		return 0, err
+	}
+	return g.ID, nil
+}
+
 func (d *GroupDal) Delete(ctx context.Context, id int64) error {
+	var g model.Group
+	if err := d.db.WithContext(ctx).First(&g, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("组不存在")
+		}
+		return fmt.Errorf("查询组失败: %w", err)
+	}
+	if g.IsDefaultGroup() {
+		return fmt.Errorf("不能删除默认分组")
+	}
+	defaultID, err := d.EnsureDefaultGroup(ctx, g.OrgID)
+	if err != nil {
+		return fmt.Errorf("准备默认分组失败: %w", err)
+	}
+	if err := d.db.WithContext(ctx).Model(&model.User{}).
+		Where("group_id = ?", id).
+		Update("group_id", defaultID).Error; err != nil {
+		return fmt.Errorf("迁移用户到默认分组失败: %w", err)
+	}
+	_ = d.db.WithContext(ctx).Model(&model.OrgMember{}).
+		Where("group_id = ?", id).
+		Update("group_id", defaultID).Error
+
 	result := d.db.WithContext(ctx).Delete(&model.Group{}, id)
 	if result.Error != nil {
 		return fmt.Errorf("删除组失败: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("组不存在")
-	}
-	if err := d.db.WithContext(ctx).Model(&model.User{}).Where("group_id = ?", id).Update("group_id", 0).Error; err != nil {
-		return fmt.Errorf("重置用户组ID失败: %w", err)
 	}
 	return nil
 }

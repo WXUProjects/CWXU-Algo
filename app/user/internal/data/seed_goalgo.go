@@ -55,19 +55,35 @@ func seedGoAlgoFramework(db *gorm.DB) {
 		return
 	}
 
-	// 各组织若无任何分组则补「默认分组」（含公共域与已有校队）
+	// 各组织确保有「默认分组」；旧名「未分组」改名
+	_ = db.Model(&model.Group{}).Where("name = ?", "未分组").Updates(map[string]interface{}{
+		"name":     model.DefaultGroupName,
+		"describe": model.DefaultGroupDesc,
+	}).Error
+
 	var allOrgs []model.Org
 	if e := db.Find(&allOrgs).Error; e == nil {
 		for _, o := range allOrgs {
-			var n int64
-			db.Model(&model.Group{}).Where("org_id = ?", o.ID).Count(&n)
-			if n == 0 {
-				defName := "默认分组"
-				_ = db.Create(&model.Group{
+			var defG model.Group
+			err := db.Where("org_id = ? AND name = ?", o.ID, model.DefaultGroupName).
+				Order("id ASC").First(&defG).Error
+			if err != nil {
+				defName := model.DefaultGroupName
+				defG = model.Group{
 					Name:     &defName,
-					Describe: "组织默认分组",
+					Describe: model.DefaultGroupDesc,
 					OrgID:    o.ID,
-				}).Error
+				}
+				if db.Create(&defG).Error != nil {
+					continue
+				}
+			}
+			// 该组织内 group_id=0 或无效的用户，挂到默认分组
+			// 仅当用户 current_org 属于本组织，或（公共域）全员无组时
+			if o.IsSystem {
+				_ = db.Model(&model.User{}).
+					Where("group_id = 0 OR group_id IS NULL").
+					Update("group_id", defG.ID).Error
 			}
 		}
 	}
@@ -140,6 +156,20 @@ func seedGoAlgoFramework(db *gorm.DB) {
 		_ = db.Create(&model.SiteConfig{ID: 1, SiteTitle: "GoAlgo"}).Error
 	} else if e == nil && (sc.SiteTitle == "" || sc.SiteTitle == "Algo-CWUX") {
 		_ = db.Model(&model.SiteConfig{}).Where("id = ?", 1).Update("site_title", "GoAlgo").Error
+	}
+
+	// 6. 再扫一遍：无有效分组的用户 → 当前组织或公共域的默认分组
+	var pubDef model.Group
+	if db.Where("org_id = ? AND name = ?", public.ID, model.DefaultGroupName).
+		Order("id ASC").First(&pubDef).Error == nil {
+		// group_id 指向已删除分组的用户
+		_ = db.Exec(`
+			UPDATE users SET group_id = ?
+			WHERE deleted_at IS NULL AND (
+				group_id = 0 OR group_id IS NULL
+				OR group_id NOT IN (SELECT id FROM groups WHERE deleted_at IS NULL)
+			)
+		`, pubDef.ID).Error
 	}
 
 	log.Infof("GoAlgo framework seed done public_org_id=%d users=%d", public.ID, len(users))

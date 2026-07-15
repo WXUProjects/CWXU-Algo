@@ -98,6 +98,27 @@ func (s *OrgService) isMemberDB(userID, orgID uint) bool {
 	return n > 0
 }
 
+// ensureDefaultGroupID 组织默认分组 ID（无则创建）
+func (s *OrgService) ensureDefaultGroupID(orgID uint) uint {
+	var g model.Group
+	if s.db.Where("org_id = ? AND name IN ?", orgID, []string{model.DefaultGroupName, "未分组"}).
+		Order("id ASC").First(&g).Error == nil {
+		if g.Name != nil && *g.Name == "未分组" {
+			n := model.DefaultGroupName
+			_ = s.db.Model(&g).Updates(map[string]interface{}{
+				"name": n, "describe": model.DefaultGroupDesc,
+			}).Error
+		}
+		return g.ID
+	}
+	n := model.DefaultGroupName
+	g = model.Group{Name: &n, Describe: model.DefaultGroupDesc, OrgID: orgID}
+	if s.db.Create(&g).Error != nil {
+		return 0
+	}
+	return g.ID
+}
+
 // RegisterOrgRoutes HTTP 路由（与 upload 同模式）
 func RegisterOrgRoutes(srv *khttp.Server, org *OrgService) {
 	r := srv.Route("/")
@@ -248,25 +269,26 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "创建失败: " + err.Error()})
 		return nil
 	}
-	// 新建组织默认分组，便于成员管理
-	defaultName := "默认分组"
-	_ = s.db.Create(&model.Group{
-		Name:     &defaultName,
-		Describe: "组织默认分组",
-		OrgID:    o.ID,
-	}).Error
+	// 新建组织自带「默认分组」
+	defID := s.ensureDefaultGroupID(o.ID)
 	adminUID := req.AdminUserID
 	if adminUID == 0 {
 		adminUID = pd.UserID
 	}
-	// 确保目标用户存在且在公共域
+	// 确保目标用户存在且加入组织为管理员，并挂到默认分组
 	if u, err := s.loadUser(adminUID); err == nil {
 		_ = u
 		_ = s.db.Where("org_id = ? AND user_id = ?", o.ID, adminUID).Delete(&model.OrgMember{}).Error
+		var gid *uint
+		if defID > 0 {
+			gid = &defID
+			_ = s.db.Model(&model.User{}).Where("id = ?", adminUID).Update("group_id", defID).Error
+		}
 		_ = s.db.Create(&model.OrgMember{
 			OrgID:    o.ID,
 			UserID:   adminUID,
 			Role:     model.OrgRoleOrgAdmin,
+			GroupID:  gid,
 			JoinedAt: time.Now(),
 		}).Error
 	}
@@ -446,10 +468,17 @@ func (s *OrgService) handleJoin(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "申请已提交，等待团队管理员审批"})
 		return nil
 	}
+	defID := s.ensureDefaultGroupID(o.ID)
+	var gid *uint
+	if defID > 0 {
+		gid = &defID
+		_ = s.db.Model(&model.User{}).Where("id = ?", pd.UserID).Update("group_id", defID).Error
+	}
 	_ = s.db.Create(&model.OrgMember{
 		OrgID:    o.ID,
 		UserID:   pd.UserID,
 		Role:     model.OrgRoleMember,
+		GroupID:  gid,
 		JoinedAt: time.Now(),
 	}).Error
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "加入成功", "data": orgToMap(&o, false)})
@@ -606,8 +635,14 @@ func (s *OrgService) handleAddMember(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "用户已在组织中", "userId": uid})
 		return nil
 	}
+	defID := s.ensureDefaultGroupID(req.OrgID)
+	var gid *uint
+	if defID > 0 {
+		gid = &defID
+		_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("group_id", defID).Error
+	}
 	if err := s.db.Create(&model.OrgMember{
-		OrgID: req.OrgID, UserID: uid, Role: role, JoinedAt: time.Now(),
+		OrgID: req.OrgID, UserID: uid, Role: role, GroupID: gid, JoinedAt: time.Now(),
 	}).Error; err != nil {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
 		return nil
@@ -800,8 +835,14 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 			"status": model.JoinReqApproved, "reviewed_by": uid,
 		}).Error
 		if !s.isMemberDB(jr.UserID, jr.OrgID) {
+			defID := s.ensureDefaultGroupID(jr.OrgID)
+			var gid *uint
+			if defID > 0 {
+				gid = &defID
+				_ = s.db.Model(&model.User{}).Where("id = ?", jr.UserID).Update("group_id", defID).Error
+			}
 			_ = s.db.Create(&model.OrgMember{
-				OrgID: jr.OrgID, UserID: jr.UserID, Role: model.OrgRoleMember, JoinedAt: time.Now(),
+				OrgID: jr.OrgID, UserID: jr.UserID, Role: model.OrgRoleMember, GroupID: gid, JoinedAt: time.Now(),
 			}).Error
 		}
 		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已通过"})
