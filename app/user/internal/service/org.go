@@ -126,6 +126,7 @@ func RegisterOrgRoutes(srv *khttp.Server, org *OrgService) {
 	r.GET("/v1/user/org/get", org.handleGet)
 	r.POST("/v1/user/org/create", org.handleCreate)
 	r.POST("/v1/user/org/update", org.handleUpdate)
+	r.POST("/v1/user/org/delete", org.handleDelete)
 	r.POST("/v1/user/org/switch", org.handleSwitch)
 	r.POST("/v1/user/org/join", org.handleJoin)
 	r.POST("/v1/user/org/leave", org.handleLeave)
@@ -295,6 +296,69 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "创建成功", "data": orgToMap(&o, true),
 	})
+	return nil
+}
+
+// handleDelete 站点管理员删除组织（软删除）；公共域不可删
+func (s *OrgService) handleDelete(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || !auth.VerifySiteAdmin(ctx) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可删除组织"})
+		return nil
+	}
+	var req struct {
+		ID uint `json:"id"`
+	}
+	if err := readJSON(ctx.Request(), &req); err != nil || req.ID == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
+		return nil
+	}
+	var o model.Org
+	if s.db.First(&o, req.ID).Error != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
+		return nil
+	}
+	if o.IsSystem || o.Slug == model.PublicOrgSlug {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "公共域不可删除"})
+		return nil
+	}
+
+	var pub model.Org
+	if s.db.Where("slug = ?", model.PublicOrgSlug).First(&pub).Error != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "公共域不存在，无法迁移用户"})
+		return nil
+	}
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		// 当前组织指向被删组织的用户 → 切回公共域
+		if err := tx.Model(&model.User{}).
+			Where("current_org_id = ?", o.ID).
+			Update("current_org_id", pub.ID).Error; err != nil {
+			return err
+		}
+		// 成员关系
+		if err := tx.Where("org_id = ?", o.ID).Delete(&model.OrgMember{}).Error; err != nil {
+			return err
+		}
+		// 加入申请
+		if err := tx.Where("org_id = ?", o.ID).Delete(&model.OrgJoinRequest{}).Error; err != nil {
+			return err
+		}
+		// 组织内分组
+		if err := tx.Where("org_id = ?", o.ID).Delete(&model.Group{}).Error; err != nil {
+			return err
+		}
+		// 组织本身（软删除）
+		if err := tx.Delete(&o).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "删除失败: " + err.Error()})
+		return nil
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除组织"})
 	return nil
 }
 
@@ -536,7 +600,8 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
 		return nil
 	}
-	id64, _ := strconv.ParseUint(ctx.Request().URL.Query().Get("orgId"), 10, 64)
+	q := ctx.Request().URL.Query()
+	id64, _ := strconv.ParseUint(q.Get("orgId"), 10, 64)
 	orgID := uint(id64)
 	if orgID == 0 {
 		orgID = pd.OrgID
@@ -545,26 +610,68 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
-	var mems []model.OrgMember
-	_ = s.db.Where("org_id = ?", orgID).Order("role DESC, id ASC").Find(&mems).Error
-	list := make([]map[string]interface{}, 0, len(mems))
-	for _, m := range mems {
-		var u model.User
-		if s.db.First(&u, m.UserID).Error != nil {
-			continue
-		}
-		item := map[string]interface{}{
-			"userId":   u.ID,
-			"username": u.Username,
-			"name":     u.Name,
-			"avatar":   u.Avatar,
-			"role":     m.Role,
-			"groupId":  m.GroupID,
-			"joinedAt": m.JoinedAt.Unix(),
-		}
-		list = append(list, item)
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page < 1 {
+		page = 1
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "list": list})
+	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	keyword := strings.TrimSpace(q.Get("keyword"))
+
+	type row struct {
+		UserID   uint
+		Username string
+		Name     string
+		Avatar   string
+		Role     string
+		GroupID  *uint
+		JoinedAt time.Time
+	}
+	base := s.db.Table("org_members AS m").
+		Select("m.user_id AS user_id, u.username AS username, u.name AS name, u.avatar AS avatar, m.role AS role, m.group_id AS group_id, m.joined_at AS joined_at").
+		Joins("JOIN users u ON u.id = m.user_id AND u.deleted_at IS NULL").
+		Where("m.org_id = ? AND m.deleted_at IS NULL", orgID)
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		base = base.Where("u.name LIKE ? OR u.username LIKE ?", like, like)
+	}
+
+	var total int64
+	countQ := s.db.Table("org_members AS m").
+		Joins("JOIN users u ON u.id = m.user_id AND u.deleted_at IS NULL").
+		Where("m.org_id = ? AND m.deleted_at IS NULL", orgID)
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		countQ = countQ.Where("u.name LIKE ? OR u.username LIKE ?", like, like)
+	}
+	_ = countQ.Count(&total).Error
+
+	var rows []row
+	_ = base.Order("m.role DESC, m.id ASC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Scan(&rows).Error
+
+	list := make([]map[string]interface{}, 0, len(rows))
+	for _, r := range rows {
+		list = append(list, map[string]interface{}{
+			"userId":   r.UserID,
+			"username": r.Username,
+			"name":     r.Name,
+			"avatar":   r.Avatar,
+			"role":     r.Role,
+			"groupId":  r.GroupID,
+			"joinedAt": r.JoinedAt.Unix(),
+		})
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "success", "list": list, "total": total, "page": page, "pageSize": pageSize,
+	})
 	return nil
 }
 

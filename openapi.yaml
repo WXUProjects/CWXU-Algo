@@ -2005,6 +2005,8 @@ components:
                     type: string
                 name:
                     type: string
+                username:
+                    type: string
         api.user.v1.GetListRes:
             type: object
             properties:

@@ -43,8 +43,9 @@ func (p *ProfileService) GetByName(ctx context.Context, req *profile.GetByNameRe
 	res := &profile.GetByNameRes{List: make([]*profile.GetByNameRes_UserList, 0)}
 	for _, v := range userList {
 		t := &profile.GetByNameRes_UserList{
-			UserId: int64(v.ID),
-			Name:   v.Name,
+			UserId:   int64(v.ID),
+			Name:     v.Name,
+			Username: v.Username,
 		}
 		res.List = append(res.List, t)
 	}

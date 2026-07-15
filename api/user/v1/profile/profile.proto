@@ -101,6 +101,7 @@ message GetByNameRes {
   message UserList {
     int64 userId = 1;
     string name = 2;
+    string username = 3;
   }
   repeated UserList list = 1;
 }

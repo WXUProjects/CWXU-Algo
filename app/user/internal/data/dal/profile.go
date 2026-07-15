@@ -7,6 +7,7 @@ import (
 	"cwxu-algo/app/user/internal/data/model"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -36,10 +37,19 @@ func (d *ProfileDal) GetById(ctx context.Context, userId int64) (*model.User, er
 	return profile, err
 }
 
-// GetByName 根据姓名模糊查询用户信息
+// GetByName 按姓名或用户名模糊查询
 func (d *ProfileDal) GetByName(ctx context.Context, name string) ([]*model.User, error) {
 	var userList []*model.User
-	err := d.db.Select("id, name").Where("name LIKE ?", "%"+name+"%").Limit(5).Find(&userList).Error
+	kw := strings.TrimSpace(name)
+	if kw == "" {
+		return userList, nil
+	}
+	like := "%" + kw + "%"
+	err := d.db.WithContext(ctx).
+		Select("id, name, username").
+		Where("name LIKE ? OR username LIKE ?", like, like).
+		Limit(15).
+		Find(&userList).Error
 	if err != nil {
 		return nil, err
 	}

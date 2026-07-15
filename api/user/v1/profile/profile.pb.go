@@ -1300,6 +1300,7 @@ type GetByNameRes_UserList struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Username      string                 `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1344,6 +1345,13 @@ func (x *GetByNameRes_UserList) GetUserId() int64 {
 func (x *GetByNameRes_UserList) GetName() string {
 	if x != nil {
 		return x.Name
+	}
+	return ""
+}
+
+func (x *GetByNameRes_UserList) GetUsername() string {
+	if x != nil {
+		return x.Username
 	}
 	return ""
 }
@@ -1599,12 +1607,13 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\"\"\n" +
 	"\fGetByNameReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"~\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\x9a\x01\n" +
 	"\fGetByNameRes\x126\n" +
-	"\x04list\x18\x01 \x03(\v2\".api.user.v1.GetByNameRes.UserListR\x04list\x1a6\n" +
+	"\x04list\x18\x01 \x03(\v2\".api.user.v1.GetByNameRes.UserListR\x04list\x1aR\n" +
 	"\bUserList\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"X\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
+	"\busername\x18\x03 \x01(\tR\busername\"X\n" +
 	"\n" +
 	"GetListReq\x12\x1a\n" +
 	"\bpageSize\x18\x01 \x01(\x03R\bpageSize\x12\x18\n" +
