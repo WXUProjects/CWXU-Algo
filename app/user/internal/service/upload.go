@@ -22,8 +22,6 @@ const (
 	staticRoutePrefix = "/v1/user/static"
 )
 
-// 常见图片后缀：边缘 CDN/nginx 常对这类扩展名做静态加速，不反代到后端，导致 404。
-// 对外 URL 不使用这些后缀；磁盘上仍可保留旧文件名以便兼容。
 var imageExts = []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico", ".bin"}
 
 func UploadDir() string {
@@ -85,7 +83,18 @@ func contentTypeFromExt(ext string) string {
 	}
 }
 
-// resolveUploadFile 在上传目录内安全解析相对路径；无扩展名时尝试常见图片后缀（兼容旧文件）。
+func isImageExt(ext string) bool {
+	ext = strings.ToLower(ext)
+	for _, e := range imageExts {
+		if e == ext {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveUploadFile 在上传目录内安全解析相对路径。
+// 支持：精确路径、无后缀（探测常见图片后缀）、错误后缀（剥后缀再探测）。
 func resolveUploadFile(rel string) (abs string, ext string, err error) {
 	rel = filepath.ToSlash(rel)
 	rel = strings.TrimPrefix(rel, "/")
@@ -96,7 +105,6 @@ func resolveUploadFile(rel string) (abs string, ext string, err error) {
 	try := func(p string) (string, string, error) {
 		p = filepath.Clean(p)
 		absPath := filepath.Join(base, p)
-		// 必须仍在 UploadDir 下
 		relCheck, e := filepath.Rel(base, absPath)
 		if e != nil || strings.HasPrefix(relCheck, "..") {
 			return "", "", os.ErrNotExist
@@ -111,15 +119,17 @@ func resolveUploadFile(rel string) (abs string, ext string, err error) {
 	if abs, ext, e := try(rel); e == nil {
 		return abs, ext, nil
 	}
-	// 无后缀 URL → 磁盘上可能是 xxx.png（历史上传）
-	if filepath.Ext(rel) == "" {
-		for _, e := range imageExts {
-			if abs, ext, err := try(rel + e); err == nil {
-				return abs, ext, nil
-			}
+
+	// 无后缀或带图片后缀但磁盘后缀不一致：按 stem 探测
+	stem := rel
+	if e := filepath.Ext(rel); isImageExt(e) {
+		stem = strings.TrimSuffix(rel, e)
+	}
+	for _, e := range imageExts {
+		if abs, ext, err := try(stem + e); err == nil {
+			return abs, ext, nil
 		}
 	}
-	// 带图片后缀的请求若能到达后端也直接试
 	return "", "", os.ErrNotExist
 }
 
@@ -131,7 +141,6 @@ func serveUploadFile(w http.ResponseWriter, r *http.Request, prefix string) {
 	rel := strings.TrimPrefix(r.URL.Path, prefix)
 	rel = strings.TrimPrefix(rel, "/")
 	if rel == "" || strings.HasSuffix(r.URL.Path, "/") {
-		// 禁止目录浏览
 		http.NotFound(w, r)
 		return
 	}
@@ -155,7 +164,6 @@ func serveUploadFile(w http.ResponseWriter, r *http.Request, prefix string) {
 		return
 	}
 
-	// 读前 512 字节嗅探类型
 	head := make([]byte, 512)
 	n, _ := f.Read(head)
 	ct := contentTypeFromExt(ext)
@@ -170,7 +178,6 @@ func serveUploadFile(w http.ResponseWriter, r *http.Request, prefix string) {
 		}
 	}
 
-	// 重新定位后交给 ServeContent
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		http.Error(w, "read error", http.StatusInternalServerError)
 		return
@@ -237,10 +244,8 @@ func RegisterUploadRoutes(srv *khttp.Server) {
 			purpose = "misc"
 		}
 
-		// 磁盘仍带真实后缀便于运维识别；对外 URL 去掉后缀，避免 CDN 按扩展名劫持
 		ext := extFromContentType(ct, hdr.Filename)
-		nameNoExt := randomName()
-		diskName := nameNoExt + ext
+		diskName := randomName() + ext
 		relDir := filepath.Join(purpose, fmt.Sprintf("%d", pd.UserID))
 		absDir := filepath.Join(UploadDir(), relDir)
 		if err := os.MkdirAll(absDir, 0o755); err != nil {
@@ -255,8 +260,7 @@ func RegisterUploadRoutes(srv *khttp.Server) {
 			})
 		}
 
-		// 对外：无图片扩展名
-		urlPath := staticURLPrefix + "/" + filepath.ToSlash(filepath.Join(relDir, nameNoExt))
+		urlPath := staticURLPrefix + "/" + filepath.ToSlash(filepath.Join(relDir, diskName))
 		return ctx.JSON(http.StatusOK, map[string]interface{}{
 			"code":    0,
 			"message": "success",
@@ -264,7 +268,6 @@ func RegisterUploadRoutes(srv *khttp.Server) {
 		})
 	})
 
-	// 自定义静态服务：正确 Content-Type、禁止目录列表、兼容无后缀 URL
 	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
 		switch {
