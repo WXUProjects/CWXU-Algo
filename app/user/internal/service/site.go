@@ -11,6 +11,7 @@ import (
 	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
+	"cwxu-algo/app/common/utils/clientip"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 
@@ -324,4 +325,64 @@ func (s *SiteService) TestEmail(ctx context.Context, req *site.TestEmailReq) (*s
 		return &site.TestEmailRes{Code: 1, Message: "发送失败：" + err.Error(), Success: false}, nil
 	}
 	return &site.TestEmailRes{Code: 0, Message: "测试邮件已发送", Success: true}, nil
+}
+
+func (s *SiteService) VisitPing(ctx context.Context, req *site.VisitPingReq) (*site.VisitPingRes, error) {
+	path := "/"
+	visitorID := ""
+	if req != nil {
+		path = req.Path
+		visitorID = req.VisitorId
+	}
+	var userID uint
+	if pd := auth.GetCurrentUser(ctx); pd != nil {
+		userID = pd.UserID
+	}
+	clientIP := clientip.FromContext(ctx)
+	rec, err := s.data.RecordVisit(ctx, userID, visitorID, clientIP, path)
+	if err != nil {
+		log.Warnf("visit ping: %v", err)
+		return &site.VisitPingRes{Code: 0, Message: "ok", Counted: false}, nil
+	}
+	counted := false
+	if rec != nil {
+		counted = rec.Counted
+	}
+	return &site.VisitPingRes{Code: 0, Message: "ok", Counted: counted}, nil
+}
+
+func (s *SiteService) GetAccessStats(ctx context.Context, req *site.GetAccessStatsReq) (*site.GetAccessStatsRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return &site.GetAccessStatsRes{Code: 1, Message: "仅站点管理员可查看访问情况"}, nil
+	}
+	days := int32(30)
+	if req != nil && req.Days > 0 {
+		days = req.Days
+	}
+	series := s.data.ListVisitSeries(ctx, int(days))
+	today := s.data.GetDayVisitStat(ctx, time.Now())
+	yesterday := s.data.GetDayVisitStat(ctx, time.Now().AddDate(0, 0, -1))
+
+	toPB := func(st data.DayVisitStat) *site.AccessDayStat {
+		return &site.AccessDayStat{
+			Date: st.Date,
+			Pv:   st.PV,
+			Dau:  st.DAU,
+			Uv:   st.UV,
+		}
+	}
+	pbSeries := make([]*site.AccessDayStat, 0, len(series))
+	for _, st := range series {
+		pbSeries = append(pbSeries, toPB(st))
+	}
+	// client IP：探测当前请求是否能解析到 IP（反映反代头是否可用）
+	ipOK := clientip.FromContext(ctx) != ""
+	return &site.GetAccessStatsRes{
+		Code:              0,
+		Message:           "success",
+		Today:             toPB(today),
+		Yesterday:         toPB(yesterday),
+		Series:            pbSeries,
+		ClientIpAvailable: ipOK,
+	}, nil
 }

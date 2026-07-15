@@ -19,12 +19,16 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
+const OperationSiteGetAccessStats = "/api.user.v1.site.Site/GetAccessStats"
 const OperationSiteGetAdminConfig = "/api.user.v1.site.Site/GetAdminConfig"
 const OperationSiteGetConfig = "/api.user.v1.site.Site/GetConfig"
 const OperationSiteTestEmail = "/api.user.v1.site.Site/TestEmail"
 const OperationSiteUpdateConfig = "/api.user.v1.site.Site/UpdateConfig"
+const OperationSiteVisitPing = "/api.user.v1.site.Site/VisitPing"
 
 type SiteHTTPServer interface {
+	// GetAccessStats 站点访问概览（仅站点管理员）
+	GetAccessStats(context.Context, *GetAccessStatsReq) (*GetAccessStatsRes, error)
 	// GetAdminConfig 管理员：获取完整站点配置（密钥脱敏）
 	GetAdminConfig(context.Context, *GetAdminConfigReq) (*GetAdminConfigRes, error)
 	// GetConfig 公开：站点品牌配置
@@ -33,6 +37,8 @@ type SiteHTTPServer interface {
 	TestEmail(context.Context, *TestEmailReq) (*TestEmailRes, error)
 	// UpdateConfig 管理员：更新站点配置（品牌 / SMTP / AI）
 	UpdateConfig(context.Context, *UpdateConfigReq) (*UpdateConfigRes, error)
+	// VisitPing 访问上报（公开；可选 JWT 计入日活）
+	VisitPing(context.Context, *VisitPingReq) (*VisitPingRes, error)
 }
 
 func RegisterSiteHTTPServer(s *http.Server, srv SiteHTTPServer) {
@@ -41,6 +47,8 @@ func RegisterSiteHTTPServer(s *http.Server, srv SiteHTTPServer) {
 	r.GET("/v1/user/site/admin-config", _Site_GetAdminConfig0_HTTP_Handler(srv))
 	r.POST("/v1/user/site/config", _Site_UpdateConfig0_HTTP_Handler(srv))
 	r.POST("/v1/user/site/test-email", _Site_TestEmail0_HTTP_Handler(srv))
+	r.POST("/v1/user/site/visit-ping", _Site_VisitPing0_HTTP_Handler(srv))
+	r.GET("/v1/user/site/access-stats", _Site_GetAccessStats0_HTTP_Handler(srv))
 }
 
 func _Site_GetConfig0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context) error {
@@ -125,7 +133,50 @@ func _Site_TestEmail0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context) er
 	}
 }
 
+func _Site_VisitPing0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in VisitPingReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSiteVisitPing)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.VisitPing(ctx, req.(*VisitPingReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*VisitPingRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Site_GetAccessStats0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetAccessStatsReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSiteGetAccessStats)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetAccessStats(ctx, req.(*GetAccessStatsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetAccessStatsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SiteHTTPClient interface {
+	// GetAccessStats 站点访问概览（仅站点管理员）
+	GetAccessStats(ctx context.Context, req *GetAccessStatsReq, opts ...http.CallOption) (rsp *GetAccessStatsRes, err error)
 	// GetAdminConfig 管理员：获取完整站点配置（密钥脱敏）
 	GetAdminConfig(ctx context.Context, req *GetAdminConfigReq, opts ...http.CallOption) (rsp *GetAdminConfigRes, err error)
 	// GetConfig 公开：站点品牌配置
@@ -134,6 +185,8 @@ type SiteHTTPClient interface {
 	TestEmail(ctx context.Context, req *TestEmailReq, opts ...http.CallOption) (rsp *TestEmailRes, err error)
 	// UpdateConfig 管理员：更新站点配置（品牌 / SMTP / AI）
 	UpdateConfig(ctx context.Context, req *UpdateConfigReq, opts ...http.CallOption) (rsp *UpdateConfigRes, err error)
+	// VisitPing 访问上报（公开；可选 JWT 计入日活）
+	VisitPing(ctx context.Context, req *VisitPingReq, opts ...http.CallOption) (rsp *VisitPingRes, err error)
 }
 
 type SiteHTTPClientImpl struct {
@@ -142,6 +195,20 @@ type SiteHTTPClientImpl struct {
 
 func NewSiteHTTPClient(client *http.Client) SiteHTTPClient {
 	return &SiteHTTPClientImpl{client}
+}
+
+// GetAccessStats 站点访问概览（仅站点管理员）
+func (c *SiteHTTPClientImpl) GetAccessStats(ctx context.Context, in *GetAccessStatsReq, opts ...http.CallOption) (*GetAccessStatsRes, error) {
+	var out GetAccessStatsRes
+	pattern := "/v1/user/site/access-stats"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationSiteGetAccessStats))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // GetAdminConfig 管理员：获取完整站点配置（密钥脱敏）
@@ -192,6 +259,20 @@ func (c *SiteHTTPClientImpl) UpdateConfig(ctx context.Context, in *UpdateConfigR
 	pattern := "/v1/user/site/config"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationSiteUpdateConfig))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// VisitPing 访问上报（公开；可选 JWT 计入日活）
+func (c *SiteHTTPClientImpl) VisitPing(ctx context.Context, in *VisitPingReq, opts ...http.CallOption) (*VisitPingRes, error) {
+	var out VisitPingRes
+	pattern := "/v1/user/site/visit-ping"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationSiteVisitPing))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

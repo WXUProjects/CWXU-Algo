@@ -33,6 +33,19 @@ service Site {
       body: "*"
     };
   }
+  // 访问上报（公开；可选 JWT 计入日活）
+  rpc VisitPing (VisitPingReq) returns (VisitPingRes) {
+    option (google.api.http) = {
+      post: "/v1/user/site/visit-ping"
+      body: "*"
+    };
+  }
+  // 站点访问概览（仅站点管理员）
+  rpc GetAccessStats (GetAccessStatsReq) returns (GetAccessStatsRes) {
+    option (google.api.http) = {
+      get: "/v1/user/site/access-stats"
+    };
+  }
 }
 
 message GetConfigReq {}
@@ -122,4 +135,41 @@ message TestEmailRes {
   int64 code = 1;
   string message = 2;
   bool success = 3;
+}
+
+message VisitPingReq {
+  // 前端路由 path，如 /home；空则记为 /
+  string path = 1;
+  // 匿名访客 id（localStorage uuid）；登录用户可不传
+  string visitor_id = 2;
+}
+
+message VisitPingRes {
+  int64 code = 1;
+  string message = 2;
+  // 是否计入本次人次（节流内重复访问为 false）
+  bool counted = 3;
+}
+
+message GetAccessStatsReq {
+  // 历史天数，默认 30，最大 90
+  int32 days = 1;
+}
+
+message AccessDayStat {
+  // yyyy-MM-dd
+  string date = 1;
+  int64 pv = 2;
+  int64 dau = 3;
+  int64 uv = 4;
+}
+
+message GetAccessStatsRes {
+  int64 code = 1;
+  string message = 2;
+  AccessDayStat today = 3;
+  AccessDayStat yesterday = 4;
+  repeated AccessDayStat series = 5;
+  // 是否成功解析到客户端 IP（部署侧反代头是否可用）
+  bool client_ip_available = 6;
 }

@@ -23,6 +23,8 @@ const (
 	Site_GetAdminConfig_FullMethodName = "/api.user.v1.site.Site/GetAdminConfig"
 	Site_UpdateConfig_FullMethodName   = "/api.user.v1.site.Site/UpdateConfig"
 	Site_TestEmail_FullMethodName      = "/api.user.v1.site.Site/TestEmail"
+	Site_VisitPing_FullMethodName      = "/api.user.v1.site.Site/VisitPing"
+	Site_GetAccessStats_FullMethodName = "/api.user.v1.site.Site/GetAccessStats"
 )
 
 // SiteClient is the client API for Site service.
@@ -37,6 +39,10 @@ type SiteClient interface {
 	UpdateConfig(ctx context.Context, in *UpdateConfigReq, opts ...grpc.CallOption) (*UpdateConfigRes, error)
 	// 管理员：发送测试邮件
 	TestEmail(ctx context.Context, in *TestEmailReq, opts ...grpc.CallOption) (*TestEmailRes, error)
+	// 访问上报（公开；可选 JWT 计入日活）
+	VisitPing(ctx context.Context, in *VisitPingReq, opts ...grpc.CallOption) (*VisitPingRes, error)
+	// 站点访问概览（仅站点管理员）
+	GetAccessStats(ctx context.Context, in *GetAccessStatsReq, opts ...grpc.CallOption) (*GetAccessStatsRes, error)
 }
 
 type siteClient struct {
@@ -87,6 +93,26 @@ func (c *siteClient) TestEmail(ctx context.Context, in *TestEmailReq, opts ...gr
 	return out, nil
 }
 
+func (c *siteClient) VisitPing(ctx context.Context, in *VisitPingReq, opts ...grpc.CallOption) (*VisitPingRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VisitPingRes)
+	err := c.cc.Invoke(ctx, Site_VisitPing_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *siteClient) GetAccessStats(ctx context.Context, in *GetAccessStatsReq, opts ...grpc.CallOption) (*GetAccessStatsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAccessStatsRes)
+	err := c.cc.Invoke(ctx, Site_GetAccessStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SiteServer is the server API for Site service.
 // All implementations must embed UnimplementedSiteServer
 // for forward compatibility.
@@ -99,6 +125,10 @@ type SiteServer interface {
 	UpdateConfig(context.Context, *UpdateConfigReq) (*UpdateConfigRes, error)
 	// 管理员：发送测试邮件
 	TestEmail(context.Context, *TestEmailReq) (*TestEmailRes, error)
+	// 访问上报（公开；可选 JWT 计入日活）
+	VisitPing(context.Context, *VisitPingReq) (*VisitPingRes, error)
+	// 站点访问概览（仅站点管理员）
+	GetAccessStats(context.Context, *GetAccessStatsReq) (*GetAccessStatsRes, error)
 	mustEmbedUnimplementedSiteServer()
 }
 
@@ -120,6 +150,12 @@ func (UnimplementedSiteServer) UpdateConfig(context.Context, *UpdateConfigReq) (
 }
 func (UnimplementedSiteServer) TestEmail(context.Context, *TestEmailReq) (*TestEmailRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method TestEmail not implemented")
+}
+func (UnimplementedSiteServer) VisitPing(context.Context, *VisitPingReq) (*VisitPingRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method VisitPing not implemented")
+}
+func (UnimplementedSiteServer) GetAccessStats(context.Context, *GetAccessStatsReq) (*GetAccessStatsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAccessStats not implemented")
 }
 func (UnimplementedSiteServer) mustEmbedUnimplementedSiteServer() {}
 func (UnimplementedSiteServer) testEmbeddedByValue()              {}
@@ -214,6 +250,42 @@ func _Site_TestEmail_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Site_VisitPing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VisitPingReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SiteServer).VisitPing(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Site_VisitPing_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SiteServer).VisitPing(ctx, req.(*VisitPingReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Site_GetAccessStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAccessStatsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SiteServer).GetAccessStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Site_GetAccessStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SiteServer).GetAccessStats(ctx, req.(*GetAccessStatsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Site_ServiceDesc is the grpc.ServiceDesc for Site service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -236,6 +308,14 @@ var Site_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TestEmail",
 			Handler:    _Site_TestEmail_Handler,
+		},
+		{
+			MethodName: "VisitPing",
+			Handler:    _Site_VisitPing_Handler,
+		},
+		{
+			MethodName: "GetAccessStats",
+			Handler:    _Site_GetAccessStats_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

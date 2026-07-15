@@ -51,7 +51,8 @@ func IssueJWT(db *gorm.DB, u *model.User) (string, error) {
 		roleIdsJSON = []byte("[1]")
 	}
 
-	expire := time.Now().Add(8640 * time.Hour)
+	// 30 天有效；前端在有效期内访问会调用 refresh 重签，实现滑动续期
+	expire := time.Now().Add(30 * 24 * time.Hour)
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"userId":      u.ID,
 		"username":    u.Username,

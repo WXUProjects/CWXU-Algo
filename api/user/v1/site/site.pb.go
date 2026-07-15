@@ -776,6 +776,320 @@ func (x *TestEmailRes) GetSuccess() bool {
 	return false
 }
 
+type VisitPingReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 前端路由 path，如 /home；空则记为 /
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// 匿名访客 id（localStorage uuid）；登录用户可不传
+	VisitorId     string `protobuf:"bytes,2,opt,name=visitor_id,json=visitorId,proto3" json:"visitor_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VisitPingReq) Reset() {
+	*x = VisitPingReq{}
+	mi := &file_user_v1_site_site_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VisitPingReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VisitPingReq) ProtoMessage() {}
+
+func (x *VisitPingReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VisitPingReq.ProtoReflect.Descriptor instead.
+func (*VisitPingReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *VisitPingReq) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *VisitPingReq) GetVisitorId() string {
+	if x != nil {
+		return x.VisitorId
+	}
+	return ""
+}
+
+type VisitPingRes struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Code    int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	// 是否计入本次人次（节流内重复访问为 false）
+	Counted       bool `protobuf:"varint,3,opt,name=counted,proto3" json:"counted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VisitPingRes) Reset() {
+	*x = VisitPingRes{}
+	mi := &file_user_v1_site_site_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VisitPingRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VisitPingRes) ProtoMessage() {}
+
+func (x *VisitPingRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VisitPingRes.ProtoReflect.Descriptor instead.
+func (*VisitPingRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *VisitPingRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *VisitPingRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *VisitPingRes) GetCounted() bool {
+	if x != nil {
+		return x.Counted
+	}
+	return false
+}
+
+type GetAccessStatsReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 历史天数，默认 30，最大 90
+	Days          int32 `protobuf:"varint,1,opt,name=days,proto3" json:"days,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAccessStatsReq) Reset() {
+	*x = GetAccessStatsReq{}
+	mi := &file_user_v1_site_site_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAccessStatsReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAccessStatsReq) ProtoMessage() {}
+
+func (x *GetAccessStatsReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAccessStatsReq.ProtoReflect.Descriptor instead.
+func (*GetAccessStatsReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GetAccessStatsReq) GetDays() int32 {
+	if x != nil {
+		return x.Days
+	}
+	return 0
+}
+
+type AccessDayStat struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// yyyy-MM-dd
+	Date          string `protobuf:"bytes,1,opt,name=date,proto3" json:"date,omitempty"`
+	Pv            int64  `protobuf:"varint,2,opt,name=pv,proto3" json:"pv,omitempty"`
+	Dau           int64  `protobuf:"varint,3,opt,name=dau,proto3" json:"dau,omitempty"`
+	Uv            int64  `protobuf:"varint,4,opt,name=uv,proto3" json:"uv,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccessDayStat) Reset() {
+	*x = AccessDayStat{}
+	mi := &file_user_v1_site_site_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccessDayStat) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccessDayStat) ProtoMessage() {}
+
+func (x *AccessDayStat) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccessDayStat.ProtoReflect.Descriptor instead.
+func (*AccessDayStat) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *AccessDayStat) GetDate() string {
+	if x != nil {
+		return x.Date
+	}
+	return ""
+}
+
+func (x *AccessDayStat) GetPv() int64 {
+	if x != nil {
+		return x.Pv
+	}
+	return 0
+}
+
+func (x *AccessDayStat) GetDau() int64 {
+	if x != nil {
+		return x.Dau
+	}
+	return 0
+}
+
+func (x *AccessDayStat) GetUv() int64 {
+	if x != nil {
+		return x.Uv
+	}
+	return 0
+}
+
+type GetAccessStatsRes struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Code      int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message   string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Today     *AccessDayStat         `protobuf:"bytes,3,opt,name=today,proto3" json:"today,omitempty"`
+	Yesterday *AccessDayStat         `protobuf:"bytes,4,opt,name=yesterday,proto3" json:"yesterday,omitempty"`
+	Series    []*AccessDayStat       `protobuf:"bytes,5,rep,name=series,proto3" json:"series,omitempty"`
+	// 是否成功解析到客户端 IP（部署侧反代头是否可用）
+	ClientIpAvailable bool `protobuf:"varint,6,opt,name=client_ip_available,json=clientIpAvailable,proto3" json:"client_ip_available,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *GetAccessStatsRes) Reset() {
+	*x = GetAccessStatsRes{}
+	mi := &file_user_v1_site_site_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAccessStatsRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAccessStatsRes) ProtoMessage() {}
+
+func (x *GetAccessStatsRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAccessStatsRes.ProtoReflect.Descriptor instead.
+func (*GetAccessStatsRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *GetAccessStatsRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *GetAccessStatsRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *GetAccessStatsRes) GetToday() *AccessDayStat {
+	if x != nil {
+		return x.Today
+	}
+	return nil
+}
+
+func (x *GetAccessStatsRes) GetYesterday() *AccessDayStat {
+	if x != nil {
+		return x.Yesterday
+	}
+	return nil
+}
+
+func (x *GetAccessStatsRes) GetSeries() []*AccessDayStat {
+	if x != nil {
+		return x.Series
+	}
+	return nil
+}
+
+func (x *GetAccessStatsRes) GetClientIpAvailable() bool {
+	if x != nil {
+		return x.ClientIpAvailable
+	}
+	return false
+}
+
 var File_user_v1_site_site_proto protoreflect.FileDescriptor
 
 const file_user_v1_site_site_proto_rawDesc = "" +
@@ -857,12 +1171,36 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\fTestEmailRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccess2\xda\x03\n" +
+	"\asuccess\x18\x03 \x01(\bR\asuccess\"A\n" +
+	"\fVisitPingReq\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1d\n" +
+	"\n" +
+	"visitor_id\x18\x02 \x01(\tR\tvisitorId\"V\n" +
+	"\fVisitPingRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
+	"\acounted\x18\x03 \x01(\bR\acounted\"'\n" +
+	"\x11GetAccessStatsReq\x12\x12\n" +
+	"\x04days\x18\x01 \x01(\x05R\x04days\"U\n" +
+	"\rAccessDayStat\x12\x12\n" +
+	"\x04date\x18\x01 \x01(\tR\x04date\x12\x0e\n" +
+	"\x02pv\x18\x02 \x01(\x03R\x02pv\x12\x10\n" +
+	"\x03dau\x18\x03 \x01(\x03R\x03dau\x12\x0e\n" +
+	"\x02uv\x18\x04 \x01(\x03R\x02uv\"\xa0\x02\n" +
+	"\x11GetAccessStatsRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x125\n" +
+	"\x05today\x18\x03 \x01(\v2\x1f.api.user.v1.site.AccessDayStatR\x05today\x12=\n" +
+	"\tyesterday\x18\x04 \x01(\v2\x1f.api.user.v1.site.AccessDayStatR\tyesterday\x127\n" +
+	"\x06series\x18\x05 \x03(\v2\x1f.api.user.v1.site.AccessDayStatR\x06series\x12.\n" +
+	"\x13client_ip_available\x18\x06 \x01(\bR\x11clientIpAvailable2\xcc\x05\n" +
 	"\x04Site\x12i\n" +
 	"\tGetConfig\x12\x1e.api.user.v1.site.GetConfigReq\x1a\x1e.api.user.v1.site.GetConfigRes\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1/user/site/config\x12~\n" +
 	"\x0eGetAdminConfig\x12#.api.user.v1.site.GetAdminConfigReq\x1a#.api.user.v1.site.GetAdminConfigRes\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/user/site/admin-config\x12u\n" +
 	"\fUpdateConfig\x12!.api.user.v1.site.UpdateConfigReq\x1a!.api.user.v1.site.UpdateConfigRes\"\x1f\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/v1/user/site/config\x12p\n" +
-	"\tTestEmail\x12\x1e.api.user.v1.site.TestEmailReq\x1a\x1e.api.user.v1.site.TestEmailRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/user/site/test-emailB5\n" +
+	"\tTestEmail\x12\x1e.api.user.v1.site.TestEmailReq\x1a\x1e.api.user.v1.site.TestEmailRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/user/site/test-email\x12p\n" +
+	"\tVisitPing\x12\x1e.api.user.v1.site.VisitPingReq\x1a\x1e.api.user.v1.site.VisitPingRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/user/site/visit-ping\x12~\n" +
+	"\x0eGetAccessStats\x12#.api.user.v1.site.GetAccessStatsReq\x1a#.api.user.v1.site.GetAccessStatsRes\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/user/site/access-statsB5\n" +
 	"\x10api.user.v1.siteP\x01Z\x1fcwxu-algo/api/user/v1/site;siteb\x06proto3"
 
 var (
@@ -877,7 +1215,7 @@ func file_user_v1_site_site_proto_rawDescGZIP() []byte {
 	return file_user_v1_site_site_proto_rawDescData
 }
 
-var file_user_v1_site_site_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_user_v1_site_site_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_user_v1_site_site_proto_goTypes = []any{
 	(*GetConfigReq)(nil),      // 0: api.user.v1.site.GetConfigReq
 	(*GetConfigRes)(nil),      // 1: api.user.v1.site.GetConfigRes
@@ -887,21 +1225,33 @@ var file_user_v1_site_site_proto_goTypes = []any{
 	(*UpdateConfigRes)(nil),   // 5: api.user.v1.site.UpdateConfigRes
 	(*TestEmailReq)(nil),      // 6: api.user.v1.site.TestEmailReq
 	(*TestEmailRes)(nil),      // 7: api.user.v1.site.TestEmailRes
+	(*VisitPingReq)(nil),      // 8: api.user.v1.site.VisitPingReq
+	(*VisitPingRes)(nil),      // 9: api.user.v1.site.VisitPingRes
+	(*GetAccessStatsReq)(nil), // 10: api.user.v1.site.GetAccessStatsReq
+	(*AccessDayStat)(nil),     // 11: api.user.v1.site.AccessDayStat
+	(*GetAccessStatsRes)(nil), // 12: api.user.v1.site.GetAccessStatsRes
 }
 var file_user_v1_site_site_proto_depIdxs = []int32{
-	0, // 0: api.user.v1.site.Site.GetConfig:input_type -> api.user.v1.site.GetConfigReq
-	2, // 1: api.user.v1.site.Site.GetAdminConfig:input_type -> api.user.v1.site.GetAdminConfigReq
-	4, // 2: api.user.v1.site.Site.UpdateConfig:input_type -> api.user.v1.site.UpdateConfigReq
-	6, // 3: api.user.v1.site.Site.TestEmail:input_type -> api.user.v1.site.TestEmailReq
-	1, // 4: api.user.v1.site.Site.GetConfig:output_type -> api.user.v1.site.GetConfigRes
-	3, // 5: api.user.v1.site.Site.GetAdminConfig:output_type -> api.user.v1.site.GetAdminConfigRes
-	5, // 6: api.user.v1.site.Site.UpdateConfig:output_type -> api.user.v1.site.UpdateConfigRes
-	7, // 7: api.user.v1.site.Site.TestEmail:output_type -> api.user.v1.site.TestEmailRes
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	11, // 0: api.user.v1.site.GetAccessStatsRes.today:type_name -> api.user.v1.site.AccessDayStat
+	11, // 1: api.user.v1.site.GetAccessStatsRes.yesterday:type_name -> api.user.v1.site.AccessDayStat
+	11, // 2: api.user.v1.site.GetAccessStatsRes.series:type_name -> api.user.v1.site.AccessDayStat
+	0,  // 3: api.user.v1.site.Site.GetConfig:input_type -> api.user.v1.site.GetConfigReq
+	2,  // 4: api.user.v1.site.Site.GetAdminConfig:input_type -> api.user.v1.site.GetAdminConfigReq
+	4,  // 5: api.user.v1.site.Site.UpdateConfig:input_type -> api.user.v1.site.UpdateConfigReq
+	6,  // 6: api.user.v1.site.Site.TestEmail:input_type -> api.user.v1.site.TestEmailReq
+	8,  // 7: api.user.v1.site.Site.VisitPing:input_type -> api.user.v1.site.VisitPingReq
+	10, // 8: api.user.v1.site.Site.GetAccessStats:input_type -> api.user.v1.site.GetAccessStatsReq
+	1,  // 9: api.user.v1.site.Site.GetConfig:output_type -> api.user.v1.site.GetConfigRes
+	3,  // 10: api.user.v1.site.Site.GetAdminConfig:output_type -> api.user.v1.site.GetAdminConfigRes
+	5,  // 11: api.user.v1.site.Site.UpdateConfig:output_type -> api.user.v1.site.UpdateConfigRes
+	7,  // 12: api.user.v1.site.Site.TestEmail:output_type -> api.user.v1.site.TestEmailRes
+	9,  // 13: api.user.v1.site.Site.VisitPing:output_type -> api.user.v1.site.VisitPingRes
+	12, // 14: api.user.v1.site.Site.GetAccessStats:output_type -> api.user.v1.site.GetAccessStatsRes
+	9,  // [9:15] is the sub-list for method output_type
+	3,  // [3:9] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_user_v1_site_site_proto_init() }
@@ -915,7 +1265,7 @@ func file_user_v1_site_site_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_v1_site_site_proto_rawDesc), len(file_user_v1_site_site_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

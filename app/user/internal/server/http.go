@@ -38,7 +38,8 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.user.v1.role.Role/List":            "",
 		"/api.user.group.Group/Get":             "",
 		"/api.user.group.Group/List":             "",
-		"/api.user.v1.site.Site/GetConfig":       "",
+		"/api.user.v1.site.Site/GetConfig":  "",
+		"/api.user.v1.site.Site/VisitPing":  "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		log.Info(operation)

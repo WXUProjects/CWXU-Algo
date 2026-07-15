@@ -26,11 +26,15 @@ func jwtSecret() []byte {
 
 // exact public path suffixes (after cleaning)
 var publicExact = map[string]struct{}{
-	"/v1/user/auth/login":    {},
-	"/v1/user/auth/register": {},
-	"/v1/user/role/list":     {},
-	"/v1/user/paste/get":     {},
-	"/api/user/paste/get":    {},
+	"/v1/user/auth/login":       {},
+	"/v1/user/auth/register":    {},
+	"/v1/user/role/list":        {},
+	"/v1/user/paste/get":        {},
+	"/api/user/paste/get":       {},
+	"/v1/user/site/config":      {},
+	"/api/user/site/config":     {},
+	"/v1/user/site/visit-ping":  {},
+	"/api/user/site/visit-ping": {},
 }
 
 // Middleware jwt 校验中间件
