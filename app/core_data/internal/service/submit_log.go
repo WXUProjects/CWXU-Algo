@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"cwxu-algo/api/core/v1/submit_log"
+	"cwxu-algo/api/user/v1/profile"
+	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
@@ -13,7 +15,10 @@ import (
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/redis/go-redis/v9"
+	grpc2 "google.golang.org/grpc"
 	"gorm.io/gorm"
 )
 
@@ -22,6 +27,19 @@ type SubmitLogService struct {
 	sbDal *dal.SpiderDal
 	db    *gorm.DB
 	rdb   *redis.Client
+	reg   *registry.Registrar
+}
+
+func (s SubmitLogService) userRPC() (*grpc2.ClientConn, error) {
+	if s.reg == nil {
+		return nil, fmt.Errorf("registry not configured")
+	}
+	return grpc.DialInsecure(
+		context.Background(),
+		grpc.WithEndpoint("discovery:///user"),
+		grpc.WithDiscovery((*s.reg).(registry.Discovery)),
+		grpc.WithTimeout(20*time.Second),
+	)
 }
 
 func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetSubmitLogReq) (*submit_log.GetSubmitLogRes, error) {
@@ -35,7 +53,6 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 		fetchLimit = 30
 	}
 	d, err := s.sbDal.GetByUserId(ctx, req.UserId, req.Cursor, fetchLimit)
-	log.Info(d)
 	if err != nil {
 		return nil, errors.InternalServer("内部服务器错误", err.Error())
 	}
@@ -65,9 +82,107 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 			break
 		}
 	}
+
+	// 一次 RPC + 一次 SQL，补齐展示字段，避免前端 N+1
+	nameMap := s.fetchUserNames(ctx, r)
+	titleMap := s.fetchProblemTitles(ctx, r)
+	for _, item := range r {
+		if n, ok := nameMap[item.UserId]; ok {
+			item.UserName = n
+		}
+		if item.ProblemId > 0 {
+			if t, ok := titleMap[item.ProblemId]; ok {
+				item.ProblemTitle = t
+			}
+		}
+	}
+
 	return &submit_log.GetSubmitLogRes{
 		Data: r,
 	}, nil
+}
+
+// fetchUserNames 批量获取用户展示名（user 服务 GetByIds）
+func (s SubmitLogService) fetchUserNames(ctx context.Context, logs []*submit_log.SubmitLog) map[int64]string {
+	result := map[int64]string{}
+	if len(logs) == 0 {
+		return result
+	}
+	idSet := map[int64]struct{}{}
+	for _, v := range logs {
+		if v.UserId != 0 {
+			idSet[v.UserId] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return result
+	}
+	userIds := make([]int64, 0, len(idSet))
+	for id := range idSet {
+		userIds = append(userIds, id)
+	}
+
+	conn, err := s.userRPC()
+	if err != nil {
+		log.Errorf("submit_log userRPC: %v", err)
+		return result
+	}
+	defer conn.Close()
+
+	client := profile.NewProfileClient(conn)
+	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIds})
+	if err != nil {
+		log.Errorf("submit_log GetByIds: %v", err)
+		return result
+	}
+	for _, p := range res.Profiles {
+		name := p.Name
+		if name == "" {
+			name = fmt.Sprintf("用户%d", p.UserId)
+		}
+		result[p.UserId] = name
+	}
+	return result
+}
+
+// fetchProblemTitles 批量取题库标题（本库 problems）
+func (s SubmitLogService) fetchProblemTitles(ctx context.Context, logs []*submit_log.SubmitLog) map[uint32]string {
+	result := map[uint32]string{}
+	if len(logs) == 0 || s.db == nil {
+		return result
+	}
+	idSet := map[uint32]struct{}{}
+	for _, v := range logs {
+		if v.ProblemId > 0 {
+			idSet[v.ProblemId] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return result
+	}
+	ids := make([]uint32, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+
+	var rows []struct {
+		ID    uint   `gorm:"column:id"`
+		Title string `gorm:"column:title"`
+	}
+	if err := s.db.WithContext(ctx).
+		Table("problems").
+		Select("id, title").
+		Where("id IN ?", ids).
+		Find(&rows).Error; err != nil {
+		log.Errorf("submit_log fetchProblemTitles: %v", err)
+		return result
+	}
+	for _, row := range rows {
+		if row.Title != "" {
+			result[uint32(row.ID)] = row.Title
+		}
+	}
+	return result
 }
 
 func (s SubmitLogService) LastSubmitTime(ctx context.Context, req *submit_log.LastSubmitTimeReq) (*submit_log.LastSubmitTimeRes, error) {
@@ -120,10 +235,11 @@ func (s SubmitLogService) LastSubmitTime(ctx context.Context, req *submit_log.La
 	return &submit_log.LastSubmitTimeRes{TimeMap: encoded}, nil
 }
 
-func NewSubmitLogService(sbDal *dal.SpiderDal, data *data.Data) *SubmitLogService {
+func NewSubmitLogService(sbDal *dal.SpiderDal, data *data.Data, reg *discovery.Register) *SubmitLogService {
 	return &SubmitLogService{
 		sbDal: sbDal,
 		db:    data.DB,
 		rdb:   data.RDB,
+		reg:   &reg.Reg,
 	}
 }

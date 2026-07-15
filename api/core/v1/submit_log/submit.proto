@@ -21,11 +21,13 @@ message SubmitLog {
   int64 user_id = 3;                       // 用户ID
   string submit_id = 4;                    // 提交ID
   string contest = 5;                      // 比赛名称
-  string problem = 6;                      // 问题
+  string problem = 6;                      // 问题（原始串）
   string lang = 7;                         // 语言
   string status = 8;                       // 状态
   int64 time = 9;                          // 提交时间
   uint32 problem_id = 10;                  // 内部题库 ID，0 表示未关联
+  string user_name = 11;                   // 展示用姓名（批量填充，省前端 N+1）
+  string problem_title = 12;               // 题库标题（有 problem_id 时批量填充）
 }
 message GetSubmitLogReq {
   int64 user_id = 1;

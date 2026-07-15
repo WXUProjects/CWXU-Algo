@@ -24,16 +24,18 @@ const (
 
 type SubmitLog struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                 // ID
-	Platform      string                 `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"`                      // 平台
-	UserId        int64                  `protobuf:"varint,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`           // 用户ID
-	SubmitId      string                 `protobuf:"bytes,4,opt,name=submit_id,json=submitId,proto3" json:"submit_id,omitempty"`      // 提交ID
-	Contest       string                 `protobuf:"bytes,5,opt,name=contest,proto3" json:"contest,omitempty"`                        // 比赛名称
-	Problem       string                 `protobuf:"bytes,6,opt,name=problem,proto3" json:"problem,omitempty"`                        // 问题
-	Lang          string                 `protobuf:"bytes,7,opt,name=lang,proto3" json:"lang,omitempty"`                              // 语言
-	Status        string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"`                          // 状态
-	Time          int64                  `protobuf:"varint,9,opt,name=time,proto3" json:"time,omitempty"`                             // 提交时间
-	ProblemId     uint32                 `protobuf:"varint,10,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"` // 内部题库 ID，0 表示未关联
+	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                         // ID
+	Platform      string                 `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"`                              // 平台
+	UserId        int64                  `protobuf:"varint,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`                   // 用户ID
+	SubmitId      string                 `protobuf:"bytes,4,opt,name=submit_id,json=submitId,proto3" json:"submit_id,omitempty"`              // 提交ID
+	Contest       string                 `protobuf:"bytes,5,opt,name=contest,proto3" json:"contest,omitempty"`                                // 比赛名称
+	Problem       string                 `protobuf:"bytes,6,opt,name=problem,proto3" json:"problem,omitempty"`                                // 问题（原始串）
+	Lang          string                 `protobuf:"bytes,7,opt,name=lang,proto3" json:"lang,omitempty"`                                      // 语言
+	Status        string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"`                                  // 状态
+	Time          int64                  `protobuf:"varint,9,opt,name=time,proto3" json:"time,omitempty"`                                     // 提交时间
+	ProblemId     uint32                 `protobuf:"varint,10,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`         // 内部题库 ID，0 表示未关联
+	UserName      string                 `protobuf:"bytes,11,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`             // 展示用姓名（批量填充，省前端 N+1）
+	ProblemTitle  string                 `protobuf:"bytes,12,opt,name=problem_title,json=problemTitle,proto3" json:"problem_title,omitempty"` // 题库标题（有 problem_id 时批量填充）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -136,6 +138,20 @@ func (x *SubmitLog) GetProblemId() uint32 {
 		return x.ProblemId
 	}
 	return 0
+}
+
+func (x *SubmitLog) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *SubmitLog) GetProblemTitle() string {
+	if x != nil {
+		return x.ProblemTitle
+	}
+	return ""
 }
 
 type GetSubmitLogReq struct {
@@ -334,7 +350,7 @@ var File_core_v1_submit_log_submit_proto protoreflect.FileDescriptor
 
 const file_core_v1_submit_log_submit_proto_rawDesc = "" +
 	"\n" +
-	"\x1fcore/v1/submit_log/submit.proto\x12\x16api.core.v1.submit_log\x1a\x1cgoogle/api/annotations.proto\"\x80\x02\n" +
+	"\x1fcore/v1/submit_log/submit.proto\x12\x16api.core.v1.submit_log\x1a\x1cgoogle/api/annotations.proto\"\xc2\x02\n" +
 	"\tSubmitLog\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1a\n" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x17\n" +
@@ -347,7 +363,9 @@ const file_core_v1_submit_log_submit_proto_rawDesc = "" +
 	"\x04time\x18\t \x01(\x03R\x04time\x12\x1d\n" +
 	"\n" +
 	"problem_id\x18\n" +
-	" \x01(\rR\tproblemId\"X\n" +
+	" \x01(\rR\tproblemId\x12\x1b\n" +
+	"\tuser_name\x18\v \x01(\tR\buserName\x12#\n" +
+	"\rproblem_title\x18\f \x01(\tR\fproblemTitle\"X\n" +
 	"\x0fGetSubmitLogReq\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x03R\x05limit\x12\x16\n" +
