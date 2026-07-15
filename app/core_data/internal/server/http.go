@@ -10,6 +10,7 @@ import (
 	"cwxu-algo/api/core/v1/submit_log"
 	"cwxu-algo/app/common/conf"
 	_const "cwxu-algo/app/common/const"
+	"cwxu-algo/app/common/opsmetrics"
 	"cwxu-algo/app/common/utils/health"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/service"
@@ -53,6 +54,7 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
+			opsmetrics.Middleware(d.RDB, "core"),
 			selector.Server(jwt.Server(func(token *jwt2.Token) (interface{}, error) {
 				return []byte(_const.JWTSecret()), nil
 			})).Match(NewWhiteListMatcher()).Build(),

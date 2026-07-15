@@ -5,6 +5,7 @@ import (
 	"cwxu-algo/app/agent/internal/data"
 	"cwxu-algo/app/agent/internal/service"
 	"cwxu-algo/app/common/conf"
+	"cwxu-algo/app/common/opsmetrics"
 	"cwxu-algo/app/common/utils/health"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -17,6 +18,7 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, summaryServi
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
+			opsmetrics.Middleware(d.RDB, "agent"),
 		),
 	}
 	if c.Http.Network != "" {

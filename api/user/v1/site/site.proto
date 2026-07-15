@@ -154,14 +154,48 @@ message VisitPingRes {
 message GetAccessStatsReq {
   // 历史天数，默认 30，最大 90
   int32 days = 1;
+  // 今日独立 IP 列表上限，默认 200，最大 500
+  int32 ip_limit = 2;
+  // 热门页面条数，默认 20，最大 50
+  int32 path_limit = 3;
 }
 
 message AccessDayStat {
   // yyyy-MM-dd
   string date = 1;
+  // 页面浏览量 PV（精确计数）
   int64 pv = 2;
+  // 登录日活 DAU（精确去重 userId）
   int64 dau = 3;
+  // 独立访客 UV（visitorId / IP 去重）
   int64 uv = 4;
+  // 独立 IP 数（精确集合基数）
+  int64 unique_ip = 5;
+}
+
+message AccessPathStat {
+  string path = 1;
+  // 页面/服务分类：首页、题库、比赛、公告、后台、工具等
+  string category = 2;
+  int64 pv = 3;
+  // 占今日 PV 百分比 0-100
+  double share = 4;
+}
+
+message AccessCategoryStat {
+  string category = 1;
+  int64 pv = 2;
+  double share = 3;
+}
+
+message AccessIpItem {
+  string ip = 1;
+  // 该 IP 今日 PV
+  int64 pv = 2;
+  // 最近一次访问路径
+  string last_path = 3;
+  // unix 秒
+  int64 last_seen = 4;
 }
 
 message GetAccessStatsRes {
@@ -172,4 +206,34 @@ message GetAccessStatsRes {
   repeated AccessDayStat series = 5;
   // 是否成功解析到客户端 IP（部署侧反代头是否可用）
   bool client_ip_available = 6;
+  // 近 N 日合计
+  int64 total_pv = 7;
+  int64 total_dau_sum = 8;
+  // 今日热门页面
+  repeated AccessPathStat top_paths = 9;
+  // 今日服务/模块使用分布
+  repeated AccessCategoryStat categories = 10;
+  // 今日独立 IP 明细（按 PV 降序）
+  repeated AccessIpItem ips = 11;
+  // 指标说明（审核/运营可读）
+  string metric_note = 12;
+
+  // —— 用户量 ——
+  int64 registered_users = 13;
+  // 月活跃用户（当月登录用户访问去重）
+  int64 mau = 14;
+
+  // —— 技术指标（Redis 日桶，自建精确计数）——
+  // 今日 API 请求总量（user/core/agent 合计）
+  int64 api_requests_today = 15;
+  // 今日 API 并发峰值
+  int64 api_peak_concurrent = 16;
+  // 当前进行中请求数
+  int64 api_inflight = 17;
+  // 爬虫：今日入队 / 成功 / 失败
+  int64 spider_enqueued_today = 18;
+  int64 spider_ok_today = 19;
+  int64 spider_fail_today = 20;
+  // 爬虫今日新写入提交记录条数（抓取数据量）
+  int64 spider_rows_today = 21;
 }

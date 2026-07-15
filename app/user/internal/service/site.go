@@ -10,6 +10,7 @@ import (
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/sitesettings"
+	"cwxu-algo/app/common/opsmetrics"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/common/utils/clientip"
 	"cwxu-algo/app/user/internal/data"
@@ -356,33 +357,91 @@ func (s *SiteService) GetAccessStats(ctx context.Context, req *site.GetAccessSta
 		return &site.GetAccessStatsRes{Code: 1, Message: "仅站点管理员可查看访问情况"}, nil
 	}
 	days := int32(30)
-	if req != nil && req.Days > 0 {
-		days = req.Days
+	ipLimit := 200
+	pathLimit := 20
+	if req != nil {
+		if req.Days > 0 {
+			days = req.Days
+		}
+		if req.IpLimit > 0 {
+			ipLimit = int(req.IpLimit)
+		}
+		if req.PathLimit > 0 {
+			pathLimit = int(req.PathLimit)
+		}
 	}
 	series := s.data.ListVisitSeries(ctx, int(days))
 	today := s.data.GetDayVisitStat(ctx, time.Now())
 	yesterday := s.data.GetDayVisitStat(ctx, time.Now().AddDate(0, 0, -1))
+	topPaths := s.data.ListTopPaths(ctx, time.Now(), pathLimit)
+	categories := s.data.ListCategoryStats(ctx, time.Now())
+	ips := s.data.ListIPItems(ctx, time.Now(), ipLimit)
+	ops := opsmetrics.ReadSnapshot(ctx, s.data.RDB)
 
 	toPB := func(st data.DayVisitStat) *site.AccessDayStat {
 		return &site.AccessDayStat{
-			Date: st.Date,
-			Pv:   st.PV,
-			Dau:  st.DAU,
-			Uv:   st.UV,
+			Date:     st.Date,
+			Pv:       st.PV,
+			Dau:      st.DAU,
+			Uv:       st.UV,
+			UniqueIp: st.UniqueIP,
 		}
 	}
 	pbSeries := make([]*site.AccessDayStat, 0, len(series))
+	var totalPV, totalDAU int64
 	for _, st := range series {
 		pbSeries = append(pbSeries, toPB(st))
+		totalPV += st.PV
+		totalDAU += st.DAU
 	}
-	// client IP：探测当前请求是否能解析到 IP（反映反代头是否可用）
+	pbPaths := make([]*site.AccessPathStat, 0, len(topPaths))
+	for _, p := range topPaths {
+		pbPaths = append(pbPaths, &site.AccessPathStat{
+			Path: p.Path, Category: p.Category, Pv: p.PV, Share: p.Share,
+		})
+	}
+	pbCats := make([]*site.AccessCategoryStat, 0, len(categories))
+	for _, c := range categories {
+		pbCats = append(pbCats, &site.AccessCategoryStat{
+			Category: c.Category, Pv: c.PV, Share: c.Share,
+		})
+	}
+	pbIPs := make([]*site.AccessIpItem, 0, len(ips))
+	for _, ip := range ips {
+		pbIPs = append(pbIPs, &site.AccessIpItem{
+			Ip: ip.IP, Pv: ip.PV, LastPath: ip.LastPath, LastSeen: ip.LastSeen,
+		})
+	}
 	ipOK := clientip.FromContext(ctx) != ""
+	registered := s.data.CountRegisteredUsers(ctx)
+	mau := s.data.CountMAU(ctx)
+	if mau == 0 {
+		mau = ops.MAU
+	}
+	note := "自建统计：PV=页面浏览（同页约30秒节流）；DAU=当日登录用户访问去重；MAU=当月登录用户访问去重；" +
+		"独立IP取自 CF-Connecting-IP / X-Real-IP / XFF；API 请求量与并发峰值为网关/服务侧精确日计数；" +
+		"爬虫数据量为当日新写入提交记录条数。"
 	return &site.GetAccessStatsRes{
-		Code:              0,
-		Message:           "success",
-		Today:             toPB(today),
-		Yesterday:         toPB(yesterday),
-		Series:            pbSeries,
-		ClientIpAvailable: ipOK,
+		Code:                 0,
+		Message:              "success",
+		Today:                toPB(today),
+		Yesterday:            toPB(yesterday),
+		Series:               pbSeries,
+		ClientIpAvailable:    ipOK,
+		TotalPv:              totalPV,
+		TotalDauSum:          totalDAU,
+		TopPaths:             pbPaths,
+		Categories:           pbCats,
+		Ips:                  pbIPs,
+		MetricNote:           note,
+		RegisteredUsers:      registered,
+		Mau:                  mau,
+		ApiRequestsToday:     ops.APIRequestsToday,
+		ApiPeakConcurrent:    ops.APIPeakToday,
+		ApiInflight:          ops.APIInflight,
+		SpiderEnqueuedToday:  ops.SpiderEnqueued,
+		SpiderOkToday:        ops.SpiderOK,
+		SpiderFailToday:      ops.SpiderFail,
+		SpiderRowsToday:      ops.SpiderRows,
 	}, nil
 }

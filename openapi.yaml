@@ -1135,6 +1135,18 @@ paths:
                   schema:
                     type: integer
                     format: int32
+                - name: ipLimit
+                  in: query
+                  description: 今日独立 IP 列表上限，默认 200，最大 500
+                  schema:
+                    type: integer
+                    format: int32
+                - name: pathLimit
+                  in: query
+                  description: 热门页面条数，默认 20，最大 50
+                  schema:
+                    type: integer
+                    format: int32
             responses:
                 "200":
                     description: OK
@@ -2424,6 +2436,16 @@ components:
                     type: string
                 message:
                     type: string
+        api.user.v1.site.AccessCategoryStat:
+            type: object
+            properties:
+                category:
+                    type: string
+                pv:
+                    type: string
+                share:
+                    type: number
+                    format: double
         api.user.v1.site.AccessDayStat:
             type: object
             properties:
@@ -2432,10 +2454,44 @@ components:
                     description: yyyy-MM-dd
                 pv:
                     type: string
+                    description: 页面浏览量 PV（精确计数）
                 dau:
                     type: string
+                    description: 登录日活 DAU（精确去重 userId）
                 uv:
                     type: string
+                    description: 独立访客 UV（visitorId / IP 去重）
+                uniqueIp:
+                    type: string
+                    description: 独立 IP 数（精确集合基数）
+        api.user.v1.site.AccessIpItem:
+            type: object
+            properties:
+                ip:
+                    type: string
+                pv:
+                    type: string
+                    description: 该 IP 今日 PV
+                lastPath:
+                    type: string
+                    description: 最近一次访问路径
+                lastSeen:
+                    type: string
+                    description: unix 秒
+        api.user.v1.site.AccessPathStat:
+            type: object
+            properties:
+                path:
+                    type: string
+                category:
+                    type: string
+                    description: 页面/服务分类：首页、题库、比赛、公告、后台、工具等
+                pv:
+                    type: string
+                share:
+                    type: number
+                    description: 占今日 PV 百分比 0-100
+                    format: double
         api.user.v1.site.GetAccessStatsRes:
             type: object
             properties:
@@ -2454,6 +2510,56 @@ components:
                 clientIpAvailable:
                     type: boolean
                     description: 是否成功解析到客户端 IP（部署侧反代头是否可用）
+                totalPv:
+                    type: string
+                    description: 近 N 日合计
+                totalDauSum:
+                    type: string
+                topPaths:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.site.AccessPathStat'
+                    description: 今日热门页面
+                categories:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.site.AccessCategoryStat'
+                    description: 今日服务/模块使用分布
+                ips:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.site.AccessIpItem'
+                    description: 今日独立 IP 明细（按 PV 降序）
+                metricNote:
+                    type: string
+                    description: 指标说明（审核/运营可读）
+                registeredUsers:
+                    type: string
+                    description: —— 用户量 ——
+                mau:
+                    type: string
+                    description: 月活跃用户（当月登录用户访问去重）
+                apiRequestsToday:
+                    type: string
+                    description: |-
+                        —— 技术指标（Redis 日桶，自建精确计数）——
+                         今日 API 请求总量（user/core/agent 合计）
+                apiPeakConcurrent:
+                    type: string
+                    description: 今日 API 并发峰值
+                apiInflight:
+                    type: string
+                    description: 当前进行中请求数
+                spiderEnqueuedToday:
+                    type: string
+                    description: 爬虫：今日入队 / 成功 / 失败
+                spiderOkToday:
+                    type: string
+                spiderFailToday:
+                    type: string
+                spiderRowsToday:
+                    type: string
+                    description: 爬虫今日新写入提交记录条数（抓取数据量）
         api.user.v1.site.GetAdminConfigRes:
             type: object
             properties:

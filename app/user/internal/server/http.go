@@ -9,6 +9,7 @@ import (
 	"cwxu-algo/api/user/v1/site"
 	"cwxu-algo/app/common/conf"
 	_const "cwxu-algo/app/common/const"
+	"cwxu-algo/app/common/opsmetrics"
 	"cwxu-algo/app/common/utils/health"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/service"
@@ -75,6 +76,7 @@ func NewHTTPServer(
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
+			opsmetrics.Middleware(d.RDB, "user"),
 			selector.Server(jwt.Server(func(token *jwt2.Token) (interface{}, error) {
 				return []byte(_const.JWTSecret()), nil
 			})).Match(NewWhiteListMatcher()).Build(),

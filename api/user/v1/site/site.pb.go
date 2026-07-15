@@ -894,7 +894,11 @@ func (x *VisitPingRes) GetCounted() bool {
 type GetAccessStatsReq struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// 历史天数，默认 30，最大 90
-	Days          int32 `protobuf:"varint,1,opt,name=days,proto3" json:"days,omitempty"`
+	Days int32 `protobuf:"varint,1,opt,name=days,proto3" json:"days,omitempty"`
+	// 今日独立 IP 列表上限，默认 200，最大 500
+	IpLimit int32 `protobuf:"varint,2,opt,name=ip_limit,json=ipLimit,proto3" json:"ip_limit,omitempty"`
+	// 热门页面条数，默认 20，最大 50
+	PathLimit     int32 `protobuf:"varint,3,opt,name=path_limit,json=pathLimit,proto3" json:"path_limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -936,13 +940,32 @@ func (x *GetAccessStatsReq) GetDays() int32 {
 	return 0
 }
 
+func (x *GetAccessStatsReq) GetIpLimit() int32 {
+	if x != nil {
+		return x.IpLimit
+	}
+	return 0
+}
+
+func (x *GetAccessStatsReq) GetPathLimit() int32 {
+	if x != nil {
+		return x.PathLimit
+	}
+	return 0
+}
+
 type AccessDayStat struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// yyyy-MM-dd
-	Date          string `protobuf:"bytes,1,opt,name=date,proto3" json:"date,omitempty"`
-	Pv            int64  `protobuf:"varint,2,opt,name=pv,proto3" json:"pv,omitempty"`
-	Dau           int64  `protobuf:"varint,3,opt,name=dau,proto3" json:"dau,omitempty"`
-	Uv            int64  `protobuf:"varint,4,opt,name=uv,proto3" json:"uv,omitempty"`
+	Date string `protobuf:"bytes,1,opt,name=date,proto3" json:"date,omitempty"`
+	// 页面浏览量 PV（精确计数）
+	Pv int64 `protobuf:"varint,2,opt,name=pv,proto3" json:"pv,omitempty"`
+	// 登录日活 DAU（精确去重 userId）
+	Dau int64 `protobuf:"varint,3,opt,name=dau,proto3" json:"dau,omitempty"`
+	// 独立访客 UV（visitorId / IP 去重）
+	Uv int64 `protobuf:"varint,4,opt,name=uv,proto3" json:"uv,omitempty"`
+	// 独立 IP 数（精确集合基数）
+	UniqueIp      int64 `protobuf:"varint,5,opt,name=unique_ip,json=uniqueIp,proto3" json:"unique_ip,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1005,6 +1028,214 @@ func (x *AccessDayStat) GetUv() int64 {
 	return 0
 }
 
+func (x *AccessDayStat) GetUniqueIp() int64 {
+	if x != nil {
+		return x.UniqueIp
+	}
+	return 0
+}
+
+type AccessPathStat struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Path  string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// 页面/服务分类：首页、题库、比赛、公告、后台、工具等
+	Category string `protobuf:"bytes,2,opt,name=category,proto3" json:"category,omitempty"`
+	Pv       int64  `protobuf:"varint,3,opt,name=pv,proto3" json:"pv,omitempty"`
+	// 占今日 PV 百分比 0-100
+	Share         float64 `protobuf:"fixed64,4,opt,name=share,proto3" json:"share,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccessPathStat) Reset() {
+	*x = AccessPathStat{}
+	mi := &file_user_v1_site_site_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccessPathStat) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccessPathStat) ProtoMessage() {}
+
+func (x *AccessPathStat) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccessPathStat.ProtoReflect.Descriptor instead.
+func (*AccessPathStat) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *AccessPathStat) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *AccessPathStat) GetCategory() string {
+	if x != nil {
+		return x.Category
+	}
+	return ""
+}
+
+func (x *AccessPathStat) GetPv() int64 {
+	if x != nil {
+		return x.Pv
+	}
+	return 0
+}
+
+func (x *AccessPathStat) GetShare() float64 {
+	if x != nil {
+		return x.Share
+	}
+	return 0
+}
+
+type AccessCategoryStat struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Category      string                 `protobuf:"bytes,1,opt,name=category,proto3" json:"category,omitempty"`
+	Pv            int64                  `protobuf:"varint,2,opt,name=pv,proto3" json:"pv,omitempty"`
+	Share         float64                `protobuf:"fixed64,3,opt,name=share,proto3" json:"share,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccessCategoryStat) Reset() {
+	*x = AccessCategoryStat{}
+	mi := &file_user_v1_site_site_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccessCategoryStat) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccessCategoryStat) ProtoMessage() {}
+
+func (x *AccessCategoryStat) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccessCategoryStat.ProtoReflect.Descriptor instead.
+func (*AccessCategoryStat) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *AccessCategoryStat) GetCategory() string {
+	if x != nil {
+		return x.Category
+	}
+	return ""
+}
+
+func (x *AccessCategoryStat) GetPv() int64 {
+	if x != nil {
+		return x.Pv
+	}
+	return 0
+}
+
+func (x *AccessCategoryStat) GetShare() float64 {
+	if x != nil {
+		return x.Share
+	}
+	return 0
+}
+
+type AccessIpItem struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Ip    string                 `protobuf:"bytes,1,opt,name=ip,proto3" json:"ip,omitempty"`
+	// 该 IP 今日 PV
+	Pv int64 `protobuf:"varint,2,opt,name=pv,proto3" json:"pv,omitempty"`
+	// 最近一次访问路径
+	LastPath string `protobuf:"bytes,3,opt,name=last_path,json=lastPath,proto3" json:"last_path,omitempty"`
+	// unix 秒
+	LastSeen      int64 `protobuf:"varint,4,opt,name=last_seen,json=lastSeen,proto3" json:"last_seen,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccessIpItem) Reset() {
+	*x = AccessIpItem{}
+	mi := &file_user_v1_site_site_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccessIpItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccessIpItem) ProtoMessage() {}
+
+func (x *AccessIpItem) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccessIpItem.ProtoReflect.Descriptor instead.
+func (*AccessIpItem) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *AccessIpItem) GetIp() string {
+	if x != nil {
+		return x.Ip
+	}
+	return ""
+}
+
+func (x *AccessIpItem) GetPv() int64 {
+	if x != nil {
+		return x.Pv
+	}
+	return 0
+}
+
+func (x *AccessIpItem) GetLastPath() string {
+	if x != nil {
+		return x.LastPath
+	}
+	return ""
+}
+
+func (x *AccessIpItem) GetLastSeen() int64 {
+	if x != nil {
+		return x.LastSeen
+	}
+	return 0
+}
+
 type GetAccessStatsRes struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Code      int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -1014,13 +1245,41 @@ type GetAccessStatsRes struct {
 	Series    []*AccessDayStat       `protobuf:"bytes,5,rep,name=series,proto3" json:"series,omitempty"`
 	// 是否成功解析到客户端 IP（部署侧反代头是否可用）
 	ClientIpAvailable bool `protobuf:"varint,6,opt,name=client_ip_available,json=clientIpAvailable,proto3" json:"client_ip_available,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// 近 N 日合计
+	TotalPv     int64 `protobuf:"varint,7,opt,name=total_pv,json=totalPv,proto3" json:"total_pv,omitempty"`
+	TotalDauSum int64 `protobuf:"varint,8,opt,name=total_dau_sum,json=totalDauSum,proto3" json:"total_dau_sum,omitempty"`
+	// 今日热门页面
+	TopPaths []*AccessPathStat `protobuf:"bytes,9,rep,name=top_paths,json=topPaths,proto3" json:"top_paths,omitempty"`
+	// 今日服务/模块使用分布
+	Categories []*AccessCategoryStat `protobuf:"bytes,10,rep,name=categories,proto3" json:"categories,omitempty"`
+	// 今日独立 IP 明细（按 PV 降序）
+	Ips []*AccessIpItem `protobuf:"bytes,11,rep,name=ips,proto3" json:"ips,omitempty"`
+	// 指标说明（审核/运营可读）
+	MetricNote string `protobuf:"bytes,12,opt,name=metric_note,json=metricNote,proto3" json:"metric_note,omitempty"`
+	// —— 用户量 ——
+	RegisteredUsers int64 `protobuf:"varint,13,opt,name=registered_users,json=registeredUsers,proto3" json:"registered_users,omitempty"`
+	// 月活跃用户（当月登录用户访问去重）
+	Mau int64 `protobuf:"varint,14,opt,name=mau,proto3" json:"mau,omitempty"`
+	// —— 技术指标（Redis 日桶，自建精确计数）——
+	// 今日 API 请求总量（user/core/agent 合计）
+	ApiRequestsToday int64 `protobuf:"varint,15,opt,name=api_requests_today,json=apiRequestsToday,proto3" json:"api_requests_today,omitempty"`
+	// 今日 API 并发峰值
+	ApiPeakConcurrent int64 `protobuf:"varint,16,opt,name=api_peak_concurrent,json=apiPeakConcurrent,proto3" json:"api_peak_concurrent,omitempty"`
+	// 当前进行中请求数
+	ApiInflight int64 `protobuf:"varint,17,opt,name=api_inflight,json=apiInflight,proto3" json:"api_inflight,omitempty"`
+	// 爬虫：今日入队 / 成功 / 失败
+	SpiderEnqueuedToday int64 `protobuf:"varint,18,opt,name=spider_enqueued_today,json=spiderEnqueuedToday,proto3" json:"spider_enqueued_today,omitempty"`
+	SpiderOkToday       int64 `protobuf:"varint,19,opt,name=spider_ok_today,json=spiderOkToday,proto3" json:"spider_ok_today,omitempty"`
+	SpiderFailToday     int64 `protobuf:"varint,20,opt,name=spider_fail_today,json=spiderFailToday,proto3" json:"spider_fail_today,omitempty"`
+	// 爬虫今日新写入提交记录条数（抓取数据量）
+	SpiderRowsToday int64 `protobuf:"varint,21,opt,name=spider_rows_today,json=spiderRowsToday,proto3" json:"spider_rows_today,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *GetAccessStatsRes) Reset() {
 	*x = GetAccessStatsRes{}
-	mi := &file_user_v1_site_site_proto_msgTypes[12]
+	mi := &file_user_v1_site_site_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1032,7 +1291,7 @@ func (x *GetAccessStatsRes) String() string {
 func (*GetAccessStatsRes) ProtoMessage() {}
 
 func (x *GetAccessStatsRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_site_site_proto_msgTypes[12]
+	mi := &file_user_v1_site_site_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1045,7 +1304,7 @@ func (x *GetAccessStatsRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAccessStatsRes.ProtoReflect.Descriptor instead.
 func (*GetAccessStatsRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_site_site_proto_rawDescGZIP(), []int{12}
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GetAccessStatsRes) GetCode() int64 {
@@ -1088,6 +1347,111 @@ func (x *GetAccessStatsRes) GetClientIpAvailable() bool {
 		return x.ClientIpAvailable
 	}
 	return false
+}
+
+func (x *GetAccessStatsRes) GetTotalPv() int64 {
+	if x != nil {
+		return x.TotalPv
+	}
+	return 0
+}
+
+func (x *GetAccessStatsRes) GetTotalDauSum() int64 {
+	if x != nil {
+		return x.TotalDauSum
+	}
+	return 0
+}
+
+func (x *GetAccessStatsRes) GetTopPaths() []*AccessPathStat {
+	if x != nil {
+		return x.TopPaths
+	}
+	return nil
+}
+
+func (x *GetAccessStatsRes) GetCategories() []*AccessCategoryStat {
+	if x != nil {
+		return x.Categories
+	}
+	return nil
+}
+
+func (x *GetAccessStatsRes) GetIps() []*AccessIpItem {
+	if x != nil {
+		return x.Ips
+	}
+	return nil
+}
+
+func (x *GetAccessStatsRes) GetMetricNote() string {
+	if x != nil {
+		return x.MetricNote
+	}
+	return ""
+}
+
+func (x *GetAccessStatsRes) GetRegisteredUsers() int64 {
+	if x != nil {
+		return x.RegisteredUsers
+	}
+	return 0
+}
+
+func (x *GetAccessStatsRes) GetMau() int64 {
+	if x != nil {
+		return x.Mau
+	}
+	return 0
+}
+
+func (x *GetAccessStatsRes) GetApiRequestsToday() int64 {
+	if x != nil {
+		return x.ApiRequestsToday
+	}
+	return 0
+}
+
+func (x *GetAccessStatsRes) GetApiPeakConcurrent() int64 {
+	if x != nil {
+		return x.ApiPeakConcurrent
+	}
+	return 0
+}
+
+func (x *GetAccessStatsRes) GetApiInflight() int64 {
+	if x != nil {
+		return x.ApiInflight
+	}
+	return 0
+}
+
+func (x *GetAccessStatsRes) GetSpiderEnqueuedToday() int64 {
+	if x != nil {
+		return x.SpiderEnqueuedToday
+	}
+	return 0
+}
+
+func (x *GetAccessStatsRes) GetSpiderOkToday() int64 {
+	if x != nil {
+		return x.SpiderOkToday
+	}
+	return 0
+}
+
+func (x *GetAccessStatsRes) GetSpiderFailToday() int64 {
+	if x != nil {
+		return x.SpiderFailToday
+	}
+	return 0
+}
+
+func (x *GetAccessStatsRes) GetSpiderRowsToday() int64 {
+	if x != nil {
+		return x.SpiderRowsToday
+	}
+	return 0
 }
 
 var File_user_v1_site_site_proto protoreflect.FileDescriptor
@@ -1179,21 +1543,58 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\fVisitPingRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
-	"\acounted\x18\x03 \x01(\bR\acounted\"'\n" +
+	"\acounted\x18\x03 \x01(\bR\acounted\"a\n" +
 	"\x11GetAccessStatsReq\x12\x12\n" +
-	"\x04days\x18\x01 \x01(\x05R\x04days\"U\n" +
+	"\x04days\x18\x01 \x01(\x05R\x04days\x12\x19\n" +
+	"\bip_limit\x18\x02 \x01(\x05R\aipLimit\x12\x1d\n" +
+	"\n" +
+	"path_limit\x18\x03 \x01(\x05R\tpathLimit\"r\n" +
 	"\rAccessDayStat\x12\x12\n" +
 	"\x04date\x18\x01 \x01(\tR\x04date\x12\x0e\n" +
 	"\x02pv\x18\x02 \x01(\x03R\x02pv\x12\x10\n" +
 	"\x03dau\x18\x03 \x01(\x03R\x03dau\x12\x0e\n" +
-	"\x02uv\x18\x04 \x01(\x03R\x02uv\"\xa0\x02\n" +
+	"\x02uv\x18\x04 \x01(\x03R\x02uv\x12\x1b\n" +
+	"\tunique_ip\x18\x05 \x01(\x03R\buniqueIp\"f\n" +
+	"\x0eAccessPathStat\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1a\n" +
+	"\bcategory\x18\x02 \x01(\tR\bcategory\x12\x0e\n" +
+	"\x02pv\x18\x03 \x01(\x03R\x02pv\x12\x14\n" +
+	"\x05share\x18\x04 \x01(\x01R\x05share\"V\n" +
+	"\x12AccessCategoryStat\x12\x1a\n" +
+	"\bcategory\x18\x01 \x01(\tR\bcategory\x12\x0e\n" +
+	"\x02pv\x18\x02 \x01(\x03R\x02pv\x12\x14\n" +
+	"\x05share\x18\x03 \x01(\x01R\x05share\"h\n" +
+	"\fAccessIpItem\x12\x0e\n" +
+	"\x02ip\x18\x01 \x01(\tR\x02ip\x12\x0e\n" +
+	"\x02pv\x18\x02 \x01(\x03R\x02pv\x12\x1b\n" +
+	"\tlast_path\x18\x03 \x01(\tR\blastPath\x12\x1b\n" +
+	"\tlast_seen\x18\x04 \x01(\x03R\blastSeen\"\xa9\a\n" +
 	"\x11GetAccessStatsRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x125\n" +
 	"\x05today\x18\x03 \x01(\v2\x1f.api.user.v1.site.AccessDayStatR\x05today\x12=\n" +
 	"\tyesterday\x18\x04 \x01(\v2\x1f.api.user.v1.site.AccessDayStatR\tyesterday\x127\n" +
 	"\x06series\x18\x05 \x03(\v2\x1f.api.user.v1.site.AccessDayStatR\x06series\x12.\n" +
-	"\x13client_ip_available\x18\x06 \x01(\bR\x11clientIpAvailable2\xcc\x05\n" +
+	"\x13client_ip_available\x18\x06 \x01(\bR\x11clientIpAvailable\x12\x19\n" +
+	"\btotal_pv\x18\a \x01(\x03R\atotalPv\x12\"\n" +
+	"\rtotal_dau_sum\x18\b \x01(\x03R\vtotalDauSum\x12=\n" +
+	"\ttop_paths\x18\t \x03(\v2 .api.user.v1.site.AccessPathStatR\btopPaths\x12D\n" +
+	"\n" +
+	"categories\x18\n" +
+	" \x03(\v2$.api.user.v1.site.AccessCategoryStatR\n" +
+	"categories\x120\n" +
+	"\x03ips\x18\v \x03(\v2\x1e.api.user.v1.site.AccessIpItemR\x03ips\x12\x1f\n" +
+	"\vmetric_note\x18\f \x01(\tR\n" +
+	"metricNote\x12)\n" +
+	"\x10registered_users\x18\r \x01(\x03R\x0fregisteredUsers\x12\x10\n" +
+	"\x03mau\x18\x0e \x01(\x03R\x03mau\x12,\n" +
+	"\x12api_requests_today\x18\x0f \x01(\x03R\x10apiRequestsToday\x12.\n" +
+	"\x13api_peak_concurrent\x18\x10 \x01(\x03R\x11apiPeakConcurrent\x12!\n" +
+	"\fapi_inflight\x18\x11 \x01(\x03R\vapiInflight\x122\n" +
+	"\x15spider_enqueued_today\x18\x12 \x01(\x03R\x13spiderEnqueuedToday\x12&\n" +
+	"\x0fspider_ok_today\x18\x13 \x01(\x03R\rspiderOkToday\x12*\n" +
+	"\x11spider_fail_today\x18\x14 \x01(\x03R\x0fspiderFailToday\x12*\n" +
+	"\x11spider_rows_today\x18\x15 \x01(\x03R\x0fspiderRowsToday2\xcc\x05\n" +
 	"\x04Site\x12i\n" +
 	"\tGetConfig\x12\x1e.api.user.v1.site.GetConfigReq\x1a\x1e.api.user.v1.site.GetConfigRes\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1/user/site/config\x12~\n" +
 	"\x0eGetAdminConfig\x12#.api.user.v1.site.GetAdminConfigReq\x1a#.api.user.v1.site.GetAdminConfigRes\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/user/site/admin-config\x12u\n" +
@@ -1215,43 +1616,49 @@ func file_user_v1_site_site_proto_rawDescGZIP() []byte {
 	return file_user_v1_site_site_proto_rawDescData
 }
 
-var file_user_v1_site_site_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_user_v1_site_site_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_user_v1_site_site_proto_goTypes = []any{
-	(*GetConfigReq)(nil),      // 0: api.user.v1.site.GetConfigReq
-	(*GetConfigRes)(nil),      // 1: api.user.v1.site.GetConfigRes
-	(*GetAdminConfigReq)(nil), // 2: api.user.v1.site.GetAdminConfigReq
-	(*GetAdminConfigRes)(nil), // 3: api.user.v1.site.GetAdminConfigRes
-	(*UpdateConfigReq)(nil),   // 4: api.user.v1.site.UpdateConfigReq
-	(*UpdateConfigRes)(nil),   // 5: api.user.v1.site.UpdateConfigRes
-	(*TestEmailReq)(nil),      // 6: api.user.v1.site.TestEmailReq
-	(*TestEmailRes)(nil),      // 7: api.user.v1.site.TestEmailRes
-	(*VisitPingReq)(nil),      // 8: api.user.v1.site.VisitPingReq
-	(*VisitPingRes)(nil),      // 9: api.user.v1.site.VisitPingRes
-	(*GetAccessStatsReq)(nil), // 10: api.user.v1.site.GetAccessStatsReq
-	(*AccessDayStat)(nil),     // 11: api.user.v1.site.AccessDayStat
-	(*GetAccessStatsRes)(nil), // 12: api.user.v1.site.GetAccessStatsRes
+	(*GetConfigReq)(nil),       // 0: api.user.v1.site.GetConfigReq
+	(*GetConfigRes)(nil),       // 1: api.user.v1.site.GetConfigRes
+	(*GetAdminConfigReq)(nil),  // 2: api.user.v1.site.GetAdminConfigReq
+	(*GetAdminConfigRes)(nil),  // 3: api.user.v1.site.GetAdminConfigRes
+	(*UpdateConfigReq)(nil),    // 4: api.user.v1.site.UpdateConfigReq
+	(*UpdateConfigRes)(nil),    // 5: api.user.v1.site.UpdateConfigRes
+	(*TestEmailReq)(nil),       // 6: api.user.v1.site.TestEmailReq
+	(*TestEmailRes)(nil),       // 7: api.user.v1.site.TestEmailRes
+	(*VisitPingReq)(nil),       // 8: api.user.v1.site.VisitPingReq
+	(*VisitPingRes)(nil),       // 9: api.user.v1.site.VisitPingRes
+	(*GetAccessStatsReq)(nil),  // 10: api.user.v1.site.GetAccessStatsReq
+	(*AccessDayStat)(nil),      // 11: api.user.v1.site.AccessDayStat
+	(*AccessPathStat)(nil),     // 12: api.user.v1.site.AccessPathStat
+	(*AccessCategoryStat)(nil), // 13: api.user.v1.site.AccessCategoryStat
+	(*AccessIpItem)(nil),       // 14: api.user.v1.site.AccessIpItem
+	(*GetAccessStatsRes)(nil),  // 15: api.user.v1.site.GetAccessStatsRes
 }
 var file_user_v1_site_site_proto_depIdxs = []int32{
 	11, // 0: api.user.v1.site.GetAccessStatsRes.today:type_name -> api.user.v1.site.AccessDayStat
 	11, // 1: api.user.v1.site.GetAccessStatsRes.yesterday:type_name -> api.user.v1.site.AccessDayStat
 	11, // 2: api.user.v1.site.GetAccessStatsRes.series:type_name -> api.user.v1.site.AccessDayStat
-	0,  // 3: api.user.v1.site.Site.GetConfig:input_type -> api.user.v1.site.GetConfigReq
-	2,  // 4: api.user.v1.site.Site.GetAdminConfig:input_type -> api.user.v1.site.GetAdminConfigReq
-	4,  // 5: api.user.v1.site.Site.UpdateConfig:input_type -> api.user.v1.site.UpdateConfigReq
-	6,  // 6: api.user.v1.site.Site.TestEmail:input_type -> api.user.v1.site.TestEmailReq
-	8,  // 7: api.user.v1.site.Site.VisitPing:input_type -> api.user.v1.site.VisitPingReq
-	10, // 8: api.user.v1.site.Site.GetAccessStats:input_type -> api.user.v1.site.GetAccessStatsReq
-	1,  // 9: api.user.v1.site.Site.GetConfig:output_type -> api.user.v1.site.GetConfigRes
-	3,  // 10: api.user.v1.site.Site.GetAdminConfig:output_type -> api.user.v1.site.GetAdminConfigRes
-	5,  // 11: api.user.v1.site.Site.UpdateConfig:output_type -> api.user.v1.site.UpdateConfigRes
-	7,  // 12: api.user.v1.site.Site.TestEmail:output_type -> api.user.v1.site.TestEmailRes
-	9,  // 13: api.user.v1.site.Site.VisitPing:output_type -> api.user.v1.site.VisitPingRes
-	12, // 14: api.user.v1.site.Site.GetAccessStats:output_type -> api.user.v1.site.GetAccessStatsRes
-	9,  // [9:15] is the sub-list for method output_type
-	3,  // [3:9] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	12, // 3: api.user.v1.site.GetAccessStatsRes.top_paths:type_name -> api.user.v1.site.AccessPathStat
+	13, // 4: api.user.v1.site.GetAccessStatsRes.categories:type_name -> api.user.v1.site.AccessCategoryStat
+	14, // 5: api.user.v1.site.GetAccessStatsRes.ips:type_name -> api.user.v1.site.AccessIpItem
+	0,  // 6: api.user.v1.site.Site.GetConfig:input_type -> api.user.v1.site.GetConfigReq
+	2,  // 7: api.user.v1.site.Site.GetAdminConfig:input_type -> api.user.v1.site.GetAdminConfigReq
+	4,  // 8: api.user.v1.site.Site.UpdateConfig:input_type -> api.user.v1.site.UpdateConfigReq
+	6,  // 9: api.user.v1.site.Site.TestEmail:input_type -> api.user.v1.site.TestEmailReq
+	8,  // 10: api.user.v1.site.Site.VisitPing:input_type -> api.user.v1.site.VisitPingReq
+	10, // 11: api.user.v1.site.Site.GetAccessStats:input_type -> api.user.v1.site.GetAccessStatsReq
+	1,  // 12: api.user.v1.site.Site.GetConfig:output_type -> api.user.v1.site.GetConfigRes
+	3,  // 13: api.user.v1.site.Site.GetAdminConfig:output_type -> api.user.v1.site.GetAdminConfigRes
+	5,  // 14: api.user.v1.site.Site.UpdateConfig:output_type -> api.user.v1.site.UpdateConfigRes
+	7,  // 15: api.user.v1.site.Site.TestEmail:output_type -> api.user.v1.site.TestEmailRes
+	9,  // 16: api.user.v1.site.Site.VisitPing:output_type -> api.user.v1.site.VisitPingRes
+	15, // 17: api.user.v1.site.Site.GetAccessStats:output_type -> api.user.v1.site.GetAccessStatsRes
+	12, // [12:18] is the sub-list for method output_type
+	6,  // [6:12] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_user_v1_site_site_proto_init() }
@@ -1265,7 +1672,7 @@ func file_user_v1_site_site_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_v1_site_site_proto_rawDesc), len(file_user_v1_site_site_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

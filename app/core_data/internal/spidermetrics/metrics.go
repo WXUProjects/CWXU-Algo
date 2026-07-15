@@ -1,10 +1,14 @@
 package spidermetrics
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 
+	"cwxu-algo/app/common/opsmetrics"
+
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/redis/go-redis/v9"
 )
 
 // Metrics 爬虫可观测计数（进程内；多实例各自统计）
@@ -20,11 +24,25 @@ type Metrics struct {
 }
 
 var global = &Metrics{}
+var rdb *redis.Client
+
+// BindRedis 绑定共享 Redis，写入日桶供站管访问统计读取
+func BindRedis(client *redis.Client) { rdb = client }
 
 func Snapshot() *Metrics { return global }
 
-func IncEnqueued()     { global.Enqueued.Add(1) }
+func IncEnqueued() {
+	global.Enqueued.Add(1)
+	opsmetrics.IncSpider(context.Background(), rdb, "enqueued", 1)
+}
 func IncDedupSkipped() { global.DedupSkipped.Add(1) }
+
+// IncRows 今日新写入提交记录条数
+func IncRows(n int64) {
+	if n > 0 {
+		opsmetrics.IncSpider(context.Background(), rdb, "rows", n)
+	}
+}
 
 func (m *Metrics) logIfNeeded() {
 	n := m.Started.Load()
@@ -62,8 +80,10 @@ func RecordStart(needAll bool) time.Time {
 func RecordEnd(start time.Time, err error) {
 	if err != nil {
 		global.Failed.Add(1)
+		opsmetrics.IncSpider(context.Background(), rdb, "fail", 1)
 		return
 	}
 	global.Succeeded.Add(1)
 	global.TotalDuration.Add(time.Since(start).Milliseconds())
+	opsmetrics.IncSpider(context.Background(), rdb, "ok", 1)
 }

@@ -5,6 +5,7 @@ import (
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
+	"cwxu-algo/app/core_data/internal/spidermetrics"
 	"fmt"
 	"strings"
 	"time"
@@ -73,12 +74,19 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 		return nil
 	}
 
-	return uc.data.DB.
+	res := uc.data.DB.
 		Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "submit_id"}},
 			DoNothing: true,
 		}).
-		Save(&tmp).Error
+		Create(&tmp)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		spidermetrics.IncRows(res.RowsAffected)
+	}
+	return nil
 }
 
 func (uc *SpiderUseCase) fetchAndSaveContest(userId int64, plat model.Platform, needAll bool) error {

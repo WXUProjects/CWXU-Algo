@@ -5,6 +5,7 @@ import (
 	gorm2 "cwxu-algo/app/common/data/gorm"
 	redis2 "cwxu-algo/app/common/data/redis"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/spidermetrics"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/wire"
@@ -35,6 +36,7 @@ type Data struct {
 func NewData(c *conf.Data) (*Data, func(), error) {
 	data := &Data{DB: gorm2.InitGorm(c), RDB: redis2.InitRedis(c)}
 	migrateModels(data.DB)
+	spidermetrics.BindRedis(data.RDB)
 	cleanup := func() {
 		log.Info("closing the data resources")
 		sql, _ := data.DB.DB()
