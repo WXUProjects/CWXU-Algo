@@ -29,6 +29,7 @@ message SubmitLog {
   string user_name = 11;                   // 展示用姓名（批量填充，省前端 N+1）
   string problem_title = 12;               // 题库标题（有 problem_id 时批量填充）
   repeated string problem_tags = 13;       // 题库 AI 标签（有 problem_id 时批量填充）
+  string problem_difficulty = 14;          // 题库难度（有 problem_id 时批量填充，如 简单/中等/困难）
 }
 message GetSubmitLogReq {
   int64 user_id = 1;

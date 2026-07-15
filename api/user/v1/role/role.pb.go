@@ -25,8 +25,8 @@ const (
 // 角色定义
 type RoleInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	RoleId        int32                  `protobuf:"varint,1,opt,name=roleId,proto3" json:"roleId,omitempty"` // 角色ID：0=普通用户 1=管理员 2=教练
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`      // 角色名称：普通用户/管理员/教练
+	RoleId        int32                  `protobuf:"varint,1,opt,name=roleId,proto3" json:"roleId,omitempty"` // 角色ID：0=队员 1=管理员 2=教练 3=队长
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`      // 角色名称：队员/管理员/教练/队长
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -158,7 +158,7 @@ func (x *ListRes) GetRoles() []*RoleInfo {
 type SetUserRoleReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"` // 目标用户ID
-	RoleId        int32                  `protobuf:"varint,2,opt,name=roleId,proto3" json:"roleId,omitempty"` // 要设置为的角色ID：0=普通用户 1=管理员 2=教练
+	RoleId        int32                  `protobuf:"varint,2,opt,name=roleId,proto3" json:"roleId,omitempty"` // 要设置为的角色ID：0=队员 1=管理员 2=教练 3=队长
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

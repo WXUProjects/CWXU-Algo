@@ -1787,6 +1787,8 @@ components:
                     type: array
                     items:
                         type: string
+                problemDifficulty:
+                    type: string
         api.user.group.CreateReply:
             type: object
             properties:

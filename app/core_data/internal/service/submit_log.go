@@ -96,6 +96,7 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 				if len(m.Tags) > 0 {
 					item.ProblemTags = m.Tags
 				}
+				item.ProblemDifficulty = m.Difficulty
 			}
 		}
 	}
@@ -149,11 +150,12 @@ func (s SubmitLogService) fetchUserNames(ctx context.Context, logs []*submit_log
 }
 
 type problemMeta struct {
-	Title string
-	Tags  []string
+	Title      string
+	Tags       []string
+	Difficulty string
 }
 
-// fetchProblemMeta 批量取题库标题与标签（本库 problems）
+// fetchProblemMeta 批量取题库标题、标签与难度（本库 problems）
 func (s SubmitLogService) fetchProblemMeta(ctx context.Context, logs []*submit_log.SubmitLog) map[uint32]problemMeta {
 	result := map[uint32]problemMeta{}
 	if len(logs) == 0 || s.db == nil {
@@ -174,13 +176,14 @@ func (s SubmitLogService) fetchProblemMeta(ctx context.Context, logs []*submit_l
 	}
 
 	var rows []struct {
-		ID    uint              `gorm:"column:id"`
-		Title string            `gorm:"column:title"`
-		Tags  model.StringArray `gorm:"column:tags"`
+		ID         uint              `gorm:"column:id"`
+		Title      string            `gorm:"column:title"`
+		Tags       model.StringArray `gorm:"column:tags"`
+		Difficulty string            `gorm:"column:difficulty"`
 	}
 	if err := s.db.WithContext(ctx).
 		Table("problems").
-		Select("id, title, tags").
+		Select("id, title, tags, difficulty").
 		Where("id IN ?", ids).
 		Find(&rows).Error; err != nil {
 		log.Errorf("submit_log fetchProblemMeta: %v", err)
@@ -195,7 +198,11 @@ func (s SubmitLogService) fetchProblemMeta(ctx context.Context, logs []*submit_l
 		if len(tags) > 6 {
 			tags = tags[:6]
 		}
-		result[uint32(row.ID)] = problemMeta{Title: row.Title, Tags: tags}
+		result[uint32(row.ID)] = problemMeta{
+			Title:      row.Title,
+			Tags:       tags,
+			Difficulty: row.Difficulty,
+		}
 	}
 	return result
 }
