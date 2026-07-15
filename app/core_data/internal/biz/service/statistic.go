@@ -162,11 +162,13 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 	var memberIDs []int64
 	queryUserId := req.UserId
 	// 个人 period 也带全局版本，避免与组织统计共用脏缓存语义
+	// schema v2：Ac 增加 TotalRaw；旧缓存缺字段会反序列化为 0，必须换 key
+	const periodCacheSchema = "2"
 	ver := "0"
 	if v, err := uc.rdb.Get(ctx, "statistic:period:global:ver").Result(); err == nil && v != "" {
 		ver = v
 	}
-	cacheKey := fmt.Sprintf("statistic:period:%d:v%s", req.UserId, ver)
+	cacheKey := fmt.Sprintf("statistic:period:s%s:%d:v%s", periodCacheSchema, req.UserId, ver)
 	if req.UserId == -1 || isSiteWideUserId(req.UserId) {
 		siteWide := isSiteWideUserId(req.UserId)
 		if siteWide && !auth.VerifySiteAdmin(ctx) {
@@ -175,11 +177,11 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 		memberIDs = uc.resolveMembers(ctx, siteWide)
 		queryUserId = -1
 		if siteWide {
-			cacheKey = fmt.Sprintf("statistic:period:site:v%s", ver)
+			cacheKey = fmt.Sprintf("statistic:period:s%s:site:v%s", periodCacheSchema, ver)
 		} else if pd := auth.GetCurrentUser(ctx); pd != nil {
-			cacheKey = fmt.Sprintf("statistic:period:org:%d:v%s", pd.OrgID, ver)
+			cacheKey = fmt.Sprintf("statistic:period:s%s:org:%d:v%s", periodCacheSchema, pd.OrgID, ver)
 		} else {
-			cacheKey = fmt.Sprintf("statistic:period:org:m%d:v%s", len(memberIDs), ver)
+			cacheKey = fmt.Sprintf("statistic:period:s%s:org:m%d:v%s", periodCacheSchema, len(memberIDs), ver)
 		}
 	}
 
