@@ -19,17 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Profile_GetById_FullMethodName           = "/api.user.v1.Profile/GetById"
-	Profile_GetByName_FullMethodName         = "/api.user.v1.Profile/GetByName"
-	Profile_GetList_FullMethodName           = "/api.user.v1.Profile/GetList"
-	Profile_Update_FullMethodName            = "/api.user.v1.Profile/Update"
-	Profile_MoveGroup_FullMethodName         = "/api.user.v1.Profile/MoveGroup"
-	Profile_SetEmailEnabled_FullMethodName   = "/api.user.v1.Profile/SetEmailEnabled"
-	Profile_GetUserIdsByGroup_FullMethodName = "/api.user.v1.Profile/GetUserIdsByGroup"
-	Profile_GetUserIdsByOrg_FullMethodName   = "/api.user.v1.Profile/GetUserIdsByOrg"
-	Profile_GetByIds_FullMethodName          = "/api.user.v1.Profile/GetByIds"
-	Profile_GetSyncPolicies_FullMethodName   = "/api.user.v1.Profile/GetSyncPolicies"
-	Profile_Delete_FullMethodName            = "/api.user.v1.Profile/Delete"
+	Profile_GetById_FullMethodName                = "/api.user.v1.Profile/GetById"
+	Profile_GetByName_FullMethodName              = "/api.user.v1.Profile/GetByName"
+	Profile_GetList_FullMethodName                = "/api.user.v1.Profile/GetList"
+	Profile_Update_FullMethodName                 = "/api.user.v1.Profile/Update"
+	Profile_MoveGroup_FullMethodName              = "/api.user.v1.Profile/MoveGroup"
+	Profile_SetEmailEnabled_FullMethodName        = "/api.user.v1.Profile/SetEmailEnabled"
+	Profile_GetUserIdsByGroup_FullMethodName      = "/api.user.v1.Profile/GetUserIdsByGroup"
+	Profile_GetUserIdsByOrg_FullMethodName        = "/api.user.v1.Profile/GetUserIdsByOrg"
+	Profile_GetNonPublicOrgUserIds_FullMethodName = "/api.user.v1.Profile/GetNonPublicOrgUserIds"
+	Profile_GetByIds_FullMethodName               = "/api.user.v1.Profile/GetByIds"
+	Profile_GetSyncPolicies_FullMethodName        = "/api.user.v1.Profile/GetSyncPolicies"
+	Profile_Delete_FullMethodName                 = "/api.user.v1.Profile/Delete"
 )
 
 // ProfileClient is the client API for Profile service.
@@ -45,6 +46,8 @@ type ProfileClient interface {
 	GetUserIdsByGroup(ctx context.Context, in *GetUserIdsByGroupReq, opts ...grpc.CallOption) (*GetUserIdsByGroupRes, error)
 	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(ctx context.Context, in *GetUserIdsByOrgReq, opts ...grpc.CallOption) (*GetUserIdsByOrgRes, error)
+	// 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+	GetNonPublicOrgUserIds(ctx context.Context, in *GetNonPublicOrgUserIdsReq, opts ...grpc.CallOption) (*GetNonPublicOrgUserIdsRes, error)
 	GetByIds(ctx context.Context, in *GetByIdsReq, opts ...grpc.CallOption) (*GetByIdsRes, error)
 	// 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
 	GetSyncPolicies(ctx context.Context, in *GetSyncPoliciesReq, opts ...grpc.CallOption) (*GetSyncPoliciesRes, error)
@@ -140,6 +143,16 @@ func (c *profileClient) GetUserIdsByOrg(ctx context.Context, in *GetUserIdsByOrg
 	return out, nil
 }
 
+func (c *profileClient) GetNonPublicOrgUserIds(ctx context.Context, in *GetNonPublicOrgUserIdsReq, opts ...grpc.CallOption) (*GetNonPublicOrgUserIdsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetNonPublicOrgUserIdsRes)
+	err := c.cc.Invoke(ctx, Profile_GetNonPublicOrgUserIds_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *profileClient) GetByIds(ctx context.Context, in *GetByIdsReq, opts ...grpc.CallOption) (*GetByIdsRes, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetByIdsRes)
@@ -183,6 +196,8 @@ type ProfileServer interface {
 	GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error)
 	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error)
+	// 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+	GetNonPublicOrgUserIds(context.Context, *GetNonPublicOrgUserIdsReq) (*GetNonPublicOrgUserIdsRes, error)
 	GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error)
 	// 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
 	GetSyncPolicies(context.Context, *GetSyncPoliciesReq) (*GetSyncPoliciesRes, error)
@@ -221,6 +236,9 @@ func (UnimplementedProfileServer) GetUserIdsByGroup(context.Context, *GetUserIds
 }
 func (UnimplementedProfileServer) GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUserIdsByOrg not implemented")
+}
+func (UnimplementedProfileServer) GetNonPublicOrgUserIds(context.Context, *GetNonPublicOrgUserIdsReq) (*GetNonPublicOrgUserIdsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetNonPublicOrgUserIds not implemented")
 }
 func (UnimplementedProfileServer) GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetByIds not implemented")
@@ -396,6 +414,24 @@ func _Profile_GetUserIdsByOrg_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Profile_GetNonPublicOrgUserIds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetNonPublicOrgUserIdsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).GetNonPublicOrgUserIds(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_GetNonPublicOrgUserIds_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).GetNonPublicOrgUserIds(ctx, req.(*GetNonPublicOrgUserIdsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Profile_GetByIds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetByIdsReq)
 	if err := dec(in); err != nil {
@@ -488,6 +524,10 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetUserIdsByOrg",
 			Handler:    _Profile_GetUserIdsByOrg_Handler,
+		},
+		{
+			MethodName: "GetNonPublicOrgUserIds",
+			Handler:    _Profile_GetNonPublicOrgUserIds_Handler,
 		},
 		{
 			MethodName: "GetByIds",

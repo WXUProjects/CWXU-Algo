@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -11,9 +12,11 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/streadway/amqp"
 	"gorm.io/gorm"
 )
@@ -22,10 +25,19 @@ type ProblemUseCase struct {
 	data   *data.Data
 	mq     *event.RabbitMQ
 	tagger *ProblemTagger
+	reg    *registry.Registrar
+
+	orgUsersMu    sync.Mutex
+	orgUsersCache map[int64]struct{}
+	orgUsersAt    time.Time
 }
 
-func NewProblemUseCase(data *data.Data, mq *event.RabbitMQ, tagger *ProblemTagger) *ProblemUseCase {
-	return &ProblemUseCase{data: data, mq: mq, tagger: tagger}
+func NewProblemUseCase(data *data.Data, mq *event.RabbitMQ, tagger *ProblemTagger, reg *discovery.Register) *ProblemUseCase {
+	var r *registry.Registrar
+	if reg != nil {
+		r = &reg.Reg
+	}
+	return &ProblemUseCase{data: data, mq: mq, tagger: tagger, reg: r}
 }
 
 // MQ 优先级：队列需 x-max-priority；增量爬虫入队最高，回填/重置队列为 bulk
@@ -216,7 +228,10 @@ func (uc *ProblemUseCase) enqueueAnalyze(id uint) error {
 	return uc.enqueueAnalyzePrio(id, mqPriorityBulk)
 }
 
-// enqueueAnalyzePrio 投递 AI 分析；统一 6 个月窗口：超窗直接弃掉（题面爬取不受影响）
+// enqueueAnalyzePrio 投递 AI 分析；统一闸门：
+// 1) 近 6 个月有提交（submit_logs）
+// 2) 近窗提交者中至少有一名组织用户（非纯公共域/散户）
+// 题面爬取不受影响。
 func (uc *ProblemUseCase) enqueueAnalyzePrio(id uint, priority uint8) error {
 	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
@@ -228,6 +243,11 @@ func (uc *ProblemUseCase) enqueueAnalyzePrio(id uint, priority uint8) error {
 	// 自动爬虫 / 回填 / 爬取成功后入队：超过 6 个月（以 submit_logs 最近提交为准）不进 AI
 	if !uc.withinAnalyzeWindow(&p) {
 		log.Debugf("enqueueAnalyze skip out-of-window id=%d last=%v", id, p.LastSubmittedAt)
+		return nil
+	}
+	// 仅公共域/散户提交历史：只保留题面，不跑 AI
+	if !uc.problemHasOrgSubmitter(id) {
+		log.Debugf("enqueueAnalyze skip public-only submitters id=%d", id)
 		return nil
 	}
 	body, _ := json.Marshal(event.ProblemAnalyzeEvent{ProblemID: id})
@@ -257,11 +277,11 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if p.Status == model.ProblemStatusCompleted {
 		return nil
 	}
-	// 已有题面：不再爬取；近 6 个月（submit_logs）才入 AI
+	// 已有题面：不再爬取；入 AI 由 enqueueAnalyze 统一闸门（窗口 + 组织用户）
 	if strings.TrimSpace(p.ContentMD) != "" || p.Status == model.ProblemStatusTagging {
 		if p.Status != model.ProblemStatusCompleted {
 			_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
-			if !pipelineControl.IsAnalyzePaused() && uc.withinAnalyzeWindow(&p) {
+			if !pipelineControl.IsAnalyzePaused() {
 				return uc.enqueueAnalyze(p.ID)
 			}
 		}
@@ -320,11 +340,8 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if err := uc.data.DB.Model(&p).Updates(updates).Error; err != nil {
 		return err
 	}
-	// 爬取成功后：仅近 6 个月有提交的题进 AI（以 submit_logs 为准）
+	// 爬取成功后：近 6 月 + 有组织用户提交才进 AI（闸门在 enqueueAnalyzePrio）
 	// 分析暂停时仍入队（暂停不清队列，恢复后继续）；高优先级延续当前已出队的爬取任务
-	if !uc.withinAnalyzeWindow(&p) {
-		return nil
-	}
 	return uc.enqueueAnalyzePrio(p.ID, mqPriorityIncremental)
 }
 
@@ -373,6 +390,15 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 			"error_msg": "超出6个月分析窗口(以submit_logs最近提交为准)，已跳过",
 		}).Error
 		// 返回 error 会 requeue；此处 Ack 丢弃，靠重置/新提交再入队
+		return nil
+	}
+	// 仅公共域/散户：不跑题面 AI（题面已爬取可保留）
+	if !uc.problemHasOrgSubmitter(p.ID) {
+		log.Infof("ProcessAnalyze skip public-only submitters id=%d", p.ID)
+		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+			"status":    model.ProblemStatusTagging,
+			"error_msg": "仅公共域/散户提交，已跳过题面AI",
+		}).Error
 		return nil
 	}
 
@@ -468,8 +494,8 @@ func sqlHasRecentSubmit(cutoff time.Time) (clause string, args []interface{}) {
 
 // Backfill 增量回填（近 6 个月提交）：
 // 1) 绑定未关联提交
-// 2) 无题面 → 入爬取队列（bulk 优先级）
-// 3) 有题面且未分析完 → 入分析队列；已 COMPLETED → 丢弃
+// 2) 无题面 → 入爬取队列（bulk 优先级；公共域-only 历史也爬题面）
+// 3) 有题面且未分析完 → 入分析队列（enqueueAnalyzePrio 会跳过纯公共域/散户）
 // 不清空 MQ（与 ResetQueues 区分）
 func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued, enqueuedFetch, enqueuedAnalyze int64, err error) {
 	if limit <= 0 {
@@ -536,6 +562,7 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		}
 		seen[p.ID] = true
 		if strings.TrimSpace(p.ContentMD) == "" {
+			// 公共域-only 历史也爬题面
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 				Updates(map[string]interface{}{
 					"status":           model.ProblemStatusPending,
@@ -549,7 +576,10 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 			}
 			continue
 		}
-		// 有题面：入分析（已分析在查询中已排除 COMPLETED；ProcessAnalyze 再丢弃）
+		// 有题面：仅近窗有组织用户提交才入 AI；纯公共域/散户跳过
+		if !uc.problemHasOrgSubmitter(p.ID) {
+			continue
+		}
 		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 			Updates(map[string]interface{}{
 				"status":    model.ProblemStatusTagging,

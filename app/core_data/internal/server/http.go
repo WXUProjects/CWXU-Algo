@@ -4,6 +4,7 @@ import (
 	"context"
 	"cwxu-algo/api/core/v1/bulletin"
 	"cwxu-algo/api/core/v1/contest_log"
+	"cwxu-algo/api/core/v1/emergency"
 	"cwxu-algo/api/core/v1/problem"
 	"cwxu-algo/api/core/v1/spider"
 	statistic2 "cwxu-algo/api/core/v1/statistic"
@@ -34,6 +35,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.core.v1.statistic.Statistic/Rank":               "",
 		"/api.core.v1.bulletin.Bulletin/Get":                  "",
 		"/api.core.v1.bulletin.Bulletin/List":                 "",
+		"/api.core.v1.emergency.Emergency/Active":             "",
 		"/api.core.v1.problem.Problem/List":                   "",
 		"/api.core.v1.problem.Problem/ListTags":               "",
 		"/api.core.v1.problem.Problem/Get":                    "",
@@ -50,7 +52,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 }
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService, contestLogService *service.ContestLogService, bulletinService *service.BulletinService, problemService *service.ProblemService) *http.Server {
+func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService, contestLogService *service.ContestLogService, bulletinService *service.BulletinService, problemService *service.ProblemService, emergencyService *service.EmergencyService) *http.Server {
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
@@ -77,5 +79,6 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 	contest_log.RegisterContestHTTPServer(srv, contestLogService)
 	bulletin.RegisterBulletinHTTPServer(srv, bulletinService)
 	problem.RegisterProblemHTTPServer(srv, problemService)
+	emergency.RegisterEmergencyHTTPServer(srv, emergencyService)
 	return srv
 }

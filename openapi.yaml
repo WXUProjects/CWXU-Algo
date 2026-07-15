@@ -209,6 +209,97 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.contest_log.GetContestRankingRes'
+    /v1/core/emergency/active:
+        get:
+            tags:
+                - Emergency
+            description: 当前生效的紧急通知（公开，前端弹窗用）
+            operationId: Emergency_Active
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.emergency.ActiveEmergencyRes'
+    /v1/core/emergency/create:
+        post:
+            tags:
+                - Emergency
+            description: 创建紧急通知（站点管理员）
+            operationId: Emergency_Create
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.emergency.CreateEmergencyReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.emergency.CreateEmergencyRes'
+    /v1/core/emergency/delete:
+        delete:
+            tags:
+                - Emergency
+            description: 删除紧急通知（站点管理员）
+            operationId: Emergency_Delete
+            parameters:
+                - name: id
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.emergency.DeleteEmergencyRes'
+    /v1/core/emergency/list:
+        get:
+            tags:
+                - Emergency
+            description: 后台分页列表（站点管理员）
+            operationId: Emergency_List
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: string
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.emergency.ListEmergencyRes'
+    /v1/core/emergency/update:
+        post:
+            tags:
+                - Emergency
+            description: 更新紧急通知（站点管理员）
+            operationId: Emergency_Update
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.emergency.UpdateEmergencyReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.emergency.UpdateEmergencyRes'
     /v1/core/problem/backfill:
         post:
             tags:
@@ -1035,6 +1126,19 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.MoveGroupRes'
+    /v1/user/profile/non-public-org-user-ids:
+        get:
+            tags:
+                - Profile
+            description: 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+            operationId: Profile_GetNonPublicOrgUserIds
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.GetNonPublicOrgUserIdsRes'
     /v1/user/profile/set-email-enabled:
         post:
             tags:
@@ -1423,6 +1527,104 @@ components:
                     type: integer
                     format: int32
             description: 排行榜项
+        api.core.v1.emergency.ActiveEmergencyRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.emergency.EmergencyInfo'
+        api.core.v1.emergency.CreateEmergencyReq:
+            type: object
+            properties:
+                title:
+                    type: string
+                content:
+                    type: string
+                enabled:
+                    type: boolean
+                sortOrder:
+                    type: string
+        api.core.v1.emergency.CreateEmergencyRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/api.core.v1.emergency.EmergencyInfo'
+        api.core.v1.emergency.DeleteEmergencyRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+        api.core.v1.emergency.EmergencyInfo:
+            type: object
+            properties:
+                id:
+                    type: string
+                title:
+                    type: string
+                content:
+                    type: string
+                enabled:
+                    type: boolean
+                sortOrder:
+                    type: string
+                authorId:
+                    type: string
+                authorName:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        api.core.v1.emergency.ListEmergencyRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.emergency.EmergencyInfo'
+                total:
+                    type: string
+                page:
+                    type: string
+                pageSize:
+                    type: string
+        api.core.v1.emergency.UpdateEmergencyReq:
+            type: object
+            properties:
+                id:
+                    type: string
+                title:
+                    type: string
+                content:
+                    type: string
+                enabled:
+                    type: boolean
+                sortOrder:
+                    type: string
+        api.core.v1.emergency.UpdateEmergencyRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/api.core.v1.emergency.EmergencyInfo'
         api.core.v1.problem.ActiveJob:
             type: object
             properties:
@@ -2225,6 +2427,13 @@ components:
                     type: string
                 role:
                     type: string
+        api.user.v1.GetNonPublicOrgUserIdsRes:
+            type: object
+            properties:
+                userIds:
+                    type: array
+                    items:
+                        type: string
         api.user.v1.GetSyncPoliciesReq:
             type: object
             properties:
@@ -2731,6 +2940,8 @@ tags:
       description: 公告服务：管理员和教练可发布/编辑/删除公告，所有人可查看
     - name: Contest
       description: 竞赛服务
+    - name: Emergency
+      description: 紧急通知：全站强制弹窗，仅站点管理员可管理
     - name: Group
     - name: Problem
     - name: Profile

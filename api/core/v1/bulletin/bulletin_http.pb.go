@@ -40,14 +40,14 @@ type BulletinHTTPServer interface {
 
 func RegisterBulletinHTTPServer(s *http.Server, srv BulletinHTTPServer) {
 	r := s.Route("/")
-	r.POST("/v1/core/bulletin/create", _Bulletin_Create0_HTTP_Handler(srv))
-	r.POST("/v1/core/bulletin/update", _Bulletin_Update1_HTTP_Handler(srv))
-	r.DELETE("/v1/core/bulletin/delete", _Bulletin_Delete0_HTTP_Handler(srv))
+	r.POST("/v1/core/bulletin/create", _Bulletin_Create1_HTTP_Handler(srv))
+	r.POST("/v1/core/bulletin/update", _Bulletin_Update2_HTTP_Handler(srv))
+	r.DELETE("/v1/core/bulletin/delete", _Bulletin_Delete1_HTTP_Handler(srv))
 	r.GET("/v1/core/bulletin/get", _Bulletin_Get1_HTTP_Handler(srv))
-	r.GET("/v1/core/bulletin/list", _Bulletin_List1_HTTP_Handler(srv))
+	r.GET("/v1/core/bulletin/list", _Bulletin_List2_HTTP_Handler(srv))
 }
 
-func _Bulletin_Create0_HTTP_Handler(srv BulletinHTTPServer) func(ctx http.Context) error {
+func _Bulletin_Create1_HTTP_Handler(srv BulletinHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in CreateBulletinReq
 		if err := ctx.Bind(&in); err != nil {
@@ -69,7 +69,7 @@ func _Bulletin_Create0_HTTP_Handler(srv BulletinHTTPServer) func(ctx http.Contex
 	}
 }
 
-func _Bulletin_Update1_HTTP_Handler(srv BulletinHTTPServer) func(ctx http.Context) error {
+func _Bulletin_Update2_HTTP_Handler(srv BulletinHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in UpdateBulletinReq
 		if err := ctx.Bind(&in); err != nil {
@@ -91,7 +91,7 @@ func _Bulletin_Update1_HTTP_Handler(srv BulletinHTTPServer) func(ctx http.Contex
 	}
 }
 
-func _Bulletin_Delete0_HTTP_Handler(srv BulletinHTTPServer) func(ctx http.Context) error {
+func _Bulletin_Delete1_HTTP_Handler(srv BulletinHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in DeleteBulletinReq
 		if err := ctx.BindQuery(&in); err != nil {
@@ -129,7 +129,7 @@ func _Bulletin_Get1_HTTP_Handler(srv BulletinHTTPServer) func(ctx http.Context) 
 	}
 }
 
-func _Bulletin_List1_HTTP_Handler(srv BulletinHTTPServer) func(ctx http.Context) error {
+func _Bulletin_List2_HTTP_Handler(srv BulletinHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in ListBulletinReq
 		if err := ctx.BindQuery(&in); err != nil {

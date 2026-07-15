@@ -33,7 +33,7 @@ type SpiderHTTPServer interface {
 func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
 	r := s.Route("/")
 	r.POST("/v1/core/spider/set", _Spider_SetSpider0_HTTP_Handler(srv))
-	r.POST("/v1/core/spider/update", _Spider_Update0_HTTP_Handler(srv))
+	r.POST("/v1/core/spider/update", _Spider_Update1_HTTP_Handler(srv))
 	r.POST("/v1/core/spider/update-all", _Spider_UpdateAll0_HTTP_Handler(srv))
 }
 
@@ -59,7 +59,7 @@ func _Spider_SetSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context
 	}
 }
 
-func _Spider_Update0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+func _Spider_Update1_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in UpdateReq
 		if err := ctx.Bind(&in); err != nil {

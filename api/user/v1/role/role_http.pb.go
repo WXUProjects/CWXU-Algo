@@ -31,11 +31,11 @@ type RoleHTTPServer interface {
 
 func RegisterRoleHTTPServer(s *http.Server, srv RoleHTTPServer) {
 	r := s.Route("/")
-	r.GET("/v1/user/role/list", _Role_List2_HTTP_Handler(srv))
+	r.GET("/v1/user/role/list", _Role_List3_HTTP_Handler(srv))
 	r.POST("/v1/user/role/set-user-role", _Role_SetUserRole0_HTTP_Handler(srv))
 }
 
-func _Role_List2_HTTP_Handler(srv RoleHTTPServer) func(ctx http.Context) error {
+func _Role_List3_HTTP_Handler(srv RoleHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in ListReq
 		if err := ctx.BindQuery(&in); err != nil {

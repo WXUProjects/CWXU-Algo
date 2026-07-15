@@ -335,6 +335,18 @@ func (d *ProfileDal) GetUserIdsByOrg(ctx context.Context, orgID uint) ([]int64, 
 	return ids, err
 }
 
+// GetNonPublicOrgUserIds 至少属于一个非公共域/非系统组织的用户
+func (d *ProfileDal) GetNonPublicOrgUserIds(ctx context.Context) ([]int64, error) {
+	var ids []int64
+	err := d.db.WithContext(ctx).
+		Table("org_members AS m").
+		Joins("JOIN orgs o ON o.id = m.org_id").
+		Where("o.slug <> ? AND COALESCE(o.is_system, false) = false", model.PublicOrgSlug).
+		Distinct().
+		Pluck("m.user_id", &ids).Error
+	return ids, err
+}
+
 // UserSyncPolicy 一人多组织聚合后的定时策略
 type UserSyncPolicy struct {
 	UserID               int64

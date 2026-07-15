@@ -24,6 +24,7 @@ const OperationProfileGetById = "/api.user.v1.Profile/GetById"
 const OperationProfileGetByIds = "/api.user.v1.Profile/GetByIds"
 const OperationProfileGetByName = "/api.user.v1.Profile/GetByName"
 const OperationProfileGetList = "/api.user.v1.Profile/GetList"
+const OperationProfileGetNonPublicOrgUserIds = "/api.user.v1.Profile/GetNonPublicOrgUserIds"
 const OperationProfileGetSyncPolicies = "/api.user.v1.Profile/GetSyncPolicies"
 const OperationProfileGetUserIdsByGroup = "/api.user.v1.Profile/GetUserIdsByGroup"
 const OperationProfileGetUserIdsByOrg = "/api.user.v1.Profile/GetUserIdsByOrg"
@@ -38,6 +39,8 @@ type ProfileHTTPServer interface {
 	GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error)
 	GetByName(context.Context, *GetByNameReq) (*GetByNameRes, error)
 	GetList(context.Context, *GetListReq) (*GetListRes, error)
+	// GetNonPublicOrgUserIds 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+	GetNonPublicOrgUserIds(context.Context, *GetNonPublicOrgUserIdsReq) (*GetNonPublicOrgUserIdsRes, error)
 	// GetSyncPolicies 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
 	GetSyncPolicies(context.Context, *GetSyncPoliciesReq) (*GetSyncPoliciesRes, error)
 	GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error)
@@ -53,14 +56,15 @@ func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r.GET("/v1/user/profile/get-by-id", _Profile_GetById0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/get-by-name", _Profile_GetByName0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/list", _Profile_GetList0_HTTP_Handler(srv))
-	r.POST("/v1/user/profile/update", _Profile_Update3_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/update", _Profile_Update4_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/move-group", _Profile_MoveGroup0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-email-enabled", _Profile_SetEmailEnabled0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-group", _Profile_GetUserIdsByGroup0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-org", _Profile_GetUserIdsByOrg0_HTTP_Handler(srv))
+	r.GET("/v1/user/profile/non-public-org-user-ids", _Profile_GetNonPublicOrgUserIds0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/get-by-ids", _Profile_GetByIds0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/sync-policies", _Profile_GetSyncPolicies0_HTTP_Handler(srv))
-	r.POST("/v1/user/profile/delete", _Profile_Delete2_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/delete", _Profile_Delete3_HTTP_Handler(srv))
 }
 
 func _Profile_GetById0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
@@ -120,7 +124,7 @@ func _Profile_GetList0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context
 	}
 }
 
-func _Profile_Update3_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+func _Profile_Update4_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in UpdateReq
 		if err := ctx.Bind(&in); err != nil {
@@ -224,6 +228,25 @@ func _Profile_GetUserIdsByOrg0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http
 	}
 }
 
+func _Profile_GetNonPublicOrgUserIds0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetNonPublicOrgUserIdsReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileGetNonPublicOrgUserIds)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetNonPublicOrgUserIds(ctx, req.(*GetNonPublicOrgUserIdsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetNonPublicOrgUserIdsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 func _Profile_GetByIds0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in GetByIdsReq
@@ -268,7 +291,7 @@ func _Profile_GetSyncPolicies0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http
 	}
 }
 
-func _Profile_Delete2_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+func _Profile_Delete3_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in DeleteReq
 		if err := ctx.Bind(&in); err != nil {
@@ -297,6 +320,8 @@ type ProfileHTTPClient interface {
 	GetByIds(ctx context.Context, req *GetByIdsReq, opts ...http.CallOption) (rsp *GetByIdsRes, err error)
 	GetByName(ctx context.Context, req *GetByNameReq, opts ...http.CallOption) (rsp *GetByNameRes, err error)
 	GetList(ctx context.Context, req *GetListReq, opts ...http.CallOption) (rsp *GetListRes, err error)
+	// GetNonPublicOrgUserIds 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+	GetNonPublicOrgUserIds(ctx context.Context, req *GetNonPublicOrgUserIdsReq, opts ...http.CallOption) (rsp *GetNonPublicOrgUserIdsRes, err error)
 	// GetSyncPolicies 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
 	GetSyncPolicies(ctx context.Context, req *GetSyncPoliciesReq, opts ...http.CallOption) (rsp *GetSyncPoliciesRes, err error)
 	GetUserIdsByGroup(ctx context.Context, req *GetUserIdsByGroupReq, opts ...http.CallOption) (rsp *GetUserIdsByGroupRes, err error)
@@ -373,6 +398,20 @@ func (c *ProfileHTTPClientImpl) GetList(ctx context.Context, in *GetListReq, opt
 	pattern := "/v1/user/profile/list"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationProfileGetList))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetNonPublicOrgUserIds 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+func (c *ProfileHTTPClientImpl) GetNonPublicOrgUserIds(ctx context.Context, in *GetNonPublicOrgUserIdsReq, opts ...http.CallOption) (*GetNonPublicOrgUserIdsRes, error) {
+	var out GetNonPublicOrgUserIdsRes
+	pattern := "/v1/user/profile/non-public-org-user-ids"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProfileGetNonPublicOrgUserIds))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {

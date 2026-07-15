@@ -418,6 +418,18 @@ func (p *ProfileService) GetUserIdsByOrg(ctx context.Context, req *profile.GetUs
 	return &profile.GetUserIdsByOrgRes{UserIds: ids, OrgId: int64(orgID)}, nil
 }
 
+// GetNonPublicOrgUserIds 非公共域组织用户（题面 AI 闸门）
+func (p *ProfileService) GetNonPublicOrgUserIds(ctx context.Context, _ *profile.GetNonPublicOrgUserIdsReq) (*profile.GetNonPublicOrgUserIdsRes, error) {
+	ids, err := p.profileDal.GetNonPublicOrgUserIds(ctx)
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	if ids == nil {
+		ids = []int64{}
+	}
+	return &profile.GetNonPublicOrgUserIdsRes{UserIds: ids}, nil
+}
+
 // GetByIds 批量获取用户展示名（当前组织 / 指定 org 的组织内名称）
 func (p *ProfileService) GetByIds(ctx context.Context, req *profile.GetByIdsReq) (*profile.GetByIdsRes, error) {
 	orgID := uint(req.OrgId)

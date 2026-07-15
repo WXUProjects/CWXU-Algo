@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package api.core.v1.emergency;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/core/v1/emergency;emergency";
+option java_multiple_files = true;
+option java_package = "api.core.v1.emergency";
+
+// 紧急通知：全站强制弹窗，仅站点管理员可管理
+service Emergency {
+  // 创建紧急通知（站点管理员）
+  rpc Create (CreateEmergencyReq) returns (CreateEmergencyRes) {
+    option (google.api.http) = {
+      post: "/v1/core/emergency/create"
+      body: "*"
+    };
+  }
+  // 更新紧急通知（站点管理员）
+  rpc Update (UpdateEmergencyReq) returns (UpdateEmergencyRes) {
+    option (google.api.http) = {
+      post: "/v1/core/emergency/update"
+      body: "*"
+    };
+  }
+  // 删除紧急通知（站点管理员）
+  rpc Delete (DeleteEmergencyReq) returns (DeleteEmergencyRes) {
+    option (google.api.http) = {
+      delete: "/v1/core/emergency/delete"
+    };
+  }
+  // 后台分页列表（站点管理员）
+  rpc List (ListEmergencyReq) returns (ListEmergencyRes) {
+    option (google.api.http) = {
+      get: "/v1/core/emergency/list"
+    };
+  }
+  // 当前生效的紧急通知（公开，前端弹窗用）
+  rpc Active (ActiveEmergencyReq) returns (ActiveEmergencyRes) {
+    option (google.api.http) = {
+      get: "/v1/core/emergency/active"
+    };
+  }
+}
+
+message EmergencyInfo {
+  int64 id = 1;
+  string title = 2;
+  string content = 3;
+  bool enabled = 4;
+  int64 sortOrder = 5;
+  int64 authorId = 6;
+  string authorName = 7;
+  int64 createdAt = 8;
+  int64 updatedAt = 9;
+}
+
+message CreateEmergencyReq {
+  string title = 1;
+  string content = 2;
+  bool enabled = 3;
+  int64 sortOrder = 4;
+}
+
+message CreateEmergencyRes {
+  int64 code = 1;
+  string message = 2;
+  EmergencyInfo data = 3;
+}
+
+message UpdateEmergencyReq {
+  int64 id = 1;
+  string title = 2;
+  string content = 3;
+  bool enabled = 4;
+  int64 sortOrder = 5;
+}
+
+message UpdateEmergencyRes {
+  int64 code = 1;
+  string message = 2;
+  EmergencyInfo data = 3;
+}
+
+message DeleteEmergencyReq {
+  int64 id = 1;
+}
+
+message DeleteEmergencyRes {
+  int64 code = 1;
+  string message = 2;
+}
+
+message ListEmergencyReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+}
+
+message ListEmergencyRes {
+  int64 code = 1;
+  string message = 2;
+  repeated EmergencyInfo data = 3;
+  int64 total = 4;
+  int64 page = 5;
+  int64 pageSize = 6;
+}
+
+message ActiveEmergencyReq {}
+
+message ActiveEmergencyRes {
+  int64 code = 1;
+  string message = 2;
+  repeated EmergencyInfo data = 3;
+}

@@ -47,7 +47,7 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 
 // migrateModels 合并
 func migrateModels(db *gorm.DB) {
-	err := db.AutoMigrate(&model.SubmitLog{}, &model.Platform{}, &model.ContestLog{}, &model.Bulletin{}, &model.Problem{})
+	err := db.AutoMigrate(&model.SubmitLog{}, &model.Platform{}, &model.ContestLog{}, &model.Bulletin{}, &model.Problem{}, &model.EmergencyNotice{})
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
 	}

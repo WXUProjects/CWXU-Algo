@@ -51,6 +51,12 @@ service Profile {
       get: "/v1/user/profile/ids-by-org"
     };
   }
+  // 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+  rpc GetNonPublicOrgUserIds (GetNonPublicOrgUserIdsReq) returns (GetNonPublicOrgUserIdsRes) {
+    option (google.api.http) = {
+      get: "/v1/user/profile/non-public-org-user-ids"
+    };
+  }
   rpc GetByIds (GetByIdsReq) returns (GetByIdsRes) {
     option (google.api.http) = {
       post: "/v1/user/profile/get-by-ids",
@@ -194,6 +200,12 @@ message GetUserIdsByOrgReq {
 message GetUserIdsByOrgRes {
   repeated int64 userIds = 1;
   int64 orgId = 2;
+}
+
+message GetNonPublicOrgUserIdsReq {}
+
+message GetNonPublicOrgUserIdsRes {
+  repeated int64 userIds = 1;
 }
 
 message GetByIdsReq {
