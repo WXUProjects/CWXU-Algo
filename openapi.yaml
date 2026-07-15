@@ -2040,6 +2040,8 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/api.user.v1.GetListRes_OrgBrief'
+                groupName:
+                    type: string
         api.user.v1.GetListRes_OrgBrief:
             type: object
             properties:

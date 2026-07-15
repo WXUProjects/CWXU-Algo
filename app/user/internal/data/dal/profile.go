@@ -94,6 +94,80 @@ type OrgBrief struct {
 	Role  string
 }
 
+// ResolveDefaultGroupID 组织默认分组 id（无则创建）
+func (d *ProfileDal) ResolveDefaultGroupID(ctx context.Context, orgID uint) (uint, error) {
+	if orgID == 0 {
+		return 0, fmt.Errorf("orgID 无效")
+	}
+	var g model.Group
+	err := d.db.WithContext(ctx).
+		Where("org_id = ? AND name IN ?", orgID, []string{model.DefaultGroupName, "未分组"}).
+		Order("id ASC").
+		First(&g).Error
+	if err == nil {
+		if g.Name != nil && *g.Name == "未分组" {
+			n := model.DefaultGroupName
+			_ = d.db.WithContext(ctx).Model(&g).Updates(map[string]interface{}{
+				"name": n, "describe": model.DefaultGroupDesc,
+			}).Error
+		}
+		return g.ID, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+	n := model.DefaultGroupName
+	g = model.Group{Name: &n, Describe: model.DefaultGroupDesc, OrgID: orgID}
+	if err := d.db.WithContext(ctx).Create(&g).Error; err != nil {
+		return 0, err
+	}
+	return g.ID, nil
+}
+
+// GetGroupNamesByIDs 批量查分组名（仅未删除）
+func (d *ProfileDal) GetGroupNamesByIDs(ctx context.Context, groupIDs []int64) (map[int64]string, error) {
+	out := make(map[int64]string)
+	if len(groupIDs) == 0 {
+		return out, nil
+	}
+	uniq := make([]int64, 0, len(groupIDs))
+	seen := map[int64]struct{}{}
+	for _, id := range groupIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniq = append(uniq, id)
+	}
+	if len(uniq) == 0 {
+		return out, nil
+	}
+	type row struct {
+		ID   int64
+		Name string
+	}
+	var rows []row
+	err := d.db.WithContext(ctx).
+		Table("groups").
+		Select("id, name").
+		Where("id IN ? AND deleted_at IS NULL", uniq).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		name := r.Name
+		if name == "未分组" {
+			name = model.DefaultGroupName
+		}
+		out[r.ID] = name
+	}
+	return out, nil
+}
+
 // GetOrgBriefsByUserIDs 批量查询用户所属组织
 func (d *ProfileDal) GetOrgBriefsByUserIDs(ctx context.Context, userIDs []uint) (map[uint][]OrgBrief, error) {
 	out := make(map[uint][]OrgBrief)

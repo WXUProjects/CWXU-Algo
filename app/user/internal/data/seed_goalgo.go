@@ -158,21 +158,56 @@ func seedGoAlgoFramework(db *gorm.DB) {
 		_ = db.Model(&model.SiteConfig{}).Where("id = ?", 1).Update("site_title", "GoAlgo").Error
 	}
 
-	// 6. 再扫一遍：无有效分组的用户 → 当前组织或公共域的默认分组
+	// 6. 无有效 group_id 的用户 → 挂到其 current_org 的默认分组，否则公共域默认分组
 	var pubDef model.Group
-	if db.Where("org_id = ? AND name = ?", public.ID, model.DefaultGroupName).
-		Order("id ASC").First(&pubDef).Error == nil {
-		// group_id 指向已删除分组的用户
-		_ = db.Exec(`
-			UPDATE users SET group_id = ?
-			WHERE deleted_at IS NULL AND (
-				group_id = 0 OR group_id IS NULL
-				OR group_id NOT IN (SELECT id FROM groups WHERE deleted_at IS NULL)
-			)
-		`, pubDef.ID).Error
+	if db.Where("org_id = ? AND name IN ?", public.ID, []string{model.DefaultGroupName, "未分组"}).
+		Order("id ASC").First(&pubDef).Error != nil {
+		defName := model.DefaultGroupName
+		pubDef = model.Group{Name: &defName, Describe: model.DefaultGroupDesc, OrgID: public.ID}
+		_ = db.Create(&pubDef).Error
+	} else if pubDef.Name != nil && *pubDef.Name == "未分组" {
+		n := model.DefaultGroupName
+		_ = db.Model(&pubDef).Updates(map[string]interface{}{"name": n, "describe": model.DefaultGroupDesc}).Error
 	}
 
-	log.Infof("GoAlgo framework seed done public_org_id=%d users=%d", public.ID, len(users))
+	// 按用户 current_org 修正无效 group_id
+	type ug struct {
+		ID           uint
+		GroupID      int64
+		CurrentOrgID uint
+	}
+	var bad []ug
+	_ = db.Raw(`
+		SELECT u.id, COALESCE(u.group_id, 0) AS group_id, COALESCE(u.current_org_id, 0) AS current_org_id
+		FROM users u
+		WHERE u.deleted_at IS NULL AND (
+			u.group_id IS NULL OR u.group_id = 0
+			OR u.group_id NOT IN (SELECT id FROM groups WHERE deleted_at IS NULL)
+		)
+	`).Scan(&bad).Error
+	for _, u := range bad {
+		orgID := u.CurrentOrgID
+		if orgID == 0 {
+			orgID = public.ID
+		}
+		var defG model.Group
+		if db.Where("org_id = ? AND name IN ?", orgID, []string{model.DefaultGroupName, "未分组"}).
+			Order("id ASC").First(&defG).Error != nil {
+			defName := model.DefaultGroupName
+			defG = model.Group{Name: &defName, Describe: model.DefaultGroupDesc, OrgID: orgID}
+			if db.Create(&defG).Error != nil {
+				defG.ID = pubDef.ID
+			}
+		}
+		if defG.ID > 0 {
+			_ = db.Model(&model.User{}).Where("id = ?", u.ID).Update("group_id", defG.ID).Error
+		}
+	}
+
+	// 删除历史虚拟「未分组」若存在 id=0 脏数据（一般无此行）
+	_ = db.Where("name = ? AND id = 0", "未分组").Delete(&model.Group{}).Error
+
+	log.Infof("GoAlgo framework seed done public_org_id=%d users=%d fixed_groups=%d", public.ID, len(users), len(bad))
 }
 
 // EnsurePublicOrgID 供业务使用

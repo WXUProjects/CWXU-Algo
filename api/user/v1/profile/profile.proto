@@ -129,6 +129,7 @@ message GetListRes {
     int32 roleId = 8;
     bool isSiteAdmin = 9;
     repeated OrgBrief orgs = 10;
+    string groupName = 11; // 分组显示名；无效 groupId 时为空或「默认分组」
   }
   repeated List list = 1;
   int64 total = 2;

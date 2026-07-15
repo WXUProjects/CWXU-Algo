@@ -57,7 +57,27 @@ func (p *ProfileService) MoveGroup(ctx context.Context, req *profile.MoveGroupRe
 	if !auth.VerifyStaff(ctx) {
 		return nil, errors.Forbidden("权限不足", "需要教练、队长、团队管理员或站点管理员权限")
 	}
-	err := p.profileDal.MoveGroup(ctx, req.UserId, req.GroupId)
+	gid := req.GroupId
+	// groupId=0 表示归入当前组织默认分组（不再使用「未分组」）
+	if gid <= 0 {
+		orgID := uint(0)
+		if pd := auth.GetCurrentUser(ctx); pd != nil {
+			orgID = pd.OrgID
+		}
+		if orgID == 0 {
+			if id, e := p.profileDal.PublicOrgID(ctx); e == nil {
+				orgID = id
+			}
+		}
+		if orgID > 0 {
+			// 通过 groupDal 路径不便，直接写默认：由 seed/list 保证存在
+			// 使用 profileDal 的 db 查默认分组
+			if def, e := p.profileDal.ResolveDefaultGroupID(ctx, orgID); e == nil && def > 0 {
+				gid = int64(def)
+			}
+		}
+	}
+	err := p.profileDal.MoveGroup(ctx, req.UserId, gid)
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
@@ -141,10 +161,15 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 	}
 
 	uids := make([]uint, 0, len(pf))
+	gids := make([]int64, 0, len(pf))
 	for _, v := range pf {
 		uids = append(uids, v.ID)
+		if v.GroupId > 0 {
+			gids = append(gids, v.GroupId)
+		}
 	}
 	orgMap, _ := p.profileDal.GetOrgBriefsByUserIDs(ctx, uids)
+	groupNames, _ := p.profileDal.GetGroupNamesByIDs(ctx, gids)
 
 	res := &profile.GetListRes{
 		List:  make([]*profile.GetListRes_List, 0),
@@ -155,6 +180,17 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		if ts, ok := timeMap[int64(v.ID)]; ok {
 			t = strconv.Itoa(int(ts))
 		}
+		gName := ""
+		if v.GroupId > 0 {
+			if n, ok := groupNames[v.GroupId]; ok {
+				gName = n
+			} else {
+				// 分组已删：显示默认分组，避免「分组11」
+				gName = "默认分组"
+			}
+		} else {
+			gName = "默认分组"
+		}
 		item := &profile.GetListRes_List{
 			UserId:      uint64(v.ID),
 			Username:    v.Username,
@@ -164,6 +200,7 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			RoleId:      int32(v.RoleID),
 			LastSubmit:  t,
 			IsSiteAdmin: v.IsSiteAdmin,
+			GroupName:   gName,
 		}
 		if briefs := orgMap[v.ID]; len(briefs) > 0 {
 			item.Orgs = make([]*profile.GetListRes_OrgBrief, 0, len(briefs))

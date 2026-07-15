@@ -147,21 +147,43 @@ func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*g
 	if pd := auth.GetCurrentUser(ctx); pd != nil {
 		orgID = pd.OrgID
 	}
+	// 当前组织无分组时自动补「默认分组」
+	if orgID > 0 {
+		_, _ = g.groupDal.EnsureDefaultGroup(ctx, orgID)
+	}
 	list, total, err := g.groupUseCase.List(ctx, page, size, orgID)
 	if err != nil {
 		return nil, errors.InternalServer("查询失败", err.Error())
 	}
 	reply := &group.ListReply{List: make([]*group.GetReply, 0), Total: total}
-	for _, g := range list {
+	for _, gr := range list {
+		if gr.ID == 0 {
+			// 不展示历史虚拟「未分组」id=0
+			continue
+		}
 		name := ""
-		if g.Name != nil {
-			name = *g.Name
+		if gr.Name != nil {
+			name = *gr.Name
+			if name == "未分组" {
+				name = "默认分组"
+			}
 		}
 		reply.List = append(reply.List, &group.GetReply{
-			Id:       int64(g.ID),
+			Id:       int64(gr.ID),
 			Name:     name,
-			Describe: g.Describe,
+			Describe: gr.Describe,
 		})
+	}
+	// 若过滤后空且有 org，再确保默认分组
+	if len(reply.List) == 0 && orgID > 0 {
+		if id, e := g.groupDal.EnsureDefaultGroup(ctx, orgID); e == nil && id > 0 {
+			reply.List = append(reply.List, &group.GetReply{
+				Id:       int64(id),
+				Name:     "默认分组",
+				Describe: "组织默认分组",
+			})
+			reply.Total = 1
+		}
 	}
 	return reply, nil
 }
