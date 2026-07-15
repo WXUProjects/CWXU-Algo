@@ -48,14 +48,15 @@ func parsePayload(ctx context.Context) *JwtPayload {
 	return &pd
 }
 
-// VerifyMinRole 校验调用者角色等级是否 >= minRole
-// 例如：VerifyMinRole(ctx, permission.RoleCoach) 表示至少是教练
+// VerifyMinRole 校验调用者权限是否不低于 minRole
+// 注意：RoleAdmin=1、RoleCoach=2，不能直接比较 RoleID 数值。
+// 例如：VerifyMinRole(ctx, permission.RoleCoach) → 管理员或教练均通过
 func VerifyMinRole(ctx context.Context, minRole int) bool {
 	pd := parsePayload(ctx)
 	if pd == nil {
 		return false
 	}
-	return pd.RoleID >= minRole
+	return permission.RoleRank(pd.RoleID) >= permission.RoleRank(minRole)
 }
 
 // VerifySelfOrAbove 校验调用者是否能操作目标用户

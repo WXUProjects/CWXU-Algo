@@ -1,10 +1,10 @@
 package permission
 
-// 角色等级，等级越高权限越大，权限校验：调用者等级 >= 被操作对象等级
+// 角色 ID（注意：数值大小 ≠ 权限高低，Admin=1 却是最高权限）
 const (
-	RoleUser   = 0 // 普通用户
-	RoleCoach  = 2 // 教练
-	RoleAdmin  = 1 // 管理员（最高权限）
+	RoleUser  = 0 // 普通用户
+	RoleAdmin = 1 // 管理员（最高权限）
+	RoleCoach = 2 // 教练
 )
 
 // RoleName 角色名称映射
@@ -12,6 +12,20 @@ var RoleName = map[int]string{
 	RoleUser:  "普通用户",
 	RoleCoach: "教练",
 	RoleAdmin: "管理员",
+}
+
+// RoleRank 权限序：数值越大权限越高（勿直接比较 RoleID）
+func RoleRank(role int) int {
+	switch role {
+	case RoleAdmin:
+		return 100
+	case RoleCoach:
+		return 50
+	case RoleUser:
+		return 0
+	default:
+		return -1
+	}
 }
 
 // String 获取角色名称
@@ -31,8 +45,7 @@ func IsValid(role int) bool {
 	return false
 }
 
-// CanManage 判断调用者是否能管理目标用户（调用者角色等级 >= 目标角色等级）
+// CanManage 判断调用者是否能管理目标用户（权限序 >=）
 func CanManage(callerRole, targetRole int) bool {
-	// 同等级只能管理自己
-	return callerRole >= targetRole
+	return RoleRank(callerRole) >= RoleRank(targetRole)
 }

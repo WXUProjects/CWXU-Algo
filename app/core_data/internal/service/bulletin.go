@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"cwxu-algo/api/core/v1/bulletin"
-	"cwxu-algo/app/common/permission"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -35,10 +34,9 @@ func (s *BulletinService) modelToProto(m *model.Bulletin) *bulletin.BulletinInfo
 	}
 }
 
-// Create 创建公告（教练/管理员）
+// Create 创建公告（管理员完全控制；教练亦可发布）
 func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBulletinReq) (*bulletin.CreateBulletinRes, error) {
-	// 权限校验：至少教练
-	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
+	if !auth.VerifyAdmin(ctx) && !auth.VerifyCoach(ctx) {
 		return &bulletin.CreateBulletinRes{
 			Code:    1,
 			Message: "权限不足，仅教练和管理员可发布公告",
@@ -86,13 +84,12 @@ func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBullet
 	}, nil
 }
 
-// Update 更新公告（教练/管理员）
+// Update 更新公告：管理员可改任意公告；教练可改任意公告（公告非作者专属）
 func (s *BulletinService) Update(ctx context.Context, req *bulletin.UpdateBulletinReq) (*bulletin.UpdateBulletinRes, error) {
-	// 权限校验
-	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
+	if !auth.VerifyAdmin(ctx) && !auth.VerifyCoach(ctx) {
 		return &bulletin.UpdateBulletinRes{
 			Code:    1,
-			Message: "权限不足",
+			Message: "权限不足，仅教练和管理员可管理公告",
 		}, nil
 	}
 
@@ -108,7 +105,7 @@ func (s *BulletinService) Update(ctx context.Context, req *bulletin.UpdateBullet
 		return nil, errors.InternalServer("查询失败", err.Error())
 	}
 
-	// 构建更新字段
+	// 构建更新字段（管理员/教练均可改任意字段，不校验作者）
 	updates := make(map[string]interface{})
 	if req.Title != "" {
 		updates["title"] = req.Title
@@ -142,13 +139,12 @@ func (s *BulletinService) Update(ctx context.Context, req *bulletin.UpdateBullet
 	}, nil
 }
 
-// Delete 删除公告（教练/管理员）
+// Delete 删除公告：管理员/教练可删任意公告（非作者专属）
 func (s *BulletinService) Delete(ctx context.Context, req *bulletin.DeleteBulletinReq) (*bulletin.DeleteBulletinRes, error) {
-	// 权限校验
-	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
+	if !auth.VerifyAdmin(ctx) && !auth.VerifyCoach(ctx) {
 		return &bulletin.DeleteBulletinRes{
 			Code:    1,
-			Message: "权限不足",
+			Message: "权限不足，仅教练和管理员可管理公告",
 		}, nil
 	}
 
