@@ -64,6 +64,30 @@ func (s *ProblemService) fetchUserNames(ctx context.Context, userIDs []int64) ma
 	return out
 }
 
+// cleanDisplayTitle 列表/详情展示用：去掉 AtCoder 页头夹带的 Editorial 与空白行
+func cleanDisplayTitle(title string) string {
+	title = strings.ReplaceAll(title, "\r", "\n")
+	for _, line := range strings.Split(title, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.EqualFold(line, "Editorial") || strings.EqualFold(line, "解説") {
+			continue
+		}
+		for _, suf := range []string{"Editorial", "解説"} {
+			if i := strings.LastIndex(line, suf); i > 0 {
+				line = strings.TrimSpace(line[:i])
+			}
+		}
+		line = strings.Join(strings.Fields(line), " ")
+		if line != "" {
+			return line
+		}
+	}
+	return strings.Join(strings.Fields(title), " ")
+}
+
 func (s *ProblemService) toInfo(p *model.Problem, userStatus string) *problem.ProblemInfo {
 	if p == nil {
 		return nil
@@ -89,7 +113,7 @@ func (s *ProblemService) toInfo(p *model.Problem, userStatus string) *problem.Pr
 		Id:              uint32(p.ID),
 		Platform:        p.Platform,
 		ExternalId:      p.ExternalID,
-		Title:           p.Title,
+		Title:           cleanDisplayTitle(p.Title),
 		Url:             p.URL,
 		ContentMd:       p.ContentMD,
 		ProblemType:     p.ProblemType,
@@ -247,11 +271,18 @@ func (s *ProblemService) UserProfile(ctx context.Context, req *problem.UserProfi
 func toFailedProto(list []model.Problem) []*problem.FailedProblem {
 	ff := make([]*problem.FailedProblem, 0, len(list))
 	for _, f := range list {
+		title := cleanDisplayTitle(f.Title)
+		if title == "" {
+			title = f.ExternalID
+		}
+		if title == "" {
+			title = f.Status
+		}
 		ff = append(ff, &problem.FailedProblem{
 			Id:            uint32(f.ID),
 			Platform:      f.Platform,
 			ExternalId:    f.ExternalID,
-			Title:         firstNonEmptyTitle(f.Title, f.Status),
+			Title:         title,
 			ErrorMsg:      firstNonEmptyTitle(f.ErrorMsg, f.Status),
 			UpdatedAt:     f.UpdatedAt.Unix(),
 			Status:        f.Status,
@@ -285,11 +316,15 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 	}
 	jobs := make([]*problem.ActiveJob, 0, len(snap.ActiveJobs))
 	for _, j := range snap.ActiveJobs {
+		t := cleanDisplayTitle(j.Title)
+		if t == "" {
+			t = j.ExternalID
+		}
 		jobs = append(jobs, &problem.ActiveJob{
 			ProblemId:  uint32(j.ProblemID),
 			Platform:   j.Platform,
 			ExternalId: j.ExternalID,
-			Title:      j.Title,
+			Title:      t,
 			Stage:      j.Stage,
 			StartedAt:  j.StartedAt.Unix(),
 		})

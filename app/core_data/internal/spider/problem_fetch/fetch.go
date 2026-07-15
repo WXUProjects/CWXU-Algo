@@ -491,10 +491,12 @@ func fetchAtCoder(problemURL string) (*FetchedContent, error) {
 	if err != nil {
 		return nil, err
 	}
-	title := strings.TrimSpace(doc.Find("span.h2").First().Text())
+	title := cleanProblemTitle(doc.Find("span.h2").First().Text())
 	if title == "" {
-		title = strings.TrimSpace(doc.Find("h2").First().Text())
+		title = cleanProblemTitle(doc.Find("h2").First().Text())
 	}
+	// AtCoder 页头 h2 常夹带 "Editorial" 与换行，再清一次
+	title = cleanProblemTitle(title)
 	var mdParts []string
 	doc.Find("#task-statement span.lang-en, #task-statement .lang-en").Each(func(_ int, s *goquery.Selection) {
 		t := selectionToMD(s)
@@ -715,11 +717,34 @@ func nowcoderFetchHTML(problemURL string) (string, error) {
 }
 
 func cleanNowCoderTitle(title string) string {
-	title = strings.TrimSpace(title)
-	for _, sep := range []string{"_", "-", "|"} {
-		title = strings.TrimSpace(strings.Split(title, sep)[0])
+	return cleanProblemTitle(title)
+}
+
+// cleanProblemTitle 去掉 AtCoder 等页头夹带的 Editorial / 换行 / 多余空白
+func cleanProblemTitle(title string) string {
+	title = strings.ReplaceAll(title, "\r", "\n")
+	// 取第一行有效内容
+	for _, line := range strings.Split(title, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// 单独的 Editorial 链接文案
+		if strings.EqualFold(line, "Editorial") || strings.EqualFold(line, "解説") {
+			continue
+		}
+		// 行尾粘着 Editorial
+		for _, suf := range []string{"Editorial", "解説"} {
+			if i := strings.LastIndex(line, suf); i > 0 {
+				line = strings.TrimSpace(line[:i])
+			}
+		}
+		line = strings.Join(strings.Fields(line), " ")
+		if line != "" {
+			return line
+		}
 	}
-	return title
+	return strings.Join(strings.Fields(title), " ")
 }
 
 // parseNowCoderMainHTML 主站 /practice/{uuid}：题面在 body 顶部 SEO 隐藏区
