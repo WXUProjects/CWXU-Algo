@@ -52,8 +52,9 @@ func (p *ProfileService) GetByName(ctx context.Context, req *profile.GetByNameRe
 }
 
 func (p *ProfileService) MoveGroup(ctx context.Context, req *profile.MoveGroupReq) (*profile.MoveGroupRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
-		return nil, errors.Forbidden("权限不足", "需要教练或管理员权限操作")
+	// 管理员 / 教练 / 队长
+	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
+		return nil, errors.Forbidden("权限不足", "需要教练、队长或管理员权限")
 	}
 	err := p.profileDal.MoveGroup(ctx, req.UserId, req.GroupId)
 	if err != nil {

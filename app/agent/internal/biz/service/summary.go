@@ -40,18 +40,19 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 	}
 
 	roleId := uc.checkRoleId(userId)
-	// RoleID=2 教练：仅周一发周报
+	// RoleID=2 教练：仅周一发周报（无队员日报）
+	// RoleID=3 队长：日报 + 周一额外周报（教练+队员）
 	// RoleID=1 管理员：日报 + 周一额外周报
-	// RoleID=0 普通：只发日报
+	// RoleID=0 队员：只发日报
 	if roleId == 2 {
 		if time.Now().Weekday() == time.Monday {
 			return uc.WeeklyReportForCoach(userId)
 		}
 		return nil
 	}
-	if roleId == 1 && time.Now().Weekday() == time.Monday {
+	if (roleId == 1 || roleId == 3) && time.Now().Weekday() == time.Monday {
 		if err := uc.WeeklyReportForCoach(userId); err != nil {
-			log.Errorf("管理员 %d 周报发送失败: %v", userId, err)
+			log.Errorf("用户 %d 周报发送失败: %v", userId, err)
 		}
 	}
 

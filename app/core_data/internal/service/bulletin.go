@@ -34,12 +34,12 @@ func (s *BulletinService) modelToProto(m *model.Bulletin) *bulletin.BulletinInfo
 	}
 }
 
-// Create 创建公告（管理员完全控制；教练亦可发布）
+// Create 创建公告（管理员 / 教练 / 队长）
 func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBulletinReq) (*bulletin.CreateBulletinRes, error) {
-	if !auth.VerifyAdmin(ctx) && !auth.VerifyCoach(ctx) {
+	if !auth.VerifyStaff(ctx) {
 		return &bulletin.CreateBulletinRes{
 			Code:    1,
-			Message: "权限不足，仅教练和管理员可发布公告",
+			Message: "权限不足，仅教练、队长和管理员可发布公告",
 		}, nil
 	}
 
@@ -84,12 +84,12 @@ func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBullet
 	}, nil
 }
 
-// Update 更新公告：管理员可改任意公告；教练可改任意公告（公告非作者专属）
+// Update 更新公告：管理员 / 教练 / 队长可改任意公告
 func (s *BulletinService) Update(ctx context.Context, req *bulletin.UpdateBulletinReq) (*bulletin.UpdateBulletinRes, error) {
-	if !auth.VerifyAdmin(ctx) && !auth.VerifyCoach(ctx) {
+	if !auth.VerifyStaff(ctx) {
 		return &bulletin.UpdateBulletinRes{
 			Code:    1,
-			Message: "权限不足，仅教练和管理员可管理公告",
+			Message: "权限不足，仅教练、队长和管理员可管理公告",
 		}, nil
 	}
 
@@ -139,12 +139,12 @@ func (s *BulletinService) Update(ctx context.Context, req *bulletin.UpdateBullet
 	}, nil
 }
 
-// Delete 删除公告：管理员/教练可删任意公告（非作者专属）
+// Delete 删除公告：管理员 / 教练 / 队长可删任意公告
 func (s *BulletinService) Delete(ctx context.Context, req *bulletin.DeleteBulletinReq) (*bulletin.DeleteBulletinRes, error) {
-	if !auth.VerifyAdmin(ctx) && !auth.VerifyCoach(ctx) {
+	if !auth.VerifyStaff(ctx) {
 		return &bulletin.DeleteBulletinRes{
 			Code:    1,
-			Message: "权限不足，仅教练和管理员可管理公告",
+			Message: "权限不足，仅教练、队长和管理员可管理公告",
 		}, nil
 	}
 

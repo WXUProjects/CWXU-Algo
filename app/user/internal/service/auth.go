@@ -38,8 +38,9 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 	}
 	// 签发 JWT Token
 	expire := time.Now().Add(8640 * time.Hour) // 过期时间8640小时
+	// roleIds 兼容旧论坛等：管理端角色标记为 [1]
 	_roleIdsJSON := []byte("[0]")
-	if u.RoleID == 1 || u.RoleID == 2 {
+	if u.RoleID == 1 || u.RoleID == 2 || u.RoleID == 3 {
 		_roleIdsJSON = []byte("[1]")
 	}
 	_jwtToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{

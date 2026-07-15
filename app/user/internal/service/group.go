@@ -37,8 +37,8 @@ func (g *GroupService) coreDataRPC() (*grpc2.ClientConn, error) {
 }
 
 func (g *GroupService) Create(ctx context.Context, request *group.CreateRequest) (*group.CreateReply, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
-		return nil, errors.Forbidden("权限不足", "需要教练或管理员权限操作")
+	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
+		return nil, errors.Forbidden("权限不足", "需要教练、队长或管理员权限")
 	}
 	if request.Name == "" {
 		return nil, errors.BadRequest("参数错误", "组名称不能为空")
@@ -54,8 +54,8 @@ func (g *GroupService) Create(ctx context.Context, request *group.CreateRequest)
 }
 
 func (g *GroupService) Delete(ctx context.Context, request *group.DeleteRequest) (*group.DeleteReply, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
-		return nil, errors.Forbidden("权限不足", "需要教练或管理员权限操作")
+	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
+		return nil, errors.Forbidden("权限不足", "需要教练、队长或管理员权限")
 	}
 	if request.Id == 0 {
 		return nil, errors.BadRequest("参数错误", "组ID不能为空")
@@ -152,8 +152,8 @@ func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*g
 }
 
 func (g *GroupService) Update(ctx context.Context, request *group.UpdateRequest) (*group.UpdateReply, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
-		return nil, errors.Forbidden("权限不足", "需要教练或管理员权限操作")
+	if !auth.VerifyMinRole(ctx, permission.RoleCoach) {
+		return nil, errors.Forbidden("权限不足", "需要教练、队长或管理员权限")
 	}
 	if request.Id == 0 {
 		return nil, errors.BadRequest("参数错误", "组ID不能为空")

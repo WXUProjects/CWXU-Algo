@@ -312,8 +312,8 @@ func firstNonEmptyTitle(a, b string) string {
 }
 
 func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq) (*problem.ProgressRes, error) {
-	// RoleAdmin=1 < RoleCoach=2，不能用 VerifyMinRole(Coach)
-	if !auth.VerifyAdmin(ctx) && !auth.VerifyCoach(ctx) {
+	// 管理端可查看进度；运维写操作仍仅管理员
+	if !auth.VerifyStaff(ctx) {
 		return &problem.ProgressRes{Code: 1, Message: "权限不足"}, nil
 	}
 	snap, err := s.uc.Progress()

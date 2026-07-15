@@ -62,9 +62,12 @@ func TestCoachRoleSkipLogic(t *testing.T) {
 		{2, true, false, "coach Monday run weekly"},
 		{0, false, false, "member daily"},
 		{1, true, false, "admin monday both"},
+		{3, false, false, "captain daily"},
+		{3, true, false, "captain monday both"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
+			// 纯教练非周一跳过；队长/管理员/队员走日报（周一另加周报）
 			shouldSkip := tt.roleId == 2 && !tt.isMonday
 			if shouldSkip != tt.expectNil {
 				t.Errorf("role=%d monday=%v skip want %v got %v", tt.roleId, tt.isMonday, tt.expectNil, shouldSkip)

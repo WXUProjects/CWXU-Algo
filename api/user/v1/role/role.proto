@@ -25,8 +25,8 @@ service Role {
 
 // 角色定义
 message RoleInfo {
-  int32 roleId = 1;    // 角色ID：0=普通用户 1=管理员 2=教练
-  string name = 2;     // 角色名称：普通用户/管理员/教练
+  int32 roleId = 1;    // 角色ID：0=队员 1=管理员 2=教练 3=队长
+  string name = 2;     // 角色名称：队员/管理员/教练/队长
 }
 
 message ListReq {}
@@ -37,7 +37,7 @@ message ListRes {
 
 message SetUserRoleReq {
   int64 userId = 1;   // 目标用户ID
-  int32 roleId = 2;   // 要设置为的角色ID：0=普通用户 1=管理员 2=教练
+  int32 roleId = 2;   // 要设置为的角色ID：0=队员 1=管理员 2=教练 3=队长
 }
 
 message SetUserRoleRes {

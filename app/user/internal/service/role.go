@@ -19,9 +19,10 @@ type RoleService struct {
 func (r *RoleService) List(ctx context.Context, req *role.ListReq) (*role.ListRes, error) {
 	return &role.ListRes{
 		Roles: []*role.RoleInfo{
-			{RoleId: 0, Name: permission.RoleName[permission.RoleUser]},
-			{RoleId: 1, Name: permission.RoleName[permission.RoleAdmin]},
-			{RoleId: 2, Name: permission.RoleName[permission.RoleCoach]},
+			{RoleId: int32(permission.RoleUser), Name: permission.RoleName[permission.RoleUser]},
+			{RoleId: int32(permission.RoleAdmin), Name: permission.RoleName[permission.RoleAdmin]},
+			{RoleId: int32(permission.RoleCoach), Name: permission.RoleName[permission.RoleCoach]},
+			{RoleId: int32(permission.RoleCaptain), Name: permission.RoleName[permission.RoleCaptain]},
 		},
 	}, nil
 }
