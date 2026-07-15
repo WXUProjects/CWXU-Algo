@@ -4,57 +4,228 @@ import (
 	"cwxu-algo/app/common/conf"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
+	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/wire"
 	"github.com/streadway/amqp"
 )
 
-// RabbitMQ 连接封装。
+// RabbitMQ 连接封装，支持 Connection 级自动重连。
 // amqp.Channel 非并发安全：消费/发布必须使用独立 Channel；
-// 发布侧通过 Publish 统一加锁，避免多 goroutine 共用一个 Ch 写坏连接。
+// 发布侧通过 pubMu 串行化，避免多 goroutine 共用一个 Ch。
 type RabbitMQ struct {
+	// Conn 当前连接（可能短暂为 nil；请用 OpenChannel，勿长期持有）
 	Conn *amqp.Connection
 
-	pubMu sync.Mutex
-	pubCh *amqp.Channel
+	dsn string
+
+	mu          sync.Mutex // 保护 Conn / pubCh
+	reconnectMu sync.Mutex // 串行重连，避免并发 Dial 打爆 MQ
+	pubMu       sync.Mutex // 串行发布 / declare / purge
+	pubCh       *amqp.Channel
+	closed      atomic.Bool
 }
 
 func NewRabbitMQ(data *conf.Server) (*RabbitMQ, func(), error) {
-	conn, err := amqp.Dial(data.AmqpDsn)
-	if err != nil {
+	mq := &RabbitMQ{dsn: data.AmqpDsn}
+	if err := mq.reconnect(); err != nil {
 		return nil, func() {}, err
-	}
-	pubCh, err := conn.Channel()
-	if err != nil {
-		_ = conn.Close()
-		return nil, func() {}, err
-	}
-	mq := &RabbitMQ{
-		Conn:  conn,
-		pubCh: pubCh,
 	}
 	return mq, func() {
-		mq.pubMu.Lock()
+		mq.closed.Store(true)
+		mq.mu.Lock()
 		if mq.pubCh != nil {
 			_ = mq.pubCh.Close()
 			mq.pubCh = nil
 		}
-		mq.pubMu.Unlock()
-		_ = conn.Close()
+		if mq.Conn != nil {
+			_ = mq.Conn.Close()
+			mq.Conn = nil
+		}
+		mq.mu.Unlock()
 	}, nil
+}
+
+func (r *RabbitMQ) dial() (*amqp.Connection, *amqp.Channel, error) {
+	conn, err := amqp.DialConfig(r.dsn, amqp.Config{
+		Heartbeat: 10 * time.Second,
+		Locale:    "en_US",
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	pubCh, err := conn.Channel()
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, err
+	}
+	return conn, pubCh, nil
+}
+
+// reconnect 建立新连接并替换旧连接；NotifyClose 后后台自动再连。
+func (r *RabbitMQ) reconnect() error {
+	if r == nil {
+		return fmt.Errorf("mq not ready")
+	}
+	if r.closed.Load() {
+		return fmt.Errorf("mq closed")
+	}
+	r.reconnectMu.Lock()
+	defer r.reconnectMu.Unlock()
+
+	// 双重检查：其它路径可能已重连成功
+	r.mu.Lock()
+	if r.Conn != nil && !r.Conn.IsClosed() {
+		r.mu.Unlock()
+		return nil
+	}
+	r.mu.Unlock()
+
+	conn, pubCh, err := r.dial()
+	if err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	oldConn, oldPub := r.Conn, r.pubCh
+	r.Conn, r.pubCh = conn, pubCh
+	r.mu.Unlock()
+
+	if oldPub != nil {
+		_ = oldPub.Close()
+	}
+	if oldConn != nil {
+		_ = oldConn.Close()
+	}
+
+	closeCh := make(chan *amqp.Error, 1)
+	conn.NotifyClose(closeCh)
+	go r.watchConn(conn, closeCh)
+	return nil
+}
+
+func (r *RabbitMQ) watchConn(conn *amqp.Connection, closeCh chan *amqp.Error) {
+	err, ok := <-closeCh
+	if r.closed.Load() {
+		return
+	}
+	if ok && err != nil {
+		log.Errorf("RabbitMQ connection closed: %v", err)
+	} else {
+		log.Warnf("RabbitMQ connection closed")
+	}
+
+	// 仅当仍是当前连接时清空，避免误清新连接
+	r.mu.Lock()
+	if r.Conn == conn {
+		if r.pubCh != nil {
+			_ = r.pubCh.Close()
+			r.pubCh = nil
+		}
+		r.Conn = nil
+	}
+	r.mu.Unlock()
+
+	backoff := time.Second
+	for !r.closed.Load() {
+		// 已被其它路径重连成功则退出
+		r.mu.Lock()
+		live := r.Conn != nil && !r.Conn.IsClosed()
+		r.mu.Unlock()
+		if live {
+			return
+		}
+		if reErr := r.reconnect(); reErr == nil {
+			log.Infof("RabbitMQ reconnected")
+			return
+		} else {
+			log.Errorf("RabbitMQ reconnect failed: %v，%v 后重试", reErr, backoff)
+		}
+		time.Sleep(backoff)
+		if backoff < 30*time.Second {
+			backoff *= 2
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+		}
+	}
+}
+
+// ensureConn 保证有可用连接（必要时同步重连一次）
+func (r *RabbitMQ) ensureConn() error {
+	if r == nil {
+		return fmt.Errorf("mq not ready")
+	}
+	if r.closed.Load() {
+		return fmt.Errorf("mq closed")
+	}
+	r.mu.Lock()
+	live := r.Conn != nil && !r.Conn.IsClosed()
+	r.mu.Unlock()
+	if live {
+		return nil
+	}
+	return r.reconnect()
+}
+
+func (r *RabbitMQ) invalidate(conn *amqp.Connection) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if conn != nil && r.Conn != conn {
+		return
+	}
+	if r.pubCh != nil {
+		_ = r.pubCh.Close()
+		r.pubCh = nil
+	}
+	if r.Conn != nil {
+		_ = r.Conn.Close()
+		r.Conn = nil
+	}
 }
 
 // OpenChannel 打开新 Channel（供消费者专用，勿与 Publish 共用）
 func (r *RabbitMQ) OpenChannel() (*amqp.Channel, error) {
-	if r == nil || r.Conn == nil {
+	if err := r.ensureConn(); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	conn := r.Conn
+	r.mu.Unlock()
+	if conn == nil {
 		return nil, fmt.Errorf("mq not ready")
 	}
-	return r.Conn.Channel()
+	ch, err := conn.Channel()
+	if err != nil {
+		r.invalidate(conn)
+		// 再试一次重连
+		if err2 := r.ensureConn(); err2 != nil {
+			return nil, err
+		}
+		r.mu.Lock()
+		conn = r.Conn
+		r.mu.Unlock()
+		if conn == nil {
+			return nil, err
+		}
+		return conn.Channel()
+	}
+	return ch, nil
 }
 
-// ensurePubCh 确保发布 channel 可用（连接断后重建）
+// ensurePubCh 确保发布 channel 可用（调用方须持有 pubMu）
 func (r *RabbitMQ) ensurePubCh() error {
-	if r == nil || r.Conn == nil {
+	if err := r.ensureConn(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed.Load() {
+		return fmt.Errorf("mq closed")
+	}
+	if r.Conn == nil || r.Conn.IsClosed() {
 		return fmt.Errorf("mq not ready")
 	}
 	if r.pubCh != nil {
@@ -68,22 +239,40 @@ func (r *RabbitMQ) ensurePubCh() error {
 	return nil
 }
 
-// Publish 线程安全发布
+func (r *RabbitMQ) dropPubCh() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pubCh != nil {
+		_ = r.pubCh.Close()
+		r.pubCh = nil
+	}
+}
+
+// Publish 线程安全发布；失败时丢弃 pub channel 并尝试重连再发一次
 func (r *RabbitMQ) Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error {
 	if r == nil {
 		return fmt.Errorf("mq not ready")
 	}
 	r.pubMu.Lock()
 	defer r.pubMu.Unlock()
-	if err := r.ensurePubCh(); err != nil {
-		return err
+
+	try := func() error {
+		if err := r.ensurePubCh(); err != nil {
+			return err
+		}
+		r.mu.Lock()
+		ch := r.pubCh
+		r.mu.Unlock()
+		if ch == nil {
+			return fmt.Errorf("mq not ready")
+		}
+		return ch.Publish(exchange, key, mandatory, immediate, msg)
 	}
-	err := r.pubCh.Publish(exchange, key, mandatory, immediate, msg)
-	if err != nil {
-		// channel 可能已死，下次重建
-		_ = r.pubCh.Close()
-		r.pubCh = nil
-		return err
+
+	if err := try(); err != nil {
+		r.dropPubCh()
+		_ = r.reconnect()
+		return try()
 	}
 	return nil
 }
@@ -95,14 +284,25 @@ func (r *RabbitMQ) QueueDeclare(name string, durable, autoDelete, exclusive, noW
 	}
 	r.pubMu.Lock()
 	defer r.pubMu.Unlock()
-	if err := r.ensurePubCh(); err != nil {
-		return amqp.Queue{}, err
+
+	try := func() (amqp.Queue, error) {
+		if err := r.ensurePubCh(); err != nil {
+			return amqp.Queue{}, err
+		}
+		r.mu.Lock()
+		ch := r.pubCh
+		r.mu.Unlock()
+		if ch == nil {
+			return amqp.Queue{}, fmt.Errorf("mq not ready")
+		}
+		return ch.QueueDeclare(name, durable, autoDelete, exclusive, noWait, args)
 	}
-	q, err := r.pubCh.QueueDeclare(name, durable, autoDelete, exclusive, noWait, args)
+
+	q, err := try()
 	if err != nil {
-		_ = r.pubCh.Close()
-		r.pubCh = nil
-		return amqp.Queue{}, err
+		r.dropPubCh()
+		_ = r.reconnect()
+		return try()
 	}
 	return q, nil
 }
@@ -114,24 +314,32 @@ func (r *RabbitMQ) QueuePurge(name string, noWait bool) (int, error) {
 	}
 	r.pubMu.Lock()
 	defer r.pubMu.Unlock()
-	if err := r.ensurePubCh(); err != nil {
-		return 0, err
+
+	try := func() (int, error) {
+		if err := r.ensurePubCh(); err != nil {
+			return 0, err
+		}
+		r.mu.Lock()
+		ch := r.pubCh
+		r.mu.Unlock()
+		if ch == nil {
+			return 0, fmt.Errorf("mq not ready")
+		}
+		return ch.QueuePurge(name, noWait)
 	}
-	n, err := r.pubCh.QueuePurge(name, noWait)
+
+	n, err := try()
 	if err != nil {
-		_ = r.pubCh.Close()
-		r.pubCh = nil
-		return 0, err
+		r.dropPubCh()
+		_ = r.reconnect()
+		return try()
 	}
 	return n, nil
 }
 
 // QueueInspect 用临时 channel 被动查询队列（消息数/消费者数），不干扰消费
 func (r *RabbitMQ) QueueInspect(name string) (amqp.Queue, error) {
-	if r == nil || r.Conn == nil {
-		return amqp.Queue{}, fmt.Errorf("mq not ready")
-	}
-	ch, err := r.Conn.Channel()
+	ch, err := r.OpenChannel()
 	if err != nil {
 		return amqp.Queue{}, err
 	}
@@ -147,6 +355,8 @@ func (r *RabbitMQ) Ch() *amqp.Channel {
 	r.pubMu.Lock()
 	defer r.pubMu.Unlock()
 	_ = r.ensurePubCh()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.pubCh
 }
 

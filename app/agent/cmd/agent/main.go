@@ -6,6 +6,7 @@ import (
 	"cwxu-algo/app/common/discovery"
 	"flag"
 	"os"
+	"time"
 
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/config"
@@ -17,6 +18,22 @@ import (
 
 	_ "go.uber.org/automaxprocs"
 )
+
+func runForever(name string, fn func()) {
+	go func() {
+		for {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Errorf("%s panic: %v，5s 后重启", name, r)
+					}
+				}()
+				fn()
+			}()
+			time.Sleep(5 * time.Second)
+		}
+	}()
+}
 
 // go build -ldflags "-X main.Version=x.y.z"
 var (
@@ -36,7 +53,7 @@ func init() {
 }
 
 func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, consumer *service.Consumer) *kratos.App {
-	go consumer.Consume()
+	runForever("summary-consumer", consumer.Consume)
 	return kratos.New(
 		kratos.ID(id),
 		kratos.Name(Name),

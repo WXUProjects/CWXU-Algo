@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"cwxu-algo/app/common/conf"
 
@@ -23,6 +24,23 @@ import (
 
 	_ "cwxu-algo/app/core_data/internal/spider/platform"
 )
+
+// runForever 后台常驻任务：panic 后自动重启，避免 consumer 永久消失
+func runForever(name string, fn func()) {
+	go func() {
+		for {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Errorf("%s panic: %v，5s 后重启", name, r)
+					}
+				}()
+				fn()
+			}()
+			time.Sleep(5 * time.Second)
+		}
+	}()
+}
 
 // go build -ldflags "-X main.Version=x.y.z"
 var (
@@ -42,38 +60,10 @@ func init() {
 }
 
 func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, cm *service.Consumer, pfc *service.ProblemFetchConsumer, pac *service.ProblemAnalyzeConsumer, cron *task.CronTask) *kratos.App {
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Errorf("Consumer goroutine panic: %v", r)
-			}
-		}()
-		cm.Consume()
-	}()
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Errorf("ProblemFetchConsumer panic: %v", r)
-			}
-		}()
-		pfc.Consume()
-	}()
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Errorf("ProblemAnalyzeConsumer panic: %v", r)
-			}
-		}()
-		pac.Consume()
-	}()
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Errorf("Cron goroutine panic: %v", r)
-			}
-		}()
-		cron.Do()
-	}()
+	runForever("spider-consumer", cm.Consume)
+	runForever("problem-fetch-consumer", pfc.Consume)
+	runForever("problem-analyze-consumer", pac.Consume)
+	runForever("cron", cron.Do)
 	return kratos.New(
 		kratos.ID(fmt.Sprintf("%s-%s-%s", id, Name, Version)),
 		kratos.Name(Name),
