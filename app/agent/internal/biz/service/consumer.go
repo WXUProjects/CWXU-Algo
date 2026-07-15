@@ -22,6 +22,7 @@ func NewConsumer(mq *event.RabbitMQ, summary *SummaryUseCase) *Consumer {
 }
 
 func (c *Consumer) Consume() {
+	log.Infof("summary consumer 循环启动")
 	for {
 		if err := c.consumeOnce(); err != nil {
 			log.Errorf("summary consumer 退出: %v，5s 后重连", err)
@@ -37,16 +38,24 @@ func (c *Consumer) consumeOnce() error {
 	if err != nil {
 		return err
 	}
+	if _, err := ch.QueueDeclarePassive("summary", true, false, false, false, nil); err != nil {
+		_ = ch.Close()
+		ch, err = c.mq.OpenChannel()
+		if err != nil {
+			return err
+		}
+		if _, err := ch.QueueDeclare("summary", true, false, false, false, nil); err != nil {
+			_ = ch.Close()
+			return err
+		}
+	}
 	defer ch.Close()
 
-	q, err := ch.QueueDeclare("summary", true, false, false, false, nil)
-	if err != nil {
-		return err
-	}
 	if err := ch.Qos(2, 0, false); err != nil {
 		return err
 	}
-	msgs, err := ch.Consume(q.Name, "agent-summary", false, false, false, false, nil)
+	// tag 留空，避免多实例/重连 NOT_ALLOWED
+	msgs, err := ch.Consume("summary", "", false, false, false, false, nil)
 	if err != nil {
 		return err
 	}

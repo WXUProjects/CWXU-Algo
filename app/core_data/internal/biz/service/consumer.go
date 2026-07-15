@@ -22,6 +22,7 @@ func NewConsumer(mq *event.RabbitMQ, spider *SpiderUseCase) *Consumer {
 }
 
 func (c *Consumer) Consume() {
+	log.Infof("spider consumer 循环启动")
 	for {
 		if err := c.consumeOnce(); err != nil {
 			log.Errorf("spider consumer 退出: %v，5s 后重连", err)
@@ -37,19 +38,35 @@ func (c *Consumer) consumeOnce() error {
 	if err != nil {
 		return err
 	}
-	defer ch.Close()
+	// 不在此 defer：失败路径会换 channel
 
-	q, err := ch.QueueDeclare("spider", true, false, false, false, nil)
-	if err != nil {
-		return err
-	}
 	if err := ch.Qos(2, 0, false); err != nil {
+		_ = ch.Close()
 		return err
 	}
-	msgs, err := ch.Consume(q.Name, "core-data-spider", false, false, false, false, nil)
+	msgs, err := ch.Consume("spider", "", false, false, false, false, nil)
 	if err != nil {
-		return err
+		// 队列可能不存在：换新 channel 创建后再消费
+		_ = ch.Close()
+		ch, err = c.mq.OpenChannel()
+		if err != nil {
+			return err
+		}
+		if _, err := ch.QueueDeclare("spider", true, false, false, false, nil); err != nil {
+			_ = ch.Close()
+			return err
+		}
+		if err := ch.Qos(2, 0, false); err != nil {
+			_ = ch.Close()
+			return err
+		}
+		msgs, err = ch.Consume("spider", "", false, false, false, false, nil)
+		if err != nil {
+			_ = ch.Close()
+			return err
+		}
 	}
+	defer ch.Close()
 	log.Infof("spider consumer 已就绪")
 
 	for d := range msgs {

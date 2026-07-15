@@ -19,18 +19,7 @@ const (
 	problemAnalyzeConcurrency = 8
 )
 
-// declareProblemConsumerQueue 与发布侧一致声明 max-priority；若队列已存在无 priority 则降级
-func declareProblemConsumerQueue(ch *amqp.Channel, name string) (amqp.Queue, error) {
-	args := amqp.Table{"x-max-priority": mqMaxPriority}
-	q, err := ch.QueueDeclare(name, true, false, false, false, args)
-	if err != nil {
-		return ch.QueueDeclare(name, true, false, false, false, nil)
-	}
-	return q, nil
-}
-
 // ProblemFetchConsumer 消费 problem_fetch：仅爬取，并发 4
-// 使用独立 Channel + 断线自动重连，避免与发布侧共用 channel 导致消费者静默死亡。
 type ProblemFetchConsumer struct {
 	mq      *event.RabbitMQ
 	problem *ProblemUseCase
@@ -44,6 +33,7 @@ func NewProblemFetchConsumer(mq *event.RabbitMQ, problem *ProblemUseCase) *Probl
 }
 
 func (c *ProblemFetchConsumer) Consume() {
+	log.Infof("problem_fetch consumer 循环启动")
 	for {
 		if err := c.consumeOnce(); err != nil {
 			log.Errorf("problem_fetch consumer 退出: %v，5s 后重连", err)
@@ -55,25 +45,22 @@ func (c *ProblemFetchConsumer) Consume() {
 }
 
 func (c *ProblemFetchConsumer) consumeOnce() error {
+	// 队列由发布侧创建；此处禁止 QueueDeclare（args 不一致会 PRECONDITION 杀 channel）
 	ch, err := c.mq.OpenChannel()
 	if err != nil {
 		return err
 	}
 	defer ch.Close()
 
-	q, err := declareProblemConsumerQueue(ch, "problem_fetch")
-	if err != nil {
-		return err
-	}
 	if err := ch.Qos(problemFetchConcurrency, 0, false); err != nil {
 		return err
 	}
-	// 独占 consumer tag，便于排查
-	msgs, err := ch.Consume(q.Name, "core-data-problem-fetch", false, false, false, false, nil)
+	// consumer tag 留空，避免多实例/重连 tag 冲突
+	msgs, err := ch.Consume("problem_fetch", "", false, false, false, false, nil)
 	if err != nil {
 		return err
 	}
-	log.Infof("problem_fetch consumer 已就绪 concurrency=%d", problemFetchConcurrency)
+	log.Infof("problem_fetch consumer 已就绪 concurrency=%d queue=problem_fetch", problemFetchConcurrency)
 
 	sem := make(chan struct{}, problemFetchConcurrency)
 	var wg sync.WaitGroup
@@ -96,7 +83,6 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 				return
 			}
 			if pipelineControl.IsFetchPaused() {
-				// 暂停：requeue 保留（勿 Ack 丢弃）
 				log.Warnf("problem_fetch id=%d requeue: fetch paused", msg.ProblemID)
 				time.Sleep(2 * time.Second)
 				_ = d.Nack(false, true)
@@ -112,7 +98,6 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 					return
 				}
 				log.Errorf("RabbitMQ(problem_fetch) id=%d: %v", msg.ProblemID, err)
-				// 可恢复错误：发回队列重试；永久失败 ProcessFetch 返回 nil 已 Ack
 				_ = d.Nack(false, true)
 				return
 			}
@@ -137,6 +122,7 @@ func NewProblemAnalyzeConsumer(mq *event.RabbitMQ, problem *ProblemUseCase) *Pro
 }
 
 func (c *ProblemAnalyzeConsumer) Consume() {
+	log.Infof("problem_analyze consumer 循环启动")
 	for {
 		if err := c.consumeOnce(); err != nil {
 			log.Errorf("problem_analyze consumer 退出: %v，5s 后重连", err)
@@ -148,24 +134,21 @@ func (c *ProblemAnalyzeConsumer) Consume() {
 }
 
 func (c *ProblemAnalyzeConsumer) consumeOnce() error {
+	// 队列由发布侧创建；此处禁止 QueueDeclare（args 不一致会 PRECONDITION 杀 channel）
 	ch, err := c.mq.OpenChannel()
 	if err != nil {
 		return err
 	}
 	defer ch.Close()
 
-	q, err := declareProblemConsumerQueue(ch, "problem_analyze")
-	if err != nil {
-		return err
-	}
 	if err := ch.Qos(problemAnalyzeConcurrency, 0, false); err != nil {
 		return err
 	}
-	msgs, err := ch.Consume(q.Name, "core-data-problem-analyze", false, false, false, false, nil)
+	msgs, err := ch.Consume("problem_analyze", "", false, false, false, false, nil)
 	if err != nil {
 		return err
 	}
-	log.Infof("problem_analyze consumer 已就绪 concurrency=%d", problemAnalyzeConcurrency)
+	log.Infof("problem_analyze consumer 已就绪 concurrency=%d queue=problem_analyze", problemAnalyzeConcurrency)
 
 	sem := make(chan struct{}, problemAnalyzeConcurrency)
 	var wg sync.WaitGroup
@@ -188,8 +171,6 @@ func (c *ProblemAnalyzeConsumer) consumeOnce() error {
 				return
 			}
 			if pipelineControl.IsAnalyzePaused() {
-				// 暂停：requeue 保留消息（勿 Ack 丢弃；ResetAll 等可能在短暂 pause 窗口入队）
-				// 短睡避免热循环；PauseAnalyze 会 purge Ready，故意清空时仍生效
 				log.Warnf("problem_analyze id=%d requeue: AI paused", msg.ProblemID)
 				time.Sleep(2 * time.Second)
 				_ = d.Nack(false, true)
@@ -205,7 +186,6 @@ func (c *ProblemAnalyzeConsumer) consumeOnce() error {
 					return
 				}
 				log.Errorf("RabbitMQ(problem_analyze) id=%d: %v", msg.ProblemID, err)
-				// 分析出错：发回队列重试
 				_ = d.Nack(false, true)
 				return
 			}

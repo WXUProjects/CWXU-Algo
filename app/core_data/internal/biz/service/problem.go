@@ -166,9 +166,14 @@ func (uc *ProblemUseCase) declareProblemQueue(name string) error {
 	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
 	}
+	// 队列已存在：直接成功。重复 QueueDeclare 且 args 不一致会 PRECONDITION 杀 channel，
+	// 导致后续 Publish 失败且消费者永远注册不上。
+	if _, err := uc.mq.QueueInspect(name); err == nil {
+		return nil
+	}
 	args := amqp.Table{"x-max-priority": mqMaxPriority}
 	if _, err := uc.mq.QueueDeclare(name, true, false, false, false, args); err != nil {
-		// 已存在且无 max-priority 时 PRECONDITION_FAILED：降级声明，Priority 字段会被忽略
+		// 已存在且无 max-priority 时 PRECONDITION_FAILED：降级声明
 		if _, err2 := uc.mq.QueueDeclare(name, true, false, false, false, nil); err2 != nil {
 			return err
 		}
