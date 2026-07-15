@@ -19,6 +19,16 @@ const (
 	problemAnalyzeConcurrency = 8
 )
 
+// declareProblemConsumerQueue 与发布侧一致声明 max-priority；若队列已存在无 priority 则降级
+func declareProblemConsumerQueue(ch *amqp.Channel, name string) (amqp.Queue, error) {
+	args := amqp.Table{"x-max-priority": mqMaxPriority}
+	q, err := ch.QueueDeclare(name, true, false, false, false, args)
+	if err != nil {
+		return ch.QueueDeclare(name, true, false, false, false, nil)
+	}
+	return q, nil
+}
+
 // ProblemFetchConsumer 消费 problem_fetch：仅爬取，并发 4
 // 使用独立 Channel + 断线自动重连，避免与发布侧共用 channel 导致消费者静默死亡。
 type ProblemFetchConsumer struct {
@@ -51,7 +61,7 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 	}
 	defer ch.Close()
 
-	q, err := ch.QueueDeclare("problem_fetch", true, false, false, false, nil)
+	q, err := declareProblemConsumerQueue(ch, "problem_fetch")
 	if err != nil {
 		return err
 	}
@@ -144,7 +154,7 @@ func (c *ProblemAnalyzeConsumer) consumeOnce() error {
 	}
 	defer ch.Close()
 
-	q, err := ch.QueueDeclare("problem_analyze", true, false, false, false, nil)
+	q, err := declareProblemConsumerQueue(ch, "problem_analyze")
 	if err != nil {
 		return err
 	}

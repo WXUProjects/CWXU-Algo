@@ -350,6 +350,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.ResetAllRes'
+    /v1/core/problem/reset-queues:
+        post:
+            tags:
+                - Problem
+            description: 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
+            operationId: Problem_ResetQueues
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.ResetQueuesReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ResetQueuesRes'
     /v1/core/problem/resume:
         post:
             tags:
@@ -422,7 +441,7 @@ paths:
         post:
             tags:
                 - Problem
-            description: 暂停/恢复 AI 分析（暂停时清空分析队列）
+            description: 暂停/恢复 AI 分析（仅停消费，不清空队列）
             operationId: Problem_ToggleAnalyze
             requestBody:
                 content:
@@ -441,7 +460,7 @@ paths:
         post:
             tags:
                 - Problem
-            description: 暂停/恢复题面爬取（暂停时清空爬取队列）
+            description: 暂停/恢复题面爬取（仅停消费，不清空队列）
             operationId: Problem_ToggleFetch
             requestBody:
                 content:
@@ -1173,7 +1192,7 @@ components:
             properties:
                 limit:
                     type: string
-                    description: 最大处理条数，0 表示默认 500
+                    description: 绑定未关联提交的最大条数，0 表示默认 5000
         api.core.v1.problem.BackfillRes:
             type: object
             properties:
@@ -1188,6 +1207,11 @@ components:
                 created:
                     type: string
                 enqueued:
+                    type: string
+                    description: 入队总数（爬取 + 分析）
+                enqueuedFetch:
+                    type: string
+                enqueuedAnalyze:
                     type: string
         api.core.v1.problem.EmergencyStopReq:
             type: object
@@ -1388,6 +1412,25 @@ components:
                     type: string
                 purgedAnalyze:
                     type: string
+        api.core.v1.problem.ResetQueuesReq:
+            type: object
+            properties: {}
+            description: 重置 MQ：清空队列后按 DB 状态重灌
+        api.core.v1.problem.ResetQueuesRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                purgedFetch:
+                    type: string
+                purgedAnalyze:
+                    type: string
+                enqueuedFetch:
+                    type: string
+                enqueuedAnalyze:
+                    type: string
         api.core.v1.problem.ResumeReq:
             type: object
             properties: {}
@@ -1470,7 +1513,7 @@ components:
                     type: boolean
                 pauseSet:
                     type: boolean
-            description: pause=true 暂停并清队列；pause=false 恢复；未设置时按当前状态翻转
+            description: pause=true 暂停（保留队列）；pause=false 恢复；未设置时按当前状态翻转
         api.core.v1.problem.TogglePipelineRes:
             type: object
             properties:
@@ -1482,6 +1525,7 @@ components:
                     type: boolean
                 purged:
                     type: string
+                    description: 兼容字段：暂停不再 purge，恒为 0
         api.core.v1.problem.UserProfileRes:
             type: object
             properties:

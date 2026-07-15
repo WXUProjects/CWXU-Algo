@@ -28,7 +28,14 @@ func NewProblemUseCase(data *data.Data, mq *event.RabbitMQ, tagger *ProblemTagge
 	return &ProblemUseCase{data: data, mq: mq, tagger: tagger}
 }
 
-// BindSubmitsAfterSpider 爬虫写入提交后绑定/创建题库
+// MQ 优先级：队列需 x-max-priority；增量爬虫入队最高，回填/重置队列为 bulk
+const (
+	mqPriorityBulk        uint8 = 1
+	mqPriorityIncremental uint8 = 9
+	mqMaxPriority         int32 = 10
+)
+
+// BindSubmitsAfterSpider 爬虫写入提交后绑定/创建题库（增量，最高优先级入队）
 func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) {
 	var logs []model.SubmitLog
 	// 仅处理未绑定的
@@ -38,14 +45,15 @@ func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) {
 		return
 	}
 	for i := range logs {
-		if _, _, err := uc.resolveOne(&logs[i]); err != nil {
+		if _, _, err := uc.resolveOne(&logs[i], true); err != nil {
 			log.Debugf("resolve submit %d: %v", logs[i].ID, err)
 		}
 	}
 }
 
 // resolveOne 解析并绑定单条提交；返回 (problem, isNew, err)
-func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog) (*model.Problem, bool, error) {
+// highPriority=true：增量爬虫路径，MQ 最高优先级
+func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*model.Problem, bool, error) {
 	parsed, err := ParseProblemIdentity(sl.Platform, sl.Contest, sl.Problem)
 	if err != nil {
 		return nil, false, err
@@ -108,9 +116,14 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog) (*model.Problem, bool,
 		"external_id": parsed.ExternalID,
 	}).Error
 
+	prio := mqPriorityBulk
+	if highPriority {
+		prio = mqPriorityIncremental
+	}
+
 	// 新题且可爬 → 入队抓题面 + AI
 	if isNew && !parsed.SkipFetch && existing.Status == model.ProblemStatusPending {
-		if err := uc.enqueueFetch(existing.ID, existing.Platform, existing.ExternalID, existing.URL); err != nil {
+		if err := uc.enqueueFetchPrio(existing.ID, existing.Platform, existing.ExternalID, existing.URL, prio); err != nil {
 			log.Errorf("enqueue problem %d: %v", existing.ID, err)
 		}
 	}
@@ -121,33 +134,53 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog) (*model.Problem, bool,
 	}
 
 	// 已存在但题面未完成：补入队（例如之前失败/卡住）；FAILED_PERM 永不重试
+	// 已 COMPLETED：分析过则丢弃，不入队
 	if !isNew && !parsed.SkipFetch {
 		switch existing.Status {
 		case model.ProblemStatusPending, model.ProblemStatusFailed:
 			if strings.TrimSpace(existing.ContentMD) == "" {
-				if err := uc.enqueueFetch(existing.ID, existing.Platform, existing.ExternalID, existing.URL); err != nil {
+				if err := uc.enqueueFetchPrio(existing.ID, existing.Platform, existing.ExternalID, existing.URL, prio); err != nil {
 					log.Errorf("re-enqueue fetch problem %d: %v", existing.ID, err)
 				}
-			} else if !pipelineControl.IsAnalyzePaused() {
+			} else {
+				// 有题面未分析完 → 分析队列
 				_ = uc.data.DB.Model(&existing).Update("status", model.ProblemStatusTagging).Error
-				if err := uc.enqueueAnalyze(existing.ID); err != nil {
+				if err := uc.enqueueAnalyzePrio(existing.ID, prio); err != nil {
 					log.Errorf("re-enqueue analyze problem %d: %v", existing.ID, err)
 				}
 			}
 		case model.ProblemStatusTagging:
-			if strings.TrimSpace(existing.ContentMD) != "" && !pipelineControl.IsAnalyzePaused() {
-				if err := uc.enqueueAnalyze(existing.ID); err != nil {
+			if strings.TrimSpace(existing.ContentMD) != "" {
+				if err := uc.enqueueAnalyzePrio(existing.ID, prio); err != nil {
 					log.Errorf("re-enqueue analyze problem %d: %v", existing.ID, err)
 				}
 			}
-		case model.ProblemStatusFailedPerm, model.ProblemStatusSkipped:
-			// 永久失败 / 跳过：不入队
+		case model.ProblemStatusCompleted, model.ProblemStatusFailedPerm, model.ProblemStatusSkipped:
+			// 已分析完成 / 永久失败 / 跳过：不入队
 		}
 	}
 	return &existing, isNew, nil
 }
 
+func (uc *ProblemUseCase) declareProblemQueue(name string) error {
+	if uc.mq == nil {
+		return fmt.Errorf("mq not ready")
+	}
+	args := amqp.Table{"x-max-priority": mqMaxPriority}
+	if _, err := uc.mq.QueueDeclare(name, true, false, false, false, args); err != nil {
+		// 已存在且无 max-priority 时 PRECONDITION_FAILED：降级声明，Priority 字段会被忽略
+		if _, err2 := uc.mq.QueueDeclare(name, true, false, false, false, nil); err2 != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (uc *ProblemUseCase) enqueueFetch(id uint, platform, externalID, url string) error {
+	return uc.enqueueFetchPrio(id, platform, externalID, url, mqPriorityBulk)
+}
+
+func (uc *ProblemUseCase) enqueueFetchPrio(id uint, platform, externalID, url string, priority uint8) error {
 	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
 	}
@@ -157,28 +190,34 @@ func (uc *ProblemUseCase) enqueueFetch(id uint, platform, externalID, url string
 		ExternalID: externalID,
 		URL:        url,
 	})
-	if _, err := uc.mq.QueueDeclare("problem_fetch", true, false, false, false, nil); err != nil {
+	if err := uc.declareProblemQueue("problem_fetch"); err != nil {
 		return err
 	}
 	return uc.mq.Publish("", "problem_fetch", false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		Body:         body,
 		DeliveryMode: amqp.Persistent,
+		Priority:     priority,
 	})
 }
 
 func (uc *ProblemUseCase) enqueueAnalyze(id uint) error {
+	return uc.enqueueAnalyzePrio(id, mqPriorityBulk)
+}
+
+func (uc *ProblemUseCase) enqueueAnalyzePrio(id uint, priority uint8) error {
 	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
 	}
 	body, _ := json.Marshal(event.ProblemAnalyzeEvent{ProblemID: id})
-	if _, err := uc.mq.QueueDeclare("problem_analyze", true, false, false, false, nil); err != nil {
+	if err := uc.declareProblemQueue("problem_analyze"); err != nil {
 		return err
 	}
 	return uc.mq.Publish("", "problem_analyze", false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		Body:         body,
 		DeliveryMode: amqp.Persistent,
+		Priority:     priority,
 	})
 }
 
@@ -261,10 +300,11 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		return err
 	}
 	// 爬取成功后：仅近 6 个月有提交的题进 AI（以 submit_logs 为准）
-	if pipelineControl.IsAnalyzePaused() || !uc.withinAnalyzeWindow(&p) {
+	// 分析暂停时仍入队（暂停不清队列，恢复后继续）；高优先级延续当前已出队的爬取任务
+	if !uc.withinAnalyzeWindow(&p) {
 		return nil
 	}
-	return uc.enqueueAnalyze(p.ID)
+	return uc.enqueueAnalyzePrio(p.ID, mqPriorityIncremental)
 }
 
 // ProcessAnalyze 仅 AI 打标（不爬取、不送用户代码）
@@ -405,19 +445,17 @@ func sqlHasRecentSubmit(cutoff time.Time) (clause string, args []interface{}) {
 	)`, []interface{}{cutoff}
 }
 
-// Backfill 历史回填：绑定未关联提交 + 按题面是否已爬决定入队
-// - 无题面 content_md → 全部入爬取队列（不限 6 个月；含 FAILED_PERM 重试爬）
-// - 已有题面 → 跳过爬取（不重爬）
-// - SKIPPED / LeetCode → 跳过
-func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued int64, err error) {
-	// 0 = 尽量全量（单次最多 5000 提交绑定）
+// Backfill 增量回填（近 6 个月提交）：
+// 1) 绑定未关联提交
+// 2) 无题面 → 入爬取队列（bulk 优先级）
+// 3) 有题面且未分析完 → 入分析队列；已 COMPLETED → 丢弃
+// 不清空 MQ（与 ResetQueues 区分）
+func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued, enqueuedFetch, enqueuedAnalyze int64, err error) {
 	if limit <= 0 {
 		limit = 5000
 	}
-	// 回填时恢复爬取队列（分析是否暂停不影响本次「补爬题面」）
-	pipelineControl.SetFetchPaused(false)
 
-	// 0) 牛客错误 external_id：既非 AC 数字 id、也非主站 32hex UUID → 解绑后重解析
+	// 0) 牛客错误 external_id → 解绑后重解析
 	if res := uc.data.DB.Exec(`
 		UPDATE submit_logs
 		SET problem_id = NULL, external_id = ''
@@ -433,18 +471,9 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		log.Infof("Backfill: unbound %d NowCoder submits with bad external_id", res.RowsAffected)
 	}
 
-	// 1) 历史永久错误文案：FAILED → FAILED_PERM（仍会在下方无题面时重新入爬取）
 	_ = uc.markExistingPermanentFailures()
 
-	// 2) 清空爬取队列（去掉毒消息，按当前 DB 重入队）
-	if uc.mq != nil {
-		_, _ = uc.mq.QueueDeclare("problem_fetch", true, false, false, false, nil)
-		if n, perr := uc.mq.QueuePurge("problem_fetch", false); perr == nil {
-			log.Infof("Backfill: purged problem_fetch %d messages", n)
-		}
-	}
-
-	// 3) 绑定未关联提交（绑定窗口仍近 6 个月，避免扫全库过慢）
+	// 1) 绑定近 6 个月未关联提交（resolveOne 按状态入爬/分析；已分析则丢弃）
 	cutoff := time.Now().Add(-backfillWindow)
 	var logs []model.SubmitLog
 	err = uc.data.DB.Where("(problem_id IS NULL OR problem_id = 0) AND platform != ?", spider.LeetCode).
@@ -456,7 +485,7 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 	}
 	scanned = int64(len(logs))
 	for i := range logs {
-		p, isNew, rerr := uc.resolveOne(&logs[i])
+		_, isNew, rerr := uc.resolveOne(&logs[i], false)
 		if rerr != nil {
 			continue
 		}
@@ -464,15 +493,18 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		if isNew {
 			created++
 		}
-		_ = p
 	}
 
-	// 4) 全库检查题面：无 content_md → 全部入爬取；有题面 → 跳过
-	// 不限 last_submitted_at / 不限条数；除 SKIPPED 外含 FAILED_PERM
+	// 2) 近 6 月有提交的题：无题面补爬；有题面且未完成补分析；COMPLETED 跳过
+	recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
 	var todos []model.Problem
 	_ = uc.data.DB.Where("platform != ?", spider.LeetCode).
-		Where("status != ?", model.ProblemStatusSkipped).
-		Where("(content_md IS NULL OR content_md = '')").
+		Where("status NOT IN ?", []string{
+			model.ProblemStatusSkipped,
+			model.ProblemStatusCompleted,
+			model.ProblemStatusFailedPerm,
+		}).
+		Where(recentClause, recentArgs...).
 		Order("last_submitted_at DESC NULLS LAST, id DESC").
 		Find(&todos).Error
 
@@ -482,23 +514,82 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 			continue
 		}
 		seen[p.ID] = true
-		if strings.TrimSpace(p.ContentMD) != "" {
-			// 已有题面：跳过爬取
+		if strings.TrimSpace(p.ContentMD) == "" {
+			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+				Updates(map[string]interface{}{
+					"status":           model.ProblemStatusPending,
+					"error_msg":        "",
+					"fetch_attempts":   0,
+					"fetch_fail_since": nil,
+				}).Error
+			if e := uc.enqueueFetchPrio(p.ID, p.Platform, p.ExternalID, p.URL, mqPriorityBulk); e == nil {
+				enqueuedFetch++
+				enqueued++
+			}
 			continue
 		}
-		// 允许回填重爬：重置 attempts / 失败时钟
+		// 有题面：入分析（已分析在查询中已排除 COMPLETED；ProcessAnalyze 再丢弃）
 		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 			Updates(map[string]interface{}{
-				"status":           model.ProblemStatusPending,
-				"error_msg":        "",
-				"fetch_attempts":   0,
-				"fetch_fail_since": nil,
+				"status":    model.ProblemStatusTagging,
+				"error_msg": "",
 			}).Error
-		if e := uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL); e == nil {
+		if e := uc.enqueueAnalyzePrio(p.ID, mqPriorityBulk); e == nil {
+			enqueuedAnalyze++
 			enqueued++
 		}
 	}
-	log.Infof("Backfill: scanned=%d bound=%d created=%d fetch_enqueued=%d", scanned, bound, created, enqueued)
+	log.Infof("Backfill: scanned=%d bound=%d created=%d fetch=%d analyze=%d",
+		scanned, bound, created, enqueuedFetch, enqueuedAnalyze)
+	return
+}
+
+// ResetQueues 重置 MQ：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（bulk 优先级）
+// 与 Backfill 不同：不扫提交、不改业务状态，只重建队列。
+func (uc *ProblemUseCase) ResetQueues() (purgedFetch, purgedAnalyze, enqueuedFetch, enqueuedAnalyze int, err error) {
+	if n, e := uc.purgeFetchQueue(); e == nil {
+		purgedFetch = n
+	} else if err == nil {
+		err = e
+	}
+	if n, e := uc.purgeAnalyzeQueue(); e == nil {
+		purgedAnalyze = n
+	} else if err == nil {
+		err = e
+	}
+
+	// 待爬取：PENDING / FETCHING（卡住的 FETCHING 一并重入）
+	var fetchTodos []model.Problem
+	_ = uc.data.DB.Where("platform != ?", spider.LeetCode).
+		Where("status IN ?", []string{model.ProblemStatusPending, model.ProblemStatusFetching}).
+		Where("(content_md IS NULL OR content_md = '')").
+		Order("last_submitted_at DESC NULLS LAST, id DESC").
+		Find(&fetchTodos).Error
+	for _, p := range fetchTodos {
+		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+			Update("status", model.ProblemStatusPending).Error
+		if e := uc.enqueueFetchPrio(p.ID, p.Platform, p.ExternalID, p.URL, mqPriorityBulk); e == nil {
+			enqueuedFetch++
+		}
+	}
+
+	// 待分析：TAGGING + 有题面；已 COMPLETED 不入队
+	cutoff := time.Now().Add(-backfillWindow)
+	recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
+	var analyzeTodos []model.Problem
+	_ = uc.data.DB.Where("platform != ?", spider.LeetCode).
+		Where("status = ?", model.ProblemStatusTagging).
+		Where("content_md IS NOT NULL AND content_md != ''").
+		Where(recentClause, recentArgs...).
+		Order("last_submitted_at DESC NULLS LAST, id DESC").
+		Find(&analyzeTodos).Error
+	for _, p := range analyzeTodos {
+		if e := uc.enqueueAnalyzePrio(p.ID, mqPriorityBulk); e == nil {
+			enqueuedAnalyze++
+		}
+	}
+	log.Infof("ResetQueues: purged_fetch=%d purged_analyze=%d enq_fetch=%d enq_analyze=%d",
+		purgedFetch, purgedAnalyze, enqueuedFetch, enqueuedAnalyze)
 	return
 }
 
@@ -977,7 +1068,7 @@ func (uc *ProblemUseCase) purgeQueue(name string) (int, error) {
 	if uc.mq == nil {
 		return 0, fmt.Errorf("mq not ready")
 	}
-	_, _ = uc.mq.QueueDeclare(name, true, false, false, false, nil)
+	_ = uc.declareProblemQueue(name)
 	return uc.mq.QueuePurge(name, false)
 }
 
@@ -989,10 +1080,10 @@ func (uc *ProblemUseCase) purgeFetchQueue() (purgedFetch int, err error) {
 	return uc.purgeQueue("problem_fetch")
 }
 
-// PauseAnalyze 暂停 AI 并清空分析队列
+// PauseAnalyze 暂停 AI 分析（保留队列消息，恢复后继续消费）
 func (uc *ProblemUseCase) PauseAnalyze() (purged int, err error) {
 	pipelineControl.SetAnalyzePaused(true)
-	return uc.purgeAnalyzeQueue()
+	return 0, nil
 }
 
 // ResumeAnalyze 恢复 AI 分析
@@ -1000,10 +1091,10 @@ func (uc *ProblemUseCase) ResumeAnalyze() {
 	pipelineControl.SetAnalyzePaused(false)
 }
 
-// PauseFetch 暂停题面爬取并清空爬取队列
+// PauseFetch 暂停题面爬取（保留队列消息，恢复后继续消费）
 func (uc *ProblemUseCase) PauseFetch() (purged int, err error) {
 	pipelineControl.SetFetchPaused(true)
-	return uc.purgeFetchQueue()
+	return 0, nil
 }
 
 // ResumeFetch 恢复题面爬取
@@ -1011,10 +1102,10 @@ func (uc *ProblemUseCase) ResumeFetch() {
 	pipelineControl.SetFetchPaused(false)
 }
 
-// EmergencyStop 兼容旧 API：暂停 AI 并清空分析队列
+// EmergencyStop 兼容旧 API：暂停 AI（不再 purge；清队列请用 ResetQueues）
 func (uc *ProblemUseCase) EmergencyStop() (purgedFetch, purgedAnalyze int, err error) {
-	purgedAnalyze, err = uc.PauseAnalyze()
-	return 0, purgedAnalyze, err
+	_, err = uc.PauseAnalyze()
+	return 0, 0, err
 }
 
 // Resume 兼容旧 API：恢复 AI

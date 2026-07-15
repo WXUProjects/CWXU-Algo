@@ -67,17 +67,24 @@ service Problem {
       body: "*"
     };
   }
-  // 暂停/恢复 AI 分析（暂停时清空分析队列）
+  // 暂停/恢复 AI 分析（仅停消费，不清空队列）
   rpc ToggleAnalyze (TogglePipelineReq) returns (TogglePipelineRes) {
     option (google.api.http) = {
       post: "/v1/core/problem/toggle-analyze"
       body: "*"
     };
   }
-  // 暂停/恢复题面爬取（暂停时清空爬取队列）
+  // 暂停/恢复题面爬取（仅停消费，不清空队列）
   rpc ToggleFetch (TogglePipelineReq) returns (TogglePipelineRes) {
     option (google.api.http) = {
       post: "/v1/core/problem/toggle-fetch"
+      body: "*"
+    };
+  }
+  // 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
+  rpc ResetQueues (ResetQueuesReq) returns (ResetQueuesRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/reset-queues"
       body: "*"
     };
   }
@@ -245,7 +252,7 @@ message ProgressRes {
 }
 
 message BackfillReq {
-  // 最大处理条数，0 表示默认 500
+  // 绑定未关联提交的最大条数，0 表示默认 5000
   int64 limit = 1;
 }
 
@@ -255,7 +262,22 @@ message BackfillRes {
   int64 scanned = 3;
   int64 bound = 4;
   int64 created = 5;
+  // 入队总数（爬取 + 分析）
   int64 enqueued = 6;
+  int64 enqueued_fetch = 7;
+  int64 enqueued_analyze = 8;
+}
+
+// 重置 MQ：清空队列后按 DB 状态重灌
+message ResetQueuesReq {}
+
+message ResetQueuesRes {
+  int64 code = 1;
+  string message = 2;
+  int64 purged_fetch = 3;
+  int64 purged_analyze = 4;
+  int64 enqueued_fetch = 5;
+  int64 enqueued_analyze = 6;
 }
 
 message EmergencyStopReq {}
@@ -306,7 +328,7 @@ message RetryFailedRes {
   int64 blacklisted = 5;
 }
 
-// pause=true 暂停并清队列；pause=false 恢复；未设置时按当前状态翻转
+// pause=true 暂停（保留队列）；pause=false 恢复；未设置时按当前状态翻转
 message TogglePipelineReq {
   bool pause = 1;
   bool pause_set = 2;
@@ -316,5 +338,6 @@ message TogglePipelineRes {
   int64 code = 1;
   string message = 2;
   bool paused = 3;
+  // 兼容字段：暂停不再 purge，恒为 0
   int64 purged = 4;
 }

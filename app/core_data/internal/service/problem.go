@@ -323,22 +323,38 @@ func (s *ProblemService) Backfill(ctx context.Context, req *problem.BackfillReq)
 	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
 		return &problem.BackfillRes{Code: 1, Message: "仅管理员可触发回填"}, nil
 	}
-	if s.uc != nil {
-		// 回填前恢复双队列
-		s.uc.ResumeAnalyze()
-		s.uc.ResumeFetch()
-	}
-	scanned, bound, created, enqueued, err := s.uc.Backfill(int(req.Limit))
+	// 回填不清空队列、不强制恢复 pause；仅补近 6 月提交入队
+	scanned, bound, created, enqueued, enqFetch, enqAnalyze, err := s.uc.Backfill(int(req.Limit))
 	if err != nil {
 		return nil, errors.InternalServer("backfill failed", err.Error())
 	}
 	return &problem.BackfillRes{
-		Code:     0,
-		Message:  "success",
-		Scanned:  scanned,
-		Bound:    bound,
-		Created:  created,
-		Enqueued: enqueued,
+		Code:            0,
+		Message:         "success",
+		Scanned:         scanned,
+		Bound:           bound,
+		Created:         created,
+		Enqueued:        enqueued,
+		EnqueuedFetch:   enqFetch,
+		EnqueuedAnalyze: enqAnalyze,
+	}, nil
+}
+
+func (s *ProblemService) ResetQueues(ctx context.Context, req *problem.ResetQueuesReq) (*problem.ResetQueuesRes, error) {
+	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+		return &problem.ResetQueuesRes{Code: 1, Message: "仅管理员可操作"}, nil
+	}
+	pf, pa, ef, ea, err := s.uc.ResetQueues()
+	if err != nil {
+		return nil, errors.InternalServer("reset queues failed", err.Error())
+	}
+	return &problem.ResetQueuesRes{
+		Code:            0,
+		Message:         "已清空 MQ 并按 DB 待爬取/待分析重灌",
+		PurgedFetch:     int64(pf),
+		PurgedAnalyze:   int64(pa),
+		EnqueuedFetch:   int64(ef),
+		EnqueuedAnalyze: int64(ea),
 	}, nil
 }
 
@@ -352,7 +368,7 @@ func (s *ProblemService) EmergencyStop(ctx context.Context, req *problem.Emergen
 	}
 	return &problem.EmergencyStopRes{
 		Code:          0,
-		Message:       "已暂停 AI 分析并清空分析队列（题面保留）",
+		Message:       "已暂停 AI 分析（队列保留；清队列请用重置队列）",
 		PurgedFetch:   int64(pf),
 		PurgedAnalyze: int64(pa),
 	}, nil
@@ -429,7 +445,7 @@ func (s *ProblemService) ToggleAnalyze(ctx context.Context, req *problem.ToggleP
 		if err != nil {
 			return nil, errors.InternalServer("pause analyze failed", err.Error())
 		}
-		return &problem.TogglePipelineRes{Code: 0, Message: "AI 分析已暂停并清空队列", Paused: true, Purged: int64(n)}, nil
+		return &problem.TogglePipelineRes{Code: 0, Message: "AI 分析已暂停（队列保留）", Paused: true, Purged: int64(n)}, nil
 	}
 	s.uc.ResumeAnalyze()
 	return &problem.TogglePipelineRes{Code: 0, Message: "AI 分析已恢复", Paused: false}, nil
@@ -450,7 +466,7 @@ func (s *ProblemService) ToggleFetch(ctx context.Context, req *problem.TogglePip
 		if err != nil {
 			return nil, errors.InternalServer("pause fetch failed", err.Error())
 		}
-		return &problem.TogglePipelineRes{Code: 0, Message: "题面爬取已暂停并清空队列", Paused: true, Purged: int64(n)}, nil
+		return &problem.TogglePipelineRes{Code: 0, Message: "题面爬取已暂停（队列保留）", Paused: true, Purged: int64(n)}, nil
 	}
 	s.uc.ResumeFetch()
 	return &problem.TogglePipelineRes{Code: 0, Message: "题面爬取已恢复", Paused: false}, nil

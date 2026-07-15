@@ -26,6 +26,7 @@ const OperationProblemList = "/api.core.v1.problem.Problem/List"
 const OperationProblemListSubmissions = "/api.core.v1.problem.Problem/ListSubmissions"
 const OperationProblemProgress = "/api.core.v1.problem.Problem/Progress"
 const OperationProblemResetAll = "/api.core.v1.problem.Problem/ResetAll"
+const OperationProblemResetQueues = "/api.core.v1.problem.Problem/ResetQueues"
 const OperationProblemResume = "/api.core.v1.problem.Problem/Resume"
 const OperationProblemRetryFailed = "/api.core.v1.problem.Problem/RetryFailed"
 const OperationProblemToggleAnalyze = "/api.core.v1.problem.Problem/ToggleAnalyze"
@@ -42,13 +43,15 @@ type ProblemHTTPServer interface {
 	Progress(context.Context, *ProgressReq) (*ProgressRes, error)
 	// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(context.Context, *ResetAllReq) (*ResetAllRes, error)
+	// ResetQueues 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
+	ResetQueues(context.Context, *ResetQueuesReq) (*ResetQueuesRes, error)
 	// Resume 恢复 AI（兼容）
 	Resume(context.Context, *ResumeReq) (*ResumeRes, error)
 	// RetryFailed 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
 	RetryFailed(context.Context, *RetryFailedReq) (*RetryFailedRes, error)
-	// ToggleAnalyze 暂停/恢复 AI 分析（暂停时清空分析队列）
+	// ToggleAnalyze 暂停/恢复 AI 分析（仅停消费，不清空队列）
 	ToggleAnalyze(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error)
-	// ToggleFetch 暂停/恢复题面爬取（暂停时清空爬取队列）
+	// ToggleFetch 暂停/恢复题面爬取（仅停消费，不清空队列）
 	ToggleFetch(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error)
 	UserProfile(context.Context, *UserProfileReq) (*UserProfileRes, error)
 }
@@ -67,6 +70,7 @@ func RegisterProblemHTTPServer(s *http.Server, srv ProblemHTTPServer) {
 	r.POST("/v1/core/problem/retry-failed", _Problem_RetryFailed0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/toggle-analyze", _Problem_ToggleAnalyze0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/toggle-fetch", _Problem_ToggleFetch0_HTTP_Handler(srv))
+	r.POST("/v1/core/problem/reset-queues", _Problem_ResetQueues0_HTTP_Handler(srv))
 }
 
 func _Problem_List0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
@@ -318,6 +322,28 @@ func _Problem_ToggleFetch0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Con
 	}
 }
 
+func _Problem_ResetQueues0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ResetQueuesReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemResetQueues)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ResetQueues(ctx, req.(*ResetQueuesReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ResetQueuesRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type ProblemHTTPClient interface {
 	Backfill(ctx context.Context, req *BackfillReq, opts ...http.CallOption) (rsp *BackfillRes, err error)
 	// EmergencyStop 紧急停止：暂停 AI 并清空分析队列（兼容）
@@ -328,13 +354,15 @@ type ProblemHTTPClient interface {
 	Progress(ctx context.Context, req *ProgressReq, opts ...http.CallOption) (rsp *ProgressRes, err error)
 	// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(ctx context.Context, req *ResetAllReq, opts ...http.CallOption) (rsp *ResetAllRes, err error)
+	// ResetQueues 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
+	ResetQueues(ctx context.Context, req *ResetQueuesReq, opts ...http.CallOption) (rsp *ResetQueuesRes, err error)
 	// Resume 恢复 AI（兼容）
 	Resume(ctx context.Context, req *ResumeReq, opts ...http.CallOption) (rsp *ResumeRes, err error)
 	// RetryFailed 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
 	RetryFailed(ctx context.Context, req *RetryFailedReq, opts ...http.CallOption) (rsp *RetryFailedRes, err error)
-	// ToggleAnalyze 暂停/恢复 AI 分析（暂停时清空分析队列）
+	// ToggleAnalyze 暂停/恢复 AI 分析（仅停消费，不清空队列）
 	ToggleAnalyze(ctx context.Context, req *TogglePipelineReq, opts ...http.CallOption) (rsp *TogglePipelineRes, err error)
-	// ToggleFetch 暂停/恢复题面爬取（暂停时清空爬取队列）
+	// ToggleFetch 暂停/恢复题面爬取（仅停消费，不清空队列）
 	ToggleFetch(ctx context.Context, req *TogglePipelineReq, opts ...http.CallOption) (rsp *TogglePipelineRes, err error)
 	UserProfile(ctx context.Context, req *UserProfileReq, opts ...http.CallOption) (rsp *UserProfileRes, err error)
 }
@@ -440,6 +468,20 @@ func (c *ProblemHTTPClientImpl) ResetAll(ctx context.Context, in *ResetAllReq, o
 	return &out, nil
 }
 
+// ResetQueues 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
+func (c *ProblemHTTPClientImpl) ResetQueues(ctx context.Context, in *ResetQueuesReq, opts ...http.CallOption) (*ResetQueuesRes, error) {
+	var out ResetQueuesRes
+	pattern := "/v1/core/problem/reset-queues"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemResetQueues))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // Resume 恢复 AI（兼容）
 func (c *ProblemHTTPClientImpl) Resume(ctx context.Context, in *ResumeReq, opts ...http.CallOption) (*ResumeRes, error) {
 	var out ResumeRes
@@ -468,7 +510,7 @@ func (c *ProblemHTTPClientImpl) RetryFailed(ctx context.Context, in *RetryFailed
 	return &out, nil
 }
 
-// ToggleAnalyze 暂停/恢复 AI 分析（暂停时清空分析队列）
+// ToggleAnalyze 暂停/恢复 AI 分析（仅停消费，不清空队列）
 func (c *ProblemHTTPClientImpl) ToggleAnalyze(ctx context.Context, in *TogglePipelineReq, opts ...http.CallOption) (*TogglePipelineRes, error) {
 	var out TogglePipelineRes
 	pattern := "/v1/core/problem/toggle-analyze"
@@ -482,7 +524,7 @@ func (c *ProblemHTTPClientImpl) ToggleAnalyze(ctx context.Context, in *TogglePip
 	return &out, nil
 }
 
-// ToggleFetch 暂停/恢复题面爬取（暂停时清空爬取队列）
+// ToggleFetch 暂停/恢复题面爬取（仅停消费，不清空队列）
 func (c *ProblemHTTPClientImpl) ToggleFetch(ctx context.Context, in *TogglePipelineReq, opts ...http.CallOption) (*TogglePipelineRes, error) {
 	var out TogglePipelineRes
 	pattern := "/v1/core/problem/toggle-fetch"

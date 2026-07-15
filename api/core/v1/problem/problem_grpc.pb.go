@@ -31,6 +31,7 @@ const (
 	Problem_RetryFailed_FullMethodName     = "/api.core.v1.problem.Problem/RetryFailed"
 	Problem_ToggleAnalyze_FullMethodName   = "/api.core.v1.problem.Problem/ToggleAnalyze"
 	Problem_ToggleFetch_FullMethodName     = "/api.core.v1.problem.Problem/ToggleFetch"
+	Problem_ResetQueues_FullMethodName     = "/api.core.v1.problem.Problem/ResetQueues"
 )
 
 // ProblemClient is the client API for Problem service.
@@ -51,10 +52,12 @@ type ProblemClient interface {
 	Resume(ctx context.Context, in *ResumeReq, opts ...grpc.CallOption) (*ResumeRes, error)
 	// 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
 	RetryFailed(ctx context.Context, in *RetryFailedReq, opts ...grpc.CallOption) (*RetryFailedRes, error)
-	// 暂停/恢复 AI 分析（暂停时清空分析队列）
+	// 暂停/恢复 AI 分析（仅停消费，不清空队列）
 	ToggleAnalyze(ctx context.Context, in *TogglePipelineReq, opts ...grpc.CallOption) (*TogglePipelineRes, error)
-	// 暂停/恢复题面爬取（暂停时清空爬取队列）
+	// 暂停/恢复题面爬取（仅停消费，不清空队列）
 	ToggleFetch(ctx context.Context, in *TogglePipelineReq, opts ...grpc.CallOption) (*TogglePipelineRes, error)
+	// 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
+	ResetQueues(ctx context.Context, in *ResetQueuesReq, opts ...grpc.CallOption) (*ResetQueuesRes, error)
 }
 
 type problemClient struct {
@@ -185,6 +188,16 @@ func (c *problemClient) ToggleFetch(ctx context.Context, in *TogglePipelineReq, 
 	return out, nil
 }
 
+func (c *problemClient) ResetQueues(ctx context.Context, in *ResetQueuesReq, opts ...grpc.CallOption) (*ResetQueuesRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetQueuesRes)
+	err := c.cc.Invoke(ctx, Problem_ResetQueues_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProblemServer is the server API for Problem service.
 // All implementations must embed UnimplementedProblemServer
 // for forward compatibility.
@@ -203,10 +216,12 @@ type ProblemServer interface {
 	Resume(context.Context, *ResumeReq) (*ResumeRes, error)
 	// 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
 	RetryFailed(context.Context, *RetryFailedReq) (*RetryFailedRes, error)
-	// 暂停/恢复 AI 分析（暂停时清空分析队列）
+	// 暂停/恢复 AI 分析（仅停消费，不清空队列）
 	ToggleAnalyze(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error)
-	// 暂停/恢复题面爬取（暂停时清空爬取队列）
+	// 暂停/恢复题面爬取（仅停消费，不清空队列）
 	ToggleFetch(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error)
+	// 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
+	ResetQueues(context.Context, *ResetQueuesReq) (*ResetQueuesRes, error)
 	mustEmbedUnimplementedProblemServer()
 }
 
@@ -252,6 +267,9 @@ func (UnimplementedProblemServer) ToggleAnalyze(context.Context, *TogglePipeline
 }
 func (UnimplementedProblemServer) ToggleFetch(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method ToggleFetch not implemented")
+}
+func (UnimplementedProblemServer) ResetQueues(context.Context, *ResetQueuesReq) (*ResetQueuesRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetQueues not implemented")
 }
 func (UnimplementedProblemServer) mustEmbedUnimplementedProblemServer() {}
 func (UnimplementedProblemServer) testEmbeddedByValue()                 {}
@@ -490,6 +508,24 @@ func _Problem_ToggleFetch_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Problem_ResetQueues_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetQueuesReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).ResetQueues(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_ResetQueues_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).ResetQueues(ctx, req.(*ResetQueuesReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Problem_ServiceDesc is the grpc.ServiceDesc for Problem service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -544,6 +580,10 @@ var Problem_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ToggleFetch",
 			Handler:    _Problem_ToggleFetch_Handler,
+		},
+		{
+			MethodName: "ResetQueues",
+			Handler:    _Problem_ResetQueues_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
