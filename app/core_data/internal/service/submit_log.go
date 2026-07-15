@@ -85,14 +85,17 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 
 	// 一次 RPC + 一次 SQL，补齐展示字段，避免前端 N+1
 	nameMap := s.fetchUserNames(ctx, r)
-	titleMap := s.fetchProblemTitles(ctx, r)
+	metaMap := s.fetchProblemMeta(ctx, r)
 	for _, item := range r {
 		if n, ok := nameMap[item.UserId]; ok {
 			item.UserName = n
 		}
 		if item.ProblemId > 0 {
-			if t, ok := titleMap[item.ProblemId]; ok {
-				item.ProblemTitle = t
+			if m, ok := metaMap[item.ProblemId]; ok {
+				item.ProblemTitle = m.Title
+				if len(m.Tags) > 0 {
+					item.ProblemTags = m.Tags
+				}
 			}
 		}
 	}
@@ -145,9 +148,14 @@ func (s SubmitLogService) fetchUserNames(ctx context.Context, logs []*submit_log
 	return result
 }
 
-// fetchProblemTitles 批量取题库标题（本库 problems）
-func (s SubmitLogService) fetchProblemTitles(ctx context.Context, logs []*submit_log.SubmitLog) map[uint32]string {
-	result := map[uint32]string{}
+type problemMeta struct {
+	Title string
+	Tags  []string
+}
+
+// fetchProblemMeta 批量取题库标题与标签（本库 problems）
+func (s SubmitLogService) fetchProblemMeta(ctx context.Context, logs []*submit_log.SubmitLog) map[uint32]problemMeta {
+	result := map[uint32]problemMeta{}
 	if len(logs) == 0 || s.db == nil {
 		return result
 	}
@@ -166,21 +174,28 @@ func (s SubmitLogService) fetchProblemTitles(ctx context.Context, logs []*submit
 	}
 
 	var rows []struct {
-		ID    uint   `gorm:"column:id"`
-		Title string `gorm:"column:title"`
+		ID    uint              `gorm:"column:id"`
+		Title string            `gorm:"column:title"`
+		Tags  model.StringArray `gorm:"column:tags"`
 	}
 	if err := s.db.WithContext(ctx).
 		Table("problems").
-		Select("id, title").
+		Select("id, title, tags").
 		Where("id IN ?", ids).
 		Find(&rows).Error; err != nil {
-		log.Errorf("submit_log fetchProblemTitles: %v", err)
+		log.Errorf("submit_log fetchProblemMeta: %v", err)
 		return result
 	}
 	for _, row := range rows {
-		if row.Title != "" {
-			result[uint32(row.ID)] = row.Title
+		tags := []string(row.Tags)
+		if tags == nil {
+			tags = []string{}
 		}
+		// 最多展示 6 个，避免动态列表过宽
+		if len(tags) > 6 {
+			tags = tags[:6]
+		}
+		result[uint32(row.ID)] = problemMeta{Title: row.Title, Tags: tags}
 	}
 	return result
 }

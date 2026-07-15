@@ -1752,6 +1752,10 @@ components:
                     type: string
                 problemTitle:
                     type: string
+                problemTags:
+                    type: array
+                    items:
+                        type: string
         api.user.group.CreateReply:
             type: object
             properties:
