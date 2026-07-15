@@ -121,7 +121,7 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*m
 		prio = mqPriorityIncremental
 	}
 
-	// 新题且可爬 → 入队抓题面 + AI
+	// 新题且可爬 → 仅入队抓题面（AI 在爬取成功后按 6 个月窗口决定）
 	if isNew && !parsed.SkipFetch && existing.Status == model.ProblemStatusPending {
 		if err := uc.enqueueFetchPrio(existing.ID, existing.Platform, existing.ExternalID, existing.URL, prio); err != nil {
 			log.Errorf("enqueue problem %d: %v", existing.ID, err)
@@ -133,8 +133,9 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*m
 		existing.Status = model.ProblemStatusFailedPerm
 	}
 
-	// 已存在但题面未完成：补入队（例如之前失败/卡住）；FAILED_PERM 永不重试
-	// 已 COMPLETED：分析过则丢弃，不入队
+	// 已存在但题面未完成：补入队；FAILED_PERM 永不重试
+	// 题面：始终可补爬；AI：仅近 6 个月（enqueueAnalyzePrio 内统一拦截）
+	// 已 COMPLETED：不入队
 	if !isNew && !parsed.SkipFetch {
 		switch existing.Status {
 		case model.ProblemStatusPending, model.ProblemStatusFailed:
@@ -143,7 +144,7 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*m
 					log.Errorf("re-enqueue fetch problem %d: %v", existing.ID, err)
 				}
 			} else {
-				// 有题面未分析完 → 分析队列
+				// 有题面未分析完 → 尝试分析队列（超 6 月会被丢弃）
 				_ = uc.data.DB.Model(&existing).Update("status", model.ProblemStatusTagging).Error
 				if err := uc.enqueueAnalyzePrio(existing.ID, prio); err != nil {
 					log.Errorf("re-enqueue analyze problem %d: %v", existing.ID, err)
@@ -153,6 +154,11 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*m
 			if strings.TrimSpace(existing.ContentMD) != "" {
 				if err := uc.enqueueAnalyzePrio(existing.ID, prio); err != nil {
 					log.Errorf("re-enqueue analyze problem %d: %v", existing.ID, err)
+				}
+			} else {
+				// 无题面却标 TAGGING：补爬
+				if err := uc.enqueueFetchPrio(existing.ID, existing.Platform, existing.ExternalID, existing.URL, prio); err != nil {
+					log.Errorf("re-enqueue fetch problem %d: %v", existing.ID, err)
 				}
 			}
 		case model.ProblemStatusCompleted, model.ProblemStatusFailedPerm, model.ProblemStatusSkipped:
@@ -210,9 +216,19 @@ func (uc *ProblemUseCase) enqueueAnalyze(id uint) error {
 	return uc.enqueueAnalyzePrio(id, mqPriorityBulk)
 }
 
+// enqueueAnalyzePrio 投递 AI 分析；统一 6 个月窗口：超窗直接弃掉（题面爬取不受影响）
 func (uc *ProblemUseCase) enqueueAnalyzePrio(id uint, priority uint8) error {
 	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
+	}
+	var p model.Problem
+	if err := uc.data.DB.First(&p, id).Error; err != nil {
+		return err
+	}
+	// 自动爬虫 / 回填 / 爬取成功后入队：超过 6 个月（以 submit_logs 最近提交为准）不进 AI
+	if !uc.withinAnalyzeWindow(&p) {
+		log.Debugf("enqueueAnalyze skip out-of-window id=%d last=%v", id, p.LastSubmittedAt)
+		return nil
 	}
 	body, _ := json.Marshal(event.ProblemAnalyzeEvent{ProblemID: id})
 	if err := uc.declareProblemQueue("problem_analyze"); err != nil {
