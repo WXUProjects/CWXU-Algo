@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"cwxu-algo/app/user/internal/data/model"
@@ -215,7 +216,71 @@ func seedGoAlgoFramework(db *gorm.DB) {
 	}).Error
 	// 组织周报开关：新列默认 true（GORM AutoMigrate）；若列为 false 且从未设置过可保持
 
+	// 8. 姓名语义迁移：users.name → 全局昵称(=username)；旧真实姓名 → 唯一非公共域的组织内名称
+	// 幂等：仅当 org_display_name 为空且 name≠username 时拷贝；之后 name 统一为 username
+	migrateNameToOrgDisplay(db, public.ID)
+
 	log.Infof("GoAlgo framework seed done public_org_id=%d users=%d fixed_groups=%d", public.ID, len(users), len(bad))
+}
+
+// migrateNameToOrgDisplay 一次性迁移：
+// - 用户有且仅有 1 个非公共域 membership 且 org_display_name 为空 → 写入旧 users.name
+// - 全部 users.name 改为 username（全局昵称）
+func migrateNameToOrgDisplay(db *gorm.DB, publicOrgID uint) {
+	type row struct {
+		UserID uint
+		Name   string
+		Uname  string
+		Cnt    int64
+	}
+	var rows []row
+	// 每个用户非公共域 membership 数量
+	_ = db.Raw(`
+		SELECT u.id AS user_id, COALESCE(u.name,'') AS name, COALESCE(u.username,'') AS uname,
+			(SELECT COUNT(*) FROM org_members m
+			 JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL
+			 WHERE m.user_id = u.id AND m.deleted_at IS NULL
+			   AND o.id <> ? AND COALESCE(o.is_system,false) = false) AS cnt
+		FROM users u
+		WHERE u.deleted_at IS NULL
+	`, publicOrgID).Scan(&rows).Error
+
+	copied := 0
+	for _, r := range rows {
+		if r.Cnt != 1 {
+			continue
+		}
+		oldName := strings.TrimSpace(r.Name)
+		if oldName == "" || oldName == r.Uname {
+			continue
+		}
+		// 找到那一条非公共域 membership
+		var m model.OrgMember
+		err := db.Table("org_members AS m").
+			Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
+			Where("m.user_id = ? AND m.deleted_at IS NULL AND o.id <> ? AND COALESCE(o.is_system,false) = false",
+				r.UserID, publicOrgID).
+			Select("m.*").
+			First(&m).Error
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(m.OrgDisplayName) != "" {
+			continue
+		}
+		if db.Model(&model.OrgMember{}).Where("id = ?", m.ID).
+			Update("org_display_name", oldName).Error == nil {
+			copied++
+		}
+	}
+
+	// 全局昵称 = 用户名（覆盖旧真实姓名）
+	res := db.Exec(`UPDATE users SET name = username WHERE deleted_at IS NULL AND (name IS DISTINCT FROM username)`)
+	nChanged := int64(0)
+	if res != nil {
+		nChanged = res.RowsAffected
+	}
+	log.Infof("migrate name→org_display: copied=%d name_to_username=%d", copied, nChanged)
 }
 
 // EnsurePublicOrgID 供业务使用

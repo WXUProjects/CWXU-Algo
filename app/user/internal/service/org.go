@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -99,6 +100,34 @@ func (s *OrgService) isMemberDB(userID, orgID uint) bool {
 	return n > 0
 }
 
+// setDefaultOrg 将组织设为用户默认（current_org_id）；登录/打开站点自动进入该组织。
+// 用户之后只需 switch 切换，无需单独「设默认」。
+func (s *OrgService) setDefaultOrg(userID, orgID uint) {
+	if userID == 0 || orgID == 0 {
+		return
+	}
+	_ = s.db.Model(&model.User{}).Where("id = ?", userID).Update("current_org_id", orgID).Error
+}
+
+// fallbackDefaultOrgIf 若用户当前组织是 orgID，则切回公共域
+func (s *OrgService) fallbackDefaultOrgIf(userID, orgID uint) {
+	if userID == 0 || orgID == 0 {
+		return
+	}
+	var u model.User
+	if s.db.Select("id", "current_org_id").First(&u, userID).Error != nil {
+		return
+	}
+	if u.CurrentOrgID != orgID {
+		return
+	}
+	var pub model.Org
+	if s.db.Where("slug = ?", model.PublicOrgSlug).First(&pub).Error != nil {
+		return
+	}
+	_ = s.db.Model(&u).Update("current_org_id", pub.ID).Error
+}
+
 // ensureDefaultGroupID 组织默认分组 ID（无则创建）
 func (s *OrgService) ensureDefaultGroupID(orgID uint) uint {
 	var g model.Group
@@ -135,6 +164,7 @@ func RegisterOrgRoutes(srv *khttp.Server, org *OrgService) {
 	r.POST("/v1/user/org/members/set-role", org.handleSetRole)
 	r.POST("/v1/user/org/members/remove", org.handleRemoveMember)
 	r.POST("/v1/user/org/members/add", org.handleAddMember)
+	r.POST("/v1/user/org/members/set-display-name", org.handleSetDisplayName)
 	r.GET("/v1/user/org/member-ids", org.handleMemberIds)
 	r.GET("/v1/user/org/invite", org.handleInviteGet)
 	r.POST("/v1/user/org/invite/rotate", org.handleInviteRotate)
@@ -278,22 +308,31 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 	if adminUID == 0 {
 		adminUID = pd.UserID
 	}
-	// 确保目标用户存在且加入组织为管理员，并挂到默认分组
+	// 确保目标用户存在且加入组织为管理员，并挂到默认分组（不改 users.group_id：分组以当前组织为准）
 	if u, err := s.loadUser(adminUID); err == nil {
 		_ = u
 		_ = s.db.Where("org_id = ? AND user_id = ?", o.ID, adminUID).Delete(&model.OrgMember{}).Error
 		var gid *uint
 		if defID > 0 {
 			gid = &defID
-			_ = s.db.Model(&model.User{}).Where("id = ?", adminUID).Update("group_id", defID).Error
+		}
+		displayName := ""
+		if au, e := s.loadUser(adminUID); e == nil {
+			displayName = strings.TrimSpace(au.Name)
+			if displayName == "" {
+				displayName = au.Username
+			}
 		}
 		_ = s.db.Create(&model.OrgMember{
-			OrgID:    o.ID,
-			UserID:   adminUID,
-			Role:     model.OrgRoleOrgAdmin,
-			GroupID:  gid,
-			JoinedAt: time.Now(),
+			OrgID:          o.ID,
+			UserID:         adminUID,
+			Role:           model.OrgRoleOrgAdmin,
+			GroupID:        gid,
+			OrgDisplayName: displayName,
+			JoinedAt:       time.Now(),
 		}).Error
+		// 拉入/任命为首任组织管理员时，设为该用户默认组织
+		s.setDefaultOrg(adminUID, o.ID)
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "创建成功", "data": orgToMap(&o, true),
@@ -330,6 +369,15 @@ func (s *OrgService) handleDelete(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "公共域不存在，无法迁移用户"})
 		return nil
 	}
+	// 优先非 0 的默认分组（历史数据可能存在 id=0 的「默认分组」）
+	pubDefID := s.ensureDefaultGroupID(pub.ID)
+	var pubDefAlt uint
+	_ = s.db.Model(&model.Group{}).
+		Where("org_id = ? AND name IN ? AND id > 0", pub.ID, []string{model.DefaultGroupName, "未分组"}).
+		Order("id ASC").Limit(1).Pluck("id", &pubDefAlt).Error
+	if pubDefAlt > 0 {
+		pubDefID = pubDefAlt
+	}
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		// 当前组织指向被删组织的用户 → 切回公共域
@@ -338,6 +386,20 @@ func (s *OrgService) handleDelete(ctx khttp.Context) error {
 			Update("current_org_id", pub.ID).Error; err != nil {
 			return err
 		}
+
+		// 组织内分组 id（先迁用户，再软删分组，避免 users.group_id 悬空）
+		var groupIDs []uint
+		if err := tx.Model(&model.Group{}).Where("org_id = ?", o.ID).Pluck("id", &groupIDs).Error; err != nil {
+			return err
+		}
+		if len(groupIDs) > 0 {
+			if err := tx.Model(&model.User{}).
+				Where("group_id IN ?", groupIDs).
+				Update("group_id", pubDefID).Error; err != nil {
+				return err
+			}
+		}
+
 		// 成员关系
 		if err := tx.Where("org_id = ?", o.ID).Delete(&model.OrgMember{}).Error; err != nil {
 			return err
@@ -348,6 +410,14 @@ func (s *OrgService) handleDelete(ctx khttp.Context) error {
 		}
 		// 组织内分组
 		if err := tx.Where("org_id = ?", o.ID).Delete(&model.Group{}).Error; err != nil {
+			return err
+		}
+		// 释放 slug / invite_code 唯一约束，避免软删后无法复用
+		suffix := fmt.Sprintf("-del-%d", o.ID)
+		if err := tx.Model(&o).Updates(map[string]interface{}{
+			"slug":        o.Slug + suffix,
+			"invite_code": o.InviteCode + suffix,
+		}).Error; err != nil {
 			return err
 		}
 		// 组织本身（软删除）
@@ -544,7 +614,8 @@ func (s *OrgService) handleJoin(ctx khttp.Context) error {
 		return nil
 	}
 	var req struct {
-		InviteCode string `json:"inviteCode"`
+		InviteCode     string `json:"inviteCode"`
+		OrgDisplayName string `json:"orgDisplayName"`
 	}
 	if err := readJSON(ctx.Request(), &req); err != nil {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
@@ -553,6 +624,15 @@ func (s *OrgService) handleJoin(ctx khttp.Context) error {
 	code := strings.TrimSpace(strings.ToUpper(req.InviteCode))
 	if code == "" {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请输入团队识别码"})
+		return nil
+	}
+	displayName := strings.TrimSpace(req.OrgDisplayName)
+	if displayName == "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请填写组织内名称（在本团队中展示的称呼）"})
+		return nil
+	}
+	if len([]rune(displayName)) > 32 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "组织内名称过长（最多 32 字）"})
 		return nil
 	}
 	var o model.Org
@@ -572,10 +652,11 @@ func (s *OrgService) handleJoin(ctx khttp.Context) error {
 			return nil
 		}
 		_ = s.db.Create(&model.OrgJoinRequest{
-			OrgID:    o.ID,
-			UserID:   pd.UserID,
-			Status:   model.JoinReqPending,
-			CodeUsed: code,
+			OrgID:          o.ID,
+			UserID:         pd.UserID,
+			Status:         model.JoinReqPending,
+			CodeUsed:       code,
+			OrgDisplayName: displayName,
 		}).Error
 		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "申请已提交，等待团队管理员审批"})
 		return nil
@@ -587,11 +668,12 @@ func (s *OrgService) handleJoin(ctx khttp.Context) error {
 		_ = s.db.Model(&model.User{}).Where("id = ?", pd.UserID).Update("group_id", defID).Error
 	}
 	_ = s.db.Create(&model.OrgMember{
-		OrgID:    o.ID,
-		UserID:   pd.UserID,
-		Role:     model.OrgRoleMember,
-		GroupID:  gid,
-		JoinedAt: time.Now(),
+		OrgID:          o.ID,
+		UserID:         pd.UserID,
+		Role:           model.OrgRoleMember,
+		GroupID:        gid,
+		OrgDisplayName: displayName,
+		JoinedAt:       time.Now(),
 	}).Error
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "加入成功", "data": orgToMap(&o, false)})
 	return nil
@@ -672,21 +754,24 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 	keyword := strings.TrimSpace(q.Get("keyword"))
 
 	type row struct {
-		UserID   uint
-		Username string
-		Name     string
-		Avatar   string
-		Role     string
-		GroupID  *uint
-		JoinedAt time.Time
+		UserID         uint
+		Username       string
+		Name           string
+		OrgDisplayName string
+		Avatar         string
+		Role           string
+		GroupID        *uint
+		JoinedAt       time.Time
 	}
 	base := s.db.Table("org_members AS m").
-		Select("m.user_id AS user_id, u.username AS username, u.name AS name, u.avatar AS avatar, m.role AS role, m.group_id AS group_id, m.joined_at AS joined_at").
+		Select(`m.user_id AS user_id, u.username AS username, u.name AS name,
+			COALESCE(m.org_display_name,'') AS org_display_name,
+			u.avatar AS avatar, m.role AS role, m.group_id AS group_id, m.joined_at AS joined_at`).
 		Joins("JOIN users u ON u.id = m.user_id AND u.deleted_at IS NULL").
 		Where("m.org_id = ? AND m.deleted_at IS NULL", orgID)
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		base = base.Where("u.name LIKE ? OR u.username LIKE ?", like, like)
+		base = base.Where("u.name LIKE ? OR u.username LIKE ? OR m.org_display_name LIKE ?", like, like, like)
 	}
 
 	var total int64
@@ -695,7 +780,7 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 		Where("m.org_id = ? AND m.deleted_at IS NULL", orgID)
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		countQ = countQ.Where("u.name LIKE ? OR u.username LIKE ?", like, like)
+		countQ = countQ.Where("u.name LIKE ? OR u.username LIKE ? OR m.org_display_name LIKE ?", like, like, like)
 	}
 	_ = countQ.Count(&total).Error
 
@@ -707,14 +792,24 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 
 	list := make([]map[string]interface{}, 0, len(rows))
 	for _, r := range rows {
+		// name = 组织内展示名（有则用 org_display_name，否则全局昵称）
+		display := strings.TrimSpace(r.OrgDisplayName)
+		if display == "" {
+			display = r.Name
+		}
+		if display == "" {
+			display = r.Username
+		}
 		list = append(list, map[string]interface{}{
-			"userId":   r.UserID,
-			"username": r.Username,
-			"name":     r.Name,
-			"avatar":   r.Avatar,
-			"role":     r.Role,
-			"groupId":  r.GroupID,
-			"joinedAt": r.JoinedAt.Unix(),
+			"userId":         r.UserID,
+			"username":       r.Username,
+			"name":           display,
+			"nickname":       r.Name,
+			"orgDisplayName": r.OrgDisplayName,
+			"avatar":         r.Avatar,
+			"role":           r.Role,
+			"groupId":        r.GroupID,
+			"joinedAt":       r.JoinedAt.Unix(),
 		})
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
@@ -752,10 +847,11 @@ func (s *OrgService) handleAddMember(ctx khttp.Context) error {
 		return nil
 	}
 	var req struct {
-		OrgID    uint   `json:"orgId"`
-		UserID   uint   `json:"userId"`
-		Username string `json:"username"`
-		Role     string `json:"role"`
+		OrgID          uint   `json:"orgId"`
+		UserID         uint   `json:"userId"`
+		Username       string `json:"username"`
+		Role           string `json:"role"`
+		OrgDisplayName string `json:"orgDisplayName"`
 	}
 	if err := readJSON(ctx.Request(), &req); err != nil || req.OrgID == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
@@ -770,7 +866,7 @@ func (s *OrgService) handleAddMember(ctx khttp.Context) error {
 	if uid == 0 && strings.TrimSpace(req.Username) != "" {
 		var u model.User
 		if s.db.Where("username = ?", strings.TrimSpace(req.Username)).First(&u).Error != nil {
-			// 尝试按姓名模糊
+			// 尝试按昵称模糊
 			if s.db.Where("name LIKE ?", "%"+strings.TrimSpace(req.Username)+"%").First(&u).Error != nil {
 				writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
 				return nil
@@ -790,6 +886,17 @@ func (s *OrgService) handleAddMember(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "用户已在组织中", "userId": uid})
 		return nil
 	}
+	displayName := strings.TrimSpace(req.OrgDisplayName)
+	if displayName == "" {
+		// 管理员未填：用目标用户全局昵称作占位，用户可再改
+		var u model.User
+		if s.db.Select("name", "username").First(&u, uid).Error == nil {
+			displayName = strings.TrimSpace(u.Name)
+			if displayName == "" {
+				displayName = u.Username
+			}
+		}
+	}
 	defID := s.ensureDefaultGroupID(req.OrgID)
 	var gid *uint
 	if defID > 0 {
@@ -797,12 +904,62 @@ func (s *OrgService) handleAddMember(ctx khttp.Context) error {
 		_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("group_id", defID).Error
 	}
 	if err := s.db.Create(&model.OrgMember{
-		OrgID: req.OrgID, UserID: uid, Role: role, GroupID: gid, JoinedAt: time.Now(),
+		OrgID: req.OrgID, UserID: uid, Role: role, GroupID: gid,
+		OrgDisplayName: displayName, JoinedAt: time.Now(),
 	}).Error; err != nil {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
 		return nil
 	}
+	// 管理员拉入 → 设为默认组织（下次打开自动进入；用户之后 switch 即记忆）
+	s.setDefaultOrg(uid, req.OrgID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已加入组织", "userId": uid})
+	return nil
+}
+
+// handleSetDisplayName 本人或组织/站点管理员修改组织内名称
+func (s *OrgService) handleSetDisplayName(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
+		return nil
+	}
+	var req struct {
+		OrgID          uint   `json:"orgId"`
+		UserID         uint   `json:"userId"`
+		OrgDisplayName string `json:"orgDisplayName"`
+	}
+	if err := readJSON(ctx.Request(), &req); err != nil || req.OrgID == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
+		return nil
+	}
+	uid := req.UserID
+	if uid == 0 {
+		uid = pd.UserID
+	}
+	displayName := strings.TrimSpace(req.OrgDisplayName)
+	if displayName == "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "组织内名称不能为空"})
+		return nil
+	}
+	if len([]rune(displayName)) > 32 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "组织内名称过长（最多 32 字）"})
+		return nil
+	}
+	if uid != pd.UserID && !auth.VerifySiteAdmin(ctx) && !s.isOrgAdminDB(pd.UserID, req.OrgID) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
+		return nil
+	}
+	if !s.isMemberDB(uid, req.OrgID) {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不在该组织中"})
+		return nil
+	}
+	if err := s.db.Model(&model.OrgMember{}).
+		Where("org_id = ? AND user_id = ?", req.OrgID, uid).
+		Update("org_display_name", displayName).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
+		return nil
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更新组织内名称"})
 	return nil
 }
 
@@ -833,11 +990,24 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 	var m model.OrgMember
 	if err := s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).First(&m).Error; err != nil {
 		// 不在组织中则加入
-		m = model.OrgMember{OrgID: req.OrgID, UserID: req.UserID, Role: req.Role, JoinedAt: time.Now()}
+		displayName := ""
+		var u model.User
+		if s.db.Select("name", "username").First(&u, req.UserID).Error == nil {
+			displayName = strings.TrimSpace(u.Name)
+			if displayName == "" {
+				displayName = u.Username
+			}
+		}
+		m = model.OrgMember{
+			OrgID: req.OrgID, UserID: req.UserID, Role: req.Role,
+			OrgDisplayName: displayName, JoinedAt: time.Now(),
+		}
 		if err := s.db.Create(&m).Error; err != nil {
 			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
 			return nil
 		}
+		// 任命时顺带拉入 → 设为默认组织
+		s.setDefaultOrg(req.UserID, req.OrgID)
 	} else {
 		_ = s.db.Model(&m).Update("role", req.Role).Error
 	}
@@ -873,6 +1043,8 @@ func (s *OrgService) handleRemoveMember(ctx khttp.Context) error {
 		return nil
 	}
 	_ = s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).Delete(&model.OrgMember{}).Error
+	// 若被移出的是其默认组织，回落公共域
+	s.fallbackDefaultOrgIf(req.UserID, req.OrgID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已移除成员"})
 	return nil
 }
@@ -954,6 +1126,7 @@ func (s *OrgService) handleJoinRequests(ctx khttp.Context) error {
 		_ = s.db.First(&u, r.UserID)
 		list = append(list, map[string]interface{}{
 			"id": r.ID, "userId": r.UserID, "username": u.Username, "name": u.Name,
+			"orgDisplayName": r.OrgDisplayName,
 			"status": r.Status, "createdAt": r.CreatedAt.Unix(),
 		})
 	}
@@ -996,9 +1169,22 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 				gid = &defID
 				_ = s.db.Model(&model.User{}).Where("id = ?", jr.UserID).Update("group_id", defID).Error
 			}
+			displayName := strings.TrimSpace(jr.OrgDisplayName)
+			if displayName == "" {
+				var u model.User
+				if s.db.Select("name", "username").First(&u, jr.UserID).Error == nil {
+					displayName = strings.TrimSpace(u.Name)
+					if displayName == "" {
+						displayName = u.Username
+					}
+				}
+			}
 			_ = s.db.Create(&model.OrgMember{
-				OrgID: jr.OrgID, UserID: jr.UserID, Role: model.OrgRoleMember, GroupID: gid, JoinedAt: time.Now(),
+				OrgID: jr.OrgID, UserID: jr.UserID, Role: model.OrgRoleMember, GroupID: gid,
+				OrgDisplayName: displayName, JoinedAt: time.Now(),
 			}).Error
+			// 审批通过 = 管理员侧拉入 → 设为默认组织
+			s.setDefaultOrg(jr.UserID, jr.OrgID)
 		}
 		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已通过"})
 		return nil

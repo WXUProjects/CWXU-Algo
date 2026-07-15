@@ -60,11 +60,12 @@ type Org struct {
 // OrgMember 用户与组织关系
 type OrgMember struct {
 	gorm.Model
-	OrgID    uint       `gorm:"uniqueIndex:idx_org_user;not null;comment:组织ID"`
-	UserID   uint       `gorm:"uniqueIndex:idx_org_user;index;not null;comment:用户ID"`
-	Role     string     `gorm:"size:16;default:member;comment:member|coach|captain|org_admin"`
-	GroupID  *uint      `gorm:"index;comment:组织内分组"`
-	JoinedAt time.Time  `gorm:"comment:加入时间"`
+	OrgID          uint      `gorm:"uniqueIndex:idx_org_user;not null;comment:组织ID"`
+	UserID         uint      `gorm:"uniqueIndex:idx_org_user;index;not null;comment:用户ID"`
+	Role           string    `gorm:"size:16;default:member;comment:member|coach|captain|org_admin"`
+	GroupID        *uint     `gorm:"index;comment:组织内分组"`
+	OrgDisplayName string    `gorm:"size:64;comment:组织内名称(仅本组织展示)"`
+	JoinedAt       time.Time `gorm:"comment:加入时间"`
 }
 
 // ValidOrgRole 组织内角色是否合法
@@ -85,11 +86,12 @@ func IsOrgStaffRole(role string) bool {
 // OrgJoinRequest 团队识别码加入申请（join_mode=review）
 type OrgJoinRequest struct {
 	gorm.Model
-	OrgID     uint   `gorm:"index;not null"`
-	UserID    uint   `gorm:"index;not null"`
-	Status    string `gorm:"size:16;default:pending;comment:pending|approved|rejected"`
-	CodeUsed  string `gorm:"size:32"`
-	ReviewedBy *uint `gorm:"comment:审批人"`
+	OrgID          uint   `gorm:"index;not null"`
+	UserID         uint   `gorm:"index;not null"`
+	Status         string `gorm:"size:16;default:pending;comment:pending|approved|rejected"`
+	CodeUsed       string `gorm:"size:32"`
+	OrgDisplayName string `gorm:"size:64;comment:申请时填写的组织内名称"`
+	ReviewedBy     *uint  `gorm:"comment:审批人"`
 }
 
 // PlanQuota 套餐配额模板

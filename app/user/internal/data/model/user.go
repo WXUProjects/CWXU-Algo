@@ -9,7 +9,7 @@ type User struct {
 	Username     string `gorm:"comment:用户名"`
 	Password     string `gorm:"comment:密码"`
 	Avatar       string `gorm:"comment:头像"`
-	Name         string `gorm:"comment:姓名"`
+	Name         string `gorm:"comment:全局昵称(非真实姓名)"`
 	Email        string `gorm:"comment:邮箱"`
 	GroupId      int64  `gorm:"comment:组id(兼容旧字段;组织内分组见 org_members.group_id)"`
 	Group        Group  `gorm:"foreignKey:GroupId;references:ID"`
