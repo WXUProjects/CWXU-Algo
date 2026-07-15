@@ -52,12 +52,64 @@ func newInviteCode() string {
 	return strings.ToUpper(hex.EncodeToString(b))
 }
 
+// DefaultSeatLimit 新建组织 / 未配置时的默认用户数上限
+const DefaultSeatLimit = 50
+
+func effectiveSeatLimit(limit int) int {
+	if limit <= 0 {
+		return DefaultSeatLimit
+	}
+	return limit
+}
+
+// countOrgSeats 占用席位数。普通组织=成员总数；
+// 公共域仅统计「只属于公共域、未加入任何其它组织」的用户。
+func countOrgSeats(db *gorm.DB, o *model.Org) int64 {
+	if o == nil || db == nil {
+		return 0
+	}
+	if o.IsSystem || o.Slug == model.PublicOrgSlug {
+		var n int64
+		_ = db.Raw(`
+			SELECT COUNT(*) FROM org_members m
+			WHERE m.org_id = ? AND m.deleted_at IS NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM org_members m2
+				WHERE m2.user_id = m.user_id
+				  AND m2.org_id <> m.org_id
+				  AND m2.deleted_at IS NULL
+			)
+		`, o.ID).Scan(&n).Error
+		return n
+	}
+	var n int64
+	_ = db.Model(&model.OrgMember{}).Where("org_id = ?", o.ID).Count(&n)
+	return n
+}
+
+// seatFullMessage 若已达上限返回错误文案，否则空串
+func seatFullMessage(db *gorm.DB, o *model.Org) string {
+	if o == nil {
+		return ""
+	}
+	limit := effectiveSeatLimit(o.SeatLimit)
+	used := countOrgSeats(db, o)
+	if used >= int64(limit) {
+		if o.IsSystem || o.Slug == model.PublicOrgSlug {
+			return fmt.Sprintf("公共域仅属用户已达上限（%d/%d），暂时无法注册", used, limit)
+		}
+		return fmt.Sprintf("该组织用户数已达上限（%d/%d），无法再加入", used, limit)
+	}
+	return ""
+}
+
 func orgToMap(o *model.Org, includeInvite bool) map[string]interface{} {
 	m := map[string]interface{}{
 		"id":                   o.ID,
 		"name":                 o.Name,
 		"slug":                 o.Slug,
 		"plan":                 o.Plan,
+		"seatLimit":            effectiveSeatLimit(o.SeatLimit),
 		"status":               o.Status,
 		"isSystem":             o.IsSystem,
 		"brandTitle":           o.BrandTitle,
@@ -75,6 +127,12 @@ func orgToMap(o *model.Org, includeInvite bool) map[string]interface{} {
 	if includeInvite {
 		m["inviteCode"] = o.InviteCode
 	}
+	return m
+}
+
+func (s *OrgService) orgToMapWithSeats(o *model.Org, includeInvite bool) map[string]interface{} {
+	m := orgToMap(o, includeInvite)
+	m["memberCount"] = countOrgSeats(s.db, o)
 	return m
 }
 
@@ -201,7 +259,7 @@ func (s *OrgService) handleList(ctx khttp.Context) error {
 		}
 		list := make([]map[string]interface{}, 0, len(orgs))
 		for i := range orgs {
-			item := orgToMap(&orgs[i], false)
+			item := s.orgToMapWithSeats(&orgs[i], false)
 			item["myRole"] = roleMap[orgs[i].ID]
 			item["orgDisplayName"] = displayMap[orgs[i].ID]
 			item["isCurrent"] = orgs[i].ID == pd.OrgID
@@ -213,7 +271,7 @@ func (s *OrgService) handleList(ctx khttp.Context) error {
 
 	list := make([]map[string]interface{}, 0, len(orgs))
 	for i := range orgs {
-		item := orgToMap(&orgs[i], pd.IsSiteAdmin)
+		item := s.orgToMapWithSeats(&orgs[i], pd.IsSiteAdmin)
 		item["isCurrent"] = orgs[i].ID == pd.OrgID
 		list = append(list, item)
 	}
@@ -239,7 +297,7 @@ func (s *OrgService) handleGet(ctx khttp.Context) error {
 		return nil
 	}
 	showInvite := pd != nil && (pd.IsSiteAdmin || s.isOrgAdminDB(pd.UserID, orgID))
-	item := orgToMap(&o, showInvite)
+	item := s.orgToMapWithSeats(&o, showInvite)
 	if pd != nil {
 		var m model.OrgMember
 		if s.db.Where("org_id = ? AND user_id = ?", orgID, pd.UserID).First(&m).Error == nil {
@@ -259,10 +317,11 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 		return nil
 	}
 	var req struct {
-		Name           string `json:"name"`
-		Slug           string `json:"slug"`
-		AdminUserID    uint   `json:"adminUserId"`
-		JoinMode       string `json:"joinMode"`
+		Name        string `json:"name"`
+		Slug        string `json:"slug"`
+		AdminUserID uint   `json:"adminUserId"`
+		JoinMode    string `json:"joinMode"`
+		SeatLimit   *int   `json:"seatLimit"`
 	}
 	if err := readJSON(ctx.Request(), &req); err != nil {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
@@ -286,10 +345,19 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 	if joinMode != model.OrgJoinReview {
 		joinMode = model.OrgJoinAuto
 	}
+	seatLimit := DefaultSeatLimit
+	if req.SeatLimit != nil {
+		if *req.SeatLimit < 1 {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "用户数上限至少为 1"})
+			return nil
+		}
+		seatLimit = *req.SeatLimit
+	}
 	o := model.Org{
 		Name:                 name,
 		Slug:                 slug,
 		Plan:                 "team",
+		SeatLimit:            seatLimit,
 		Status:               model.OrgStatusActive,
 		IsSystem:             false,
 		JoinMode:             joinMode,
@@ -339,7 +407,7 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 		s.setDefaultOrg(adminUID, o.ID)
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "创建成功", "data": orgToMap(&o, true),
+		"code": 0, "message": "创建成功", "data": s.orgToMapWithSeats(&o, true),
 	})
 	return nil
 }
@@ -459,6 +527,7 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 		SpiderIntervalMin    *int   `json:"spiderIntervalMin"`
 		AISummaryIntervalMin *int   `json:"aiSummaryIntervalMin"`
 		AIEmailSchedule      string `json:"aiEmailSchedule"`
+		SeatLimit            *int   `json:"seatLimit"`
 	}
 	if err := readJSON(ctx.Request(), &req); err != nil || req.ID == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
@@ -505,7 +574,7 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 		}
 	}
 
-	// 间隔 / 状态：仅站点管理员
+	// 间隔 / 状态 / 用户数上限：仅站点管理员
 	if siteAdmin {
 		if req.Status == model.OrgStatusActive || req.Status == model.OrgStatusSuspended {
 			if !o.IsSystem {
@@ -520,6 +589,13 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 		}
 		if strings.TrimSpace(req.AIEmailSchedule) != "" {
 			updates["ai_email_schedule"] = strings.TrimSpace(req.AIEmailSchedule)
+		}
+		if req.SeatLimit != nil {
+			if *req.SeatLimit < 1 {
+				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "用户数上限至少为 1"})
+				return nil
+			}
+			updates["seat_limit"] = *req.SeatLimit
 		}
 	}
 
@@ -536,7 +612,7 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 	}
 	_ = s.db.First(&o, req.ID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success", "data": orgToMap(&o, siteAdmin || orgAdmin),
+		"code": 0, "message": "success", "data": s.orgToMapWithSeats(&o, siteAdmin || orgAdmin),
 	})
 	return nil
 }
@@ -645,7 +721,11 @@ func (s *OrgService) handleJoin(ctx khttp.Context) error {
 		return nil
 	}
 	if s.isMemberDB(pd.UserID, o.ID) {
-		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "你已在该组织中", "data": orgToMap(&o, false)})
+		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "你已在该组织中", "data": s.orgToMapWithSeats(&o, false)})
+		return nil
+	}
+	if msg := seatFullMessage(s.db, &o); msg != "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
 		return nil
 	}
 	if o.JoinMode == model.OrgJoinReview {
@@ -679,7 +759,7 @@ func (s *OrgService) handleJoin(ctx khttp.Context) error {
 		OrgDisplayName: displayName,
 		JoinedAt:       time.Now(),
 	}).Error
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "加入成功", "data": orgToMap(&o, false)})
+	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "加入成功", "data": s.orgToMapWithSeats(&o, false)})
 	return nil
 }
 
@@ -886,6 +966,15 @@ func (s *OrgService) handleAddMember(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "用户已在组织中", "userId": uid})
 		return nil
 	}
+	var addOrg model.Org
+	if s.db.First(&addOrg, req.OrgID).Error != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
+		return nil
+	}
+	if msg := seatFullMessage(s.db, &addOrg); msg != "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
+		return nil
+	}
 	displayName := strings.TrimSpace(req.OrgDisplayName)
 	if displayName == "" {
 		// 管理员未填：用目标用户全局昵称作占位，用户可再改
@@ -995,7 +1084,16 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 	}
 	var m model.OrgMember
 	if err := s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).First(&m).Error; err != nil {
-		// 不在组织中则加入
+		// 不在组织中则加入（占席位）
+		var roleOrg model.Org
+		if s.db.First(&roleOrg, req.OrgID).Error != nil {
+			writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
+			return nil
+		}
+		if msg := seatFullMessage(s.db, &roleOrg); msg != "" {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
+			return nil
+		}
 		displayName := ""
 		var u model.User
 		if s.db.Select("name", "username").First(&u, req.UserID).Error == nil {
@@ -1170,6 +1268,17 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 	}
 	uid := pd.UserID
 	if req.Approve {
+		if !s.isMemberDB(jr.UserID, jr.OrgID) {
+			var reviewOrg model.Org
+			if s.db.First(&reviewOrg, jr.OrgID).Error != nil {
+				writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
+				return nil
+			}
+			if msg := seatFullMessage(s.db, &reviewOrg); msg != "" {
+				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
+				return nil
+			}
+		}
 		_ = s.db.Model(&jr).Updates(map[string]interface{}{
 			"status": model.JoinReqApproved, "reviewed_by": uid,
 		}).Error

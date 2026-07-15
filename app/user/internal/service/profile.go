@@ -187,6 +187,8 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		}
 	}
 
+	dailyGrant, weeklyGrant := p.profileDal.BatchEmailGrants(ctx, ids)
+
 	res := &profile.GetListRes{
 		List:  make([]*profile.GetListRes_List, 0),
 		Total: total,
@@ -215,16 +217,21 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 				displayName = v.Username
 			}
 		}
+		uid := int64(v.ID)
 		item := &profile.GetListRes_List{
-			UserId:      uint64(v.ID),
-			Username:    v.Username,
-			Name:        displayName,
-			Avatar:      v.Avatar,
-			GroupId:     v.GroupId,
-			RoleId:      int32(v.RoleID),
-			LastSubmit:  t,
-			IsSiteAdmin: v.IsSiteAdmin,
-			GroupName:   gName,
+			UserId:                  uint64(v.ID),
+			Username:                v.Username,
+			Name:                    displayName,
+			Avatar:                  v.Avatar,
+			GroupId:                 v.GroupId,
+			RoleId:                  int32(v.RoleID),
+			LastSubmit:              t,
+			IsSiteAdmin:             v.IsSiteAdmin,
+			GroupName:               gName,
+			EmailEnabled:            v.EmailEnabled,
+			EmailWeeklyEnabled:      v.EmailWeeklyEnabled,
+			EmailAllowedByOrg:       dailyGrant[uid],
+			EmailWeeklyAllowedByOrg: weeklyGrant[uid],
 		}
 		if briefs := orgMap[v.ID]; len(briefs) > 0 {
 			item.Orgs = make([]*profile.GetListRes_OrgBrief, 0, len(briefs))
@@ -467,9 +474,24 @@ func (p *ProfileService) Delete(ctx context.Context, req *profile.DeleteReq) (*p
 	}, nil
 }
 
+// canManageEmailPrefs 本人、站点管理员，或当前组织 staff 管理本组织成员
+func (p *ProfileService) canManageEmailPrefs(ctx context.Context, targetUserID int64) bool {
+	if auth.VerifySelfOrAbove(ctx, uint(targetUserID)) {
+		return true
+	}
+	if !auth.VerifyStaff(ctx) {
+		return false
+	}
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.OrgID == 0 {
+		return false
+	}
+	return p.profileDal.IsMemberOfOrg(ctx, targetUserID, pd.OrgID)
+}
+
 // SetEmailEnabled 设置用户日报/周报邮件开关（kind=daily|weekly）
 func (p *ProfileService) SetEmailEnabled(ctx context.Context, req *profile.SetEmailEnabledReq) (*profile.SetEmailEnabledRes, error) {
-	if !auth.VerifySelfOrAbove(ctx, uint(req.UserId)) {
+	if !p.canManageEmailPrefs(ctx, req.UserId) {
 		return nil, UpdateForbidden
 	}
 	kind := req.Kind
@@ -481,14 +503,14 @@ func (p *ProfileService) SetEmailEnabled(ctx context.Context, req *profile.SetEm
 			if !p.profileDal.UserHasOrgWeeklyEmailGrant(ctx, req.UserId) {
 				return &profile.SetEmailEnabledRes{
 					Code:    1,
-					Message: "当前没有组织为你开通周报权限（需为教练/队长/团队管理员，且组织开启周报）",
+					Message: "无法开启周报：需在组织中为教练/队长/团队管理员，且组织已开通周报",
 				}, nil
 			}
 		} else {
 			if !p.profileDal.UserHasOrgDailyEmailGrant(ctx, req.UserId) {
 				return &profile.SetEmailEnabledRes{
 					Code:    1,
-					Message: "当前没有组织为你开通日报邮件权限，请联系组织管理员",
+					Message: "无法开启日报：该用户所在组织未开通日报邮件权限",
 				}, nil
 			}
 		}

@@ -3,47 +3,80 @@ package service
 import (
 	"context"
 	"cwxu-algo/app/common/conf"
+	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
+	"github.com/redis/go-redis/v9"
 )
 
 // ProblemTagger 使用官方 openai-go SDK 调用 OpenAI 兼容 Chat Completions。
-// 与 app/agent、火山 Ark 完全隔离，仅读取 ai_analyze 配置。
+// 优先读站点设置（Redis），yaml 仅作兜底。
 type ProblemTagger struct {
-	client openai.Client
+	yaml   *conf.AiAnalyze
+	rdb    *redis.Client
+	mu     sync.Mutex
+	client *openai.Client
 	model  string
-	ready  bool
+	secret string
+	base   string
 }
 
-func NewProblemTagger(c *conf.AiAnalyze) *ProblemTagger {
-	t := &ProblemTagger{}
-	if c == nil || strings.TrimSpace(c.Secret) == "" || strings.TrimSpace(c.Endpoint) == "" {
-		return t
-	}
-	base := normalizeOpenAIBaseURL(c.Endpoint)
-	// 流式 AI：给整体上限，避免 worker 永久占用
-	httpClient := &http.Client{Timeout: 10 * time.Minute}
-	t.client = openai.NewClient(
-		option.WithAPIKey(c.Secret),
-		option.WithBaseURL(base),
-		option.WithHTTPClient(httpClient),
-	)
-	t.model = c.Model
-	t.ready = true
+func NewProblemTagger(c *conf.AiAnalyze, rdb *redis.Client) *ProblemTagger {
+	t := &ProblemTagger{yaml: c, rdb: rdb}
+	t.reload(context.Background())
 	return t
 }
 
-// Ready 是否已配置可用（非 nil 空壳）
+func (t *ProblemTagger) conf(ctx context.Context) *conf.AiAnalyze {
+	rt := sitesettings.Load(ctx, t.rdb, nil).MergeFallback(nil, nil, t.yaml)
+	return rt.AiAnalyzeConf()
+}
+
+func (t *ProblemTagger) reload(ctx context.Context) {
+	c := t.conf(ctx)
+	endpoint := strings.TrimSpace(c.Endpoint)
+	secret := strings.TrimSpace(c.Secret)
+	modelID := strings.TrimSpace(c.Model)
+	base := normalizeOpenAIBaseURL(endpoint)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if secret == t.secret && modelID == t.model && base == t.base && t.client != nil {
+		return
+	}
+	t.secret = secret
+	t.model = modelID
+	t.base = base
+	if secret == "" || endpoint == "" {
+		t.client = nil
+		return
+	}
+	httpClient := &http.Client{Timeout: 10 * time.Minute}
+	cli := openai.NewClient(
+		option.WithAPIKey(secret),
+		option.WithBaseURL(base),
+		option.WithHTTPClient(httpClient),
+	)
+	t.client = &cli
+}
+
+// Ready 是否已配置可用
 func (t *ProblemTagger) Ready() bool {
-	return t != nil && t.ready
+	if t == nil {
+		return false
+	}
+	t.reload(context.Background())
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.client != nil && t.model != ""
 }
 
 type aiAnalyzeResult struct {
@@ -55,8 +88,13 @@ type aiAnalyzeResult struct {
 }
 
 func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*aiAnalyzeResult, error) {
-	if !t.ready {
-		return nil, fmt.Errorf("ai_analyze 未配置")
+	t.reload(ctx)
+	t.mu.Lock()
+	client := t.client
+	modelID := t.model
+	t.mu.Unlock()
+	if client == nil || modelID == "" {
+		return nil, fmt.Errorf("题库 AI 未配置（请在站点设置中填写）")
 	}
 	// 节约 token：截断超长题面（翻译+排版需要更多上下文）
 	content := contentMD
@@ -100,7 +138,7 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*
 	user := fmt.Sprintf("请将下列题目完整翻译/整理为中文题面，并完成标签分析。\n标题: %s\n\n原题面:\n%s", title, content)
 
 	params := openai.ChatCompletionNewParams{
-		Model: shared.ChatModel(t.model),
+		Model: shared.ChatModel(modelID),
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(system),
 			openai.UserMessage(user),
@@ -111,11 +149,11 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*
 		},
 	}
 
-	contentStr, err := t.streamChat(ctx, params)
+	contentStr, err := streamChat(ctx, client, params)
 	if err != nil {
 		// 部分兼容网关不支持 response_format，降级重试
 		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{}
-		contentStr, err = t.streamChat(ctx, params)
+		contentStr, err = streamChat(ctx, client, params)
 		if err != nil {
 			return nil, fmt.Errorf("openai chat completion stream: %w", err)
 		}
@@ -138,8 +176,8 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*
 }
 
 // streamChat 流式拉取完整 assistant content，避免网关 ~60s 非流式切断
-func (t *ProblemTagger) streamChat(ctx context.Context, params openai.ChatCompletionNewParams) (string, error) {
-	stream := t.client.Chat.Completions.NewStreaming(ctx, params)
+func streamChat(ctx context.Context, client *openai.Client, params openai.ChatCompletionNewParams) (string, error) {
+	stream := client.Chat.Completions.NewStreaming(ctx, params)
 	defer stream.Close()
 
 	acc := openai.ChatCompletionAccumulator{}

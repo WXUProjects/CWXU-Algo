@@ -19,9 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Auth_Login_FullMethodName    = "/api.user.v1.Auth/Login"
-	Auth_Register_FullMethodName = "/api.user.v1.Auth/Register"
-	Auth_Refresh_FullMethodName  = "/api.user.v1.Auth/Refresh"
+	Auth_Login_FullMethodName         = "/api.user.v1.Auth/Login"
+	Auth_Register_FullMethodName      = "/api.user.v1.Auth/Register"
+	Auth_Refresh_FullMethodName       = "/api.user.v1.Auth/Refresh"
+	Auth_SendCode_FullMethodName      = "/api.user.v1.Auth/SendCode"
+	Auth_ResetPassword_FullMethodName = "/api.user.v1.Auth/ResetPassword"
 )
 
 // AuthClient is the client API for Auth service.
@@ -34,6 +36,10 @@ type AuthClient interface {
 	Register(ctx context.Context, in *RegisterReq, opts ...grpc.CallOption) (*RegisterRes, error)
 	// 根据当前登录态重签 JWT（任命角色后刷新页面即可同步权限）
 	Refresh(ctx context.Context, in *RefreshReq, opts ...grpc.CallOption) (*LoginRes, error)
+	// 发送邮箱验证码（注册 / 找回密码）
+	SendCode(ctx context.Context, in *SendCodeReq, opts ...grpc.CallOption) (*SendCodeRes, error)
+	// 邮箱验证码重置密码
+	ResetPassword(ctx context.Context, in *ResetPasswordReq, opts ...grpc.CallOption) (*ResetPasswordRes, error)
 }
 
 type authClient struct {
@@ -74,6 +80,26 @@ func (c *authClient) Refresh(ctx context.Context, in *RefreshReq, opts ...grpc.C
 	return out, nil
 }
 
+func (c *authClient) SendCode(ctx context.Context, in *SendCodeReq, opts ...grpc.CallOption) (*SendCodeRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SendCodeRes)
+	err := c.cc.Invoke(ctx, Auth_SendCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authClient) ResetPassword(ctx context.Context, in *ResetPasswordReq, opts ...grpc.CallOption) (*ResetPasswordRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetPasswordRes)
+	err := c.cc.Invoke(ctx, Auth_ResetPassword_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthServer is the server API for Auth service.
 // All implementations must embed UnimplementedAuthServer
 // for forward compatibility.
@@ -84,6 +110,10 @@ type AuthServer interface {
 	Register(context.Context, *RegisterReq) (*RegisterRes, error)
 	// 根据当前登录态重签 JWT（任命角色后刷新页面即可同步权限）
 	Refresh(context.Context, *RefreshReq) (*LoginRes, error)
+	// 发送邮箱验证码（注册 / 找回密码）
+	SendCode(context.Context, *SendCodeReq) (*SendCodeRes, error)
+	// 邮箱验证码重置密码
+	ResetPassword(context.Context, *ResetPasswordReq) (*ResetPasswordRes, error)
 	mustEmbedUnimplementedAuthServer()
 }
 
@@ -102,6 +132,12 @@ func (UnimplementedAuthServer) Register(context.Context, *RegisterReq) (*Registe
 }
 func (UnimplementedAuthServer) Refresh(context.Context, *RefreshReq) (*LoginRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Refresh not implemented")
+}
+func (UnimplementedAuthServer) SendCode(context.Context, *SendCodeReq) (*SendCodeRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method SendCode not implemented")
+}
+func (UnimplementedAuthServer) ResetPassword(context.Context, *ResetPasswordReq) (*ResetPasswordRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetPassword not implemented")
 }
 func (UnimplementedAuthServer) mustEmbedUnimplementedAuthServer() {}
 func (UnimplementedAuthServer) testEmbeddedByValue()              {}
@@ -178,6 +214,42 @@ func _Auth_Refresh_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Auth_SendCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SendCodeReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServer).SendCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Auth_SendCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServer).SendCode(ctx, req.(*SendCodeReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Auth_ResetPassword_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetPasswordReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServer).ResetPassword(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Auth_ResetPassword_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServer).ResetPassword(ctx, req.(*ResetPasswordReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Auth_ServiceDesc is the grpc.ServiceDesc for Auth service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -196,6 +268,14 @@ var Auth_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Refresh",
 			Handler:    _Auth_Refresh_Handler,
+		},
+		{
+			MethodName: "SendCode",
+			Handler:    _Auth_SendCode_Handler,
+		},
+		{
+			MethodName: "ResetPassword",
+			Handler:    _Auth_ResetPassword_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

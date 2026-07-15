@@ -25,13 +25,18 @@ func NewSpiderUseCase(data *data.Data, problem *ProblemUseCase) *SpiderUseCase {
 	}
 }
 
-// LoadData 加载数据。无绑定平台时成功返回；有平台且全部失败则返回 error（consumer 可重试）。
-func (uc *SpiderUseCase) LoadData(userId int64, needAll bool) error {
+// LoadData 加载数据。platform 非空时只抓该平台；空则抓全部已绑定平台。
+// 无绑定平台时成功返回；有平台且全部失败则返回 error（consumer 可重试）。
+func (uc *SpiderUseCase) LoadData(userId int64, needAll bool, platform string) error {
 	// 无论如何，函数退出前一定删缓存
 	defer uc.invalidateCache(userId)
 
 	var platforms []model.Platform
-	if err := uc.data.DB.Where("user_id = ?", userId).Find(&platforms).Error; err != nil {
+	q := uc.data.DB.Where("user_id = ?", userId)
+	if platform != "" {
+		q = q.Where("platform = ?", platform)
+	}
+	if err := q.Find(&platforms).Error; err != nil {
 		return err
 	}
 	if len(platforms) == 0 {
@@ -158,16 +163,17 @@ func (uc *SpiderUseCase) invalidateCache(userId int64) {
 		ctx,
 		fmt.Sprintf("core:submit_log:user:%d", userId),
 		fmt.Sprintf("user:%d:lastSubmitTime", userId),
-		fmt.Sprintf("statistic:period:%d", userId),
-		fmt.Sprintf("statistic:period:-1"),
 		fmt.Sprintf("core:contest_log:user:%d", userId),
 	).Err()
 
-	// 2. 用户级模糊前缀 SCAN；全局 heatmap 用版本号失效，避免每次爬虫扫全库
+	// 2. period / heatmap 用全局版本号失效（含组织 statistic:period:org:{id}:v*）
+	// 旧无版本 key 也会被 SCAN 清掉，避免脏缓存卡 48h 导致「组织统计像个人」。
 	_ = rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
+	_ = rdb.Incr(ctx, "statistic:period:global:ver").Err()
 
 	patterns := []string{
 		fmt.Sprintf("statistic:heatmap:%d:*:*:*", userId),
+		"statistic:period:*",
 		fmt.Sprintf("core:contest_log:user:%d:*", userId),
 	}
 

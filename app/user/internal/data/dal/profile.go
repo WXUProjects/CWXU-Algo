@@ -113,7 +113,8 @@ func (d *ProfileDal) OrgDisplayNamesByUserIDs(ctx context.Context, orgID uint, u
 func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64) ([]model.User, int64, error) {
 	var list []model.User
 	err := d.db.WithContext(ctx).
-		Select("id", "username", "name", "group_id", "avatar", "role_id", "is_site_admin").
+		Select("id", "username", "name", "group_id", "avatar", "role_id", "is_site_admin",
+			"email_enabled", "email_weekly_enabled").
 		Order("id").
 		Limit(int(pageSize)).Offset(int(pageNum-1) * int(pageSize)).
 		Find(&list).Error
@@ -489,12 +490,57 @@ func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pag
 	}
 	var list []model.User
 	err := d.db.WithContext(ctx).
-		Select("id", "username", "name", "group_id", "avatar", "role_id", "is_site_admin").
+		Select("id", "username", "name", "group_id", "avatar", "role_id", "is_site_admin",
+			"email_enabled", "email_weekly_enabled").
 		Where("id IN (?)", sub).
 		Order("id").
 		Limit(int(pageSize)).Offset(int(pageNum-1)*int(pageSize)).
 		Find(&list).Error
 	return list, total, err
+}
+
+// IsMemberOfOrg 用户是否为某组织成员
+func (d *ProfileDal) IsMemberOfOrg(ctx context.Context, userID int64, orgID uint) bool {
+	if userID <= 0 || orgID == 0 {
+		return false
+	}
+	var n int64
+	_ = d.db.WithContext(ctx).Model(&model.OrgMember{}).
+		Where("user_id = ? AND org_id = ? AND deleted_at IS NULL", userID, orgID).
+		Count(&n)
+	return n > 0
+}
+
+// BatchEmailGrants 批量查询日报/周报组织授权（任一组织满足即 true）
+func (d *ProfileDal) BatchEmailGrants(ctx context.Context, userIDs []int64) (daily map[int64]bool, weekly map[int64]bool) {
+	daily = map[int64]bool{}
+	weekly = map[int64]bool{}
+	if len(userIDs) == 0 {
+		return daily, weekly
+	}
+	var dailyIDs []int64
+	_ = d.db.WithContext(ctx).Table("org_members AS m").
+		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
+		Where("m.user_id IN ? AND m.deleted_at IS NULL AND o.status = ? AND o.enable_ai_email = ?",
+			userIDs, model.OrgStatusActive, true).
+		Distinct("m.user_id").
+		Pluck("m.user_id", &dailyIDs)
+	for _, id := range dailyIDs {
+		daily[id] = true
+	}
+	var weeklyIDs []int64
+	_ = d.db.WithContext(ctx).Table("org_members AS m").
+		Joins("JOIN orgs o ON o.id = m.org_id AND o.deleted_at IS NULL").
+		Where(`m.user_id IN ? AND m.deleted_at IS NULL AND o.status = ?
+			AND o.enable_ai_weekly_email = ? AND m.role IN ?`,
+			userIDs, model.OrgStatusActive, true,
+			[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
+		Distinct("m.user_id").
+		Pluck("m.user_id", &weeklyIDs)
+	for _, id := range weeklyIDs {
+		weekly[id] = true
+	}
+	return daily, weekly
 }
 
 // GetUserIdsByGroup 根据组ID获取用户ID列表

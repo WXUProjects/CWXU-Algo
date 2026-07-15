@@ -1492,19 +1492,24 @@ func (x *GetListRes_OrgBrief) GetRole() string {
 }
 
 type GetListRes_List struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint64                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	GroupId       int64                  `protobuf:"varint,5,opt,name=groupId,proto3" json:"groupId,omitempty"`
-	Avatar        string                 `protobuf:"bytes,6,opt,name=avatar,proto3" json:"avatar,omitempty"`
-	LastSubmit    string                 `protobuf:"bytes,7,opt,name=lastSubmit,proto3" json:"lastSubmit,omitempty"`
-	RoleId        int32                  `protobuf:"varint,8,opt,name=roleId,proto3" json:"roleId,omitempty"`
-	IsSiteAdmin   bool                   `protobuf:"varint,9,opt,name=isSiteAdmin,proto3" json:"isSiteAdmin,omitempty"`
-	Orgs          []*GetListRes_OrgBrief `protobuf:"bytes,10,rep,name=orgs,proto3" json:"orgs,omitempty"`
-	GroupName     string                 `protobuf:"bytes,11,opt,name=groupName,proto3" json:"groupName,omitempty"` // 分组显示名；无效 groupId 时为空或「默认分组」
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	UserId      uint64                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	Username    string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Name        string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	GroupId     int64                  `protobuf:"varint,5,opt,name=groupId,proto3" json:"groupId,omitempty"`
+	Avatar      string                 `protobuf:"bytes,6,opt,name=avatar,proto3" json:"avatar,omitempty"`
+	LastSubmit  string                 `protobuf:"bytes,7,opt,name=lastSubmit,proto3" json:"lastSubmit,omitempty"`
+	RoleId      int32                  `protobuf:"varint,8,opt,name=roleId,proto3" json:"roleId,omitempty"`
+	IsSiteAdmin bool                   `protobuf:"varint,9,opt,name=isSiteAdmin,proto3" json:"isSiteAdmin,omitempty"`
+	Orgs        []*GetListRes_OrgBrief `protobuf:"bytes,10,rep,name=orgs,proto3" json:"orgs,omitempty"`
+	GroupName   string                 `protobuf:"bytes,11,opt,name=groupName,proto3" json:"groupName,omitempty"` // 分组显示名；无效 groupId 时为空或「默认分组」
+	// 日报/周报接收偏好与组织授权（管理端展示/开关用）
+	EmailEnabled            bool `protobuf:"varint,12,opt,name=emailEnabled,proto3" json:"emailEnabled,omitempty"`
+	EmailWeeklyEnabled      bool `protobuf:"varint,13,opt,name=emailWeeklyEnabled,proto3" json:"emailWeeklyEnabled,omitempty"`
+	EmailAllowedByOrg       bool `protobuf:"varint,14,opt,name=emailAllowedByOrg,proto3" json:"emailAllowedByOrg,omitempty"`
+	EmailWeeklyAllowedByOrg bool `protobuf:"varint,15,opt,name=emailWeeklyAllowedByOrg,proto3" json:"emailWeeklyAllowedByOrg,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *GetListRes_List) Reset() {
@@ -1607,6 +1612,34 @@ func (x *GetListRes_List) GetGroupName() string {
 	return ""
 }
 
+func (x *GetListRes_List) GetEmailEnabled() bool {
+	if x != nil {
+		return x.EmailEnabled
+	}
+	return false
+}
+
+func (x *GetListRes_List) GetEmailWeeklyEnabled() bool {
+	if x != nil {
+		return x.EmailWeeklyEnabled
+	}
+	return false
+}
+
+func (x *GetListRes_List) GetEmailAllowedByOrg() bool {
+	if x != nil {
+		return x.EmailAllowedByOrg
+	}
+	return false
+}
+
+func (x *GetListRes_List) GetEmailWeeklyAllowedByOrg() bool {
+	if x != nil {
+		return x.EmailWeeklyAllowedByOrg
+	}
+	return false
+}
+
 type GetByIdsRes_UserProfile struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
@@ -1705,7 +1738,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"GetListReq\x12\x1a\n" +
 	"\bpageSize\x18\x01 \x01(\x03R\bpageSize\x12\x18\n" +
 	"\apageNum\x18\x02 \x01(\x03R\apageNum\x12\x14\n" +
-	"\x05scope\x18\x03 \x01(\tR\x05scope\"\xcf\x03\n" +
+	"\x05scope\x18\x03 \x01(\tR\x05scope\"\x8b\x05\n" +
 	"\n" +
 	"GetListRes\x120\n" +
 	"\x04list\x18\x01 \x03(\v2\x1c.api.user.v1.GetListRes.ListR\x04list\x12\x14\n" +
@@ -1713,7 +1746,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\bOrgBrief\x12\x14\n" +
 	"\x05orgId\x18\x01 \x01(\x04R\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\x1a\xae\x02\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\x1a\xea\x03\n" +
 	"\x04List\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
@@ -1727,7 +1760,11 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\visSiteAdmin\x18\t \x01(\bR\visSiteAdmin\x124\n" +
 	"\x04orgs\x18\n" +
 	" \x03(\v2 .api.user.v1.GetListRes.OrgBriefR\x04orgs\x12\x1c\n" +
-	"\tgroupName\x18\v \x01(\tR\tgroupName\"e\n" +
+	"\tgroupName\x18\v \x01(\tR\tgroupName\x12\"\n" +
+	"\femailEnabled\x18\f \x01(\bR\femailEnabled\x12.\n" +
+	"\x12emailWeeklyEnabled\x18\r \x01(\bR\x12emailWeeklyEnabled\x12,\n" +
+	"\x11emailAllowedByOrg\x18\x0e \x01(\bR\x11emailAllowedByOrg\x128\n" +
+	"\x17emailWeeklyAllowedByOrg\x18\x0f \x01(\bR\x17emailWeeklyAllowedByOrg\"e\n" +
 	"\tUpdateReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +

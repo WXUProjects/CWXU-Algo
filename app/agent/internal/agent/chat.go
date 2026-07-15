@@ -2,12 +2,17 @@ package agent
 
 import (
 	"context"
-	"cwxu-algo/app/agent/internal/agent/tool"
-	"cwxu-algo/app/common/conf"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
+
+	"cwxu-algo/app/agent/internal/agent/tool"
+	"cwxu-algo/app/common/conf"
+	"cwxu-algo/app/common/sitesettings"
 
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/redis/go-redis/v9"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 	"github.com/volcengine/volcengine-go-sdk/volcengine"
@@ -16,15 +21,51 @@ import (
 const defaultMaxRounds = 8
 
 type Chat struct {
-	conf   *conf.Agent
+	yaml   *conf.Agent
+	rdb    *redis.Client
+	mu     sync.Mutex
 	client *arkruntime.Client
+	model  string
+	secret string
 }
 
-func NewChat(conf *conf.Agent) *Chat {
-	client := arkruntime.NewClientWithApiKey(
-		conf.Secret,
-	)
-	return &Chat{conf: conf, client: client}
+func NewChat(yaml *conf.Agent, rdb *redis.Client) *Chat {
+	c := &Chat{yaml: yaml, rdb: rdb}
+	c.reload(context.Background())
+	return c
+}
+
+func (c *Chat) runtime(ctx context.Context) *sitesettings.Runtime {
+	rt := sitesettings.Load(ctx, c.rdb, nil)
+	return rt.MergeFallback(nil, c.yaml, nil)
+}
+
+func (c *Chat) reload(ctx context.Context) {
+	rt := c.runtime(ctx)
+	modelID := strings.TrimSpace(rt.AgentModel)
+	secret := strings.TrimSpace(rt.AgentSecret)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if secret == c.secret && modelID == c.model && c.client != nil {
+		return
+	}
+	c.model = modelID
+	c.secret = secret
+	if secret == "" {
+		c.client = nil
+		return
+	}
+	c.client = arkruntime.NewClientWithApiKey(secret)
+}
+
+func (c *Chat) ensureClient(ctx context.Context) (*arkruntime.Client, string, error) {
+	c.reload(ctx)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.client == nil || c.model == "" {
+		return nil, "", errors.New("AI 总结模型未配置（请在站点设置中填写）")
+	}
+	return c.client, c.model, nil
 }
 
 // Complete 纯文本补全（不携带工具），用于预取数据后的文案生成。
@@ -36,6 +77,10 @@ func (c *Chat) Complete(ctx context.Context, messages []*model.ChatCompletionMes
 func (c *Chat) Chat(ctx context.Context, messages []*model.ChatCompletionMessage, tools ...tool.AgentToolFactory) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	client, modelID, err := c.ensureClient(ctx)
+	if err != nil {
+		return "", err
 	}
 	finalResp := ""
 	reg := map[string]tool.AgentToolFactory{}
@@ -51,11 +96,11 @@ func (c *Chat) Chat(ctx context.Context, messages []*model.ChatCompletionMessage
 
 	for round := 0; round < defaultMaxRounds; round++ {
 		req := model.CreateChatCompletionRequest{
-			Model:    c.conf.Model,
+			Model:    modelID,
 			Messages: messages,
 			Tools:    toolUse,
 		}
-		resp, err := c.client.CreateChatCompletion(ctx, &req)
+		resp, err := client.CreateChatCompletion(ctx, &req)
 		if err != nil {
 			return "", err
 		}

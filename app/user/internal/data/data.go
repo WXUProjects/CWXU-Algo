@@ -1,9 +1,12 @@
 package data
 
 import (
+	"context"
+
 	"cwxu-algo/app/common/conf"
 	gorm2 "cwxu-algo/app/common/data/gorm"
 	redis2 "cwxu-algo/app/common/data/redis"
+	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -25,6 +28,7 @@ type Data struct {
 func NewData(c *conf.Data) (*Data, func(), error) {
 	data := &Data{DB: gorm2.InitGorm(c), RDB: redis2.InitRedis(c)}
 	migrateModels(data.DB)
+	PublishSiteSettings(data)
 	cleanup := func() {
 		log.Info("closing the data resources")
 		sql, _ := data.DB.DB()
@@ -51,6 +55,20 @@ func migrateModels(db *gorm.DB) {
 	}
 	seedPlanQuotas(db)
 	seedGoAlgoFramework(db)
+}
+
+// PublishSiteSettings 将站点业务配置写入 Redis，供 agent/core_data 热读
+func PublishSiteSettings(d *Data) {
+	if d == nil || d.DB == nil || d.RDB == nil {
+		return
+	}
+	rt, err := sitesettings.LoadFromDB(d.DB)
+	if err != nil || rt == nil {
+		return
+	}
+	if err := sitesettings.PublishRedis(context.Background(), d.RDB, rt); err != nil {
+		log.Warnf("publish site settings: %v", err)
+	}
 }
 
 // seedPlanQuotas 幂等写入默认套餐配额模板

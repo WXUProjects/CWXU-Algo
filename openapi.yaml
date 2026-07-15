@@ -736,6 +736,44 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.RegisterRes'
+    /v1/user/auth/reset-password:
+        post:
+            tags:
+                - Auth
+            description: 邮箱验证码重置密码
+            operationId: Auth_ResetPassword
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.ResetPasswordReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ResetPasswordRes'
+    /v1/user/auth/send-code:
+        post:
+            tags:
+                - Auth
+            description: 发送邮箱验证码（注册 / 找回密码）
+            operationId: Auth_SendCode
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.SendCodeReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.SendCodeRes'
     /v1/user/group/create:
         post:
             tags:
@@ -1065,6 +1103,19 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.role.SetUserRoleRes'
+    /v1/user/site/admin-config:
+        get:
+            tags:
+                - Site
+            description: 管理员：获取完整站点配置（密钥脱敏）
+            operationId: Site_GetAdminConfig
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.site.GetAdminConfigRes'
     /v1/user/site/config:
         get:
             tags:
@@ -1081,7 +1132,7 @@ paths:
         post:
             tags:
                 - Site
-            description: 管理员：更新站点标题 / logo / favicon
+            description: 管理员：更新站点配置（品牌 / SMTP / AI）
             operationId: Site_UpdateConfig
             requestBody:
                 content:
@@ -1096,6 +1147,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.site.UpdateConfigRes'
+    /v1/user/site/test-email:
+        post:
+            tags:
+                - Site
+            description: 管理员：发送测试邮件
+            operationId: Site_TestEmail
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.site.TestEmailReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.site.TestEmailRes'
 components:
     schemas:
         api.agent.v1.summary.GetSummaryReply:
@@ -2052,6 +2122,15 @@ components:
                         $ref: '#/components/schemas/api.user.v1.GetListRes_OrgBrief'
                 groupName:
                     type: string
+                emailEnabled:
+                    type: boolean
+                    description: 日报/周报接收偏好与组织授权（管理端展示/开关用）
+                emailWeeklyEnabled:
+                    type: boolean
+                emailAllowedByOrg:
+                    type: boolean
+                emailWeeklyAllowedByOrg:
+                    type: boolean
         api.user.v1.GetListRes_OrgBrief:
             type: object
             properties:
@@ -2097,6 +2176,7 @@ components:
             properties:
                 username:
                     type: string
+                    description: 用户名或邮箱
                 password:
                     type: string
         api.user.v1.LoginRes:
@@ -2138,7 +2218,42 @@ components:
                     type: string
                 groupId:
                     type: string
+                code:
+                    type: string
+                    description: 邮箱验证码
         api.user.v1.RegisterRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+        api.user.v1.ResetPasswordReq:
+            type: object
+            properties:
+                email:
+                    type: string
+                code:
+                    type: string
+                password:
+                    type: string
+                    description: 新密码（客户端 SHA256 后传输）
+        api.user.v1.ResetPasswordRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+        api.user.v1.SendCodeReq:
+            type: object
+            properties:
+                email:
+                    type: string
+                purpose:
+                    type: string
+            description: 'purpose: register | reset'
+        api.user.v1.SendCodeRes:
             type: object
             properties:
                 success:
@@ -2236,6 +2351,53 @@ components:
                     type: string
                 message:
                     type: string
+        api.user.v1.site.GetAdminConfigRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                siteTitle:
+                    type: string
+                siteLogo:
+                    type: string
+                favicon:
+                    type: string
+                smtpHost:
+                    type: string
+                    description: SMTP
+                smtpPort:
+                    type: integer
+                    format: int32
+                smtpUsername:
+                    type: string
+                smtpPasswordMasked:
+                    type: string
+                    description: 脱敏：已配置为 ****，未配置为空
+                smtpPasswordSet:
+                    type: boolean
+                smtpFrom:
+                    type: string
+                agentModel:
+                    type: string
+                    description: Agent（AI 总结 / 日报周报）
+                agentSecretMasked:
+                    type: string
+                agentSecretSet:
+                    type: boolean
+                aiAnalyzeEndpoint:
+                    type: string
+                    description: 题库 AI 分析
+                aiAnalyzeModel:
+                    type: string
+                aiAnalyzeSecretMasked:
+                    type: string
+                aiAnalyzeSecretSet:
+                    type: boolean
+                footerIcp:
+                    type: string
+                    description: 页脚
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -2249,6 +2411,34 @@ components:
                     type: string
                 favicon:
                     type: string
+                footerIcp:
+                    type: string
+        api.user.v1.site.TestEmailReq:
+            type: object
+            properties:
+                to:
+                    type: string
+                smtpHost:
+                    type: string
+                smtpPort:
+                    type: integer
+                    format: int32
+                smtpUsername:
+                    type: string
+                smtpPassword:
+                    type: string
+                smtpFrom:
+                    type: string
+            description: 测试邮件：可用已保存配置，也可临时覆盖（password 空则用已保存）
+        api.user.v1.site.TestEmailRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                success:
+                    type: boolean
         api.user.v1.site.UpdateConfigReq:
             type: object
             properties:
@@ -2258,6 +2448,39 @@ components:
                     type: string
                 favicon:
                     type: string
+                smtpHost:
+                    type: string
+                    description: SMTP（password 空串表示不修改）
+                smtpPort:
+                    type: integer
+                    format: int32
+                smtpUsername:
+                    type: string
+                smtpPassword:
+                    type: string
+                smtpFrom:
+                    type: string
+                clearSmtpPassword:
+                    type: boolean
+                agentModel:
+                    type: string
+                    description: Agent
+                agentSecret:
+                    type: string
+                clearAgentSecret:
+                    type: boolean
+                aiAnalyzeEndpoint:
+                    type: string
+                    description: 题库 AI
+                aiAnalyzeModel:
+                    type: string
+                aiAnalyzeSecret:
+                    type: string
+                clearAiAnalyzeSecret:
+                    type: boolean
+                footerIcp:
+                    type: string
+                    description: 页脚备案号
         api.user.v1.site.UpdateConfigRes:
             type: object
             properties:
@@ -2270,6 +2493,8 @@ components:
                 siteLogo:
                     type: string
                 favicon:
+                    type: string
+                footerIcp:
                     type: string
 tags:
     - name: Auth

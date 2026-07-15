@@ -52,7 +52,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, ai
 	contestLogService := service.NewContestLogService(spiderDal, dataData, register)
 	bulletinDal := dal.NewBulletinDal(dataData)
 	bulletinService := service.NewBulletinService(bulletinDal)
-	problemTagger := service2.NewProblemTagger(aiAnalyze)
+	problemTagger := service2.NewProblemTagger(aiAnalyze, client)
 	problemUseCase := service2.NewProblemUseCase(dataData, rabbitMQ, problemTagger)
 	problemService := service.NewProblemService(problemUseCase, register)
 	httpServer := server.NewHTTPServer(confServer, logger, dataData, submitLogService, spiderService, statisticService, contestLogService, bulletinService, problemService)

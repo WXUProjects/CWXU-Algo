@@ -22,12 +22,18 @@ const _ = http.SupportPackageIsVersion1
 const OperationAuthLogin = "/api.user.v1.Auth/Login"
 const OperationAuthRefresh = "/api.user.v1.Auth/Refresh"
 const OperationAuthRegister = "/api.user.v1.Auth/Register"
+const OperationAuthResetPassword = "/api.user.v1.Auth/ResetPassword"
+const OperationAuthSendCode = "/api.user.v1.Auth/SendCode"
 
 type AuthHTTPServer interface {
 	Login(context.Context, *LoginReq) (*LoginRes, error)
 	// Refresh 根据当前登录态重签 JWT（任命角色后刷新页面即可同步权限）
 	Refresh(context.Context, *RefreshReq) (*LoginRes, error)
 	Register(context.Context, *RegisterReq) (*RegisterRes, error)
+	// ResetPassword 邮箱验证码重置密码
+	ResetPassword(context.Context, *ResetPasswordReq) (*ResetPasswordRes, error)
+	// SendCode 发送邮箱验证码（注册 / 找回密码）
+	SendCode(context.Context, *SendCodeReq) (*SendCodeRes, error)
 }
 
 func RegisterAuthHTTPServer(s *http.Server, srv AuthHTTPServer) {
@@ -35,6 +41,8 @@ func RegisterAuthHTTPServer(s *http.Server, srv AuthHTTPServer) {
 	r.POST("/v1/user/auth/login", _Auth_Login0_HTTP_Handler(srv))
 	r.POST("/v1/user/auth/register", _Auth_Register0_HTTP_Handler(srv))
 	r.POST("/v1/user/auth/refresh", _Auth_Refresh0_HTTP_Handler(srv))
+	r.POST("/v1/user/auth/send-code", _Auth_SendCode0_HTTP_Handler(srv))
+	r.POST("/v1/user/auth/reset-password", _Auth_ResetPassword0_HTTP_Handler(srv))
 }
 
 func _Auth_Login0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) error {
@@ -103,11 +111,59 @@ func _Auth_Refresh0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) erro
 	}
 }
 
+func _Auth_SendCode0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in SendCodeReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationAuthSendCode)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.SendCode(ctx, req.(*SendCodeReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*SendCodeRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Auth_ResetPassword0_HTTP_Handler(srv AuthHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ResetPasswordReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationAuthResetPassword)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ResetPassword(ctx, req.(*ResetPasswordReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ResetPasswordRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type AuthHTTPClient interface {
 	Login(ctx context.Context, req *LoginReq, opts ...http.CallOption) (rsp *LoginRes, err error)
 	// Refresh 根据当前登录态重签 JWT（任命角色后刷新页面即可同步权限）
 	Refresh(ctx context.Context, req *RefreshReq, opts ...http.CallOption) (rsp *LoginRes, err error)
 	Register(ctx context.Context, req *RegisterReq, opts ...http.CallOption) (rsp *RegisterRes, err error)
+	// ResetPassword 邮箱验证码重置密码
+	ResetPassword(ctx context.Context, req *ResetPasswordReq, opts ...http.CallOption) (rsp *ResetPasswordRes, err error)
+	// SendCode 发送邮箱验证码（注册 / 找回密码）
+	SendCode(ctx context.Context, req *SendCodeReq, opts ...http.CallOption) (rsp *SendCodeRes, err error)
 }
 
 type AuthHTTPClientImpl struct {
@@ -150,6 +206,34 @@ func (c *AuthHTTPClientImpl) Register(ctx context.Context, in *RegisterReq, opts
 	pattern := "/v1/user/auth/register"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationAuthRegister))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ResetPassword 邮箱验证码重置密码
+func (c *AuthHTTPClientImpl) ResetPassword(ctx context.Context, in *ResetPasswordReq, opts ...http.CallOption) (*ResetPasswordRes, error) {
+	var out ResetPasswordRes
+	pattern := "/v1/user/auth/reset-password"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationAuthResetPassword))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SendCode 发送邮箱验证码（注册 / 找回密码）
+func (c *AuthHTTPClientImpl) SendCode(ctx context.Context, in *SendCodeReq, opts ...http.CallOption) (*SendCodeRes, error) {
+	var out SendCodeRes
+	pattern := "/v1/user/auth/send-code"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationAuthSendCode))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

@@ -19,20 +19,28 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
+const OperationSiteGetAdminConfig = "/api.user.v1.site.Site/GetAdminConfig"
 const OperationSiteGetConfig = "/api.user.v1.site.Site/GetConfig"
+const OperationSiteTestEmail = "/api.user.v1.site.Site/TestEmail"
 const OperationSiteUpdateConfig = "/api.user.v1.site.Site/UpdateConfig"
 
 type SiteHTTPServer interface {
+	// GetAdminConfig 管理员：获取完整站点配置（密钥脱敏）
+	GetAdminConfig(context.Context, *GetAdminConfigReq) (*GetAdminConfigRes, error)
 	// GetConfig 公开：站点品牌配置
 	GetConfig(context.Context, *GetConfigReq) (*GetConfigRes, error)
-	// UpdateConfig 管理员：更新站点标题 / logo / favicon
+	// TestEmail 管理员：发送测试邮件
+	TestEmail(context.Context, *TestEmailReq) (*TestEmailRes, error)
+	// UpdateConfig 管理员：更新站点配置（品牌 / SMTP / AI）
 	UpdateConfig(context.Context, *UpdateConfigReq) (*UpdateConfigRes, error)
 }
 
 func RegisterSiteHTTPServer(s *http.Server, srv SiteHTTPServer) {
 	r := s.Route("/")
 	r.GET("/v1/user/site/config", _Site_GetConfig0_HTTP_Handler(srv))
+	r.GET("/v1/user/site/admin-config", _Site_GetAdminConfig0_HTTP_Handler(srv))
 	r.POST("/v1/user/site/config", _Site_UpdateConfig0_HTTP_Handler(srv))
+	r.POST("/v1/user/site/test-email", _Site_TestEmail0_HTTP_Handler(srv))
 }
 
 func _Site_GetConfig0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context) error {
@@ -50,6 +58,25 @@ func _Site_GetConfig0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context) er
 			return err
 		}
 		reply := out.(*GetConfigRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Site_GetAdminConfig0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetAdminConfigReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSiteGetAdminConfig)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetAdminConfig(ctx, req.(*GetAdminConfigReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetAdminConfigRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -76,10 +103,36 @@ func _Site_UpdateConfig0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context)
 	}
 }
 
+func _Site_TestEmail0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in TestEmailReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSiteTestEmail)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.TestEmail(ctx, req.(*TestEmailReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*TestEmailRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SiteHTTPClient interface {
+	// GetAdminConfig 管理员：获取完整站点配置（密钥脱敏）
+	GetAdminConfig(ctx context.Context, req *GetAdminConfigReq, opts ...http.CallOption) (rsp *GetAdminConfigRes, err error)
 	// GetConfig 公开：站点品牌配置
 	GetConfig(ctx context.Context, req *GetConfigReq, opts ...http.CallOption) (rsp *GetConfigRes, err error)
-	// UpdateConfig 管理员：更新站点标题 / logo / favicon
+	// TestEmail 管理员：发送测试邮件
+	TestEmail(ctx context.Context, req *TestEmailReq, opts ...http.CallOption) (rsp *TestEmailRes, err error)
+	// UpdateConfig 管理员：更新站点配置（品牌 / SMTP / AI）
 	UpdateConfig(ctx context.Context, req *UpdateConfigReq, opts ...http.CallOption) (rsp *UpdateConfigRes, err error)
 }
 
@@ -89,6 +142,20 @@ type SiteHTTPClientImpl struct {
 
 func NewSiteHTTPClient(client *http.Client) SiteHTTPClient {
 	return &SiteHTTPClientImpl{client}
+}
+
+// GetAdminConfig 管理员：获取完整站点配置（密钥脱敏）
+func (c *SiteHTTPClientImpl) GetAdminConfig(ctx context.Context, in *GetAdminConfigReq, opts ...http.CallOption) (*GetAdminConfigRes, error) {
+	var out GetAdminConfigRes
+	pattern := "/v1/user/site/admin-config"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationSiteGetAdminConfig))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // GetConfig 公开：站点品牌配置
@@ -105,7 +172,21 @@ func (c *SiteHTTPClientImpl) GetConfig(ctx context.Context, in *GetConfigReq, op
 	return &out, nil
 }
 
-// UpdateConfig 管理员：更新站点标题 / logo / favicon
+// TestEmail 管理员：发送测试邮件
+func (c *SiteHTTPClientImpl) TestEmail(ctx context.Context, in *TestEmailReq, opts ...http.CallOption) (*TestEmailRes, error) {
+	var out TestEmailRes
+	pattern := "/v1/user/site/test-email"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationSiteTestEmail))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdateConfig 管理员：更新站点配置（品牌 / SMTP / AI）
 func (c *SiteHTTPClientImpl) UpdateConfig(ctx context.Context, in *UpdateConfigReq, opts ...http.CallOption) (*UpdateConfigRes, error) {
 	var out UpdateConfigRes
 	pattern := "/v1/user/site/config"

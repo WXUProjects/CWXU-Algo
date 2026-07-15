@@ -32,7 +32,7 @@ type Org struct {
 	Name      string     `gorm:"size:128;not null;comment:组织名称"`
 	Slug      string     `gorm:"size:64;uniqueIndex;comment:URL 标识"`
 	Plan      string     `gorm:"size:32;default:free;comment:套餐 free|team|pro"`
-	SeatLimit int        `gorm:"default:0;comment:席位上限 0=未限制"`
+	SeatLimit int        `gorm:"default:50;comment:用户数上限(席位)；默认50；公共域仅计仅属公共域的用户"`
 	ExpireAt  *time.Time `gorm:"comment:套餐到期"`
 	Status    string     `gorm:"size:16;default:active;comment:active|suspended"`
 	IsSystem  bool       `gorm:"default:false;comment:系统组织(公共域)"`

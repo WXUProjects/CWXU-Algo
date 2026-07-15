@@ -35,6 +35,7 @@ func seedGoAlgoFramework(db *gorm.DB) {
 			Name:                 model.PublicOrgName,
 			Slug:                 model.PublicOrgSlug,
 			Plan:                 "free",
+			SeatLimit:            50,
 			Status:               model.OrgStatusActive,
 			IsSystem:             true,
 			JoinMode:             model.OrgJoinAuto,
@@ -55,6 +56,9 @@ func seedGoAlgoFramework(db *gorm.DB) {
 		log.Errorf("query public org: %v", err)
 		return
 	}
+
+	// 历史 seat_limit=0（旧语义未限制）→ 默认 50
+	_ = db.Model(&model.Org{}).Where("seat_limit <= 0 OR seat_limit IS NULL").Update("seat_limit", 50).Error
 
 	// 各组织确保有「默认分组」；旧名「未分组」改名
 	_ = db.Model(&model.Group{}).Where("name = ?", "未分组").Updates(map[string]interface{}{

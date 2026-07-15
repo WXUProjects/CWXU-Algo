@@ -65,6 +65,7 @@ type GetConfigRes struct {
 	SiteTitle     string                 `protobuf:"bytes,3,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
 	SiteLogo      string                 `protobuf:"bytes,4,opt,name=site_logo,json=siteLogo,proto3" json:"site_logo,omitempty"`
 	Favicon       string                 `protobuf:"bytes,5,opt,name=favicon,proto3" json:"favicon,omitempty"`
+	FooterIcp     string                 `protobuf:"bytes,6,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -134,18 +135,272 @@ func (x *GetConfigRes) GetFavicon() string {
 	return ""
 }
 
-type UpdateConfigReq struct {
+func (x *GetConfigRes) GetFooterIcp() string {
+	if x != nil {
+		return x.FooterIcp
+	}
+	return ""
+}
+
+type GetAdminConfigReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	SiteTitle     string                 `protobuf:"bytes,1,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
-	SiteLogo      string                 `protobuf:"bytes,2,opt,name=site_logo,json=siteLogo,proto3" json:"site_logo,omitempty"`
-	Favicon       string                 `protobuf:"bytes,3,opt,name=favicon,proto3" json:"favicon,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAdminConfigReq) Reset() {
+	*x = GetAdminConfigReq{}
+	mi := &file_user_v1_site_site_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAdminConfigReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAdminConfigReq) ProtoMessage() {}
+
+func (x *GetAdminConfigReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAdminConfigReq.ProtoReflect.Descriptor instead.
+func (*GetAdminConfigReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{2}
+}
+
+type GetAdminConfigRes struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Code      int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message   string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	SiteTitle string                 `protobuf:"bytes,3,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
+	SiteLogo  string                 `protobuf:"bytes,4,opt,name=site_logo,json=siteLogo,proto3" json:"site_logo,omitempty"`
+	Favicon   string                 `protobuf:"bytes,5,opt,name=favicon,proto3" json:"favicon,omitempty"`
+	// SMTP
+	SmtpHost     string `protobuf:"bytes,6,opt,name=smtp_host,json=smtpHost,proto3" json:"smtp_host,omitempty"`
+	SmtpPort     int32  `protobuf:"varint,7,opt,name=smtp_port,json=smtpPort,proto3" json:"smtp_port,omitempty"`
+	SmtpUsername string `protobuf:"bytes,8,opt,name=smtp_username,json=smtpUsername,proto3" json:"smtp_username,omitempty"`
+	// 脱敏：已配置为 ****，未配置为空
+	SmtpPasswordMasked string `protobuf:"bytes,9,opt,name=smtp_password_masked,json=smtpPasswordMasked,proto3" json:"smtp_password_masked,omitempty"`
+	SmtpPasswordSet    bool   `protobuf:"varint,10,opt,name=smtp_password_set,json=smtpPasswordSet,proto3" json:"smtp_password_set,omitempty"`
+	SmtpFrom           string `protobuf:"bytes,11,opt,name=smtp_from,json=smtpFrom,proto3" json:"smtp_from,omitempty"`
+	// Agent（AI 总结 / 日报周报）
+	AgentModel        string `protobuf:"bytes,12,opt,name=agent_model,json=agentModel,proto3" json:"agent_model,omitempty"`
+	AgentSecretMasked string `protobuf:"bytes,13,opt,name=agent_secret_masked,json=agentSecretMasked,proto3" json:"agent_secret_masked,omitempty"`
+	AgentSecretSet    bool   `protobuf:"varint,14,opt,name=agent_secret_set,json=agentSecretSet,proto3" json:"agent_secret_set,omitempty"`
+	// 题库 AI 分析
+	AiAnalyzeEndpoint     string `protobuf:"bytes,15,opt,name=ai_analyze_endpoint,json=aiAnalyzeEndpoint,proto3" json:"ai_analyze_endpoint,omitempty"`
+	AiAnalyzeModel        string `protobuf:"bytes,16,opt,name=ai_analyze_model,json=aiAnalyzeModel,proto3" json:"ai_analyze_model,omitempty"`
+	AiAnalyzeSecretMasked string `protobuf:"bytes,17,opt,name=ai_analyze_secret_masked,json=aiAnalyzeSecretMasked,proto3" json:"ai_analyze_secret_masked,omitempty"`
+	AiAnalyzeSecretSet    bool   `protobuf:"varint,18,opt,name=ai_analyze_secret_set,json=aiAnalyzeSecretSet,proto3" json:"ai_analyze_secret_set,omitempty"`
+	// 页脚
+	FooterIcp     string `protobuf:"bytes,19,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAdminConfigRes) Reset() {
+	*x = GetAdminConfigRes{}
+	mi := &file_user_v1_site_site_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAdminConfigRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAdminConfigRes) ProtoMessage() {}
+
+func (x *GetAdminConfigRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAdminConfigRes.ProtoReflect.Descriptor instead.
+func (*GetAdminConfigRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetAdminConfigRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *GetAdminConfigRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetSiteTitle() string {
+	if x != nil {
+		return x.SiteTitle
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetSiteLogo() string {
+	if x != nil {
+		return x.SiteLogo
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetFavicon() string {
+	if x != nil {
+		return x.Favicon
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetSmtpHost() string {
+	if x != nil {
+		return x.SmtpHost
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetSmtpPort() int32 {
+	if x != nil {
+		return x.SmtpPort
+	}
+	return 0
+}
+
+func (x *GetAdminConfigRes) GetSmtpUsername() string {
+	if x != nil {
+		return x.SmtpUsername
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetSmtpPasswordMasked() string {
+	if x != nil {
+		return x.SmtpPasswordMasked
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetSmtpPasswordSet() bool {
+	if x != nil {
+		return x.SmtpPasswordSet
+	}
+	return false
+}
+
+func (x *GetAdminConfigRes) GetSmtpFrom() string {
+	if x != nil {
+		return x.SmtpFrom
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAgentModel() string {
+	if x != nil {
+		return x.AgentModel
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAgentSecretMasked() string {
+	if x != nil {
+		return x.AgentSecretMasked
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAgentSecretSet() bool {
+	if x != nil {
+		return x.AgentSecretSet
+	}
+	return false
+}
+
+func (x *GetAdminConfigRes) GetAiAnalyzeEndpoint() string {
+	if x != nil {
+		return x.AiAnalyzeEndpoint
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAiAnalyzeModel() string {
+	if x != nil {
+		return x.AiAnalyzeModel
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAiAnalyzeSecretMasked() string {
+	if x != nil {
+		return x.AiAnalyzeSecretMasked
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAiAnalyzeSecretSet() bool {
+	if x != nil {
+		return x.AiAnalyzeSecretSet
+	}
+	return false
+}
+
+func (x *GetAdminConfigRes) GetFooterIcp() string {
+	if x != nil {
+		return x.FooterIcp
+	}
+	return ""
+}
+
+type UpdateConfigReq struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SiteTitle string                 `protobuf:"bytes,1,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
+	SiteLogo  string                 `protobuf:"bytes,2,opt,name=site_logo,json=siteLogo,proto3" json:"site_logo,omitempty"`
+	Favicon   string                 `protobuf:"bytes,3,opt,name=favicon,proto3" json:"favicon,omitempty"`
+	// SMTP（password 空串表示不修改）
+	SmtpHost          string `protobuf:"bytes,4,opt,name=smtp_host,json=smtpHost,proto3" json:"smtp_host,omitempty"`
+	SmtpPort          int32  `protobuf:"varint,5,opt,name=smtp_port,json=smtpPort,proto3" json:"smtp_port,omitempty"`
+	SmtpUsername      string `protobuf:"bytes,6,opt,name=smtp_username,json=smtpUsername,proto3" json:"smtp_username,omitempty"`
+	SmtpPassword      string `protobuf:"bytes,7,opt,name=smtp_password,json=smtpPassword,proto3" json:"smtp_password,omitempty"`
+	SmtpFrom          string `protobuf:"bytes,8,opt,name=smtp_from,json=smtpFrom,proto3" json:"smtp_from,omitempty"`
+	ClearSmtpPassword bool   `protobuf:"varint,9,opt,name=clear_smtp_password,json=clearSmtpPassword,proto3" json:"clear_smtp_password,omitempty"`
+	// Agent
+	AgentModel       string `protobuf:"bytes,10,opt,name=agent_model,json=agentModel,proto3" json:"agent_model,omitempty"`
+	AgentSecret      string `protobuf:"bytes,11,opt,name=agent_secret,json=agentSecret,proto3" json:"agent_secret,omitempty"`
+	ClearAgentSecret bool   `protobuf:"varint,12,opt,name=clear_agent_secret,json=clearAgentSecret,proto3" json:"clear_agent_secret,omitempty"`
+	// 题库 AI
+	AiAnalyzeEndpoint    string `protobuf:"bytes,13,opt,name=ai_analyze_endpoint,json=aiAnalyzeEndpoint,proto3" json:"ai_analyze_endpoint,omitempty"`
+	AiAnalyzeModel       string `protobuf:"bytes,14,opt,name=ai_analyze_model,json=aiAnalyzeModel,proto3" json:"ai_analyze_model,omitempty"`
+	AiAnalyzeSecret      string `protobuf:"bytes,15,opt,name=ai_analyze_secret,json=aiAnalyzeSecret,proto3" json:"ai_analyze_secret,omitempty"`
+	ClearAiAnalyzeSecret bool   `protobuf:"varint,16,opt,name=clear_ai_analyze_secret,json=clearAiAnalyzeSecret,proto3" json:"clear_ai_analyze_secret,omitempty"`
+	// 页脚备案号
+	FooterIcp     string `protobuf:"bytes,17,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateConfigReq) Reset() {
 	*x = UpdateConfigReq{}
-	mi := &file_user_v1_site_site_proto_msgTypes[2]
+	mi := &file_user_v1_site_site_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -157,7 +412,7 @@ func (x *UpdateConfigReq) String() string {
 func (*UpdateConfigReq) ProtoMessage() {}
 
 func (x *UpdateConfigReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_site_site_proto_msgTypes[2]
+	mi := &file_user_v1_site_site_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -170,7 +425,7 @@ func (x *UpdateConfigReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateConfigReq.ProtoReflect.Descriptor instead.
 func (*UpdateConfigReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_site_site_proto_rawDescGZIP(), []int{2}
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *UpdateConfigReq) GetSiteTitle() string {
@@ -194,6 +449,104 @@ func (x *UpdateConfigReq) GetFavicon() string {
 	return ""
 }
 
+func (x *UpdateConfigReq) GetSmtpHost() string {
+	if x != nil {
+		return x.SmtpHost
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetSmtpPort() int32 {
+	if x != nil {
+		return x.SmtpPort
+	}
+	return 0
+}
+
+func (x *UpdateConfigReq) GetSmtpUsername() string {
+	if x != nil {
+		return x.SmtpUsername
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetSmtpPassword() string {
+	if x != nil {
+		return x.SmtpPassword
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetSmtpFrom() string {
+	if x != nil {
+		return x.SmtpFrom
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetClearSmtpPassword() bool {
+	if x != nil {
+		return x.ClearSmtpPassword
+	}
+	return false
+}
+
+func (x *UpdateConfigReq) GetAgentModel() string {
+	if x != nil {
+		return x.AgentModel
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetAgentSecret() string {
+	if x != nil {
+		return x.AgentSecret
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetClearAgentSecret() bool {
+	if x != nil {
+		return x.ClearAgentSecret
+	}
+	return false
+}
+
+func (x *UpdateConfigReq) GetAiAnalyzeEndpoint() string {
+	if x != nil {
+		return x.AiAnalyzeEndpoint
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetAiAnalyzeModel() string {
+	if x != nil {
+		return x.AiAnalyzeModel
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetAiAnalyzeSecret() string {
+	if x != nil {
+		return x.AiAnalyzeSecret
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetClearAiAnalyzeSecret() bool {
+	if x != nil {
+		return x.ClearAiAnalyzeSecret
+	}
+	return false
+}
+
+func (x *UpdateConfigReq) GetFooterIcp() string {
+	if x != nil {
+		return x.FooterIcp
+	}
+	return ""
+}
+
 type UpdateConfigRes struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -201,13 +554,14 @@ type UpdateConfigRes struct {
 	SiteTitle     string                 `protobuf:"bytes,3,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
 	SiteLogo      string                 `protobuf:"bytes,4,opt,name=site_logo,json=siteLogo,proto3" json:"site_logo,omitempty"`
 	Favicon       string                 `protobuf:"bytes,5,opt,name=favicon,proto3" json:"favicon,omitempty"`
+	FooterIcp     string                 `protobuf:"bytes,6,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateConfigRes) Reset() {
 	*x = UpdateConfigRes{}
-	mi := &file_user_v1_site_site_proto_msgTypes[3]
+	mi := &file_user_v1_site_site_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -219,7 +573,7 @@ func (x *UpdateConfigRes) String() string {
 func (*UpdateConfigRes) ProtoMessage() {}
 
 func (x *UpdateConfigRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_site_site_proto_msgTypes[3]
+	mi := &file_user_v1_site_site_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -232,7 +586,7 @@ func (x *UpdateConfigRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateConfigRes.ProtoReflect.Descriptor instead.
 func (*UpdateConfigRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_site_site_proto_rawDescGZIP(), []int{3}
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *UpdateConfigRes) GetCode() int64 {
@@ -270,34 +624,245 @@ func (x *UpdateConfigRes) GetFavicon() string {
 	return ""
 }
 
+func (x *UpdateConfigRes) GetFooterIcp() string {
+	if x != nil {
+		return x.FooterIcp
+	}
+	return ""
+}
+
+// 测试邮件：可用已保存配置，也可临时覆盖（password 空则用已保存）
+type TestEmailReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	To            string                 `protobuf:"bytes,1,opt,name=to,proto3" json:"to,omitempty"`
+	SmtpHost      string                 `protobuf:"bytes,2,opt,name=smtp_host,json=smtpHost,proto3" json:"smtp_host,omitempty"`
+	SmtpPort      int32                  `protobuf:"varint,3,opt,name=smtp_port,json=smtpPort,proto3" json:"smtp_port,omitempty"`
+	SmtpUsername  string                 `protobuf:"bytes,4,opt,name=smtp_username,json=smtpUsername,proto3" json:"smtp_username,omitempty"`
+	SmtpPassword  string                 `protobuf:"bytes,5,opt,name=smtp_password,json=smtpPassword,proto3" json:"smtp_password,omitempty"`
+	SmtpFrom      string                 `protobuf:"bytes,6,opt,name=smtp_from,json=smtpFrom,proto3" json:"smtp_from,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestEmailReq) Reset() {
+	*x = TestEmailReq{}
+	mi := &file_user_v1_site_site_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestEmailReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestEmailReq) ProtoMessage() {}
+
+func (x *TestEmailReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestEmailReq.ProtoReflect.Descriptor instead.
+func (*TestEmailReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *TestEmailReq) GetTo() string {
+	if x != nil {
+		return x.To
+	}
+	return ""
+}
+
+func (x *TestEmailReq) GetSmtpHost() string {
+	if x != nil {
+		return x.SmtpHost
+	}
+	return ""
+}
+
+func (x *TestEmailReq) GetSmtpPort() int32 {
+	if x != nil {
+		return x.SmtpPort
+	}
+	return 0
+}
+
+func (x *TestEmailReq) GetSmtpUsername() string {
+	if x != nil {
+		return x.SmtpUsername
+	}
+	return ""
+}
+
+func (x *TestEmailReq) GetSmtpPassword() string {
+	if x != nil {
+		return x.SmtpPassword
+	}
+	return ""
+}
+
+func (x *TestEmailReq) GetSmtpFrom() string {
+	if x != nil {
+		return x.SmtpFrom
+	}
+	return ""
+}
+
+type TestEmailRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Success       bool                   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestEmailRes) Reset() {
+	*x = TestEmailRes{}
+	mi := &file_user_v1_site_site_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestEmailRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestEmailRes) ProtoMessage() {}
+
+func (x *TestEmailRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestEmailRes.ProtoReflect.Descriptor instead.
+func (*TestEmailRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *TestEmailRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *TestEmailRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *TestEmailRes) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
 var File_user_v1_site_site_proto protoreflect.FileDescriptor
 
 const file_user_v1_site_site_proto_rawDesc = "" +
 	"\n" +
 	"\x17user/v1/site/site.proto\x12\x10api.user.v1.site\x1a\x1cgoogle/api/annotations.proto\"\x0e\n" +
-	"\fGetConfigReq\"\x92\x01\n" +
+	"\fGetConfigReq\"\xb1\x01\n" +
 	"\fGetConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
 	"\n" +
 	"site_title\x18\x03 \x01(\tR\tsiteTitle\x12\x1b\n" +
 	"\tsite_logo\x18\x04 \x01(\tR\bsiteLogo\x12\x18\n" +
-	"\afavicon\x18\x05 \x01(\tR\afavicon\"g\n" +
+	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1d\n" +
+	"\n" +
+	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\"\x13\n" +
+	"\x11GetAdminConfigReq\"\xd1\x05\n" +
+	"\x11GetAdminConfigRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
+	"\n" +
+	"site_title\x18\x03 \x01(\tR\tsiteTitle\x12\x1b\n" +
+	"\tsite_logo\x18\x04 \x01(\tR\bsiteLogo\x12\x18\n" +
+	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1b\n" +
+	"\tsmtp_host\x18\x06 \x01(\tR\bsmtpHost\x12\x1b\n" +
+	"\tsmtp_port\x18\a \x01(\x05R\bsmtpPort\x12#\n" +
+	"\rsmtp_username\x18\b \x01(\tR\fsmtpUsername\x120\n" +
+	"\x14smtp_password_masked\x18\t \x01(\tR\x12smtpPasswordMasked\x12*\n" +
+	"\x11smtp_password_set\x18\n" +
+	" \x01(\bR\x0fsmtpPasswordSet\x12\x1b\n" +
+	"\tsmtp_from\x18\v \x01(\tR\bsmtpFrom\x12\x1f\n" +
+	"\vagent_model\x18\f \x01(\tR\n" +
+	"agentModel\x12.\n" +
+	"\x13agent_secret_masked\x18\r \x01(\tR\x11agentSecretMasked\x12(\n" +
+	"\x10agent_secret_set\x18\x0e \x01(\bR\x0eagentSecretSet\x12.\n" +
+	"\x13ai_analyze_endpoint\x18\x0f \x01(\tR\x11aiAnalyzeEndpoint\x12(\n" +
+	"\x10ai_analyze_model\x18\x10 \x01(\tR\x0eaiAnalyzeModel\x127\n" +
+	"\x18ai_analyze_secret_masked\x18\x11 \x01(\tR\x15aiAnalyzeSecretMasked\x121\n" +
+	"\x15ai_analyze_secret_set\x18\x12 \x01(\bR\x12aiAnalyzeSecretSet\x12\x1d\n" +
+	"\n" +
+	"footer_icp\x18\x13 \x01(\tR\tfooterIcp\"\x86\x05\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
 	"site_title\x18\x01 \x01(\tR\tsiteTitle\x12\x1b\n" +
 	"\tsite_logo\x18\x02 \x01(\tR\bsiteLogo\x12\x18\n" +
-	"\afavicon\x18\x03 \x01(\tR\afavicon\"\x95\x01\n" +
+	"\afavicon\x18\x03 \x01(\tR\afavicon\x12\x1b\n" +
+	"\tsmtp_host\x18\x04 \x01(\tR\bsmtpHost\x12\x1b\n" +
+	"\tsmtp_port\x18\x05 \x01(\x05R\bsmtpPort\x12#\n" +
+	"\rsmtp_username\x18\x06 \x01(\tR\fsmtpUsername\x12#\n" +
+	"\rsmtp_password\x18\a \x01(\tR\fsmtpPassword\x12\x1b\n" +
+	"\tsmtp_from\x18\b \x01(\tR\bsmtpFrom\x12.\n" +
+	"\x13clear_smtp_password\x18\t \x01(\bR\x11clearSmtpPassword\x12\x1f\n" +
+	"\vagent_model\x18\n" +
+	" \x01(\tR\n" +
+	"agentModel\x12!\n" +
+	"\fagent_secret\x18\v \x01(\tR\vagentSecret\x12,\n" +
+	"\x12clear_agent_secret\x18\f \x01(\bR\x10clearAgentSecret\x12.\n" +
+	"\x13ai_analyze_endpoint\x18\r \x01(\tR\x11aiAnalyzeEndpoint\x12(\n" +
+	"\x10ai_analyze_model\x18\x0e \x01(\tR\x0eaiAnalyzeModel\x12*\n" +
+	"\x11ai_analyze_secret\x18\x0f \x01(\tR\x0faiAnalyzeSecret\x125\n" +
+	"\x17clear_ai_analyze_secret\x18\x10 \x01(\bR\x14clearAiAnalyzeSecret\x12\x1d\n" +
+	"\n" +
+	"footer_icp\x18\x11 \x01(\tR\tfooterIcp\"\xb4\x01\n" +
 	"\x0fUpdateConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
 	"\n" +
 	"site_title\x18\x03 \x01(\tR\tsiteTitle\x12\x1b\n" +
 	"\tsite_logo\x18\x04 \x01(\tR\bsiteLogo\x12\x18\n" +
-	"\afavicon\x18\x05 \x01(\tR\afavicon2\xe8\x01\n" +
+	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1d\n" +
+	"\n" +
+	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\"\xbf\x01\n" +
+	"\fTestEmailReq\x12\x0e\n" +
+	"\x02to\x18\x01 \x01(\tR\x02to\x12\x1b\n" +
+	"\tsmtp_host\x18\x02 \x01(\tR\bsmtpHost\x12\x1b\n" +
+	"\tsmtp_port\x18\x03 \x01(\x05R\bsmtpPort\x12#\n" +
+	"\rsmtp_username\x18\x04 \x01(\tR\fsmtpUsername\x12#\n" +
+	"\rsmtp_password\x18\x05 \x01(\tR\fsmtpPassword\x12\x1b\n" +
+	"\tsmtp_from\x18\x06 \x01(\tR\bsmtpFrom\"V\n" +
+	"\fTestEmailRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
+	"\asuccess\x18\x03 \x01(\bR\asuccess2\xda\x03\n" +
 	"\x04Site\x12i\n" +
-	"\tGetConfig\x12\x1e.api.user.v1.site.GetConfigReq\x1a\x1e.api.user.v1.site.GetConfigRes\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1/user/site/config\x12u\n" +
-	"\fUpdateConfig\x12!.api.user.v1.site.UpdateConfigReq\x1a!.api.user.v1.site.UpdateConfigRes\"\x1f\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/v1/user/site/configB5\n" +
+	"\tGetConfig\x12\x1e.api.user.v1.site.GetConfigReq\x1a\x1e.api.user.v1.site.GetConfigRes\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1/user/site/config\x12~\n" +
+	"\x0eGetAdminConfig\x12#.api.user.v1.site.GetAdminConfigReq\x1a#.api.user.v1.site.GetAdminConfigRes\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/user/site/admin-config\x12u\n" +
+	"\fUpdateConfig\x12!.api.user.v1.site.UpdateConfigReq\x1a!.api.user.v1.site.UpdateConfigRes\"\x1f\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/v1/user/site/config\x12p\n" +
+	"\tTestEmail\x12\x1e.api.user.v1.site.TestEmailReq\x1a\x1e.api.user.v1.site.TestEmailRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/user/site/test-emailB5\n" +
 	"\x10api.user.v1.siteP\x01Z\x1fcwxu-algo/api/user/v1/site;siteb\x06proto3"
 
 var (
@@ -312,20 +877,28 @@ func file_user_v1_site_site_proto_rawDescGZIP() []byte {
 	return file_user_v1_site_site_proto_rawDescData
 }
 
-var file_user_v1_site_site_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_user_v1_site_site_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_user_v1_site_site_proto_goTypes = []any{
-	(*GetConfigReq)(nil),    // 0: api.user.v1.site.GetConfigReq
-	(*GetConfigRes)(nil),    // 1: api.user.v1.site.GetConfigRes
-	(*UpdateConfigReq)(nil), // 2: api.user.v1.site.UpdateConfigReq
-	(*UpdateConfigRes)(nil), // 3: api.user.v1.site.UpdateConfigRes
+	(*GetConfigReq)(nil),      // 0: api.user.v1.site.GetConfigReq
+	(*GetConfigRes)(nil),      // 1: api.user.v1.site.GetConfigRes
+	(*GetAdminConfigReq)(nil), // 2: api.user.v1.site.GetAdminConfigReq
+	(*GetAdminConfigRes)(nil), // 3: api.user.v1.site.GetAdminConfigRes
+	(*UpdateConfigReq)(nil),   // 4: api.user.v1.site.UpdateConfigReq
+	(*UpdateConfigRes)(nil),   // 5: api.user.v1.site.UpdateConfigRes
+	(*TestEmailReq)(nil),      // 6: api.user.v1.site.TestEmailReq
+	(*TestEmailRes)(nil),      // 7: api.user.v1.site.TestEmailRes
 }
 var file_user_v1_site_site_proto_depIdxs = []int32{
 	0, // 0: api.user.v1.site.Site.GetConfig:input_type -> api.user.v1.site.GetConfigReq
-	2, // 1: api.user.v1.site.Site.UpdateConfig:input_type -> api.user.v1.site.UpdateConfigReq
-	1, // 2: api.user.v1.site.Site.GetConfig:output_type -> api.user.v1.site.GetConfigRes
-	3, // 3: api.user.v1.site.Site.UpdateConfig:output_type -> api.user.v1.site.UpdateConfigRes
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
+	2, // 1: api.user.v1.site.Site.GetAdminConfig:input_type -> api.user.v1.site.GetAdminConfigReq
+	4, // 2: api.user.v1.site.Site.UpdateConfig:input_type -> api.user.v1.site.UpdateConfigReq
+	6, // 3: api.user.v1.site.Site.TestEmail:input_type -> api.user.v1.site.TestEmailReq
+	1, // 4: api.user.v1.site.Site.GetConfig:output_type -> api.user.v1.site.GetConfigRes
+	3, // 5: api.user.v1.site.Site.GetAdminConfig:output_type -> api.user.v1.site.GetAdminConfigRes
+	5, // 6: api.user.v1.site.Site.UpdateConfig:output_type -> api.user.v1.site.UpdateConfigRes
+	7, // 7: api.user.v1.site.Site.TestEmail:output_type -> api.user.v1.site.TestEmailRes
+	4, // [4:8] is the sub-list for method output_type
+	0, // [0:4] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -342,7 +915,7 @@ func file_user_v1_site_site_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_v1_site_site_proto_rawDesc), len(file_user_v1_site_site_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

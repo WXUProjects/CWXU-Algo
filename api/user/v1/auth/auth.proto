@@ -26,9 +26,24 @@ service Auth {
       body: "*"
     };
   }
+  // 发送邮箱验证码（注册 / 找回密码）
+  rpc SendCode (SendCodeReq) returns (SendCodeRes) {
+    option (google.api.http) = {
+      post: "/v1/user/auth/send-code",
+      body: "*"
+    };
+  }
+  // 邮箱验证码重置密码
+  rpc ResetPassword (ResetPasswordReq) returns (ResetPasswordRes) {
+    option (google.api.http) = {
+      post: "/v1/user/auth/reset-password",
+      body: "*"
+    };
+  }
 }
 
 message LoginReq {
+  // 用户名或邮箱
   string username = 1;
   string password = 2;
 }
@@ -45,6 +60,8 @@ message RegisterReq {
   string name = 3;
   string email = 4;
   int64 groupId = 5;
+  // 邮箱验证码
+  string code = 6;
 }
 message RegisterRes {
   bool success = 1;
@@ -52,3 +69,26 @@ message RegisterRes {
 }
 
 message RefreshReq {}
+
+// purpose: register | reset
+message SendCodeReq {
+  string email = 1;
+  string purpose = 2;
+}
+
+message SendCodeRes {
+  bool success = 1;
+  string message = 2;
+}
+
+message ResetPasswordReq {
+  string email = 1;
+  string code = 2;
+  // 新密码（客户端 SHA256 后传输）
+  string password = 3;
+}
+
+message ResetPasswordRes {
+  bool success = 1;
+  string message = 2;
+}

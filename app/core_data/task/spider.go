@@ -30,29 +30,40 @@ func NewSpiderTask(mq *event.RabbitMQ, rdb *redis.Client) *SpiderTask {
 	return &SpiderTask{mq: mq, rdb: rdb}
 }
 
-func pendingKey(userId int64) string {
-	return fmt.Sprintf("spider:pending:%d", userId)
+func pendingKey(userId int64, platform string) string {
+	if platform == "" {
+		return fmt.Sprintf("spider:pending:%d", userId)
+	}
+	return fmt.Sprintf("spider:pending:%d:%s", userId, platform)
 }
 
-func InflightKey(userId int64) string {
-	return fmt.Sprintf("spider:inflight:%d", userId)
+func InflightKey(userId int64, platform string) string {
+	if platform == "" {
+		return fmt.Sprintf("spider:inflight:%d", userId)
+	}
+	return fmt.Sprintf("spider:inflight:%d:%s", userId, platform)
 }
 
-// Do 入队爬虫任务。同 user 在 pending/inflight 窗口内去重（功能结果仍是「会同步」，只是不重复堆队列）。
+// Do 入队全平台爬虫任务。同 user 全量任务在 pending/inflight 窗口内去重。
 func (t *SpiderTask) Do(userId int64, needAll bool) {
+	t.DoPlatform(userId, "", needAll)
+}
+
+// DoPlatform 入队爬虫任务；platform 非空时只抓该平台。
+func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) {
 	if t.mq == nil {
 		log.Errorf("SpiderTask: mq not ready")
 		return
 	}
 	if t.rdb != nil {
 		ctx := context.Background()
-		// 执行中或已在队列：跳过重复入队
-		if n, err := t.rdb.Exists(ctx, InflightKey(userId), pendingKey(userId)).Result(); err == nil && n > 0 {
+		// 执行中或已在队列：跳过重复入队（按 user+platform 维度）
+		if n, err := t.rdb.Exists(ctx, InflightKey(userId, platform), pendingKey(userId, platform)).Result(); err == nil && n > 0 {
 			spidermetrics.IncDedupSkipped()
-			log.Debugf("SpiderTask: dedup skip user=%d needAll=%v", userId, needAll)
+			log.Debugf("SpiderTask: dedup skip user=%d platform=%q needAll=%v", userId, platform, needAll)
 			return
 		}
-		if err := t.rdb.Set(ctx, pendingKey(userId), "1", pendingTTL).Err(); err != nil {
+		if err := t.rdb.Set(ctx, pendingKey(userId, platform), "1", pendingTTL).Err(); err != nil {
 			log.Warnf("SpiderTask: set pending key failed: %v", err)
 		}
 	}
@@ -60,7 +71,7 @@ func (t *SpiderTask) Do(userId int64, needAll bool) {
 		log.Errorf("SpiderTask: QueueDeclare failed: %v", err)
 		return
 	}
-	e := event.SpiderEvent{UserId: userId, NeedAll: needAll}
+	e := event.SpiderEvent{UserId: userId, NeedAll: needAll, Platform: platform}
 	body, err := json.Marshal(e)
 	if err != nil {
 		log.Errorf("SpiderTask: json.Marshal failed: %v", err)
@@ -78,21 +89,21 @@ func (t *SpiderTask) Do(userId int64, needAll bool) {
 }
 
 // MarkInflight 消费开始时调用
-func (t *SpiderTask) MarkInflight(userId int64) {
+func (t *SpiderTask) MarkInflight(userId int64, platform string) {
 	if t.rdb == nil {
 		return
 	}
 	ctx := context.Background()
-	_ = t.rdb.Del(ctx, pendingKey(userId)).Err()
-	_ = t.rdb.Set(ctx, InflightKey(userId), "1", inflightTTL).Err()
+	_ = t.rdb.Del(ctx, pendingKey(userId, platform)).Err()
+	_ = t.rdb.Set(ctx, InflightKey(userId, platform), "1", inflightTTL).Err()
 }
 
 // ClearInflight 消费结束时调用
-func (t *SpiderTask) ClearInflight(userId int64) {
+func (t *SpiderTask) ClearInflight(userId int64, platform string) {
 	if t.rdb == nil {
 		return
 	}
-	_ = t.rdb.Del(context.Background(), InflightKey(userId)).Err()
+	_ = t.rdb.Del(context.Background(), InflightKey(userId, platform)).Err()
 }
 
 // DoBatch 分批入队，避免 UpdateAll 瞬时打满队列（功能仍是「全部触发」）。

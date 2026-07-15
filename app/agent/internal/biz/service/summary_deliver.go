@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"cwxu-algo/app/agent/internal/agent/tool/utils"
+	"cwxu-algo/app/common/mail"
 
 	"github.com/go-kratos/kratos/v2/log"
 )
@@ -20,16 +20,6 @@ type recentSummaryPayload struct {
 	UpdateTime int64    `json:"updateTime"`
 }
 
-func (uc *SummaryUseCase) newEmailTool() *utils.SendEmail {
-	return utils.NewSendEmail(
-		uc.mailConf.Host,
-		int(uc.mailConf.Port),
-		uc.mailConf.Username,
-		uc.mailConf.Password,
-		uc.mailConf.From,
-	)
-}
-
 func (uc *SummaryUseCase) sendHTMLEmail(to, subject, body string) error {
 	body = stripCodeFence(body)
 	if strings.TrimSpace(body) == "" {
@@ -38,7 +28,12 @@ func (uc *SummaryUseCase) sendHTMLEmail(to, subject, body string) error {
 	if to == "" {
 		return fmt.Errorf("收件人为空")
 	}
-	return uc.newEmailTool().Handle(to, subject, body)
+	rt := uc.runtime(context.Background())
+	sender := mail.NewSender(rt.SMTPConf())
+	if !sender.Configured() {
+		return fmt.Errorf("SMTP 未配置（请在站点设置中填写）")
+	}
+	return sender.Send(to, subject, body)
 }
 
 func (uc *SummaryUseCase) saveRecentSummary(ctx context.Context, userId int64, raw string) error {

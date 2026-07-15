@@ -19,8 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Site_GetConfig_FullMethodName    = "/api.user.v1.site.Site/GetConfig"
-	Site_UpdateConfig_FullMethodName = "/api.user.v1.site.Site/UpdateConfig"
+	Site_GetConfig_FullMethodName      = "/api.user.v1.site.Site/GetConfig"
+	Site_GetAdminConfig_FullMethodName = "/api.user.v1.site.Site/GetAdminConfig"
+	Site_UpdateConfig_FullMethodName   = "/api.user.v1.site.Site/UpdateConfig"
+	Site_TestEmail_FullMethodName      = "/api.user.v1.site.Site/TestEmail"
 )
 
 // SiteClient is the client API for Site service.
@@ -29,8 +31,12 @@ const (
 type SiteClient interface {
 	// 公开：站点品牌配置
 	GetConfig(ctx context.Context, in *GetConfigReq, opts ...grpc.CallOption) (*GetConfigRes, error)
-	// 管理员：更新站点标题 / logo / favicon
+	// 管理员：获取完整站点配置（密钥脱敏）
+	GetAdminConfig(ctx context.Context, in *GetAdminConfigReq, opts ...grpc.CallOption) (*GetAdminConfigRes, error)
+	// 管理员：更新站点配置（品牌 / SMTP / AI）
 	UpdateConfig(ctx context.Context, in *UpdateConfigReq, opts ...grpc.CallOption) (*UpdateConfigRes, error)
+	// 管理员：发送测试邮件
+	TestEmail(ctx context.Context, in *TestEmailReq, opts ...grpc.CallOption) (*TestEmailRes, error)
 }
 
 type siteClient struct {
@@ -51,10 +57,30 @@ func (c *siteClient) GetConfig(ctx context.Context, in *GetConfigReq, opts ...gr
 	return out, nil
 }
 
+func (c *siteClient) GetAdminConfig(ctx context.Context, in *GetAdminConfigReq, opts ...grpc.CallOption) (*GetAdminConfigRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAdminConfigRes)
+	err := c.cc.Invoke(ctx, Site_GetAdminConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *siteClient) UpdateConfig(ctx context.Context, in *UpdateConfigReq, opts ...grpc.CallOption) (*UpdateConfigRes, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateConfigRes)
 	err := c.cc.Invoke(ctx, Site_UpdateConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *siteClient) TestEmail(ctx context.Context, in *TestEmailReq, opts ...grpc.CallOption) (*TestEmailRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TestEmailRes)
+	err := c.cc.Invoke(ctx, Site_TestEmail_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -67,8 +93,12 @@ func (c *siteClient) UpdateConfig(ctx context.Context, in *UpdateConfigReq, opts
 type SiteServer interface {
 	// 公开：站点品牌配置
 	GetConfig(context.Context, *GetConfigReq) (*GetConfigRes, error)
-	// 管理员：更新站点标题 / logo / favicon
+	// 管理员：获取完整站点配置（密钥脱敏）
+	GetAdminConfig(context.Context, *GetAdminConfigReq) (*GetAdminConfigRes, error)
+	// 管理员：更新站点配置（品牌 / SMTP / AI）
 	UpdateConfig(context.Context, *UpdateConfigReq) (*UpdateConfigRes, error)
+	// 管理员：发送测试邮件
+	TestEmail(context.Context, *TestEmailReq) (*TestEmailRes, error)
 	mustEmbedUnimplementedSiteServer()
 }
 
@@ -82,8 +112,14 @@ type UnimplementedSiteServer struct{}
 func (UnimplementedSiteServer) GetConfig(context.Context, *GetConfigReq) (*GetConfigRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConfig not implemented")
 }
+func (UnimplementedSiteServer) GetAdminConfig(context.Context, *GetAdminConfigReq) (*GetAdminConfigRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAdminConfig not implemented")
+}
 func (UnimplementedSiteServer) UpdateConfig(context.Context, *UpdateConfigReq) (*UpdateConfigRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateConfig not implemented")
+}
+func (UnimplementedSiteServer) TestEmail(context.Context, *TestEmailReq) (*TestEmailRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method TestEmail not implemented")
 }
 func (UnimplementedSiteServer) mustEmbedUnimplementedSiteServer() {}
 func (UnimplementedSiteServer) testEmbeddedByValue()              {}
@@ -124,6 +160,24 @@ func _Site_GetConfig_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Site_GetAdminConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAdminConfigReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SiteServer).GetAdminConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Site_GetAdminConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SiteServer).GetAdminConfig(ctx, req.(*GetAdminConfigReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Site_UpdateConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpdateConfigReq)
 	if err := dec(in); err != nil {
@@ -142,6 +196,24 @@ func _Site_UpdateConfig_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Site_TestEmail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TestEmailReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SiteServer).TestEmail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Site_TestEmail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SiteServer).TestEmail(ctx, req.(*TestEmailReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Site_ServiceDesc is the grpc.ServiceDesc for Site service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -154,8 +226,16 @@ var Site_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Site_GetConfig_Handler,
 		},
 		{
+			MethodName: "GetAdminConfig",
+			Handler:    _Site_GetAdminConfig_Handler,
+		},
+		{
 			MethodName: "UpdateConfig",
 			Handler:    _Site_UpdateConfig_Handler,
+		},
+		{
+			MethodName: "TestEmail",
+			Handler:    _Site_TestEmail_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

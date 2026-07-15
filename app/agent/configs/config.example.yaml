@@ -17,9 +17,10 @@ data:
     read_timeout: 0.2s
     write_timeout: 0.2s
 
+# 业务配置请在站点设置 /admin/site 配置；以下仅作兜底（Redis 无数据时）
 agent:
-  model: xxxxx # 火山引擎模型id
-  secret: xxxx
+  model: glm-4-7-251222
+  secret: your-ark-api-key
 
 smtp:
   host: smtp.163.com

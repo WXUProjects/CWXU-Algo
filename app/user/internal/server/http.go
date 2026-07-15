@@ -24,10 +24,12 @@ import (
 
 func NewWhiteListMatcher() selector.MatchFunc {
 	whiteList := map[string]string{
-		"/api.user.v1.Auth/Login":          "",
-		"/api.user.v1.Auth/Register":       "",
-		"/api.user.v1.Profile/GetById":     "",
-		"/api.user.v1.Profile/GetByName":   "",
+		"/api.user.v1.Auth/Login":               "",
+		"/api.user.v1.Auth/Register":            "",
+		"/api.user.v1.Auth/SendCode":            "",
+		"/api.user.v1.Auth/ResetPassword":       "",
+		"/api.user.v1.Profile/GetById":          "",
+		"/api.user.v1.Profile/GetByName":        "",
 		"/api.user.v1.Profile/GetList":          "",
 		"/api.user.v1.Profile/GetUserIdsByGroup": "",
 		"/api.user.v1.Profile/GetUserIdsByOrg":   "",

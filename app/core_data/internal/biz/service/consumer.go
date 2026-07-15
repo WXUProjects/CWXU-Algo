@@ -55,11 +55,11 @@ func (c *Consumer) Consume() {
 				return fmt.Errorf("bad json: %w", err)
 			}
 			if c.spiderTask != nil {
-				c.spiderTask.MarkInflight(msg.UserId)
-				defer c.spiderTask.ClearInflight(msg.UserId)
+				c.spiderTask.MarkInflight(msg.UserId, msg.Platform)
+				defer c.spiderTask.ClearInflight(msg.UserId, msg.Platform)
 			}
 			start := spidermetrics.RecordStart(msg.NeedAll)
-			err := c.spider.LoadData(msg.UserId, msg.NeedAll)
+			err := c.spider.LoadData(msg.UserId, msg.NeedAll, msg.Platform)
 			spidermetrics.RecordEnd(start, err)
 			if err != nil {
 				log.Errorf("RabbitMQ(Spider): %v", err)

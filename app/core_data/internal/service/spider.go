@@ -21,7 +21,7 @@ import (
 var (
 	SetForbidden    = errors.Forbidden("权限错误", "权限不允许，设置失败")
 	InternalError   = errors.InternalServer("内部错误", "内部错误，操作失败")
-	UpdateForbidden = errors.Forbidden("权限错误", "权限不允许，不允许手动申请全量更新他人数据")
+	UpdateForbidden = errors.Forbidden("权限错误", "仅站点管理员可手动同步 OJ 数据")
 	RateLimitError  = errors.New(429, "TOO_MANY_REQUESTS", "请求过于频繁，请稍后再试")
 )
 
@@ -41,17 +41,17 @@ func (s SpiderService) allow(ctx context.Context, key string, interval time.Dura
 }
 
 func (s SpiderService) Update(ctx context.Context, req *spider.UpdateReq) (*spider.UpdateRes, error) {
-	// 本人或管理员可触发；避免任意登录用户刷他人全量爬虫
-	if !auth.VerifySelfOrAbove(ctx, uint(req.UserId)) {
+	// 仅站点管理员可手动触发全量同步（普通用户依赖定时任务与绑定后自动抓取）
+	if !auth.VerifyAdmin(ctx) {
 		return nil, UpdateForbidden
 	}
 	if !s.allow(ctx, ratelimit.SpiderUpdateKey(req.UserId), 60*time.Second) {
 		return nil, RateLimitError
 	}
-	s.spider.Do(req.UserId, true) // 全量更新
+	s.spider.Do(req.UserId, true) // 全量更新该用户全部已绑定平台
 	return &spider.UpdateRes{
 		Code:    0,
-		Message: "更新成功，请稍等片刻，您的全量OJ数据正在更新",
+		Message: "更新成功，请稍等片刻，该用户的全量 OJ 数据正在同步",
 	}, nil
 }
 
@@ -127,10 +127,11 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 		log.Errorf("SetSpider: save platform failed: %v", err)
 		return nil, InternalError
 	}
-	s.spider.Do(req.UserId, true)
+	// 只全量抓取刚绑定的这一平台，避免重绑 CF 时把其它 OJ 再扫一遍
+	s.spider.DoPlatform(req.UserId, req.Platform, true)
 	return &spider.SetSpiderRep{
 		Code:    0,
-		Message: "设置成功，请稍等片刻，您的全量OJ数据正在更新",
+		Message: fmt.Sprintf("绑定成功，正在同步 %s 的全量数据，请稍候", req.Platform),
 	}, nil
 }
 

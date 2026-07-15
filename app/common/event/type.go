@@ -1,8 +1,10 @@
 package event
 
 type SpiderEvent struct {
-	UserId  int64 `json:"user_id"`
-	NeedAll bool  `json:"need_all"`
+	UserId   int64  `json:"user_id"`
+	NeedAll  bool   `json:"need_all"`
+	// Platform 非空时只抓该平台；空则抓用户全部已绑定平台
+	Platform string `json:"platform,omitempty"`
 }
 
 type SummaryEvent struct {

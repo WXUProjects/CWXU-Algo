@@ -13,10 +13,23 @@ service Site {
       get: "/v1/user/site/config"
     };
   }
-  // 管理员：更新站点标题 / logo / favicon
+  // 管理员：获取完整站点配置（密钥脱敏）
+  rpc GetAdminConfig (GetAdminConfigReq) returns (GetAdminConfigRes) {
+    option (google.api.http) = {
+      get: "/v1/user/site/admin-config"
+    };
+  }
+  // 管理员：更新站点配置（品牌 / SMTP / AI）
   rpc UpdateConfig (UpdateConfigReq) returns (UpdateConfigRes) {
     option (google.api.http) = {
       post: "/v1/user/site/config"
+      body: "*"
+    };
+  }
+  // 管理员：发送测试邮件
+  rpc TestEmail (TestEmailReq) returns (TestEmailRes) {
+    option (google.api.http) = {
+      post: "/v1/user/site/test-email"
       body: "*"
     };
   }
@@ -30,12 +43,60 @@ message GetConfigRes {
   string site_title = 3;
   string site_logo = 4;
   string favicon = 5;
+  string footer_icp = 6;
+}
+
+message GetAdminConfigReq {}
+
+message GetAdminConfigRes {
+  int64 code = 1;
+  string message = 2;
+  string site_title = 3;
+  string site_logo = 4;
+  string favicon = 5;
+  // SMTP
+  string smtp_host = 6;
+  int32 smtp_port = 7;
+  string smtp_username = 8;
+  // 脱敏：已配置为 ****，未配置为空
+  string smtp_password_masked = 9;
+  bool smtp_password_set = 10;
+  string smtp_from = 11;
+  // Agent（AI 总结 / 日报周报）
+  string agent_model = 12;
+  string agent_secret_masked = 13;
+  bool agent_secret_set = 14;
+  // 题库 AI 分析
+  string ai_analyze_endpoint = 15;
+  string ai_analyze_model = 16;
+  string ai_analyze_secret_masked = 17;
+  bool ai_analyze_secret_set = 18;
+  // 页脚
+  string footer_icp = 19;
 }
 
 message UpdateConfigReq {
   string site_title = 1;
   string site_logo = 2;
   string favicon = 3;
+  // SMTP（password 空串表示不修改）
+  string smtp_host = 4;
+  int32 smtp_port = 5;
+  string smtp_username = 6;
+  string smtp_password = 7;
+  string smtp_from = 8;
+  bool clear_smtp_password = 9;
+  // Agent
+  string agent_model = 10;
+  string agent_secret = 11;
+  bool clear_agent_secret = 12;
+  // 题库 AI
+  string ai_analyze_endpoint = 13;
+  string ai_analyze_model = 14;
+  string ai_analyze_secret = 15;
+  bool clear_ai_analyze_secret = 16;
+  // 页脚备案号
+  string footer_icp = 17;
 }
 
 message UpdateConfigRes {
@@ -44,4 +105,21 @@ message UpdateConfigRes {
   string site_title = 3;
   string site_logo = 4;
   string favicon = 5;
+  string footer_icp = 6;
+}
+
+// 测试邮件：可用已保存配置，也可临时覆盖（password 空则用已保存）
+message TestEmailReq {
+  string to = 1;
+  string smtp_host = 2;
+  int32 smtp_port = 3;
+  string smtp_username = 4;
+  string smtp_password = 5;
+  string smtp_from = 6;
+}
+
+message TestEmailRes {
+  int64 code = 1;
+  string message = 2;
+  bool success = 3;
 }

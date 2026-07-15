@@ -134,6 +134,11 @@ message GetListRes {
     bool isSiteAdmin = 9;
     repeated OrgBrief orgs = 10;
     string groupName = 11; // 分组显示名；无效 groupId 时为空或「默认分组」
+    // 日报/周报接收偏好与组织授权（管理端展示/开关用）
+    bool emailEnabled = 12;
+    bool emailWeeklyEnabled = 13;
+    bool emailAllowedByOrg = 14;
+    bool emailWeeklyAllowedByOrg = 15;
   }
   repeated List list = 1;
   int64 total = 2;

@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"cwxu-algo/app/agent/internal/agent"
 	"cwxu-algo/app/agent/internal/data"
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/sitesettings"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
@@ -19,18 +21,31 @@ import (
 
 type SummaryUseCase struct {
 	chat     *agent.Chat
-	mailConf *conf.SMTP
+	yamlSMTP *conf.SMTP
 	reg      *registry.Registrar
 	redis    *redis.Client
 }
 
-func NewSummaryUseCase(chat *agent.Chat, mailConf *conf.SMTP, reg *discovery.Register, redis *data.Data) *SummaryUseCase {
+func NewSummaryUseCase(chat *agent.Chat, mailConf *conf.SMTP, reg *discovery.Register, d *data.Data) *SummaryUseCase {
 	return &SummaryUseCase{
 		chat:     chat,
-		mailConf: mailConf,
+		yamlSMTP: mailConf,
 		reg:      &reg.Reg,
-		redis:    redis.RDB,
+		redis:    d.RDB,
 	}
+}
+
+func (uc *SummaryUseCase) runtime(ctx context.Context) *sitesettings.Runtime {
+	rt := sitesettings.Load(ctx, uc.redis, nil)
+	return rt.MergeFallback(uc.yamlSMTP, nil, nil)
+}
+
+func (uc *SummaryUseCase) brandTitle(ctx context.Context) string {
+	t := strings.TrimSpace(uc.runtime(ctx).SiteTitle)
+	if t == "" {
+		return "GoAlgo"
+	}
+	return t
 }
 
 // PersonalLastDay 仅发个人日报（周报见 WeeklyStaff）
@@ -73,7 +88,7 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 		return fmt.Errorf("生成日报失败: %w", err)
 	}
 
-	subject := fmt.Sprintf("【GoAlgo 日报】%s · %s", formatCNDate(data.Yesterday), data.Name)
+	subject := fmt.Sprintf("【%s 日报】%s · %s", uc.brandTitle(ctx), formatCNDate(data.Yesterday), data.Name)
 	if err := uc.sendHTMLEmail(data.Email, subject, html); err != nil {
 		return fmt.Errorf("发送日报失败: %w", err)
 	}
@@ -175,7 +190,7 @@ func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
 		return fmt.Errorf("生成周报失败: %w", err)
 	}
 
-	subject := fmt.Sprintf("【GoAlgo 周报】%s-%s", formatCNDate(data.WeekStart), formatCNDate(data.WeekEnd))
+	subject := fmt.Sprintf("【%s 周报】%s-%s", uc.brandTitle(ctx), formatCNDate(data.WeekStart), formatCNDate(data.WeekEnd))
 	if err := uc.sendHTMLEmail(data.CoachEmail, subject, html); err != nil {
 		return fmt.Errorf("发送周报失败: %w", err)
 	}
