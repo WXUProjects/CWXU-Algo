@@ -176,9 +176,8 @@ func (c *ProblemAnalyzeConsumer) consumeOnce() error {
 				_ = d.Nack(false, true)
 				return
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
-			defer cancel()
-			if err := c.problem.ProcessAnalyze(ctx, msg); err != nil {
+			// 流式 AI：不设整体超时，避免长翻译被 240s/网关切断
+			if err := c.problem.ProcessAnalyze(context.Background(), msg); err != nil {
 				if strings.Contains(err.Error(), "paused") {
 					log.Warnf("RabbitMQ(problem_analyze) id=%d requeue paused: %v", msg.ProblemID, err)
 					time.Sleep(2 * time.Second)

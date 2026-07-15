@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -29,7 +28,8 @@ func NewProblemTagger(c *conf.AiAnalyze) *ProblemTagger {
 		return t
 	}
 	base := normalizeOpenAIBaseURL(c.Endpoint)
-	httpClient := &http.Client{Timeout: 240 * time.Second}
+	// 流式传输：不设整体 Timeout（0=无限制），靠 SSE 持续收 chunk
+	httpClient := &http.Client{Timeout: 0}
 	t.client = openai.NewClient(
 		option.WithAPIKey(c.Secret),
 		option.WithBaseURL(base),
@@ -110,19 +110,16 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*
 		},
 	}
 
-	chat, err := t.client.Chat.Completions.New(ctx, params)
+	contentStr, err := t.streamChat(ctx, params)
 	if err != nil {
 		// 部分兼容网关不支持 response_format，降级重试
 		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{}
-		chat, err = t.client.Chat.Completions.New(ctx, params)
+		contentStr, err = t.streamChat(ctx, params)
 		if err != nil {
-			return nil, fmt.Errorf("openai chat completion: %w", err)
+			return nil, fmt.Errorf("openai chat completion stream: %w", err)
 		}
 	}
-	if len(chat.Choices) == 0 {
-		return nil, fmt.Errorf("AI 返回空 choices")
-	}
-	contentStr := stripJSONFence(strings.TrimSpace(chat.Choices[0].Message.Content))
+	contentStr = stripJSONFence(strings.TrimSpace(contentStr))
 	var result aiAnalyzeResult
 	if err := json.Unmarshal([]byte(contentStr), &result); err != nil {
 		return nil, fmt.Errorf("反序列化 AI JSON 失败: %w body=%s", err, truncateStr(contentStr, 400))
@@ -137,6 +134,26 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*
 		result.ContentMD = strings.ReplaceAll(result.ContentMD, "$$$", "$")
 	}
 	return &result, nil
+}
+
+// streamChat 流式拉取完整 assistant content，避免网关 ~60s 非流式切断
+func (t *ProblemTagger) streamChat(ctx context.Context, params openai.ChatCompletionNewParams) (string, error) {
+	stream := t.client.Chat.Completions.NewStreaming(ctx, params)
+	defer stream.Close()
+
+	acc := openai.ChatCompletionAccumulator{}
+	for stream.Next() {
+		if !acc.AddChunk(stream.Current()) {
+			return "", fmt.Errorf("AI stream chunk 累积失败")
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return "", err
+	}
+	if len(acc.Choices) == 0 {
+		return "", fmt.Errorf("AI 返回空 choices")
+	}
+	return acc.Choices[0].Message.Content, nil
 }
 
 // normalizeChineseTags 去掉空白、过短、明显纯英文标签
