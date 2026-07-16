@@ -183,16 +183,10 @@ func CurrentGeneration(rdb *redis.Client, userId int64, platform string) int64 {
 	return v
 }
 
-// DoBatch 分批入队，避免 UpdateAll 瞬时打满队列（功能仍是「全部触发」）。
+// DoBatch 将全部用户尽快入队 MQ（背压交给 RabbitMQ + consumer Qos）。
+// batchSize / interval 保留参数兼容旧调用，已忽略（不再人工削峰）。
 // ctx 取消时提前结束（进程停机）。
-// 1w 日活 / 2c4g 默认：10 人一批、间隔 2 分钟，削峰保护单机。
-func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool, batchSize int, interval time.Duration) {
-	if batchSize <= 0 {
-		batchSize = 10
-	}
-	if interval <= 0 {
-		interval = 2 * time.Minute
-	}
+func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool, _ int, _ time.Duration) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -204,12 +198,6 @@ func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool,
 		default:
 		}
 		t.Do(uid, needAll)
-		if (i+1)%batchSize == 0 && i+1 < len(userIds) {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(interval):
-			}
-		}
 	}
+	log.Infof("SpiderTask: DoBatch enqueued %d users needAll=%v", len(userIds), needAll)
 }

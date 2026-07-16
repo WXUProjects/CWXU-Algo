@@ -76,12 +76,12 @@ func (s SpiderService) UpdateAll(ctx context.Context, _ *spider.UpdateAllReq) (*
 		return nil, InternalError
 	}
 
-	// 异步分批：API 立即返回，后台按 20 人/分钟 入队
-	go s.spider.DoBatch(context.Background(), userIds, true, 20, time.Minute)
+	// 一次全部入队 MQ；并发消费由 spider consumer Qos=4 控制
+	go s.spider.DoBatch(context.Background(), userIds, true, 0, 0)
 
 	return &spider.UpdateAllRes{
 		Code:    0,
-		Message: fmt.Sprintf("已为 %d 名用户触发全量更新，后台异步抓取中", len(userIds)),
+		Message: fmt.Sprintf("已为 %d 名用户全部入队全量更新，后台并发抓取中", len(userIds)),
 		Count:   int64(len(userIds)),
 	}, nil
 }
@@ -288,8 +288,8 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 		log.Errorf("purge recrawl list users: %v", err)
 		return nil, InternalError
 	}
-	// 异步分批全量重爬
-	go s.spider.DoBatch(context.Background(), userIds, true, 20, time.Minute)
+	// 全部入队全量重爬；并发由 spider consumer 控制
+	go s.spider.DoBatch(context.Background(), userIds, true, 0, 0)
 
 	log.Warnf("ops purge-submits admin=%d deleted_logs=%d ledger=%d daily=%d ac=%d enqueued=%d",
 		adminID, deletedLogs, deletedLedger, deletedDaily, deletedAc, len(userIds))

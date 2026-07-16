@@ -14,8 +14,8 @@ import (
 	"github.com/streadway/amqp"
 )
 
-// spiderConcurrency 2c4g 单机：1 个 worker 避免与 HTTP/PG 抢核；靠队列削峰
-const spiderConcurrency = 1
+// spiderConcurrency 爬虫并发；Qos=prefetch 与 worker 数一致，由 MQ 背压
+const spiderConcurrency = 4
 
 type Consumer struct {
 	mq         *event.RabbitMQ
