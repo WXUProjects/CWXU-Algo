@@ -141,13 +141,21 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 			log.Infof("Spider: pruned %d duplicate leetcode recent-AC rows user=%d", n, userId)
 		}
 	}
+	// 回写已入库的 pending/空状态（CF 评测中先入库后终态不会再进 FilterUncounted）
+	nRefresh, rerr := dal.RefreshPendingSubmitVerdicts(ctx, uc.data.DB, tmp)
+	if rerr != nil {
+		log.Warnf("Spider: refresh pending status user=%d platform=%s: %v", userId, plat.Platform, rerr)
+	} else if nRefresh > 0 {
+		log.Infof("Spider: refreshed pending status user=%d platform=%s n=%d", userId, plat.Platform, nRefresh)
+	}
+
 	// 账本去重：已计入预聚合的 submit_id 不再累加（防全量重爬双计）
 	neu, err := dal.FilterUncountedSubmits(ctx, uc.data.DB, tmp)
 	if err != nil {
 		return 0, err
 	}
 	if len(neu) == 0 {
-		return 0, nil
+		return nRefresh, nil
 	}
 	// 异常大批量：多为账本残缺后全量把历史当新行叠统计
 	if len(neu) >= 2000 {
@@ -175,7 +183,7 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 		return 0, err
 	}
 	spidermetrics.IncRows(int64(len(neu)))
-	return int64(len(neu)), nil
+	return int64(len(neu)) + nRefresh, nil
 }
 
 // tryPlatformWriteLock 获取 user+platform 写入锁；短轮询等待，避免重绑后新任务与旧任务交接时直接失败。

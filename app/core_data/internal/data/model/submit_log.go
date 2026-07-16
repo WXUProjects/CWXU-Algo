@@ -42,6 +42,16 @@ func IsAcceptedStatus(status string) bool {
 	return ok
 }
 
+// IsPendingSubmitStatus 评测中 / 无终态（可被后续爬虫回写 status）
+func IsPendingSubmitStatus(status string) bool {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "", "TESTING", "PENDING", "JUDGING", "IN_QUEUE":
+		return true
+	default:
+		return false
+	}
+}
+
 // FillIsAC 根据 Status 填充 IsAC（写入前调用）
 func (s *SubmitLog) FillIsAC() {
 	s.IsAC = IsAcceptedStatus(s.Status)

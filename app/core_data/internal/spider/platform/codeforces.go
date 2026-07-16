@@ -80,8 +80,9 @@ func (p NewCodeforces) FetchSubmitLog(userId int64, username string, needAll boo
 			Contest:  strconv.Itoa(sub.ContestID),
 			Problem:  fmt.Sprintf("%s-%s", sub.Problem.Index, sub.Problem.Name),
 			Lang:     sub.ProgrammingLanguage,
-			Status:   sub.Verdict,
-			Time:     time.Unix(sub.CreationTimeSeconds, 0),
+			// CF 评测中可能省略 verdict → 空串；归一化后写入，避免 UI 显示空白
+			Status: NormalizeCodeforcesVerdict(sub.Verdict),
+			Time:   time.Unix(sub.CreationTimeSeconds, 0),
 		}
 		res = append(res, t)
 	}
