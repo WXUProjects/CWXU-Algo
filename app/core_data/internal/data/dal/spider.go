@@ -111,7 +111,10 @@ func (s *SpiderDal) GetByUserIdScoped(ctx context.Context, userId int64, lastTim
 	return sbLog, nil
 }
 
-// SetCache 缓存提交记录
+// submitLogCacheKeep 每用户 ZSET 最多保留条数（列表接口分页用，无需缓存全量 10w+）
+const submitLogCacheKeep = 300
+
+// SetCache 缓存提交记录（ZSET 裁剪，避免随提交量无界膨胀）
 func (s *SpiderDal) SetCache(ctx context.Context, log []model.SubmitLog, userId int64) {
 	pipe := s.rdb.Pipeline()
 	userKey := fmt.Sprintf("core:submit_log:user:%d", userId)
@@ -127,6 +130,8 @@ func (s *SpiderDal) SetCache(ctx context.Context, log []model.SubmitLog, userId 
 		vByte, _ := utils.GobEncoder(v)
 		_ = pipe.Set(ctx, cacheKey, vByte, 12*time.Hour)
 	}
+	// 只保留 score 最高（最新）的 N 条，防止日增 2w 把 ZSET 撑爆
+	_ = pipe.ZRemRangeByRank(ctx, userKey, 0, int64(-submitLogCacheKeep-1))
 	_ = pipe.Expire(ctx, userKey, 12*time.Hour)
 	_, _ = pipe.Exec(ctx)
 }
@@ -272,6 +277,9 @@ func (s *SpiderDal) GetContestRanking(ctx context.Context, contestId string, pla
 	return contestLogs, total, nil
 }
 
+// contestLogCacheKeep 每用户比赛 ZSET 上限
+const contestLogCacheKeep = 200
+
 // SetContestCache 缓存比赛记录
 func (s *SpiderDal) SetContestCache(ctx context.Context, logs []model.ContestLog, userId int64, platform string) {
 	pipe := s.rdb.Pipeline()
@@ -294,6 +302,7 @@ func (s *SpiderDal) SetContestCache(ctx context.Context, logs []model.ContestLog
 		vByte, _ := utils.GobEncoder(v)
 		_ = pipe.Set(ctx, detailKey, vByte, 12*time.Hour)
 	}
+	_ = pipe.ZRemRangeByRank(ctx, cacheKey, 0, int64(-contestLogCacheKeep-1))
 	_ = pipe.Expire(ctx, cacheKey, 12*time.Hour)
 	_, _ = pipe.Exec(ctx)
 }

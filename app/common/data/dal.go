@@ -8,7 +8,17 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
+
+// cacheSF 防止缓存击穿：同一 key 并发 miss 只回源一次
+var cacheSF singleflight.Group
+
+// DefaultCacheTTL 个人统计默认 TTL（1w 日活：靠 user ver 失效，不宜过长占内存）
+const DefaultCacheTTL = 6 * time.Hour
+
+// OrgStatsCacheTTL 组织/全站统计较短 TTL，配合全局 ver 节流
+const OrgStatsCacheTTL = 3 * time.Minute
 
 // GetCacheDal 通用带Redis缓存的Dal查询操作层
 //
@@ -31,29 +41,62 @@ func GetCacheDal[T any](
 	cacheKey string,
 	dbFunc func(data *T) error,
 ) (*T, bool, error) {
+	return GetCacheDalTTL[T](ctx, rdb, cacheKey, DefaultCacheTTL, dbFunc)
+}
+
+// GetCacheDalTTL 同 GetCacheDal，可指定 TTL
+func GetCacheDalTTL[T any](
+	ctx context.Context,
+	rdb *redis.Client,
+	cacheKey string,
+	ttl time.Duration,
+	dbFunc func(data *T) error,
+) (*T, bool, error) {
+	if ttl <= 0 {
+		ttl = DefaultCacheTTL
+	}
+
 	// 尝试去查 Redis
 	res := rdb.Get(ctx, cacheKey)
 	rVal, err := res.Result()
-	var data T
-	if err != nil {
-		// 降级回数据库
-		err := dbFunc(&data)
-		if err != nil {
-			return nil, false, err
+	if err == nil {
+		var data T
+		if err := utils.GobDecoder([]byte(rVal), &data); err != nil {
+			return nil, false, fmt.Errorf("缓存解析出错 %s", err.Error())
+		}
+		return &data, true, nil
+	}
+
+	// miss：singleflight 合并并发回源
+	v, err, _ := cacheSF.Do(cacheKey, func() (interface{}, error) {
+		// double-check：其它协程可能已写入
+		if rVal, err := rdb.Get(ctx, cacheKey).Result(); err == nil {
+			var data T
+			if err := utils.GobDecoder([]byte(rVal), &data); err != nil {
+				return nil, fmt.Errorf("缓存解析出错 %s", err.Error())
+			}
+			return &data, nil
+		}
+
+		var data T
+		if err := dbFunc(&data); err != nil {
+			return nil, err
 		}
 		b, err := utils.GobEncoder(&data)
 		if err != nil {
-			return nil, false, errors.New("gob编码失败")
+			return nil, errors.New("gob编码失败")
 		}
-		rdb.Set(ctx, cacheKey, b, 48*time.Hour)
-		return &data, false, nil
-	}
-	err = utils.GobDecoder([]byte(rVal), &data)
+		_ = rdb.Set(ctx, cacheKey, b, ttl).Err()
+		return &data, nil
+	})
 	if err != nil {
-		err = fmt.Errorf("缓存解析出错 %s", err.Error())
 		return nil, false, err
 	}
-	return &data, true, nil
+	data, ok := v.(*T)
+	if !ok {
+		return nil, false, errors.New("cache type assert failed")
+	}
+	return data, false, nil
 }
 
 // UpdateCacheDal 通用带Redis缓存的Dal更新操作层

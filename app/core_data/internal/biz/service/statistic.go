@@ -51,16 +51,58 @@ func isSiteWideUserId(userId int64) bool {
 	return userId == -2
 }
 
+func (uc *StatisticUseCase) redisVer(ctx context.Context, key string) string {
+	if v, err := uc.rdb.Get(ctx, key).Result(); err == nil && v != "" {
+		return v
+	}
+	return "0"
+}
+
+// heatmapMaxDays 2c4g / 1w 日活：热力最大跨度（约 13 个月），防止 2023→今 的超长 series
+const heatmapMaxDays = 400
+
+// clampHeatmapRange 规范化并限制日期跨度；入参支持 20060102 / 2006-01-02
+func clampHeatmapRange(startS, endS string) (start, end string, err error) {
+	parse := func(s string) (time.Time, error) {
+		if t, e := time.ParseInLocation("2006-01-02", s, time.Local); e == nil {
+			return t, nil
+		}
+		return time.ParseInLocation("20060102", s, time.Local)
+	}
+	st, e1 := parse(startS)
+	en, e2 := parse(endS)
+	if e1 != nil || e2 != nil {
+		return "", "", errors.BadRequest("参数错误", "日期格式错误")
+	}
+	if en.Before(st) {
+		st, en = en, st
+	}
+	if int(en.Sub(st).Hours()/24) > heatmapMaxDays {
+		st = en.AddDate(0, 0, -heatmapMaxDays)
+	}
+	return st.Format("2006-01-02"), en.Format("2006-01-02"), nil
+}
+
 // Heatmap 获取热力图数据
 func (uc *StatisticUseCase) Heatmap(ctx context.Context, req *statistic.HeatmapReq) (*statistic.HeatmapResp, error) {
 	if req.StartDate == "" || req.EndDate == "" {
 		return nil, errors.BadRequest("参数错误", "日期参数错误")
 	}
+	startDate, endDate, err := clampHeatmapRange(req.StartDate, req.EndDate)
+	if err != nil {
+		return nil, err
+	}
 
 	var memberIDs []int64
-	cacheSuffix := ""
 	queryUserId := req.UserId
-	if req.UserId == 0 || isSiteWideUserId(req.UserId) {
+	ttl := data2.DefaultCacheTTL
+	var cacheKey string
+
+	if req.UserId > 0 {
+		// 个人：用用户级 ver，其它用户爬虫不会失效本缓存
+		userVer := uc.redisVer(ctx, fmt.Sprintf("statistic:user:%d:ver", req.UserId))
+		cacheKey = fmt.Sprintf("statistic:heatmap:u%d:%s:%s:%t:v%s", req.UserId, startDate, endDate, req.IsAc, userVer)
+	} else if req.UserId == 0 || isSiteWideUserId(req.UserId) {
 		siteWide := isSiteWideUserId(req.UserId)
 		if siteWide && !auth.VerifySiteAdmin(ctx) {
 			return nil, errors.Forbidden("权限不足", "仅站点管理员可查看全站统计")
@@ -68,21 +110,22 @@ func (uc *StatisticUseCase) Heatmap(ctx context.Context, req *statistic.HeatmapR
 		var resolvedOrgID uint
 		memberIDs, resolvedOrgID = uc.resolveMembers(ctx, siteWide)
 		queryUserId = 0 // 聚合查询
+		globalVer := uc.redisVer(ctx, "statistic:heatmap:global:ver")
+		ttl = data2.OrgStatsCacheTTL
 		if siteWide {
-			cacheSuffix = ":site"
+			cacheKey = fmt.Sprintf("statistic:heatmap:site:%s:%s:%t:v%s", startDate, endDate, req.IsAc, globalVer)
 		} else {
-			cacheSuffix = fmt.Sprintf(":org%d", resolvedOrgID)
+			cacheKey = fmt.Sprintf("statistic:heatmap:org%d:%s:%s:%t:v%s", resolvedOrgID, startDate, endDate, req.IsAc, globalVer)
 		}
+	} else {
+		// 兼容其它 userId（如历史 -1 等）：走全局 ver
+		globalVer := uc.redisVer(ctx, "statistic:heatmap:global:ver")
+		cacheKey = fmt.Sprintf("statistic:heatmap:%d:%s:%s:%t:v%s", req.UserId, startDate, endDate, req.IsAc, globalVer)
 	}
 
-	ver := "0"
-	if v, err := uc.rdb.Get(ctx, "statistic:heatmap:global:ver").Result(); err == nil && v != "" {
-		ver = v
-	}
-	cacheKey := fmt.Sprintf("statistic:heatmap:%d:%s:%s:%t:v%s%s", req.UserId, req.StartDate, req.EndDate, req.IsAc, ver, cacheSuffix)
-	result, _, err := data2.GetCacheDal[[]dal.DailyCount](ctx, uc.rdb, cacheKey, func(data *[]dal.DailyCount) error {
+	result, _, err := data2.GetCacheDalTTL[[]dal.DailyCount](ctx, uc.rdb, cacheKey, ttl, func(data *[]dal.DailyCount) error {
 		var err error
-		*data, err = uc.dal.HeatmapQueryScoped(ctx, req.StartDate, req.EndDate, queryUserId, req.IsAc, memberIDs)
+		*data, err = uc.dal.HeatmapQueryScoped(ctx, startDate, endDate, queryUserId, req.IsAc, memberIDs)
 		return err
 	})
 	if err != nil {
@@ -158,15 +201,17 @@ func (uc *StatisticUseCase) Rank(ctx context.Context, req *statistic.RankReq) (*
 func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.PeriodCountReq) (*statistic.PeriodCountResp, error) {
 	var memberIDs []int64
 	queryUserId := req.UserId
-	// 个人 period 也带全局版本，避免与组织统计共用脏缓存语义
-	// schema v3：组织/全站 AC 改为条数不去重
-	const periodCacheSchema = "3"
-	ver := "0"
-	if v, err := uc.rdb.Get(ctx, "statistic:period:global:ver").Result(); err == nil && v != "" {
-		ver = v
-	}
-	cacheKey := fmt.Sprintf("statistic:period:s%s:%d:v%s", periodCacheSchema, req.UserId, ver)
-	if req.UserId == -1 || isSiteWideUserId(req.UserId) {
+	// schema v6：个人 AC 去重走 user_ac_problem_* 预聚合
+	const periodCacheSchema = "6"
+	ttl := data2.DefaultCacheTTL
+	var cacheKey string
+
+	if req.UserId > 0 {
+		userVer := uc.redisVer(ctx, fmt.Sprintf("statistic:user:%d:ver", req.UserId))
+		cacheKey = fmt.Sprintf("statistic:period:s%s:u%d:v%s", periodCacheSchema, req.UserId, userVer)
+		// 热度：供爬虫后自主预热决策
+		TouchUserHeat(ctx, uc.rdb, req.UserId)
+	} else if req.UserId == -1 || isSiteWideUserId(req.UserId) {
 		siteWide := isSiteWideUserId(req.UserId)
 		if siteWide && !auth.VerifySiteAdmin(ctx) {
 			return nil, errors.Forbidden("权限不足", "仅站点管理员可查看全站统计")
@@ -174,11 +219,17 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 		var resolvedOrgID uint
 		memberIDs, resolvedOrgID = uc.resolveMembers(ctx, siteWide)
 		queryUserId = -1
+		globalVer := uc.redisVer(ctx, "statistic:period:global:ver")
+		ttl = data2.OrgStatsCacheTTL
 		if siteWide {
-			cacheKey = fmt.Sprintf("statistic:period:s%s:site:v%s", periodCacheSchema, ver)
+			cacheKey = fmt.Sprintf("statistic:period:s%s:site:v%s", periodCacheSchema, globalVer)
 		} else {
-			cacheKey = fmt.Sprintf("statistic:period:s%s:org:%d:v%s", periodCacheSchema, resolvedOrgID, ver)
+			cacheKey = fmt.Sprintf("statistic:period:s%s:org:%d:v%s", periodCacheSchema, resolvedOrgID, globalVer)
 		}
+	} else {
+		// 兼容 0 等：按全局
+		globalVer := uc.redisVer(ctx, "statistic:period:global:ver")
+		cacheKey = fmt.Sprintf("statistic:period:s%s:%d:v%s", periodCacheSchema, req.UserId, globalVer)
 	}
 
 	type PeriodCountData struct {
@@ -186,7 +237,7 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 		Ac     dal.PeriodAcCount
 	}
 
-	result, _, err := data2.GetCacheDal[PeriodCountData](ctx, uc.rdb, cacheKey, func(data *PeriodCountData) error {
+	result, _, err := data2.GetCacheDalTTL[PeriodCountData](ctx, uc.rdb, cacheKey, ttl, func(data *PeriodCountData) error {
 		var err error
 		data.Submit, data.Ac, err = uc.dal.GetPeriodCountScoped(queryUserId, memberIDs)
 		return err

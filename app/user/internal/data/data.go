@@ -2,6 +2,8 @@ package data
 
 import (
 	"context"
+	"os"
+	"strings"
 
 	"cwxu-algo/app/common/conf"
 	gorm2 "cwxu-algo/app/common/data/gorm"
@@ -12,7 +14,9 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // ProviderSet is data providers.
@@ -20,22 +24,70 @@ var ProviderSet = wire.NewSet(NewData)
 
 // Data .
 type Data struct {
-	DB  *gorm.DB
-	RDB *redis.Client
+	DB     *gorm.DB
+	CoreDB *gorm.DB // optional: algo_core_data for site backup
+	RDB    *redis.Client
 }
 
 // NewData .
 func NewData(c *conf.Data) (*Data, func(), error) {
 	data := &Data{DB: gorm2.InitGorm(c), RDB: redis2.InitRedis(c)}
+	if core := openCoreDB(c); core != nil {
+		data.CoreDB = core
+		log.Info("backup: core database connected")
+	} else {
+		log.Warn("backup: core database not configured; full site export/import of training data will fail")
+	}
 	migrateModels(data.DB)
 	PublishSiteSettings(data)
 	cleanup := func() {
 		log.Info("closing the data resources")
 		sql, _ := data.DB.DB()
 		sql.Close()
+		if data.CoreDB != nil {
+			if s, err := data.CoreDB.DB(); err == nil {
+				_ = s.Close()
+			}
+		}
 		data.RDB.Close()
 	}
 	return data, cleanup, nil
+}
+
+// openCoreDB connects to algo_core_data for backup.
+// Priority: CWXU_CORE_DATABASE_SOURCE env → derive from user DSN (algo_user → algo_core_data).
+func openCoreDB(c *conf.Data) *gorm.DB {
+	src := strings.TrimSpace(os.Getenv("CWXU_CORE_DATABASE_SOURCE"))
+	if src == "" && c != nil && c.Database != nil {
+		u := c.Database.Source
+		if strings.Contains(u, "dbname=algo_user") {
+			src = strings.Replace(u, "dbname=algo_user", "dbname=algo_core_data", 1)
+		}
+	}
+	if src == "" {
+		return nil
+	}
+	db, err := gorm.Open(postgres.Open(src), &gorm.Config{
+		Logger:      logger.Default.LogMode(logger.Warn),
+		PrepareStmt: true,
+	})
+	if err != nil {
+		log.Warnf("backup: open core database failed: %v", err)
+		return nil
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Warnf("backup: core database pool: %v", err)
+		return nil
+	}
+	sqlDB.SetMaxOpenConns(4)
+	sqlDB.SetMaxIdleConns(2)
+	if err := sqlDB.Ping(); err != nil {
+		log.Warnf("backup: core database ping failed: %v", err)
+		_ = sqlDB.Close()
+		return nil
+	}
+	return db
 }
 
 // migrateModels 合并
@@ -51,6 +103,7 @@ func migrateModels(db *gorm.DB) {
 		&model.PlanQuota{},
 		&model.Paste{},
 		&model.SiteVisitDaily{},
+		&model.BackupJob{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")

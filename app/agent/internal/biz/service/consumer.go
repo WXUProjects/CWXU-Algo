@@ -12,7 +12,8 @@ import (
 	"github.com/streadway/amqp"
 )
 
-const summaryConcurrency = 2
+// 2c4g：AI 摘要占 CPU/内存，单 worker 串行
+const summaryConcurrency = 1
 
 type Consumer struct {
 	mq       *event.RabbitMQ

@@ -56,6 +56,22 @@ func Configured() bool {
 	return err == nil
 }
 
+// Fingerprint returns a short stable id of the active encryption key (hex of
+// first 8 bytes of SHA256). Used by site backup to ensure import uses the same key.
+func Fingerprint() string {
+	raw := strings.TrimSpace(os.Getenv("CWXU_CONFIG_ENCRYPTION_KEY"))
+	if raw == "" {
+		configuredKeyMu.RLock()
+		raw = configuredKey
+		configuredKeyMu.RUnlock()
+	}
+	if raw == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(raw))
+	return fmt.Sprintf("%x", sum[:8])
+}
+
 // Encrypt encrypts an application secret with AES-GCM. Already encrypted values
 // are returned unchanged so retries and whole-form saves are idempotent.
 func Encrypt(plain string) (string, error) {

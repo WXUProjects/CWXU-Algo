@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"cwxu-algo/app/common/event"
@@ -24,10 +25,23 @@ const (
 type SpiderTask struct {
 	mq  *event.RabbitMQ
 	rdb *redis.Client
+	// queueReady 避免每次入队都 QueueDeclare（50 用户 cron 高频时省 RTT）
+	queueReady atomic.Bool
 }
 
 func NewSpiderTask(mq *event.RabbitMQ, rdb *redis.Client) *SpiderTask {
 	return &SpiderTask{mq: mq, rdb: rdb}
+}
+
+func (t *SpiderTask) ensureSpiderQueue() error {
+	if t.queueReady.Load() {
+		return nil
+	}
+	if _, err := t.mq.QueueDeclare("spider", true, false, false, false, nil); err != nil {
+		return err
+	}
+	t.queueReady.Store(true)
+	return nil
 }
 
 func pendingKey(userId int64, platform string) string {
@@ -75,7 +89,7 @@ func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) {
 			return
 		}
 	}
-	if _, err := t.mq.QueueDeclare("spider", true, false, false, false, nil); err != nil {
+	if err := t.ensureSpiderQueue(); err != nil {
 		log.Errorf("SpiderTask: QueueDeclare failed: %v", err)
 		t.clearPending(userId, platform)
 		return
@@ -93,6 +107,8 @@ func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) {
 		DeliveryMode: amqp.Persistent,
 	}); err != nil {
 		log.Errorf("SpiderTask: Publish failed: %v", err)
+		// 连接可能已重置，下次重新 declare
+		t.queueReady.Store(false)
 		t.clearPending(userId, platform)
 		return
 	}
@@ -126,12 +142,13 @@ func (t *SpiderTask) ClearInflight(userId int64, platform string) {
 
 // DoBatch 分批入队，避免 UpdateAll 瞬时打满队列（功能仍是「全部触发」）。
 // ctx 取消时提前结束（进程停机）。
+// 1w 日活 / 2c4g 默认：10 人一批、间隔 2 分钟，削峰保护单机。
 func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool, batchSize int, interval time.Duration) {
 	if batchSize <= 0 {
-		batchSize = 20
+		batchSize = 10
 	}
 	if interval <= 0 {
-		interval = time.Minute
+		interval = 2 * time.Minute
 	}
 	if ctx == nil {
 		ctx = context.Background()

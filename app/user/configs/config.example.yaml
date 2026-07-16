@@ -14,11 +14,14 @@ data:
   database:
     driver: postgres
     source: host=192.168.1.7 user=cwxu password=cwxu dbname=algo_user port=5432 sslmode=disable TimeZone=Asia/Shanghai
+  # 站点备份：默认会把 dbname=algo_user 推导为 algo_core_data；
+  # 也可显式覆盖：环境变量 CWXU_CORE_DATABASE_SOURCE=host=... dbname=algo_core_data ...
   redis:
     addr: 192.168.1.7:6379
     password: cwxu
     read_timeout: 2s
     write_timeout: 2s
+# 备份 zip 目录（可选，默认 ./data/backups）；上传文件目录 CWXU_UPLOAD_DIR（默认 ./data/uploads）
 # 业务配置（SMTP / AI）请在站点设置 /admin/site 配置；以下仅作首次启动兜底
 smtp:
   host: smtp.163.com

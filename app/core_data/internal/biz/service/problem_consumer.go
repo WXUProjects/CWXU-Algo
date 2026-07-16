@@ -15,10 +15,9 @@ import (
 )
 
 const (
-	// 题面爬取并发
-	problemFetchConcurrency = 4
-	// AI 分析并发
-	problemAnalyzeConcurrency = 8
+	// 2c4g 单机：题库流水线低并发，避免与 HTTP/spider/PG 争核
+	problemFetchConcurrency   = 1
+	problemAnalyzeConcurrency = 1
 	problemMaxRetry           = 5
 )
 

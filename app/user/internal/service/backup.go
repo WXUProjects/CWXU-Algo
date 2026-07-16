@@ -1,0 +1,490 @@
+package service
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"cwxu-algo/app/common/backup"
+	"cwxu-algo/app/common/utils/auth"
+	"cwxu-algo/app/user/internal/data"
+	"cwxu-algo/app/user/internal/data/model"
+
+	"github.com/go-kratos/kratos/v2/log"
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
+)
+
+const (
+	maxBackupUploadBytes = 2 << 30 // 2 GiB
+	backupJobRetention   = 7 * 24 * time.Hour
+	maxListedJobs        = 30
+)
+
+// RegisterBackupRoutes 站点数据备份/恢复（仅站点管理员；自定义路由以支持大文件与长下载）
+func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
+	if d == nil {
+		return
+	}
+	_ = os.MkdirAll(backup.BackupDir(), 0o755)
+	go cleanupExpiredBackups(d)
+
+	r := srv.Route("/")
+
+	r.POST("/v1/user/site/backup/export", func(ctx khttp.Context) error {
+		if !auth.VerifySiteAdmin(ctx) {
+			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
+				"code": 1, "message": "仅站点管理员可导出数据",
+			})
+		}
+		var body struct {
+			Scopes []string `json:"scopes"`
+		}
+		_ = ctx.Bind(&body)
+		scopes, err := backup.NormalizeScopes(body.Scopes)
+		if err != nil {
+			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+				"code": 1, "message": err.Error(),
+			})
+		}
+		if busy, _ := hasActiveJob(d, model.BackupKindExport); busy {
+			return ctx.JSON(http.StatusConflict, map[string]interface{}{
+				"code": 1, "message": "已有导出任务进行中，请稍后再试",
+			})
+		}
+		pd := auth.GetCurrentUser(ctx)
+		uid := uint(0)
+		if pd != nil {
+			uid = pd.UserID
+		}
+		scopesJSON, _ := json.Marshal(scopes)
+		job := model.BackupJob{
+			Kind:      model.BackupKindExport,
+			Status:    model.BackupStatusPending,
+			Scopes:    string(scopesJSON),
+			Progress:  0,
+			Message:   "排队中",
+			CreatedBy: uid,
+		}
+		if err := d.DB.Create(&job).Error; err != nil {
+			return ctx.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"code": 1, "message": "创建任务失败",
+			})
+		}
+		go runExportJob(d, job.ID)
+		return ctx.JSON(http.StatusOK, map[string]interface{}{
+			"code": 0, "message": "导出任务已创建", "jobId": job.ID,
+		})
+	})
+
+	r.POST("/v1/user/site/backup/import", func(ctx khttp.Context) error {
+		if !auth.VerifySiteAdmin(ctx) {
+			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
+				"code": 1, "message": "仅站点管理员可导入数据",
+			})
+		}
+		req := ctx.Request()
+		if err := req.ParseMultipartForm(maxBackupUploadBytes); err != nil {
+			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+				"code": 1, "message": "解析表单失败或文件过大（最大 2GB）",
+			})
+		}
+		confirm := strings.TrimSpace(req.FormValue("confirm"))
+		if confirm != backup.ConfirmToken {
+			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+				"code": 1, "message": "请确认后输入 RESTORE 再导入",
+			})
+		}
+		if busy, _ := hasActiveJob(d, model.BackupKindImport); busy {
+			return ctx.JSON(http.StatusConflict, map[string]interface{}{
+				"code": 1, "message": "已有导入任务进行中，请稍后再试",
+			})
+		}
+		file, hdr, err := req.FormFile("file")
+		if err != nil {
+			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+				"code": 1, "message": "缺少 file 字段（zip 备份包）",
+			})
+		}
+		defer file.Close()
+
+		pd := auth.GetCurrentUser(ctx)
+		uid := uint(0)
+		if pd != nil {
+			uid = pd.UserID
+		}
+		job := model.BackupJob{
+			Kind:      model.BackupKindImport,
+			Status:    model.BackupStatusPending,
+			Scopes:    `["all"]`,
+			Progress:  0,
+			Message:   "上传完成，排队中",
+			CreatedBy: uid,
+		}
+		if err := d.DB.Create(&job).Error; err != nil {
+			return ctx.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"code": 1, "message": "创建任务失败",
+			})
+		}
+
+		// save upload under backups/imports/
+		importDir := filepath.Join(backup.BackupDir(), "imports")
+		_ = os.MkdirAll(importDir, 0o755)
+		relName := fmt.Sprintf("import_%d_%s.zip", job.ID, time.Now().Format("20060102_150405"))
+		absPath := filepath.Join(importDir, relName)
+		out, err := os.Create(absPath)
+		if err != nil {
+			failJob(d, job.ID, "无法保存上传文件")
+			return ctx.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"code": 1, "message": "保存上传失败",
+			})
+		}
+		n, copyErr := io.Copy(out, io.LimitReader(file, maxBackupUploadBytes+1))
+		_ = out.Close()
+		if copyErr != nil || n > maxBackupUploadBytes {
+			_ = os.Remove(absPath)
+			failJob(d, job.ID, "读取上传文件失败或超过 2GB")
+			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+				"code": 1, "message": "读取上传文件失败或超过 2GB",
+			})
+		}
+		rel := filepath.ToSlash(filepath.Join("imports", relName))
+		_ = d.DB.Model(&model.BackupJob{}).Where("id = ?", job.ID).Updates(map[string]interface{}{
+			"file_path": rel,
+			"file_size": n,
+			"message":   fmt.Sprintf("已接收 %s（%d 字节）", hdr.Filename, n),
+		})
+		go runImportJob(d, job.ID)
+		return ctx.JSON(http.StatusOK, map[string]interface{}{
+			"code": 0, "message": "导入任务已创建", "jobId": job.ID,
+		})
+	})
+
+	r.GET("/v1/user/site/backup/jobs", func(ctx khttp.Context) error {
+		if !auth.VerifySiteAdmin(ctx) {
+			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
+				"code": 1, "message": "仅站点管理员",
+			})
+		}
+		var jobs []model.BackupJob
+		_ = d.DB.Order("id DESC").Limit(maxListedJobs).Find(&jobs).Error
+		list := make([]map[string]interface{}, 0, len(jobs))
+		for _, j := range jobs {
+			list = append(list, jobToMap(j))
+		}
+		return ctx.JSON(http.StatusOK, map[string]interface{}{
+			"code": 0, "message": "ok", "jobs": list,
+		})
+	})
+
+	r.GET("/v1/user/site/backup/jobs/{id}", func(ctx khttp.Context) error {
+		if !auth.VerifySiteAdmin(ctx) {
+			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
+				"code": 1, "message": "仅站点管理员",
+			})
+		}
+		id, _ := strconv.ParseUint(ctx.Vars().Get("id"), 10, 64)
+		if id == 0 {
+			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+				"code": 1, "message": "无效任务 id",
+			})
+		}
+		var job model.BackupJob
+		if err := d.DB.First(&job, id).Error; err != nil {
+			return ctx.JSON(http.StatusNotFound, map[string]interface{}{
+				"code": 1, "message": "任务不存在",
+			})
+		}
+		return ctx.JSON(http.StatusOK, map[string]interface{}{
+			"code": 0, "message": "ok", "job": jobToMap(job),
+		})
+	})
+
+	r.GET("/v1/user/site/backup/jobs/{id}/download", func(ctx khttp.Context) error {
+		if !auth.VerifySiteAdmin(ctx) {
+			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
+				"code": 1, "message": "仅站点管理员",
+			})
+		}
+		id, _ := strconv.ParseUint(ctx.Vars().Get("id"), 10, 64)
+		var job model.BackupJob
+		if err := d.DB.First(&job, id).Error; err != nil {
+			return ctx.JSON(http.StatusNotFound, map[string]interface{}{
+				"code": 1, "message": "任务不存在",
+			})
+		}
+		if job.Kind != model.BackupKindExport || job.Status != model.BackupStatusDone || job.FilePath == "" {
+			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+				"code": 1, "message": "该任务没有可下载的备份包",
+			})
+		}
+		abs := filepath.Join(backup.BackupDir(), filepath.FromSlash(job.FilePath))
+		abs = filepath.Clean(abs)
+		base := filepath.Clean(backup.BackupDir())
+		if rel, err := filepath.Rel(base, abs); err != nil || strings.HasPrefix(rel, "..") {
+			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+				"code": 1, "message": "非法文件路径",
+			})
+		}
+		f, err := os.Open(abs)
+		if err != nil {
+			return ctx.JSON(http.StatusNotFound, map[string]interface{}{
+				"code": 1, "message": "备份文件不存在或已清理",
+			})
+		}
+		defer f.Close()
+		st, err := f.Stat()
+		if err != nil {
+			return ctx.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"code": 1, "message": "读取文件失败",
+			})
+		}
+		w := ctx.Response()
+		name := filepath.Base(abs)
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeContent(w, ctx.Request(), name, st.ModTime(), f)
+		return nil
+	})
+
+	r.DELETE("/v1/user/site/backup/jobs/{id}", func(ctx khttp.Context) error {
+		if !auth.VerifySiteAdmin(ctx) {
+			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
+				"code": 1, "message": "仅站点管理员",
+			})
+		}
+		id, _ := strconv.ParseUint(ctx.Vars().Get("id"), 10, 64)
+		var job model.BackupJob
+		if err := d.DB.First(&job, id).Error; err != nil {
+			return ctx.JSON(http.StatusNotFound, map[string]interface{}{
+				"code": 1, "message": "任务不存在",
+			})
+		}
+		if job.Status == model.BackupStatusRunning || job.Status == model.BackupStatusPending {
+			return ctx.JSON(http.StatusConflict, map[string]interface{}{
+				"code": 1, "message": "进行中的任务不可删除",
+			})
+		}
+		if job.FilePath != "" {
+			abs := filepath.Join(backup.BackupDir(), filepath.FromSlash(job.FilePath))
+			_ = os.Remove(abs)
+		}
+		_ = d.DB.Delete(&model.BackupJob{}, id).Error
+		return ctx.JSON(http.StatusOK, map[string]interface{}{
+			"code": 0, "message": "已删除",
+		})
+	})
+}
+
+func jobToMap(j model.BackupJob) map[string]interface{} {
+	var scopes []string
+	_ = json.Unmarshal([]byte(j.Scopes), &scopes)
+	m := map[string]interface{}{
+		"id":          j.ID,
+		"kind":        j.Kind,
+		"status":      j.Status,
+		"scopes":      scopes,
+		"progress":    j.Progress,
+		"message":     j.Message,
+		"fileSize":    j.FileSize,
+		"createdBy":   j.CreatedBy,
+		"errorDetail": j.ErrorDetail,
+		"createdAt":   j.CreatedAt.UTC().Format(time.RFC3339),
+		"downloadable": j.Kind == model.BackupKindExport &&
+			j.Status == model.BackupStatusDone && j.FilePath != "",
+	}
+	if j.StartedAt != nil {
+		m["startedAt"] = j.StartedAt.UTC().Format(time.RFC3339)
+	}
+	if j.FinishedAt != nil {
+		m["finishedAt"] = j.FinishedAt.UTC().Format(time.RFC3339)
+	}
+	return m
+}
+
+func hasActiveJob(d *data.Data, kind string) (bool, error) {
+	var n int64
+	err := d.DB.Model(&model.BackupJob{}).
+		Where("kind = ? AND status IN ?", kind, []string{model.BackupStatusPending, model.BackupStatusRunning}).
+		Count(&n).Error
+	return n > 0, err
+}
+
+func failJob(d *data.Data, id uint, msg string) {
+	now := time.Now()
+	_ = d.DB.Model(&model.BackupJob{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":       model.BackupStatusFailed,
+		"message":      msg,
+		"error_detail": msg,
+		"finished_at":  now,
+		"progress":     0,
+	})
+}
+
+func updateJobProgress(d *data.Data, id uint, pct int, msg string) {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 99 {
+		pct = 99
+	}
+	_ = d.DB.Model(&model.BackupJob{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"progress": pct,
+		"message":  msg,
+		"status":   model.BackupStatusRunning,
+	})
+}
+
+func runExportJob(d *data.Data, id uint) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorf("backup export panic job=%d: %v", id, r)
+			failJob(d, id, fmt.Sprintf("导出异常: %v", r))
+		}
+	}()
+	now := time.Now()
+	_ = d.DB.Model(&model.BackupJob{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":     model.BackupStatusRunning,
+		"started_at": now,
+		"message":    "开始导出",
+		"progress":   1,
+	})
+
+	var job model.BackupJob
+	if err := d.DB.First(&job, id).Error; err != nil {
+		return
+	}
+	var scopes []string
+	_ = json.Unmarshal([]byte(job.Scopes), &scopes)
+
+	work := filepath.Join(backup.BackupDir(), "work", fmt.Sprintf("export_%d", id))
+	_ = os.RemoveAll(work)
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		failJob(d, id, "创建工作目录失败")
+		return
+	}
+	defer os.RemoveAll(work)
+
+	_, err := backup.Export(backup.ExportOptions{
+		DBs:    backup.DBs{User: d.DB, Core: d.CoreDB},
+		Dir:    work,
+		Scopes: scopes,
+		Progress: func(pct int, msg string) {
+			updateJobProgress(d, id, pct, msg)
+		},
+	})
+	if err != nil {
+		failJob(d, id, err.Error())
+		return
+	}
+
+	updateJobProgress(d, id, 96, "压缩备份包 …")
+	zipName := fmt.Sprintf("goalgo-backup-%s-%d.zip", time.Now().Format("20060102-150405"), id)
+	rel := filepath.ToSlash(filepath.Join("exports", zipName))
+	absZip := filepath.Join(backup.BackupDir(), "exports", zipName)
+	if err := backup.ZipDir(work, absZip); err != nil {
+		failJob(d, id, "压缩失败: "+err.Error())
+		return
+	}
+	st, _ := os.Stat(absZip)
+	var size int64
+	if st != nil {
+		size = st.Size()
+	}
+	fin := time.Now()
+	_ = d.DB.Model(&model.BackupJob{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":      model.BackupStatusDone,
+		"progress":    100,
+		"message":     "导出完成，可下载",
+		"file_path":   rel,
+		"file_size":   size,
+		"finished_at": fin,
+	})
+	log.Infof("backup export done job=%d size=%d", id, size)
+}
+
+func runImportJob(d *data.Data, id uint) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorf("backup import panic job=%d: %v", id, r)
+			failJob(d, id, fmt.Sprintf("导入异常: %v（可能已部分恢复）", r))
+		}
+	}()
+	now := time.Now()
+	_ = d.DB.Model(&model.BackupJob{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":     model.BackupStatusRunning,
+		"started_at": now,
+		"message":    "开始导入",
+		"progress":   1,
+	})
+
+	var job model.BackupJob
+	if err := d.DB.First(&job, id).Error; err != nil {
+		return
+	}
+	if job.FilePath == "" {
+		failJob(d, id, "缺少上传文件")
+		return
+	}
+	absZip := filepath.Join(backup.BackupDir(), filepath.FromSlash(job.FilePath))
+	work := filepath.Join(backup.BackupDir(), "work", fmt.Sprintf("import_%d", id))
+	_ = os.RemoveAll(work)
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		failJob(d, id, "创建工作目录失败")
+		return
+	}
+	defer os.RemoveAll(work)
+
+	updateJobProgress(d, id, 5, "解压备份包 …")
+	if err := backup.UnzipTo(absZip, work); err != nil {
+		failJob(d, id, "解压失败: "+err.Error())
+		return
+	}
+
+	_, err := backup.Import(backup.ImportOptions{
+		DBs: backup.DBs{User: d.DB, Core: d.CoreDB},
+		Dir: work,
+		Progress: func(pct int, msg string) {
+			updateJobProgress(d, id, pct, msg)
+		},
+	})
+	if err != nil {
+		failJob(d, id, err.Error())
+		return
+	}
+
+	// refresh site settings redis
+	data.PublishSiteSettings(d)
+
+	fin := time.Now()
+	_ = d.DB.Model(&model.BackupJob{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":      model.BackupStatusDone,
+		"progress":    100,
+		"message":     "导入完成，建议刷新页面",
+		"finished_at": fin,
+	})
+	log.Infof("backup import done job=%d", id)
+}
+
+func cleanupExpiredBackups(d *data.Data) {
+	// best-effort; run once at start then periodically would be nicer — once is enough for v1
+	cutoff := time.Now().Add(-backupJobRetention)
+	var old []model.BackupJob
+	if err := d.DB.Where("created_at < ? AND status IN ?", cutoff,
+		[]string{model.BackupStatusDone, model.BackupStatusFailed}).
+		Find(&old).Error; err != nil {
+		return
+	}
+	for _, j := range old {
+		if j.FilePath != "" {
+			_ = os.Remove(filepath.Join(backup.BackupDir(), filepath.FromSlash(j.FilePath)))
+		}
+		_ = d.DB.Delete(&model.BackupJob{}, j.ID).Error
+	}
+}

@@ -103,5 +103,6 @@ func NewHTTPServer(
 	service.RegisterUploadRoutes(srv)
 	service.RegisterOrgRoutes(srv, orgService)
 	service.RegisterPasteRoutes(srv, pasteService)
+	service.RegisterBackupRoutes(srv, d)
 	return srv
 }
