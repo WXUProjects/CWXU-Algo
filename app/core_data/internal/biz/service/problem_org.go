@@ -68,6 +68,53 @@ func (uc *ProblemUseCase) shouldEnqueueFetch(problemID uint) bool {
 	return uc.problemHasFetchSubmitter(problemID)
 }
 
+// recentPipelineProblemSet 近窗有指定流水线资格用户提交的 problem_id 集合（批量，避免 N+1）
+// ok=false：名单不可用（调用方应保守放行或降级逐题检查）
+func (uc *ProblemUseCase) recentPipelineProblemSet(kind string, cutoff time.Time) (map[uint]struct{}, bool) {
+	users, ok := uc.pipelineUserIDs(kind)
+	if !ok {
+		return nil, false
+	}
+	out := make(map[uint]struct{})
+	if len(users) == 0 {
+		return out, true
+	}
+	ids := make([]int64, 0, len(users))
+	for id := range users {
+		ids = append(ids, id)
+	}
+	var pids []uint
+	err := uc.data.DB.Model(&model.SubmitLog{}).
+		Select("DISTINCT problem_id").
+		Where("problem_id IS NOT NULL AND problem_id > 0").
+		Where("time IS NOT NULL AND time >= ?", cutoff).
+		Where("user_id IN ?", ids).
+		Pluck("problem_id", &pids).Error
+	if err != nil {
+		log.Warnf("recentPipelineProblemSet(%s): %v", kind, err)
+		return nil, false
+	}
+	for _, id := range pids {
+		if id > 0 {
+			out[id] = struct{}{}
+		}
+	}
+	return out, true
+}
+
+// pipelineUserIDSlice 资格用户 id 列表（有序无关）
+func (uc *ProblemUseCase) pipelineUserIDSlice(kind string) ([]int64, bool) {
+	users, ok := uc.pipelineUserIDs(kind)
+	if !ok {
+		return nil, false
+	}
+	ids := make([]int64, 0, len(users))
+	for id := range users {
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+
 func (uc *ProblemUseCase) pipelineUserIDs(kind string) (map[int64]struct{}, bool) {
 	uc.orgUsersMu.Lock()
 	defer uc.orgUsersMu.Unlock()

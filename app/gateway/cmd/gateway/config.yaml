@@ -16,7 +16,8 @@ endpoints:
       - target: 'discovery:///user'
 #          stripPrefix: /bbs
   - path: /v1/core/*
-    timeout: 5s
+    # 题库补全近期 / 重置队列等管理接口可能超过 5s
+    timeout: 120s
     protocol: HTTP
     backends:
       - target: 'discovery:///core-data'

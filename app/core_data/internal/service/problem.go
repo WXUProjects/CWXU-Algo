@@ -397,20 +397,27 @@ func (s *ProblemService) Backfill(ctx context.Context, req *problem.BackfillReq)
 	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
 		return &problem.BackfillRes{Code: 1, Message: "仅管理员可触发回填"}, nil
 	}
-	// 回填不清空队列、不强制恢复 pause；仅补近 6 月提交入队
-	scanned, bound, created, enqueued, enqFetch, enqAnalyze, err := s.uc.Backfill(int(req.Limit))
-	if err != nil {
-		return nil, errors.InternalServer("backfill failed", "service unavailable")
+	// 后台执行：避免 gateway/core HTTP 超时导致前端 500，而任务其实还在跑
+	if ok, running := s.uc.TryStartAdminOp("backfill"); !ok {
+		return &problem.BackfillRes{Code: 1, Message: "已有任务在执行：" + running + "，请稍后再试"}, nil
 	}
+	limit := 0
+	if req != nil {
+		limit = int(req.Limit)
+	}
+	go func() {
+		defer s.uc.FinishAdminOp()
+		scanned, bound, created, enqueued, enqFetch, enqAnalyze, err := s.uc.Backfill(limit)
+		if err != nil {
+			log.Errorf("Backfill background failed: %v", err)
+			return
+		}
+		log.Infof("Backfill background done scanned=%d bound=%d created=%d enq=%d fetch=%d analyze=%d",
+			scanned, bound, created, enqueued, enqFetch, enqAnalyze)
+	}()
 	return &problem.BackfillRes{
-		Code:            0,
-		Message:         "success",
-		Scanned:         scanned,
-		Bound:           bound,
-		Created:         created,
-		Enqueued:        enqueued,
-		EnqueuedFetch:   enqFetch,
-		EnqueuedAnalyze: enqAnalyze,
+		Code:    0,
+		Message: "已开始后台补全近 6 个月提交，请稍后刷新进度查看待处理数量",
 	}, nil
 }
 
@@ -418,17 +425,22 @@ func (s *ProblemService) ResetQueues(ctx context.Context, req *problem.ResetQueu
 	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
 		return &problem.ResetQueuesRes{Code: 1, Message: "仅管理员可操作"}, nil
 	}
-	pf, pa, ef, ea, err := s.uc.ResetQueues()
-	if err != nil {
-		return nil, errors.InternalServer("reset queues failed", "service unavailable")
+	if ok, running := s.uc.TryStartAdminOp("reset-queues"); !ok {
+		return &problem.ResetQueuesRes{Code: 1, Message: "已有任务在执行：" + running + "，请稍后再试"}, nil
 	}
+	go func() {
+		defer s.uc.FinishAdminOp()
+		pf, pa, ef, ea, err := s.uc.ResetQueues()
+		if err != nil {
+			log.Errorf("ResetQueues background failed: %v", err)
+			return
+		}
+		log.Infof("ResetQueues background done purged_fetch=%d purged_analyze=%d enq_fetch=%d enq_analyze=%d",
+			pf, pa, ef, ea)
+	}()
 	return &problem.ResetQueuesRes{
-		Code:            0,
-		Message:         "已清空 MQ 并按 DB 待爬取/待分析重灌",
-		PurgedFetch:     int64(pf),
-		PurgedAnalyze:   int64(pa),
-		EnqueuedFetch:   int64(ef),
-		EnqueuedAnalyze: int64(ea),
+		Code:    0,
+		Message: "已开始后台重置队列并按 DB 重灌，请稍后刷新进度",
 	}, nil
 }
 
@@ -486,20 +498,26 @@ func (s *ProblemService) RetryFailed(ctx context.Context, req *problem.RetryFail
 		s.uc.ResumeAnalyze()
 		s.uc.ResumeFetch()
 	}
+	if ok, running := s.uc.TryStartAdminOp("retry-failed"); !ok {
+		return &problem.RetryFailedRes{Code: 1, Message: "已有任务在执行：" + running + "，请稍后再试"}, nil
+	}
 	limit := 0
 	if req != nil {
 		limit = int(req.Limit)
 	}
-	scanned, enqueued, blacklisted, err := s.uc.RetryFailed(limit)
-	if err != nil {
-		return nil, errors.InternalServer("retry failed", "service unavailable")
-	}
+	go func() {
+		defer s.uc.FinishAdminOp()
+		scanned, enqueued, blacklisted, err := s.uc.RetryFailed(limit)
+		if err != nil {
+			log.Errorf("RetryFailed background failed: %v", err)
+			return
+		}
+		log.Infof("RetryFailed background done scanned=%d enqueued=%d blacklisted=%d",
+			scanned, enqueued, blacklisted)
+	}()
 	return &problem.RetryFailedRes{
-		Code:        0,
-		Message:     "success",
-		Scanned:     scanned,
-		Enqueued:    enqueued,
-		Blacklisted: blacklisted,
+		Code:    0,
+		Message: "已开始后台重试近 6 月失败题，请稍后刷新进度",
 	}, nil
 }
 

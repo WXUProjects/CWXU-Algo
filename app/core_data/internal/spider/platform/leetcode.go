@@ -164,12 +164,9 @@ func (p NewLeetCode) FetchSubmitLog(userId int64, username string, needAll bool)
 	}
 
 	// 3) 最近通过 → 真实题级 AC（进题库 / 动态 / 提交历史；不计提交数以免与日历双计）
-	//    公开接口只有通过记录，无源码 → 状态固定 AC，前端不提供「查看代码」链接。
-	//    与合成 AC 的 external_id 空间不同，生涯去重题数可能略高于 acTotal（约 +最近通过去重数）。
-	for _, r := range recent {
-		if r.TitleSlug == "" || r.SubmissionID == 0 {
-			continue
-		}
+	//    公开接口常对同一题返回多次 AC → 先按 submissionId / titleSlug 去重（保留最新）。
+	//    无源码 → 状态固定 AC。
+	for _, r := range dedupeLeetCodeRecentAC(recent) {
 		title := r.Title
 		if title == "" {
 			title = r.TitleSlug
@@ -310,6 +307,32 @@ func fetchLeetCodeProgress(username string) (lcProgress, error) {
 		AcTotal:          sp.AcTotal,
 		TotalSubmissions: sp.TotalSubmissions,
 	}, nil
+}
+
+// dedupeLeetCodeRecentAC 同一批最近通过：submissionId 去重 + 同一 titleSlug 只留最新一条
+// API 列表通常已按时间倒序；同 slug 保留先出现的（更新）。
+func dedupeLeetCodeRecentAC(in []lcRecentAC) []lcRecentAC {
+	if len(in) == 0 {
+		return nil
+	}
+	seenID := make(map[int64]struct{}, len(in))
+	seenSlug := make(map[string]struct{}, len(in))
+	out := make([]lcRecentAC, 0, len(in))
+	for _, r := range in {
+		if r.TitleSlug == "" || r.SubmissionID == 0 {
+			continue
+		}
+		if _, ok := seenID[r.SubmissionID]; ok {
+			continue
+		}
+		if _, ok := seenSlug[r.TitleSlug]; ok {
+			continue
+		}
+		seenID[r.SubmissionID] = struct{}{}
+		seenSlug[r.TitleSlug] = struct{}{}
+		out = append(out, r)
+	}
+	return out
 }
 
 func fetchLeetCodeRecentAC(username string) ([]lcRecentAC, error) {

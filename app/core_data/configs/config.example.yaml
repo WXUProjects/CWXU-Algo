@@ -1,10 +1,11 @@
 server:
   http:
     addr: 0.0.0.0:8001
-    timeout: 1s
+    # 题库补全/重试等管理操作可能较久；过短会 500
+    timeout: 120s
   grpc:
     addr: 0.0.0.0:9001
-    timeout: 1s
+    timeout: 120s
   reg_dsn: 192.168.1.7:8500
   amqp_dsn: amqp://cwxu-algo:cwxu-algo@192.168.1.7:5672/algo
   jwt_secret: ""

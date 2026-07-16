@@ -108,6 +108,14 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 
 	// 只插入真正的新行，才能准确累加 daily_user_stats（OnConflict DoNothing 无法区分）
 	ctx := context.Background()
+	// 力扣：先清历史重复最近通过，再过滤待插入（同题只留一条）
+	if plat.Platform == spider.LeetCode {
+		if n, perr := dal.PruneLeetCodeProbDuplicates(ctx, uc.data.DB, userId); perr != nil {
+			log.Warnf("Spider: prune leetcode prob dups user=%d: %v", userId, perr)
+		} else if n > 0 {
+			log.Infof("Spider: pruned %d duplicate leetcode recent-AC rows user=%d", n, userId)
+		}
+	}
 	neu, err := dal.FilterNewSubmitLogs(ctx, uc.data.DB, tmp)
 	if err != nil {
 		return 0, err

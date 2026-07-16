@@ -6,6 +6,29 @@ import (
 	"time"
 )
 
+func TestDedupeLeetCodeRecentAC(t *testing.T) {
+	t1 := time.Unix(100, 0)
+	t2 := time.Unix(200, 0)
+	in := []lcRecentAC{
+		{SubmissionID: 1, SubmitTime: t2, TitleSlug: "two-sum", Title: "A"},
+		{SubmissionID: 1, SubmitTime: t2, TitleSlug: "two-sum", Title: "dup id"},
+		{SubmissionID: 2, SubmitTime: t1, TitleSlug: "two-sum", Title: "older same slug"},
+		{SubmissionID: 3, SubmitTime: t1, TitleSlug: "add-two", Title: "B"},
+		{SubmissionID: 0, TitleSlug: "x"},
+		{SubmissionID: 4, TitleSlug: ""},
+	}
+	out := dedupeLeetCodeRecentAC(in)
+	if len(out) != 2 {
+		t.Fatalf("len=%d want 2 (two-sum latest + add-two)", len(out))
+	}
+	if out[0].SubmissionID != 1 || out[0].TitleSlug != "two-sum" {
+		t.Fatalf("first=%+v", out[0])
+	}
+	if out[1].SubmissionID != 3 {
+		t.Fatalf("second=%+v", out[1])
+	}
+}
+
 func TestLeetCodeFetchLive(t *testing.T) {
 	p := NewLeetCode{}
 	full, err := p.FetchSubmitLog(999001, "sanenchen-o", true)

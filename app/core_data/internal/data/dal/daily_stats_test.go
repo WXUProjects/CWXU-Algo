@@ -27,3 +27,19 @@ func TestAggregateSubmitDeltas(t *testing.T) {
 		t.Fatalf("ac_cnt=%d want 3", d[0].AcCnt)
 	}
 }
+
+func TestDedupeSubmitLogsBySubmitID(t *testing.T) {
+	logs := []model.SubmitLog{
+		{SubmitID: "a", Problem: "1"},
+		{SubmitID: "a", Problem: "2"},
+		{SubmitID: "b", Problem: "3"},
+		{SubmitID: "", Problem: "skip"},
+	}
+	out := dedupeSubmitLogsBySubmitID(logs)
+	if len(out) != 2 {
+		t.Fatalf("len=%d want 2", len(out))
+	}
+	if out[0].Problem != "1" || out[1].SubmitID != "b" {
+		t.Fatalf("unexpected %+v", out)
+	}
+}

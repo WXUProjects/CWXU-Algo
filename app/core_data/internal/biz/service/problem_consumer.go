@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	// 2c4g 单机：题库流水线低并发，避免与 HTTP/spider/PG 争核
-	problemFetchConcurrency   = 1
-	problemAnalyzeConcurrency = 1
+	// 题面爬取 / AI 分析并发（用户要求各 4；QoS + 信号量共同限制）
+	problemFetchConcurrency   = 4
+	problemAnalyzeConcurrency = 4
 	problemMaxRetry           = 5
 )
 
@@ -74,7 +74,7 @@ func requeueWithRetry(mq *event.RabbitMQ, queue string, d amqp.Delivery, max int
 	_ = d.Ack(false)
 }
 
-// ProblemFetchConsumer 消费 problem_fetch：仅爬取，并发 4
+// ProblemFetchConsumer 消费 problem_fetch：仅爬取
 type ProblemFetchConsumer struct {
 	mq      *event.RabbitMQ
 	problem *ProblemUseCase
@@ -163,7 +163,7 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 	return nil
 }
 
-// ProblemAnalyzeConsumer 消费 problem_analyze：仅 AI，并发 8
+// ProblemAnalyzeConsumer 消费 problem_analyze：仅 AI
 type ProblemAnalyzeConsumer struct {
 	mq      *event.RabbitMQ
 	problem *ProblemUseCase

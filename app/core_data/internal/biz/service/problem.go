@@ -27,11 +27,15 @@ type ProblemUseCase struct {
 	tagger *ProblemTagger
 	reg    *registry.Registrar
 
-	orgUsersMu          sync.Mutex
-	orgUsersCache       map[int64]struct{} // 兼容旧缓存（= fetch 集合）
-	orgUsersAt          time.Time
-	pipelineUsersCache  *pipelineUserSets
-	pipelineUsersAt     time.Time
+	orgUsersMu         sync.Mutex
+	orgUsersCache      map[int64]struct{} // 兼容旧缓存（= fetch 集合）
+	orgUsersAt         time.Time
+	pipelineUsersCache *pipelineUserSets
+	pipelineUsersAt    time.Time
+
+	// adminOp 防止补全/重置/重试并发互踩
+	adminOpMu   sync.Mutex
+	adminOpName string
 }
 
 func NewProblemUseCase(data *data.Data, mq *event.RabbitMQ, tagger *ProblemTagger, reg *discovery.Register) *ProblemUseCase {
@@ -518,6 +522,23 @@ func sqlHasRecentSubmit(cutoff time.Time) (clause string, args []interface{}) {
 	)`, []interface{}{cutoff}
 }
 
+// TryStartAdminOp 管理端重操作互斥（补全/重置/重试）
+func (uc *ProblemUseCase) TryStartAdminOp(name string) (ok bool, running string) {
+	uc.adminOpMu.Lock()
+	defer uc.adminOpMu.Unlock()
+	if uc.adminOpName != "" {
+		return false, uc.adminOpName
+	}
+	uc.adminOpName = name
+	return true, ""
+}
+
+func (uc *ProblemUseCase) FinishAdminOp() {
+	uc.adminOpMu.Lock()
+	uc.adminOpName = ""
+	uc.adminOpMu.Unlock()
+}
+
 // Backfill 增量回填（近 6 个月提交）：
 // 1) 绑定未关联提交
 // 2) 无题面且有组织用户提交 → 入爬取；纯公共域/散户不爬
@@ -569,65 +590,106 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 		}
 	}
 
-	// 2) 近 6 月有提交的题：无题面补爬；有题面且未完成补分析；COMPLETED 跳过
-	recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
-	var todos []model.Problem
-	_ = uc.data.DB.
-		Where("status NOT IN ?", []string{
-			model.ProblemStatusSkipped,
-			model.ProblemStatusCompleted,
-			model.ProblemStatusFailedPerm,
-		}).
-		Where(recentClause, recentArgs...).
-		Order("last_submitted_at DESC NULLS LAST, id DESC").
-		Find(&todos).Error
-
-	seen := map[uint]bool{}
-	for _, p := range todos {
-		if seen[p.ID] {
-			continue
+	// 2) 仅处理「近窗有资格用户提交」的题（批量集合，避免对纯公共域几千题逐题查）
+	fetchSet, fetchOK := uc.recentPipelineProblemSet("fetch", cutoff)
+	aiSet, aiOK := uc.recentPipelineProblemSet("ai", cutoff)
+	if !fetchOK || !aiOK {
+		// 名单不可用时保守：仍扫近窗未完成题，但加 limit 防止拖死
+		log.Warnf("Backfill: pipeline set unavailable fetchOK=%v aiOK=%v, fallback limited scan", fetchOK, aiOK)
+		recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
+		var todos []model.Problem
+		_ = uc.data.DB.
+			Where("status NOT IN ?", []string{
+				model.ProblemStatusSkipped,
+				model.ProblemStatusCompleted,
+				model.ProblemStatusFailedPerm,
+			}).
+			Where(recentClause, recentArgs...).
+			Order("last_submitted_at DESC NULLS LAST, id DESC").
+			Limit(limit).
+			Find(&todos).Error
+		for _, p := range todos {
+			ef, ea := uc.backfillOneProblem(p)
+			enqueuedFetch += ef
+			enqueuedAnalyze += ea
+			enqueued += ef + ea
 		}
-		seen[p.ID] = true
-		hasFetch := uc.problemHasFetchSubmitter(p.ID)
-		hasAI := uc.problemHasAISubmitter(p.ID)
-		if !hasFetch && !hasAI {
-			// 无资格用户：只入库
-			continue
+	} else {
+		// 合并资格题 id
+		idSet := make(map[uint]struct{}, len(fetchSet)+len(aiSet))
+		for id := range fetchSet {
+			idSet[id] = struct{}{}
 		}
-		if strings.TrimSpace(p.ContentMD) == "" {
-			if !hasFetch {
-				continue
+		for id := range aiSet {
+			idSet[id] = struct{}{}
+		}
+		if len(idSet) > 0 {
+			ids := make([]uint, 0, len(idSet))
+			for id := range idSet {
+				ids = append(ids, id)
 			}
-			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
-				Updates(map[string]interface{}{
-					"status":           model.ProblemStatusPending,
-					"error_msg":        "",
-					"fetch_attempts":   0,
-					"fetch_fail_since": nil,
-				}).Error
-			if e := uc.enqueueFetchPrio(p.ID, p.Platform, p.ExternalID, p.URL, mqPriorityBulk); e == nil {
-				enqueuedFetch++
-				enqueued++
+			var todos []model.Problem
+			_ = uc.data.DB.
+				Where("id IN ?", ids).
+				Where("status NOT IN ?", []string{
+					model.ProblemStatusSkipped,
+					model.ProblemStatusCompleted,
+					model.ProblemStatusFailedPerm,
+				}).
+				Order("last_submitted_at DESC NULLS LAST, id DESC").
+				Find(&todos).Error
+			for _, p := range todos {
+				_, hasFetch := fetchSet[p.ID]
+				_, hasAI := aiSet[p.ID]
+				ef, ea := uc.backfillOneProblemWithGate(p, hasFetch, hasAI)
+				enqueuedFetch += ef
+				enqueuedAnalyze += ea
+				enqueued += ef + ea
 			}
-			continue
-		}
-		// 有题面：入 AI（enqueueAnalyzePrio 内再校验资格）
-		if !hasAI {
-			continue
-		}
-		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
-			Updates(map[string]interface{}{
-				"status":    model.ProblemStatusTagging,
-				"error_msg": "",
-			}).Error
-		if e := uc.enqueueAnalyzePrio(p.ID, mqPriorityBulk); e == nil {
-			enqueuedAnalyze++
-			enqueued++
 		}
 	}
 	log.Infof("Backfill: scanned=%d bound=%d created=%d fetch=%d analyze=%d",
 		scanned, bound, created, enqueuedFetch, enqueuedAnalyze)
 	return
+}
+
+// backfillOneProblem 单题回填入队（逐题资格检查）
+func (uc *ProblemUseCase) backfillOneProblem(p model.Problem) (enqueuedFetch, enqueuedAnalyze int64) {
+	return uc.backfillOneProblemWithGate(p, uc.problemHasFetchSubmitter(p.ID), uc.problemHasAISubmitter(p.ID))
+}
+
+func (uc *ProblemUseCase) backfillOneProblemWithGate(p model.Problem, hasFetch, hasAI bool) (enqueuedFetch, enqueuedAnalyze int64) {
+	if !hasFetch && !hasAI {
+		return 0, 0
+	}
+	if strings.TrimSpace(p.ContentMD) == "" {
+		if !hasFetch {
+			return 0, 0
+		}
+		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+			Updates(map[string]interface{}{
+				"status":           model.ProblemStatusPending,
+				"error_msg":        "",
+				"fetch_attempts":   0,
+				"fetch_fail_since": nil,
+			}).Error
+		if e := uc.enqueueFetchPrio(p.ID, p.Platform, p.ExternalID, p.URL, mqPriorityBulk); e == nil {
+			return 1, 0
+		}
+		return 0, 0
+	}
+	if !hasAI {
+		return 0, 0
+	}
+	_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+		Updates(map[string]interface{}{
+			"status":    model.ProblemStatusTagging,
+			"error_msg": "",
+		}).Error
+	if e := uc.enqueueAnalyzePrio(p.ID, mqPriorityBulk); e == nil {
+		return 0, 1
+	}
+	return 0, 0
 }
 
 // ResetQueues 重置 MQ：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（bulk 优先级）
@@ -684,6 +746,7 @@ func (uc *ProblemUseCase) ResetQueues() (purgedFetch, purgedAnalyze, enqueuedFet
 
 // RetryFailed 重试错误队列：仅重入 FAILED（可重试失败），排除 FAILED_PERM 黑名单
 // 会先把永久错误升级为 FAILED_PERM，并解除误标的 WAF/登录墙 FAILED_PERM
+// 仅近 6 月有提交 + 有流水线资格用户提交的题才会真正入队（避免公共域假入队后立刻 Ack）
 func (uc *ProblemUseCase) RetryFailed(limit int) (scanned, enqueued, blacklisted int64, err error) {
 	pipelineControl.SetAnalyzePaused(false)
 	pipelineControl.SetFetchPaused(false)
@@ -703,10 +766,11 @@ func (uc *ProblemUseCase) RetryFailed(limit int) (scanned, enqueued, blacklisted
 	// 先把已是永久错误文案的 FAILED 升为黑名单
 	blacklisted = uc.markExistingPermanentFailures()
 
-	// 仅近 6 个月；新题优先
+	// 近 6 月以 submit_logs 为准（与 Progress / ProcessAnalyze 一致）
 	cutoff := time.Now().Add(-backfillWindow)
+	recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
 	q := uc.data.DB.Where("status = ?", model.ProblemStatusFailed).
-		Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
+		Where(recentClause, recentArgs...).
 		Order("last_submitted_at DESC NULLS LAST, id DESC")
 	if limit > 0 {
 		q = q.Limit(limit)
@@ -716,6 +780,9 @@ func (uc *ProblemUseCase) RetryFailed(limit int) (scanned, enqueued, blacklisted
 		return
 	}
 	scanned = int64(len(todos))
+
+	fetchSet, fetchOK := uc.recentPipelineProblemSet("fetch", cutoff)
+	aiSet, aiOK := uc.recentPipelineProblemSet("ai", cutoff)
 
 	seen := map[uint]bool{}
 	for _, p := range todos {
@@ -730,7 +797,23 @@ func (uc *ProblemUseCase) RetryFailed(limit int) (scanned, enqueued, blacklisted
 			blacklisted++
 			continue
 		}
-		if strings.TrimSpace(p.ContentMD) != "" {
+		hasContent := strings.TrimSpace(p.ContentMD) != ""
+		hasFetch := false
+		hasAI := false
+		if fetchOK {
+			_, hasFetch = fetchSet[p.ID]
+		} else {
+			hasFetch = uc.problemHasFetchSubmitter(p.ID)
+		}
+		if aiOK {
+			_, hasAI = aiSet[p.ID]
+		} else {
+			hasAI = uc.problemHasAISubmitter(p.ID)
+		}
+		if hasContent {
+			if !hasAI {
+				continue
+			}
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 				Updates(map[string]interface{}{
 					"status":    model.ProblemStatusTagging,
@@ -740,6 +823,9 @@ func (uc *ProblemUseCase) RetryFailed(limit int) (scanned, enqueued, blacklisted
 				enqueued++
 			}
 		} else {
+			if !hasFetch {
+				continue
+			}
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 				Updates(map[string]interface{}{
 					"status":    model.ProblemStatusPending,
@@ -750,6 +836,7 @@ func (uc *ProblemUseCase) RetryFailed(limit int) (scanned, enqueued, blacklisted
 			}
 		}
 	}
+	log.Infof("RetryFailed: scanned=%d enqueued=%d blacklisted=%d", scanned, enqueued, blacklisted)
 	return
 }
 
