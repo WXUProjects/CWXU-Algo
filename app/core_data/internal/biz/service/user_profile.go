@@ -10,6 +10,7 @@ import (
 	"cwxu-algo/app/core_data/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
+	"golang.org/x/sync/singleflight"
 )
 
 // 画像缓存：ver 精确失效 + latest 兜底（爬虫后仍可读旧画像，同时 MQ 刷新）
@@ -17,9 +18,10 @@ const (
 	userProfileCacheSchema = "1"
 	userProfileLatestTTL   = 30 * 24 * time.Hour
 	userProfileVerTTL      = 7 * 24 * time.Hour
-	// 小用户同步算；大用户只入队避免 HTTP 504
-	userProfileSyncACMax = 300
 )
+
+// profileBuildSF 同一用户并发请求只算一次（HTTP 即时处理 + MQ consumer 共用）
+var profileBuildSF singleflight.Group
 
 // UserProfileSnapshot 可 gob 缓存的画像快照
 type UserProfileSnapshot struct {
@@ -106,20 +108,44 @@ func (uc *ProblemUseCase) EnqueueUserProfileRebuild(userID int64) {
 	_ = uc.profileTask.Do(userID)
 }
 
-// BuildAndCacheUserProfile 同步计算并写缓存（consumer 调用）
+// BuildAndCacheUserProfile 同步计算并写缓存（HTTP 即时 / MQ consumer）
+// 同一 user 并发只跑一遍（singleflight）。
 func (uc *ProblemUseCase) BuildAndCacheUserProfile(userID int64) error {
 	if userID <= 0 {
 		return fmt.Errorf("invalid user_id")
 	}
-	snap, err := uc.computeUserProfile(userID)
-	if err != nil {
-		return err
-	}
-	uc.writeProfileCache(context.Background(), userID, snap)
-	return nil
+	_, err, _ := profileBuildSF.Do(fmt.Sprintf("up:%d", userID), func() (interface{}, error) {
+		snap, e := uc.computeUserProfile(userID)
+		if e != nil {
+			return nil, e
+		}
+		uc.writeProfileCache(context.Background(), userID, snap)
+		return snap, nil
+	})
+	return err
 }
 
-// UserProfile 读路径：优先缓存；miss 时小用户同步、大用户只入队
+// buildUserProfileNow 即时计算；成功返回快照，失败返回 error
+func (uc *ProblemUseCase) buildUserProfileNow(userID int64) (*UserProfileSnapshot, error) {
+	if userID <= 0 {
+		return nil, fmt.Errorf("invalid user_id")
+	}
+	v, err, _ := profileBuildSF.Do(fmt.Sprintf("up:%d", userID), func() (interface{}, error) {
+		snap, e := uc.computeUserProfile(userID)
+		if e != nil {
+			return nil, e
+		}
+		uc.writeProfileCache(context.Background(), userID, snap)
+		return snap, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	snap, _ := v.(*UserProfileSnapshot)
+	return snap, nil
+}
+
+// UserProfile 读路径：缓存优先；从未处理过则本次请求立即计算并落缓存
 func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	Tag     string
 	Score   float64
@@ -137,31 +163,35 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	if snap, ok := uc.readProfileCache(ctx, userProfileCacheKey(userID, ver)); ok {
 		return unpackProfile(snap)
 	}
-	// ver 失效后仍可用 latest，同时后台刷新
+	// ver 失效：先返回 latest，并立即后台重算（不挡本次响应）
 	if snap, ok := uc.readProfileCache(ctx, userProfileLatestKey(userID)); ok {
+		go func(uid int64) {
+			if e := uc.BuildAndCacheUserProfile(uid); e != nil {
+				log.Warnf("user_profile refresh user=%d: %v", uid, e)
+				// 失败再入队，由 MQ 重试
+				uc.EnqueueUserProfileRebuild(uid)
+			} else if uc.profileTask != nil {
+				uc.profileTask.ClearPending(uid)
+			}
+		}(userID)
+		return unpackProfile(snap)
+	}
+
+	// 从未处理：有人请求就立刻算完再返回（singleflight 防打穿）
+	start := time.Now()
+	snap, e := uc.buildUserProfileNow(userID)
+	if e != nil {
+		log.Errorf("user_profile on-demand user=%d: %v", userID, e)
+		// 同步失败则入队，下次可命中
 		uc.EnqueueUserProfileRebuild(userID)
-		return unpackProfile(snap)
+		err = e
+		return
 	}
-
-	// 冷启动：小用户同步算；大用户入队避免 504
-	var acCount int64
-	if uc.data != nil && uc.data.DB != nil {
-		_ = uc.data.DB.Raw(`SELECT COUNT(*) FROM user_ac_problems WHERE user_id = ?`, userID).Scan(&acCount).Error
+	if uc.profileTask != nil {
+		uc.profileTask.ClearPending(userID)
 	}
-	if acCount <= userProfileSyncACMax {
-		snap, e := uc.computeUserProfile(userID)
-		if e != nil {
-			err = e
-			return
-		}
-		uc.writeProfileCache(ctx, userID, snap)
-		return unpackProfile(snap)
-	}
-
-	uc.EnqueueUserProfileRebuild(userID)
-	// 大用户无缓存时返回空壳（total 可先给 count，雷达等 MQ 完成后有）
-	totalAC = acCount
-	return
+	log.Infof("user_profile on-demand user=%d cost=%s", userID, time.Since(start).Round(time.Millisecond))
+	return unpackProfile(snap)
 }
 
 func unpackProfile(snap *UserProfileSnapshot) (radar []struct {
