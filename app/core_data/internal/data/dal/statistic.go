@@ -34,29 +34,46 @@ func (d *StatisticDal) HeatmapQuery(ctx context.Context, startDate, endDate stri
 	return d.HeatmapQueryScoped(ctx, startDate, endDate, userId, isAc, nil)
 }
 
+// acceptedStatusList 常见 AC 状态字面量（可走索引）；另保留规范化匹配兜底历史脏数据
+var acceptedStatusList = []string{
+	"AC", "OK", "ACCEPTED", "Accepted", "accepted", "ac", "ok",
+	"正确", "答案正确",
+}
+
 // HeatmapQueryScoped userId=0 时 memberIDs 限制组织；nil 表示不限制（全站）
 func (d *StatisticDal) HeatmapQueryScoped(ctx context.Context, startDate, endDate string, userId int64, isAc bool, memberIDs []int64) ([]DailyCount, error) {
-	sub := d.db.
-		Table("submit_logs").
-		Select("id, time")
-	if isAc {
-		sub = sub.Where("UPPER(BTRIM(status)) IN ?", []string{"AC", "OK", "ACCEPTED", "正确", "答案正确"})
-	} else {
-		// 力扣合成 AC 只用于做题数，不进入提交热力图（真实提交由 lc-cal 记录承担）
-		sub = sub.Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
-	}
-	if userId != 0 {
-		sub = sub.Where("user_id = ?", userId)
-	} else if memberIDs != nil {
-		if len(memberIDs) == 0 {
-			return []DailyCount{}, nil
-		}
-		sub = sub.Where("user_id IN ?", memberIDs)
+	if userId == 0 && memberIDs != nil && len(memberIDs) == 0 {
+		return []DailyCount{}, nil
 	}
 
+	// 先按日聚合再补全日期轴，避免无时间界的全表子查询 + 按天 range join
+	agg := d.db.WithContext(ctx).
+		Table("submit_logs").
+		Select("date_trunc('day', time)::date AS day, COUNT(*) AS cnt").
+		// 关键：只扫请求窗口内的行（原先 generate_series 子查询无 time 条件，isAc 极慢）
+		Where("time >= ?::date AND time < (?::date + INTERVAL '1 day')", startDate, endDate)
+
+	if isAc {
+		// 优先字面量 IN（可用 status/time 相关索引），UPPER(BTRIM) 兜底大小写/空白脏值
+		agg = agg.Where(
+			"(status IN ? OR UPPER(BTRIM(status)) IN ?)",
+			acceptedStatusList,
+			[]string{"AC", "OK", "ACCEPTED", "正确", "答案正确"},
+		)
+	} else {
+		// 力扣合成 AC 只用于做题数，不进入提交热力图（真实提交由 lc-cal 记录承担）
+		agg = agg.Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
+	}
+	if userId != 0 {
+		agg = agg.Where("user_id = ?", userId)
+	} else if memberIDs != nil {
+		agg = agg.Where("user_id IN ?", memberIDs)
+	}
+	agg = agg.Group("date_trunc('day', time)::date")
+
 	var result []DailyCount
-	err := d.db.Raw(`
-		SELECT days.day, COUNT(s.id) AS cnt
+	err := d.db.WithContext(ctx).Raw(`
+		SELECT days.day, COALESCE(s.cnt, 0) AS cnt
 		FROM (
 			SELECT generate_series(
 				?::date,
@@ -64,12 +81,9 @@ func (d *StatisticDal) HeatmapQueryScoped(ctx context.Context, startDate, endDat
 				INTERVAL '1 day'
 			) AS day
 		) days
-		LEFT JOIN (?) s
-		ON s.time >= days.day
-		AND s.time < days.day + INTERVAL '1 day'
-		GROUP BY days.day
+		LEFT JOIN (?) s ON s.day = days.day
 		ORDER BY days.day
-	`, startDate, endDate, sub).Scan(&result).Error
+	`, startDate, endDate, agg).Scan(&result).Error
 
 	return result, err
 }
