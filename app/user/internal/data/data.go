@@ -40,6 +40,7 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 
 // migrateModels 合并
 func migrateModels(db *gorm.DB) {
+	reconcileOrgJoinRequestDuplicates(db)
 	err := db.AutoMigrate(
 		&model.User{},
 		&model.Group{},
@@ -56,6 +57,32 @@ func migrateModels(db *gorm.DB) {
 	}
 	seedPlanQuotas(db)
 	seedGoAlgoFramework(db)
+}
+
+// reconcileOrgJoinRequestDuplicates prepares legacy data for the composite
+// unique index. Older deployments allowed repeated applications; keep the most
+// recently inserted row (highest id) and remove only older duplicates.
+func reconcileOrgJoinRequestDuplicates(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasTable(&model.OrgJoinRequest{}) {
+		return
+	}
+	result := db.Exec(`
+		DELETE FROM org_join_requests
+		WHERE id IN (
+			SELECT id FROM (
+				SELECT id,
+					ROW_NUMBER() OVER (PARTITION BY org_id, user_id ORDER BY id DESC) AS duplicate_rank
+				FROM org_join_requests
+			) AS duplicate_rows
+			WHERE duplicate_rank > 1
+		)
+	`)
+	if result.Error != nil {
+		panic("数据库：组织加入申请历史重复数据归并失败")
+	}
+	if result.RowsAffected > 0 {
+		log.Warnf("database migration removed %d duplicate org join requests", result.RowsAffected)
+	}
 }
 
 // PublishSiteSettings 将站点业务配置写入 Redis，供 agent/core_data 热读

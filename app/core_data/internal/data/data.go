@@ -47,8 +47,35 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 
 // migrateModels 合并
 func migrateModels(db *gorm.DB) {
+	reconcilePlatformDuplicates(db)
 	err := db.AutoMigrate(&model.SubmitLog{}, &model.Platform{}, &model.ContestLog{}, &model.Bulletin{}, &model.Problem{}, &model.EmergencyNotice{})
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
+	}
+}
+
+// reconcilePlatformDuplicates prepares historical bindings for the new
+// (user_id, platform) unique index. Submission and contest rows reference that
+// natural key rather than platforms.id, so retaining the newest binding is safe.
+func reconcilePlatformDuplicates(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasTable(&model.Platform{}) {
+		return
+	}
+	result := db.Exec(`
+		DELETE FROM platforms
+		WHERE id IN (
+			SELECT id FROM (
+				SELECT id,
+					ROW_NUMBER() OVER (PARTITION BY user_id, platform ORDER BY id DESC) AS duplicate_rank
+				FROM platforms
+			) AS duplicate_rows
+			WHERE duplicate_rank > 1
+		)
+	`)
+	if result.Error != nil {
+		panic("数据库：OJ 绑定历史重复数据归并失败")
+	}
+	if result.RowsAffected > 0 {
+		log.Warnf("database migration removed %d duplicate platform bindings", result.RowsAffected)
 	}
 }
