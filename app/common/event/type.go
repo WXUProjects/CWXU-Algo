@@ -26,3 +26,9 @@ type ProblemFetchEvent struct {
 type ProblemAnalyzeEvent struct {
 	ProblemID uint `json:"problem_id"`
 }
+
+// UserProfileEvent 用户题库画像预计算（user_profile 队列）
+// 重 JOIN 在后台跑，HTTP 只读 Redis，避免高 AC 用户 504
+type UserProfileEvent struct {
+	UserId int64 `json:"user_id"`
+}

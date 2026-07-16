@@ -44,6 +44,7 @@ type UserSyncPolicy struct {
 type CronTask struct {
 	spider  *SpiderTask
 	summary *SummaryTask
+	profile *UserProfileTask
 	db      *gorm.DB
 	rdb     *redis.Client
 	reg     *discovery.Register
@@ -53,12 +54,13 @@ type CronTask struct {
 	running bool
 }
 
-func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, reg *discovery.Register) *CronTask {
+func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, profile *UserProfileTask, reg *discovery.Register) *CronTask {
 	return &CronTask{
 		spider:  spider,
 		db:      data.DB,
 		rdb:     data.RDB,
 		summary: summary,
+		profile: profile,
 		reg:     reg,
 		stopCh:  make(chan struct{}),
 	}
@@ -384,6 +386,37 @@ func (t *CronTask) runDailySummaryTick() {
 		len(userIds), len(seen), enqueued, weekly, isMonday)
 }
 
+// runUserProfilePrewarm 将有 AC 的用户入队画像预计算。
+// full=true：全量 DISTINCT user_id；false：最多 500 人（启动/补漏）。
+func (t *CronTask) runUserProfilePrewarm(full bool) {
+	if t.profile == nil || t.db == nil {
+		return
+	}
+	lockKind := "user_profile"
+	if full {
+		lockKind = "user_profile_full"
+	}
+	ttl := 10 * time.Minute
+	if full {
+		ttl = 50 * time.Minute
+	}
+	if !t.tryCronLock(lockKind, ttl) {
+		return
+	}
+	var userIDs []int64
+	q := t.db.Model(&model.UserACProblem{}).Distinct("user_id").Order("user_id")
+	if !full {
+		q = q.Limit(500)
+	}
+	if err := q.Pluck("user_id", &userIDs).Error; err != nil {
+		log.Errorf("CronTask user_profile: pluck users: %v", err)
+		return
+	}
+	pub, dedup, fail := t.profile.DoBatch(userIDs)
+	log.Infof("CronTask user_profile prewarm full=%v candidates=%d published=%d dedup=%d failed=%d",
+		full, len(userIDs), pub, dedup, fail)
+}
+
 // Do 启动 cron 并阻塞到 Stop，供 runForever 使用（只应有一个存活实例）。
 // panic 后 defer 会停掉 cron，runForever 可安全重启。
 func (t *CronTask) Do() {
@@ -420,6 +453,13 @@ func (t *CronTask) Do() {
 	_, _ = c.AddFunc("*/5 * * * *", func() {
 		t.runCalendarNotify()
 	})
+	// 画像预热：凌晨 3:15（低峰）+ 每 6 小时补漏
+	_, _ = c.AddFunc("15 3 * * *", func() {
+		t.runUserProfilePrewarm(true)
+	})
+	_, _ = c.AddFunc("20 */6 * * *", func() {
+		t.runUserProfilePrewarm(false)
+	})
 	// 启动后异步跑一次爬取，避免空库等到下一个 12h 点
 	go func() {
 		time.Sleep(8 * time.Second)
@@ -430,13 +470,23 @@ func (t *CronTask) Do() {
 		}
 		t.runCalendarCrawl()
 	}()
+	// 启动约 45s 后轻量预热一批画像（不阻塞启动）
+	go func() {
+		time.Sleep(45 * time.Second)
+		select {
+		case <-t.stopCh:
+			return
+		default:
+		}
+		t.runUserProfilePrewarm(false)
+	}()
 	c.Start()
 	t.cron = c
 	t.running = true
 	stopCh := t.stopCh
 	t.mu.Unlock()
 
-	log.Infof("CronTask started: spider/summary every 5m; calendar crawl 12h + notify 5m")
+	log.Infof("CronTask started: spider/summary 5m; calendar 12h; user_profile 03:15 + 6h")
 
 	defer func() {
 		t.mu.Lock()

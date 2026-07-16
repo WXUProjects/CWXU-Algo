@@ -329,4 +329,9 @@ func (uc *SpiderUseCase) invalidateCache(userId int64) {
 
 	// 热用户：异步预热 period 缓存（读路径更快，2c4g 上仅高热度触发）
 	go MaybeWarmUserPeriod(context.Background(), uc.data.DB, rdb, userId)
+
+	// 画像：ver 已变，入队后台重算（HTTP 先读 latest 兜底）
+	if uc.problem != nil {
+		uc.problem.EnqueueUserProfileRebuild(userId)
+	}
 }

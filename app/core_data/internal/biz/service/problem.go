@@ -9,9 +9,9 @@ import (
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
 	"cwxu-algo/app/core_data/internal/spider/problem_fetch"
+	"cwxu-algo/app/core_data/task"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +28,9 @@ type ProblemUseCase struct {
 	tagger *ProblemTagger
 	reg    *registry.Registrar
 
+	// profileTask 画像 MQ 入队（可选；nil 时只同步算小用户）
+	profileTask *task.UserProfileTask
+
 	orgUsersMu         sync.Mutex
 	orgUsersCache      map[int64]struct{} // 兼容旧缓存（= fetch 集合）
 	orgUsersAt         time.Time
@@ -39,12 +42,12 @@ type ProblemUseCase struct {
 	adminOpName string
 }
 
-func NewProblemUseCase(data *data.Data, mq *event.RabbitMQ, tagger *ProblemTagger, reg *discovery.Register) *ProblemUseCase {
+func NewProblemUseCase(data *data.Data, mq *event.RabbitMQ, tagger *ProblemTagger, reg *discovery.Register, profileTask *task.UserProfileTask) *ProblemUseCase {
 	var r *registry.Registrar
 	if reg != nil {
 		r = &reg.Reg
 	}
-	return &ProblemUseCase{data: data, mq: mq, tagger: tagger, reg: r}
+	return &ProblemUseCase{data: data, mq: mq, tagger: tagger, reg: r, profileTask: profileTask}
 }
 
 // MQ 优先级：队列需 x-max-priority；增量爬虫入队最高，回填/重置队列为 bulk
@@ -1174,114 +1177,7 @@ func (uc *ProblemUseCase) FollowingProblemStatus(problemID uint, followingIDs []
 	return out, nil
 }
 
-// UserProfile 纯 SQL 聚合画像
-func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
-	Tag     string
-	Score   float64
-	ACCount int64
-}, platforms []struct {
-	Name  string
-	Count int64
-}, difficulties []struct {
-	Name  string
-	Count int64
-}, totalAC int64, err error) {
-
-	// 画像读 user_ac_problems（生涯预聚合）；JOIN 兼容 p:{id} 与 e:platform:external_id
-	type tagRow struct {
-		Tag   string
-		Count int64
-	}
-	var tags []tagRow
-	const userACJoinProblems = `
-		FROM user_ac_problems u
-		JOIN problems p ON (
-			u.problem_key = 'p:' || p.id::text
-			OR (
-				p.external_id IS NOT NULL AND btrim(p.external_id) <> ''
-				AND u.problem_key = 'e:' || p.platform || ':' || p.external_id
-			)
-		)
-	`
-	err = uc.data.DB.Raw(`
-		SELECT tag, COUNT(DISTINCT p.id) AS count
-		`+userACJoinProblems+`
-		CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(p.tags::jsonb, '[]'::jsonb)) AS tag
-		WHERE u.user_id = ? AND p.status = ?
-		  AND p.tags IS NOT NULL AND p.tags::text NOT IN ('', '[]', 'null')
-		GROUP BY tag
-		ORDER BY count DESC
-		LIMIT 20
-	`, userID, model.ProblemStatusCompleted).Scan(&tags).Error
-	if err != nil {
-		log.Errorf("radar sql user=%d: %v", userID, err)
-		err = nil
-	}
-
-	// 归一化：max 为 100
-	var maxC int64
-	for _, t := range tags {
-		if t.Count > maxC {
-			maxC = t.Count
-		}
-	}
-	for _, t := range tags {
-		score := 0.0
-		if maxC > 0 {
-			score = math.Round(float64(t.Count)/float64(maxC)*1000) / 10
-		}
-		radar = append(radar, struct {
-			Tag     string
-			Score   float64
-			ACCount int64
-		}{Tag: t.Tag, Score: score, ACCount: t.Count})
-	}
-
-	type nc struct {
-		Name  string
-		Count int64
-	}
-	var plats []nc
-	if e := uc.data.DB.Raw(`
-		SELECT COALESCE(NULLIF(btrim(u.platform), ''), p.platform) AS name, COUNT(DISTINCT p.id) AS count
-		`+userACJoinProblems+`
-		WHERE u.user_id = ?
-		GROUP BY 1
-	`, userID).Scan(&plats).Error; e != nil {
-		log.Errorf("platforms sql user=%d: %v", userID, e)
-	}
-	for _, p := range plats {
-		platforms = append(platforms, struct {
-			Name  string
-			Count int64
-		}{p.Name, p.Count})
-	}
-
-	var diffs []nc
-	if e := uc.data.DB.Raw(`
-		SELECT p.difficulty AS name, COUNT(DISTINCT p.id) AS count
-		`+userACJoinProblems+`
-		WHERE u.user_id = ?
-		  AND p.difficulty IS NOT NULL AND BTRIM(p.difficulty) <> ''
-		  AND UPPER(BTRIM(p.difficulty)) NOT IN ('UNKNOWN','NULL','NONE')
-		GROUP BY p.difficulty
-	`, userID).Scan(&diffs).Error; e != nil {
-		log.Errorf("difficulties sql user=%d: %v", userID, e)
-	}
-	for _, d := range diffs {
-		difficulties = append(difficulties, struct {
-			Name  string
-			Count int64
-		}{d.Name, d.Count})
-	}
-
-	// 生涯 AC 去重题数：预聚合全量；有 problem_id 绑定的另计
-	_ = uc.data.DB.Raw(`
-		SELECT COUNT(*) FROM user_ac_problems WHERE user_id = ?
-	`, userID).Scan(&totalAC).Error
-
-	return
-}
+// UserProfile 见 user_profile.go（缓存 + MQ 预计算）
 
 type ProgressSnapshot struct {
 	Items      []struct {

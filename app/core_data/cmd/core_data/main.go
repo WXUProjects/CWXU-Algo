@@ -71,11 +71,12 @@ func init() {
 	flag.StringVar(&flagconf, "conf", "./configs", "config path, eg: -conf config.yaml")
 }
 
-func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, cm *service.Consumer, pfc *service.ProblemFetchConsumer, pac *service.ProblemAnalyzeConsumer, cron *task.CronTask) *kratos.App {
+func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, cm *service.Consumer, pfc *service.ProblemFetchConsumer, pac *service.ProblemAnalyzeConsumer, upc *service.UserProfileConsumer, cron *task.CronTask) *kratos.App {
 	stopCh := make(chan struct{})
 	runForever("spider-consumer", stopCh, cm.Consume)
 	runForever("problem-fetch-consumer", stopCh, pfc.Consume)
 	runForever("problem-analyze-consumer", stopCh, pac.Consume)
+	runForever("user-profile-consumer", stopCh, upc.Consume)
 	runForever("cron", stopCh, cron.Do)
 	return kratos.New(
 		kratos.ID(fmt.Sprintf("%s-%s-%s", id, Name, Version)),
@@ -92,6 +93,7 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.
 			log.Info("stopping background workers...")
 			close(stopCh)
 			cm.Stop()
+			upc.Stop()
 			log.Info("stopping cron task...")
 			cron.Stop()
 			log.Info("background workers stop signal sent")

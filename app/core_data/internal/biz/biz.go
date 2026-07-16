@@ -15,4 +15,5 @@ var ProviderSet = wire.NewSet(
 	service.NewProblemTagger,
 	service.NewProblemFetchConsumer,
 	service.NewProblemAnalyzeConsumer,
+	service.NewUserProfileConsumer,
 )
