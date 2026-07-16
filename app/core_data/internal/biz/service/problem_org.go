@@ -17,15 +17,15 @@ import (
 const nonPublicOrgUserCacheTTL = 2 * time.Minute
 
 // problemHasOrgSubmitter 该题近 backfillWindow 内是否有「组织用户」（非纯公共域）提交。
-// 仅公共域/散户提交历史 → false（只爬题面，不跑题面 AI）。
+// 仅公共域/散户 → false：不爬题面、不跑题面 AI（题库仅入库，前端显示「题面准备中」）。
 func (uc *ProblemUseCase) problemHasOrgSubmitter(problemID uint) bool {
 	if problemID == 0 {
 		return false
 	}
 	orgUsers, ok := uc.nonPublicOrgUserIDs()
 	if !ok {
-		// 拉不到组织名单时保守放行，避免 user 短暂故障拖死 AI 流水线
-		log.Warnf("problemHasOrgSubmitter: org user list unavailable, allow analyze id=%d", problemID)
+		// 拉不到组织名单时保守放行，避免 user 短暂故障拖死流水线
+		log.Warnf("problemHasOrgSubmitter: org user list unavailable, allow id=%d", problemID)
 		return true
 	}
 	if len(orgUsers) == 0 {
@@ -48,6 +48,11 @@ func (uc *ProblemUseCase) problemHasOrgSubmitter(problemID uint) bool {
 		return true
 	}
 	return n > 0
+}
+
+// shouldEnqueueFetch 是否入队爬题面：仅近窗有组织用户提交时爬。
+func (uc *ProblemUseCase) shouldEnqueueFetch(problemID uint) bool {
+	return uc.problemHasOrgSubmitter(problemID)
 }
 
 func (uc *ProblemUseCase) nonPublicOrgUserIDs() (map[int64]struct{}, bool) {

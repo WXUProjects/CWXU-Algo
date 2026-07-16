@@ -25,23 +25,23 @@ import (
 
 func NewWhiteListMatcher() selector.MatchFunc {
 	whiteList := map[string]string{
-		"/api.user.v1.Auth/Login":               "",
-		"/api.user.v1.Auth/Register":            "",
-		"/api.user.v1.Auth/SendCode":            "",
-		"/api.user.v1.Auth/ResetPassword":       "",
-		"/api.user.v1.Profile/GetById":          "",
-		"/api.user.v1.Profile/GetByName":        "",
-		"/api.user.v1.Profile/GetList":          "",
-		"/api.user.v1.Profile/GetUserIdsByGroup": "",
-		"/api.user.v1.Profile/GetUserIdsByOrg":          "",
-		"/api.user.v1.Profile/GetNonPublicOrgUserIds":   "",
-		"/api.user.v1.Profile/GetByIds":                 "",
-		"/api.user.v1.Profile/GetSyncPolicies":          "",
-		"/api.user.v1.role.Role/List":            "",
-		"/api.user.group.Group/Get":             "",
-		"/api.user.group.Group/List":             "",
-		"/api.user.v1.site.Site/GetConfig":  "",
-		"/api.user.v1.site.Site/VisitPing":  "",
+		"/api.user.v1.Auth/Login":                     "",
+		"/api.user.v1.Auth/Register":                  "",
+		"/api.user.v1.Auth/SendCode":                  "",
+		"/api.user.v1.Auth/ResetPassword":             "",
+		"/api.user.v1.Profile/GetById":                "",
+		"/api.user.v1.Profile/GetByName":              "",
+		"/api.user.v1.Profile/GetList":                "",
+		"/api.user.v1.Profile/GetUserIdsByGroup":      "",
+		"/api.user.v1.Profile/GetUserIdsByOrg":        "",
+		"/api.user.v1.Profile/GetNonPublicOrgUserIds": "",
+		"/api.user.v1.Profile/GetByIds":               "",
+		"/api.user.v1.Profile/GetSyncPolicies":        "",
+		"/api.user.v1.role.Role/List":                 "",
+		"/api.user.group.Group/Get":                   "",
+		"/api.user.group.Group/List":                  "",
+		"/api.user.v1.site.Site/GetConfig":            "",
+		"/api.user.v1.site.Site/VisitPing":            "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		log.Info(operation)
@@ -79,6 +79,9 @@ func NewHTTPServer(
 			recovery.Recovery(),
 			opsmetrics.Middleware(d.RDB, "user"),
 			selector.Server(jwt.Server(func(token *jwt2.Token) (interface{}, error) {
+				if token.Method != jwt2.SigningMethodHS256 {
+					return nil, jwt2.ErrSignatureInvalid
+				}
 				return []byte(_const.JWTSecret()), nil
 			})).Match(NewWhiteListMatcher()).Build(),
 		),

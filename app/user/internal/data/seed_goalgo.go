@@ -2,7 +2,6 @@ package data
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -20,12 +19,8 @@ func randomInviteCode() string {
 	return hex.EncodeToString(b)
 }
 
-func sha256Hex(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])
-}
-
-// seedGoAlgoFramework 公共域、全员入域、admin、站点标题、旧 role 迁移
+// seedGoAlgoFramework 公共域、全员入域、站点标题、旧 role 迁移。
+// 管理员必须通过显式运维流程创建，启动时绝不创建弱口令账号或自动提权。
 func seedGoAlgoFramework(db *gorm.DB) {
 	// 1. 公共域
 	var public model.Org
@@ -128,40 +123,7 @@ func seedGoAlgoFramework(db *gorm.DB) {
 		}
 	}
 
-	// 4. admin 账户
-	var adminCount int64
-	db.Model(&model.User{}).Where("username = ?", "admin").Count(&adminCount)
-	if adminCount == 0 {
-		admin := model.User{
-			Username:     "admin",
-			Password:     sha256Hex("admin"),
-			Name:         "站点管理员",
-			Email:        "admin@goalgo.local",
-			RoleID:       1,
-			IsSiteAdmin:        true,
-			CurrentOrgID:       public.ID,
-			EmailEnabled:       false,
-			EmailWeeklyEnabled: false,
-		}
-		if e := db.Create(&admin).Error; e != nil {
-			log.Errorf("seed admin user: %v", e)
-		} else {
-			_ = db.Create(&model.OrgMember{
-				OrgID:    public.ID,
-				UserID:   admin.ID,
-				Role:     model.OrgRoleMember,
-				JoinedAt: now,
-			}).Error
-			log.Warnf("seeded default admin/admin — change password in production")
-		}
-	} else {
-		_ = db.Model(&model.User{}).Where("username = ?", "admin").Updates(map[string]interface{}{
-			"is_site_admin": true,
-			"role_id":       1,
-		}).Error
-	}
-
-	// 5. 站点标题默认 GoAlgo
+	// 4. 站点标题默认 GoAlgo
 	var sc model.SiteConfig
 	if e := db.First(&sc, 1).Error; e == gorm.ErrRecordNotFound {
 		_ = db.Create(&model.SiteConfig{ID: 1, SiteTitle: "GoAlgo"}).Error
@@ -169,7 +131,7 @@ func seedGoAlgoFramework(db *gorm.DB) {
 		_ = db.Model(&model.SiteConfig{}).Where("id = ?", 1).Update("site_title", "GoAlgo").Error
 	}
 
-	// 6. 无有效 group_id 的用户 → 挂到其 current_org 的默认分组，否则公共域默认分组
+	// 5. 无有效 group_id 的用户 → 挂到其 current_org 的默认分组，否则公共域默认分组
 	var pubDef model.Group
 	if db.Where("org_id = ? AND name IN ?", public.ID, []string{model.DefaultGroupName, "未分组"}).
 		Order("id ASC").First(&pubDef).Error != nil {

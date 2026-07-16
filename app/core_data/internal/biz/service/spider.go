@@ -26,11 +26,17 @@ func NewSpiderUseCase(data *data.Data, problem *ProblemUseCase) *SpiderUseCase {
 	}
 }
 
+// loadDataTimeout 单用户整次爬取上限，防止某平台挂死占满 worker 导致 spider 队列堆积
+const loadDataTimeout = 8 * time.Minute
+
 // LoadData 加载数据。platform 非空时只抓该平台；空则抓全部已绑定平台。
 // 无绑定平台时成功返回；有平台且全部失败则返回 error（consumer 可重试）。
 func (uc *SpiderUseCase) LoadData(userId int64, needAll bool, platform string) error {
 	// 无论如何，函数退出前一定删缓存
 	defer uc.invalidateCache(userId)
+
+	ctx, cancel := context.WithTimeout(context.Background(), loadDataTimeout)
+	defer cancel()
 
 	var platforms []model.Platform
 	q := uc.data.DB.Where("user_id = ?", userId)
@@ -47,6 +53,9 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool, platform string) e
 	var failCount int
 	var lastErr error
 	for _, plat := range platforms {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("load data timeout user=%d after partial: %w", userId, err)
+		}
 		if err := uc.loadOnePlatform(userId, plat, needAll); err != nil {
 			failCount++
 			lastErr = err
@@ -115,8 +124,11 @@ func (uc *SpiderUseCase) fetchAndSaveContest(userId int64, plat model.Platform, 
 }
 
 func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, needAll bool) error {
-	// 限制最大重试次数
-	maxRetries := 12
+	// needAll 全量：最多 3 次（原先 12 次会把 worker 占死、队列堆积）
+	maxRetries := 1
+	if needAll {
+		maxRetries = 3
+	}
 	for i := 0; i < maxRetries; i++ {
 		err := uc.fetchAndSave(userId, plat, needAll)
 		if contestErr := uc.fetchAndSaveContest(userId, plat, needAll); contestErr != nil {
@@ -147,19 +159,11 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 			maxRetries,
 			err,
 		)
-		// needAll=false，不重试
-		if !needAll {
+		if !needAll || i+1 >= maxRetries {
 			return err
 		}
-		// needAll=true，重试最多12次
-		time.Sleep(5 * time.Second)
+		time.Sleep(3 * time.Second)
 	}
-	log.Errorf(
-		"Spider: %s %s 达到最大重试次数 %d",
-		plat.Platform,
-		plat.Username,
-		maxRetries,
-	)
 	return fmt.Errorf("platform %s max retries exceeded", plat.Platform)
 }
 func (uc *SpiderUseCase) invalidateCache(userId int64) {

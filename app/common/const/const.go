@@ -1,26 +1,25 @@
 package _const
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"sync"
 )
-
-const defaultJWTSecret = "CwxuAlgo-JWT"
 
 var (
 	jwtSecretOnce sync.Once
 	jwtSecret     string
 )
 
-// JWTSecret 优先读环境变量 CWXU_JWT_SECRET，未设置时回退默认值（兼容现网）。
+// JWTSecret returns the deployment JWT secret. Authentication must fail closed:
+// silently falling back to a public value would allow anyone to forge tokens.
 func JWTSecret() string {
 	jwtSecretOnce.Do(func() {
-		if v := strings.TrimSpace(os.Getenv("CWXU_JWT_SECRET")); v != "" {
-			jwtSecret = v
-			return
+		jwtSecret = strings.TrimSpace(os.Getenv("CWXU_JWT_SECRET"))
+		if len(jwtSecret) < 32 {
+			panic(fmt.Sprintf("CWXU_JWT_SECRET must be configured with at least 32 characters (got %d)", len(jwtSecret)))
 		}
-		jwtSecret = defaultJWTSecret
 	})
 	return jwtSecret
 }

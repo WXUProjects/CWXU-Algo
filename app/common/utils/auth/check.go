@@ -2,17 +2,18 @@ package auth
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"strings"
 
+	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/common/permission"
 
 	"github.com/go-kratos/kratos/v2/transport"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // JwtPayload JWT 载荷
 type JwtPayload struct {
+	jwt.RegisteredClaims
 	UserID      uint   `json:"userId"`
 	Username    string `json:"username"`
 	Name        string `json:"name"`
@@ -23,39 +24,44 @@ type JwtPayload struct {
 	OrgRole     string `json:"orgRole"` // member | coach | captain | org_admin
 }
 
-func praseJwtToken(ctx context.Context) string {
+func parseJWTToken(ctx context.Context) string {
 	header, _ := transport.FromServerContext(ctx)
 	if header == nil {
 		return ""
 	}
-	auths := strings.SplitN(header.RequestHeader().Get("Authorization"), " ", 2)
-	if len(auths) < 2 {
+	auths := strings.Fields(header.RequestHeader().Get("Authorization"))
+	if len(auths) != 2 || !strings.EqualFold(auths[0], "Bearer") {
 		return ""
 	}
 	return auths[1]
 }
 
 func parsePayload(ctx context.Context) *JwtPayload {
-	parts := strings.Split(praseJwtToken(ctx), ".")
-	if len(parts) != 3 {
+	tokenString := parseJWTToken(ctx)
+	if tokenString == "" {
 		return nil
 	}
-	payloadBase64 := parts[1]
-	dstLen := base64.RawURLEncoding.DecodedLen(len(payloadBase64))
-	dst := make([]byte, dstLen)
-	_, err := base64.RawURLEncoding.Decode(dst, []byte(payloadBase64))
-	if err != nil {
-		return nil
-	}
-	pd := JwtPayload{}
-	if err := json.Unmarshal(dst, &pd); err != nil {
+	pd := &JwtPayload{}
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		pd,
+		func(token *jwt.Token) (interface{}, error) {
+			if token.Method != jwt.SigningMethodHS256 {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return []byte(_const.JWTSecret()), nil
+		},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+	)
+	if err != nil || !token.Valid || pd.UserID == 0 {
 		return nil
 	}
 	// 兼容：旧 token 无 isSiteAdmin 时用 roleId==1
 	if !pd.IsSiteAdmin && pd.RoleID == permission.RoleAdmin {
 		pd.IsSiteAdmin = true
 	}
-	return &pd
+	return pd
 }
 
 // VerifyMinRole 兼容旧权限序

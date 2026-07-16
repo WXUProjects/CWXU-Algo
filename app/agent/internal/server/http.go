@@ -5,12 +5,15 @@ import (
 	"cwxu-algo/app/agent/internal/data"
 	"cwxu-algo/app/agent/internal/service"
 	"cwxu-algo/app/common/conf"
+	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/common/opsmetrics"
 	"cwxu-algo/app/common/utils/health"
 
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/go-kratos/kratos/v2/middleware/auth/jwt"
 	"github.com/go-kratos/kratos/v2/middleware/recovery"
 	"github.com/go-kratos/kratos/v2/transport/http"
+	jwt2 "github.com/golang-jwt/jwt/v5"
 )
 
 // NewHTTPServer new an HTTP server.
@@ -19,6 +22,12 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, summaryServi
 		http.Middleware(
 			recovery.Recovery(),
 			opsmetrics.Middleware(d.RDB, "agent"),
+			jwt.Server(func(token *jwt2.Token) (interface{}, error) {
+				if token.Method != jwt2.SigningMethodHS256 {
+					return nil, jwt2.ErrSignatureInvalid
+				}
+				return []byte(_const.JWTSecret()), nil
+			}),
 		),
 	}
 	if c.Http.Network != "" {

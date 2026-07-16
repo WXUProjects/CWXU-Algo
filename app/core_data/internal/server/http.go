@@ -26,21 +26,21 @@ import (
 
 func NewWhiteListMatcher() selector.MatchFunc {
 	whiteList := map[string]string{
-		"/api.core.v1.submit_log.Submit/GetSubmitLog":         "",
-		"/api.core.v1.contest_log.Contest/GetContestList":     "",
-		"/api.core.v1.contest_log.Contest/GetContestRanking":  "",
-		"/api.core.v1.spider.Spider/GetSpider":                "",
-		"/api.core.v1.statistic.Statistic/Heatmap":            "",
-		"/api.core.v1.statistic.Statistic/PeriodCount":        "",
-		"/api.core.v1.statistic.Statistic/Rank":               "",
-		"/api.core.v1.bulletin.Bulletin/Get":                  "",
-		"/api.core.v1.bulletin.Bulletin/List":                 "",
-		"/api.core.v1.emergency.Emergency/Active":             "",
-		"/api.core.v1.problem.Problem/List":                   "",
-		"/api.core.v1.problem.Problem/ListTags":               "",
-		"/api.core.v1.problem.Problem/Get":                    "",
-		"/api.core.v1.problem.Problem/ListSubmissions":        "",
-		"/api.core.v1.problem.Problem/UserProfile":            "",
+		"/api.core.v1.submit_log.Submit/GetSubmitLog":        "",
+		"/api.core.v1.contest_log.Contest/GetContestList":    "",
+		"/api.core.v1.contest_log.Contest/GetContestRanking": "",
+		"/api.core.v1.spider.Spider/GetSpider":               "",
+		"/api.core.v1.statistic.Statistic/Heatmap":           "",
+		"/api.core.v1.statistic.Statistic/PeriodCount":       "",
+		"/api.core.v1.statistic.Statistic/Rank":              "",
+		"/api.core.v1.bulletin.Bulletin/Get":                 "",
+		"/api.core.v1.bulletin.Bulletin/List":                "",
+		"/api.core.v1.emergency.Emergency/Active":            "",
+		"/api.core.v1.problem.Problem/List":                  "",
+		"/api.core.v1.problem.Problem/ListTags":              "",
+		"/api.core.v1.problem.Problem/Get":                   "",
+		"/api.core.v1.problem.Problem/ListSubmissions":       "",
+		"/api.core.v1.problem.Problem/UserProfile":           "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		//log.Info(operation)
@@ -58,6 +58,9 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 			recovery.Recovery(),
 			opsmetrics.Middleware(d.RDB, "core"),
 			selector.Server(jwt.Server(func(token *jwt2.Token) (interface{}, error) {
+				if token.Method != jwt2.SigningMethodHS256 {
+					return nil, jwt2.ErrSignatureInvalid
+				}
 				return []byte(_const.JWTSecret()), nil
 			})).Match(NewWhiteListMatcher()).Build(),
 		),

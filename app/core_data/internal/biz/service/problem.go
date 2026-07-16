@@ -133,8 +133,12 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*m
 		prio = mqPriorityIncremental
 	}
 
-	// 新题且可爬 → 仅入队抓题面（AI 在爬取成功后按 6 个月窗口决定）
-	if isNew && !parsed.SkipFetch && existing.Status == model.ProblemStatusPending {
+	// 题面爬取：仅近窗有组织用户提交才入队（公共域/散户只入库，前端「题面准备中」）
+	// AI：enqueueAnalyzePrio 内统一闸门
+	allowFetch := !parsed.SkipFetch && uc.shouldEnqueueFetch(existing.ID)
+
+	// 新题且可爬
+	if isNew && allowFetch && existing.Status == model.ProblemStatusPending {
 		if err := uc.enqueueFetchPrio(existing.ID, existing.Platform, existing.ExternalID, existing.URL, prio); err != nil {
 			log.Errorf("enqueue problem %d: %v", existing.ID, err)
 		}
@@ -145,18 +149,17 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*m
 		existing.Status = model.ProblemStatusFailedPerm
 	}
 
-	// 已存在但题面未完成：补入队；FAILED_PERM 永不重试
-	// 题面：始终可补爬；AI：仅近 6 个月（enqueueAnalyzePrio 内统一拦截）
-	// 已 COMPLETED：不入队
+	// 已存在但题面未完成：补入队；FAILED_PERM 永不重试；已 COMPLETED：不入队
 	if !isNew && !parsed.SkipFetch {
 		switch existing.Status {
 		case model.ProblemStatusPending, model.ProblemStatusFailed:
 			if strings.TrimSpace(existing.ContentMD) == "" {
-				if err := uc.enqueueFetchPrio(existing.ID, existing.Platform, existing.ExternalID, existing.URL, prio); err != nil {
-					log.Errorf("re-enqueue fetch problem %d: %v", existing.ID, err)
+				if allowFetch {
+					if err := uc.enqueueFetchPrio(existing.ID, existing.Platform, existing.ExternalID, existing.URL, prio); err != nil {
+						log.Errorf("re-enqueue fetch problem %d: %v", existing.ID, err)
+					}
 				}
 			} else {
-				// 有题面未分析完 → 尝试分析队列（超 6 月会被丢弃）
 				_ = uc.data.DB.Model(&existing).Update("status", model.ProblemStatusTagging).Error
 				if err := uc.enqueueAnalyzePrio(existing.ID, prio); err != nil {
 					log.Errorf("re-enqueue analyze problem %d: %v", existing.ID, err)
@@ -167,8 +170,7 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*m
 				if err := uc.enqueueAnalyzePrio(existing.ID, prio); err != nil {
 					log.Errorf("re-enqueue analyze problem %d: %v", existing.ID, err)
 				}
-			} else {
-				// 无题面却标 TAGGING：补爬
+			} else if allowFetch {
 				if err := uc.enqueueFetchPrio(existing.ID, existing.Platform, existing.ExternalID, existing.URL, prio); err != nil {
 					log.Errorf("re-enqueue fetch problem %d: %v", existing.ID, err)
 				}
@@ -275,6 +277,17 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	defer pipelineControl.TrackEnd("fetch", p.ID)
 	// 已识别完成：跳过
 	if p.Status == model.ProblemStatusCompleted {
+		return nil
+	}
+	// 仅公共域/散户提交：不爬题面（旧消息防御；前端显示「题面准备中」）
+	if !uc.shouldEnqueueFetch(p.ID) {
+		log.Infof("ProcessFetch skip public-only submitters id=%d", p.ID)
+		if strings.TrimSpace(p.ContentMD) == "" && p.Status != model.ProblemStatusSkipped {
+			_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+				"status":    model.ProblemStatusPending,
+				"error_msg": "仅公共域/散户提交，暂不爬取题面",
+			}).Error
+		}
 		return nil
 	}
 	// 已有题面：不再爬取；入 AI 由 enqueueAnalyze 统一闸门（窗口 + 组织用户）
@@ -494,8 +507,8 @@ func sqlHasRecentSubmit(cutoff time.Time) (clause string, args []interface{}) {
 
 // Backfill 增量回填（近 6 个月提交）：
 // 1) 绑定未关联提交
-// 2) 无题面 → 入爬取队列（bulk 优先级；公共域-only 历史也爬题面）
-// 3) 有题面且未分析完 → 入分析队列（enqueueAnalyzePrio 会跳过纯公共域/散户）
+// 2) 无题面且有组织用户提交 → 入爬取；纯公共域/散户不爬
+// 3) 有题面且未分析完 → 入分析（enqueueAnalyzePrio 跳过纯公共域）
 // 不清空 MQ（与 ResetQueues 区分）
 func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued, enqueuedFetch, enqueuedAnalyze int64, err error) {
 	if limit <= 0 {
@@ -561,8 +574,11 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 			continue
 		}
 		seen[p.ID] = true
+		if !uc.problemHasOrgSubmitter(p.ID) {
+			// 公共域/散户：只入库，不爬题面、不 AI
+			continue
+		}
 		if strings.TrimSpace(p.ContentMD) == "" {
-			// 公共域-only 历史也爬题面
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 				Updates(map[string]interface{}{
 					"status":           model.ProblemStatusPending,
@@ -576,10 +592,7 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 			}
 			continue
 		}
-		// 有题面：仅近窗有组织用户提交才入 AI；纯公共域/散户跳过
-		if !uc.problemHasOrgSubmitter(p.ID) {
-			continue
-		}
+		// 有题面：入 AI
 		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 			Updates(map[string]interface{}{
 				"status":    model.ProblemStatusTagging,
@@ -609,7 +622,7 @@ func (uc *ProblemUseCase) ResetQueues() (purgedFetch, purgedAnalyze, enqueuedFet
 		err = e
 	}
 
-	// 待爬取：PENDING / FETCHING（卡住的 FETCHING 一并重入）
+	// 待爬取：PENDING / FETCHING；仅有组织用户提交的题才重灌
 	var fetchTodos []model.Problem
 	_ = uc.data.DB.Where("platform != ?", spider.LeetCode).
 		Where("status IN ?", []string{model.ProblemStatusPending, model.ProblemStatusFetching}).
@@ -617,6 +630,9 @@ func (uc *ProblemUseCase) ResetQueues() (purgedFetch, purgedAnalyze, enqueuedFet
 		Order("last_submitted_at DESC NULLS LAST, id DESC").
 		Find(&fetchTodos).Error
 	for _, p := range fetchTodos {
+		if !uc.shouldEnqueueFetch(p.ID) {
+			continue
+		}
 		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 			Update("status", model.ProblemStatusPending).Error
 		if e := uc.enqueueFetchPrio(p.ID, p.Platform, p.ExternalID, p.URL, mqPriorityBulk); e == nil {
