@@ -843,8 +843,16 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 	if err := q.Count(&total).Error; err != nil {
 		return nil, nil, 0, err
 	}
-	// 固定：最近提交降序（不再提供其它排序）
-	order := "last_submitted_at DESC NULLS LAST, id DESC"
+	// 无题面 / 无标签 → 靠后；有题面且有标签 → 按最近提交正常排序
+	// （公共域-only 入库无题面时前端仍可见，但不抢前排）
+	order := `
+		CASE
+			WHEN content_md IS NULL OR btrim(content_md) = '' THEN 2
+			WHEN tags IS NULL OR btrim(tags::text) IN ('', '[]', 'null') THEN 1
+			ELSE 0
+		END ASC,
+		last_submitted_at DESC NULLS LAST,
+		id DESC`
 	var list []model.Problem
 	err := q.Order(order).Offset(int((f.Page - 1) * f.PageSize)).Limit(int(f.PageSize)).Find(&list).Error
 	if err != nil {
