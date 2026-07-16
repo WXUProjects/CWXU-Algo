@@ -73,16 +73,23 @@ func (t *CronTask) runCalendarNotify() {
 		return
 	}
 
-	// platform -> []sub, calendarID -> []sub
+	// platform / contest（仅 enabled=true）；contest enabled=false 为静默，覆盖平台
 	byPlatform := make(map[string][]model.ContestCalendarSub)
-	byContest := make(map[uint][]model.ContestCalendarSub)
-	userIDs := make(map[int64]struct{})
+	byContestOn := make(map[uint][]model.ContestCalendarSub)
+	muted := make(map[string]struct{}) // "userID:calendarID"
+	muteRows, muteErr := t.calDal().ListMutedContestSubs()
+	if muteErr != nil {
+		log.Warnf("CronTask calendar notify list mutes: %v", muteErr)
+	} else {
+		for _, m := range muteRows {
+			muted[fmt.Sprintf("%d:%d", m.UserID, m.CalendarID)] = struct{}{}
+		}
+	}
 	for _, s := range subs {
-		userIDs[s.UserID] = struct{}{}
 		if s.Scope == model.CalScopePlatform {
 			byPlatform[s.Platform] = append(byPlatform[s.Platform], s)
 		} else if s.Scope == model.CalScopeContest && s.CalendarID > 0 {
-			byContest[s.CalendarID] = append(byContest[s.CalendarID], s)
+			byContestOn[s.CalendarID] = append(byContestOn[s.CalendarID], s)
 		}
 	}
 
@@ -99,12 +106,18 @@ func (t *CronTask) runCalendarNotify() {
 	skipped := 0
 	const batchLimit = 200
 	for _, c := range contests {
+		// 先 contest 再 platform；同用户同 advance 只发一封（时间重复去重）
 		matched := make([]model.ContestCalendarSub, 0, 8)
+		matched = append(matched, byContestOn[c.ID]...)
 		matched = append(matched, byPlatform[c.Platform]...)
-		matched = append(matched, byContest[c.ID]...)
-		// 去重：同一用户同一 advance 只处理一次
+		// 去重：同一用户同一 advance 只处理一次；contest 优先（先入 matched）
 		seen := map[string]struct{}{}
 		for _, sub := range matched {
+			// contest 静默覆盖平台：本场该用户不提醒
+			if _, ok := muted[fmt.Sprintf("%d:%d", sub.UserID, c.ID)]; ok {
+				skipped++
+				continue
+			}
 			key := fmt.Sprintf("%d:%d", sub.UserID, sub.AdvanceMinutes)
 			if _, ok := seen[key]; ok {
 				continue
@@ -159,7 +172,6 @@ func (t *CronTask) runCalendarNotify() {
 	if sent > 0 || skipped > 0 {
 		log.Infof("CronTask calendar notify: sent=%d skipped=%d contests=%d", sent, skipped, len(contests))
 	}
-	_ = userIDs
 }
 
 func (t *CronTask) lookupEmail(userID int64) string {

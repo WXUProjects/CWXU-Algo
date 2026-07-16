@@ -27,7 +27,7 @@ type ContestCalendarSub struct {
 	Scope          string    `gorm:"size:16;not null;uniqueIndex:idx_cal_sub_key,priority:2;comment:platform|contest"`
 	Platform       string    `gorm:"size:32;not null;uniqueIndex:idx_cal_sub_key,priority:3;index"`
 	CalendarID     uint      `gorm:"not null;uniqueIndex:idx_cal_sub_key,priority:4;default:0;comment:scope=contest时指向日历行"`
-	AdvanceMinutes int       `gorm:"not null;default:1440;comment:提前分钟数"`
+	AdvanceMinutes int       `gorm:"not null;default:360;comment:提前分钟数（默认6小时）"`
 	Enabled        bool      `gorm:"not null;default:true"`
 	CreatedAt      time.Time
 	UpdatedAt      time.Time

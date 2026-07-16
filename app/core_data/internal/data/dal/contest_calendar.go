@@ -212,10 +212,18 @@ func (d *ContestCalendarDal) DeleteSub(userID int64, scope, platform string, cal
 	return q.Delete(&model.ContestCalendarSub{}).Error
 }
 
-// ListEnabledSubs 通知扫描用
+// ListEnabledSubs 通知扫描用（enabled=true）
 func (d *ContestCalendarDal) ListEnabledSubs() ([]model.ContestCalendarSub, error) {
 	var list []model.ContestCalendarSub
 	err := d.db.Where("enabled = ?", true).Find(&list).Error
+	return list, err
+}
+
+// ListMutedContestSubs 本场静默：scope=contest 且 enabled=false，覆盖平台订阅
+func (d *ContestCalendarDal) ListMutedContestSubs() ([]model.ContestCalendarSub, error) {
+	var list []model.ContestCalendarSub
+	err := d.db.Where("scope = ? AND enabled = ? AND calendar_id > 0", model.CalScopeContest, false).
+		Find(&list).Error
 	return list, err
 }
 

@@ -67,19 +67,24 @@ func (s *ContestCalendarService) ListCalendar(ctx context.Context, req *contest_
 		return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
 	}
 
-	// 登录用户：标记是否已订阅（平台或单场）
+	// 登录用户：标记是否已订阅（平台或单场）。
+	// contest enabled=false 视为本场静默，覆盖平台订阅。
 	subPlatforms := map[string]bool{}
-	subContests := map[uint]bool{}
+	subContestsOn := map[uint]bool{}
+	subContestsMuted := map[uint]bool{}
 	if user := auth.GetCurrentUser(ctx); user != nil {
 		if subs, err := s.dal.ListSubsByUser(int64(user.UserID)); err == nil {
 			for _, sub := range subs {
-				if !sub.Enabled {
-					continue
-				}
 				if sub.Scope == model.CalScopePlatform {
-					subPlatforms[sub.Platform] = true
+					if sub.Enabled {
+						subPlatforms[sub.Platform] = true
+					}
 				} else if sub.Scope == model.CalScopeContest {
-					subContests[sub.CalendarID] = true
+					if sub.Enabled {
+						subContestsOn[sub.CalendarID] = true
+					} else {
+						subContestsMuted[sub.CalendarID] = true
+					}
 				}
 			}
 		}
@@ -88,7 +93,14 @@ func (s *ContestCalendarService) ListCalendar(ctx context.Context, req *contest_
 	items := make([]*contest_calendar.CalendarItem, 0, len(list))
 	for i := range list {
 		m := &list[i]
-		subbed := subContests[m.ID] || subPlatforms[m.Platform]
+		subbed := false
+		if subContestsMuted[m.ID] {
+			subbed = false
+		} else if subContestsOn[m.ID] {
+			subbed = true
+		} else if subPlatforms[m.Platform] {
+			subbed = true
+		}
 		items = append(items, s.toItem(m, subbed))
 	}
 	return &contest_calendar.ListCalendarRes{
@@ -166,7 +178,7 @@ func (s *ContestCalendarService) UpsertSub(ctx context.Context, req *contest_cal
 	}
 	adv := int(req.GetAdvanceMinutes())
 	if adv <= 0 {
-		adv = 1440
+		adv = 360 // 默认提前 6 小时
 	}
 	if !model.ValidCalendarAdvance(adv) {
 		return &contest_calendar.UpsertSubRes{Code: 3, Message: "提前时间不在允许范围内"}, nil
