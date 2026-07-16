@@ -39,12 +39,12 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, ai
 		return nil, nil, err
 	}
 	client := data.NewDataRDB(dataData)
-	spiderTask := task.NewSpiderTask(rabbitMQ, client)
+	db := data.NewDataDB(dataData)
+	spiderTask := task.NewSpiderTask(rabbitMQ, client, db)
 	spiderService := service.NewSpiderService(dataData, spiderTask)
 	spiderDal := dal.NewSpiderDal(dataData)
 	register := discovery.NewConsulRegister(confServer)
 	submitLogService := service.NewSubmitLogService(spiderDal, dataData, register)
-	db := data.NewDataDB(dataData)
 	statisticDal := dal.NewStatisticDal(db, client)
 	statisticUseCase := service2.NewStatisticUseCase(statisticDal, client, register)
 	statisticService := service.NewStatistic(statisticUseCase)

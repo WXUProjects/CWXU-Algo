@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"cwxu-algo/app/common/event"
+	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spidermetrics"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
 	"github.com/streadway/amqp"
+	"gorm.io/gorm"
 )
 
 const (
@@ -25,12 +27,13 @@ const (
 type SpiderTask struct {
 	mq  *event.RabbitMQ
 	rdb *redis.Client
+	db  *gorm.DB
 	// queueReady 避免每次入队都 QueueDeclare（50 用户 cron 高频时省 RTT）
 	queueReady atomic.Bool
 }
 
-func NewSpiderTask(mq *event.RabbitMQ, rdb *redis.Client) *SpiderTask {
-	return &SpiderTask{mq: mq, rdb: rdb}
+func NewSpiderTask(mq *event.RabbitMQ, rdb *redis.Client, db *gorm.DB) *SpiderTask {
+	return &SpiderTask{mq: mq, rdb: rdb, db: db}
 }
 
 func (t *SpiderTask) ensureSpiderQueue() error {
@@ -58,14 +61,40 @@ func InflightKey(userId int64, platform string) string {
 	return fmt.Sprintf("spider:inflight:%d:%s", userId, platform)
 }
 
-// Do 入队全平台爬虫任务。同 user 全量任务在 pending/inflight 窗口内去重。
+// Do 为该用户每个已绑定平台各入队一条消息（一条消息 = 一个平台请求）。
 func (t *SpiderTask) Do(userId int64, needAll bool) {
-	t.DoPlatform(userId, "", needAll)
+	plats := t.listUserPlatforms(userId)
+	if len(plats) == 0 {
+		log.Debugf("SpiderTask: Do skip user=%d (no platform binding)", userId)
+		return
+	}
+	for _, p := range plats {
+		t.DoPlatform(userId, p, needAll)
+	}
 }
 
-// DoPlatform 入队爬虫任务；platform 非空时只抓该平台。
+// listUserPlatforms 查用户已绑定 OJ 平台名
+func (t *SpiderTask) listUserPlatforms(userId int64) []string {
+	if t.db == nil || userId <= 0 {
+		return nil
+	}
+	var names []string
+	if err := t.db.Model(&model.Platform{}).
+		Where("user_id = ?", userId).
+		Pluck("platform", &names).Error; err != nil {
+		log.Warnf("SpiderTask: list platforms user=%d: %v", userId, err)
+		return nil
+	}
+	return names
+}
+
+// DoPlatform 入队单平台爬虫任务（platform 必须非空；空则按 Do 展开）。
 // 去重：inflight 存在则跳过；pending 用 SetNX 原子占坑（多实例/并发安全）。
 func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) {
+	if platform == "" {
+		t.Do(userId, needAll)
+		return
+	}
 	if t.mq == nil {
 		log.Errorf("SpiderTask: mq not ready")
 		return
@@ -183,21 +212,57 @@ func CurrentGeneration(rdb *redis.Client, userId int64, platform string) int64 {
 	return v
 }
 
-// DoBatch 将全部用户尽快入队 MQ（背压交给 RabbitMQ + consumer Qos）。
-// batchSize / interval 保留参数兼容旧调用，已忽略（不再人工削峰）。
+// DoBatch 为给定用户的每个绑定平台各入队一条消息（一次 Publish = 一个平台）。
+// batchSize / interval 保留兼容，已忽略。
 // ctx 取消时提前结束（进程停机）。
 func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool, _ int, _ time.Duration) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	for i, uid := range userIds {
+	if len(userIds) == 0 {
+		return
+	}
+	// 一次查出所有绑定，避免 per-user 查库
+	type bind struct {
+		UserID   int64  `gorm:"column:user_id"`
+		Platform string `gorm:"column:platform"`
+	}
+	var binds []bind
+	if t.db != nil {
+		q := t.db.Model(&model.Platform{}).Select("user_id, platform")
+		if len(userIds) == 1 {
+			q = q.Where("user_id = ?", userIds[0])
+		} else {
+			q = q.Where("user_id IN ?", userIds)
+		}
+		if err := q.Find(&binds).Error; err != nil {
+			log.Errorf("SpiderTask: DoBatch list platforms: %v", err)
+			// 回退 per-user
+			for i, uid := range userIds {
+				select {
+				case <-ctx.Done():
+					log.Warnf("SpiderTask: DoBatch cancelled at user %d/%d", i, len(userIds))
+					return
+				default:
+				}
+				t.Do(uid, needAll)
+			}
+			return
+		}
+	}
+	n := 0
+	for i, b := range binds {
 		select {
 		case <-ctx.Done():
-			log.Warnf("SpiderTask: DoBatch cancelled at %d/%d", i, len(userIds))
+			log.Warnf("SpiderTask: DoBatch cancelled at bind %d/%d", i, len(binds))
 			return
 		default:
 		}
-		t.Do(uid, needAll)
+		if b.Platform == "" {
+			continue
+		}
+		t.DoPlatform(b.UserID, b.Platform, needAll)
+		n++
 	}
-	log.Infof("SpiderTask: DoBatch enqueued %d users needAll=%v", len(userIds), needAll)
+	log.Infof("SpiderTask: DoBatch enqueued %d platform jobs for %d users needAll=%v", n, len(userIds), needAll)
 }
