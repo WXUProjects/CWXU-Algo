@@ -179,12 +179,39 @@ func (t *CronTask) fetchPolicies(userIds []int64) map[int64]UserSyncPolicy {
 	return out
 }
 
-func lastKey(kind string, userId int64) string {
-	return fmt.Sprintf("cron:last:%s:%d", kind, userId)
-}
-
 func cronLockKey(kind string) string {
 	return fmt.Sprintf("cron:lock:%s", kind)
+}
+
+// claimPeriodKey 按墙钟周期槽位占坑（同一 interval 周期内 key 固定）
+func claimPeriodKey(kind string, userId int64, periodUnix int64) string {
+	return fmt.Sprintf("cron:claim:%s:%d:%d", kind, userId, periodUnix)
+}
+
+// cronTZ 用户可见间隔对齐时区（与 cron.WithLocation 一致）
+func cronTZ() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.Local
+	}
+	return loc
+}
+
+// intervalPeriodStart 将 now 对齐到「当前间隔周期」起点（墙钟整点网格，非启动时刻）。
+// 以 Asia/Shanghai 的固定原点 2020-01-01 00:00 起，按 interval 分钟切槽：
+// 例如 60 分 → 每小时 :00；5 分 → :00/:05/…；180 分 → 00:00/03:00/06:00…
+func intervalPeriodStart(now time.Time, intervalMin int) time.Time {
+	intervalMin = clampInterval(intervalMin, defaultSpiderIntervalMin)
+	loc := cronTZ()
+	now = now.In(loc)
+	interval := time.Duration(intervalMin) * time.Minute
+	origin := time.Date(2020, 1, 1, 0, 0, 0, 0, loc)
+	if now.Before(origin) {
+		return origin
+	}
+	elapsed := now.Sub(origin)
+	n := elapsed / interval
+	return origin.Add(n * interval)
 }
 
 // tryCronLock 多 core_data 实例下同一 tick 只跑一次（TTL < 调度间隔）
@@ -208,15 +235,23 @@ func (t *CronTask) tryCronLock(kind string, ttl time.Duration) bool {
 	return true
 }
 
-// tryClaim 原子占用本用户本周期：interval 内只入队一次（多实例安全）
-// Redis 故障时跳过，避免 stampede。
+// tryClaim 原子占用本用户「当前墙钟周期」：同一 interval 槽位只入队一次（多实例安全）。
+// 周期从整点网格起算，与服务启动时间无关；Redis 故障时跳过，避免 stampede。
 func (t *CronTask) tryClaim(kind string, userId int64, intervalMin int) bool {
 	intervalMin = clampInterval(intervalMin, defaultSpiderIntervalMin)
 	if t.rdb == nil {
 		return true
 	}
-	ttl := time.Duration(intervalMin) * time.Minute
-	ok, err := t.rdb.SetNX(context.Background(), lastKey(kind, userId), time.Now().Format(time.RFC3339), ttl).Result()
+	now := time.Now()
+	period := intervalPeriodStart(now, intervalMin)
+	next := period.Add(time.Duration(intervalMin) * time.Minute)
+	// TTL 到周期结束 + 1 分钟缓冲，避免边界 tick 重复；下一周期用新 key
+	ttl := time.Until(next) + time.Minute
+	if ttl < time.Minute {
+		ttl = time.Minute
+	}
+	key := claimPeriodKey(kind, userId, period.Unix())
+	ok, err := t.rdb.SetNX(context.Background(), key, period.Format(time.RFC3339), ttl).Result()
 	if err != nil {
 		log.Warnf("CronTask: claim %s user=%d failed, skip: %v", kind, userId, err)
 		return false
@@ -224,12 +259,15 @@ func (t *CronTask) tryClaim(kind string, userId int64, intervalMin int) bool {
 	return ok
 }
 
-// releaseClaim 入队失败时释放周期占用，下个 tick 可重试
-func (t *CronTask) releaseClaim(kind string, userId int64) {
+// releaseClaim 入队失败时释放「当前墙钟周期」占用，同周期内下个 tick 可重试
+func (t *CronTask) releaseClaim(kind string, userId int64, intervalMin int) {
 	if t.rdb == nil {
 		return
 	}
-	if err := t.rdb.Del(context.Background(), lastKey(kind, userId)).Err(); err != nil {
+	intervalMin = clampInterval(intervalMin, defaultSpiderIntervalMin)
+	period := intervalPeriodStart(time.Now(), intervalMin)
+	key := claimPeriodKey(kind, userId, period.Unix())
+	if err := t.rdb.Del(context.Background(), key).Err(); err != nil {
 		log.Warnf("CronTask: release claim %s user=%d: %v", kind, userId, err)
 	}
 }
@@ -260,7 +298,7 @@ func (t *CronTask) runSpiderTick() {
 		}
 		res := t.spider.Do(uid, false)
 		if !res.KeepClaim() {
-			t.releaseClaim("spider", uid)
+			t.releaseClaim("spider", uid, p.SpiderIntervalMin)
 			failedUsers++
 			continue
 		}
@@ -300,7 +338,7 @@ func (t *CronTask) runRecentSummaryTick() {
 		}
 		res := t.summary.Do(uid, "PersonalRecent")
 		if !res.KeepClaim() {
-			t.releaseClaim("summary_recent", uid)
+			t.releaseClaim("summary_recent", uid, p.AISummaryIntervalMin)
 			failed++
 			continue
 		}

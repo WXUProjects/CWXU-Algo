@@ -999,7 +999,35 @@ func fetchQOJ(externalID, problemURL string) (*FetchedContent, error) {
 	if problemURL == "" && externalID != "" {
 		problemURL = "https://qoj.ac/problem/" + externalID
 	}
-	return fetchGeneric(problemURL)
+	if problemURL == "" {
+		return nil, fmt.Errorf("empty url")
+	}
+	resp, err := httpGet(problemURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	// QOJ 403 = 无权限（比赛题/私有题），不可恢复，直接永久失效
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("QOJ 无权限访问题面(403)")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("QOJ status %d", resp.StatusCode)
+	}
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	title := strings.TrimSpace(doc.Find("h1").First().Text())
+	if title == "" {
+		title = strings.TrimSpace(doc.Find("title").Text())
+	}
+	doc.Find("script,style,nav,footer,header").Remove()
+	text := collapseBlankLines(strings.TrimSpace(doc.Find("body").Text()))
+	if text == "" {
+		return nil, fmt.Errorf("empty page")
+	}
+	return &FetchedContent{Title: title, ContentMD: truncate(text, 15000)}, nil
 }
 
 // fetchLeetCode 通过 GraphQL 拉中文题面；付费题无公开 content → 永久错误

@@ -848,11 +848,14 @@ func (uc *ProblemUseCase) markExistingPermanentFailures() int64 {
 		Find(&list).Error
 	var n int64
 	for _, p := range list {
-		if !isPermanentFetchError(p.ErrorMsg) {
+		if !isPermanentFetchError(p.ErrorMsg) && !isQOJFailedForbidden(&p) {
 			continue
 		}
 		if err := uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
-			Update("status", model.ProblemStatusFailedPerm).Error; err == nil {
+			Updates(map[string]interface{}{
+				"status":    model.ProblemStatusFailedPerm,
+				"error_msg": normalizeQOJForbiddenMsg(p.ErrorMsg, p.Platform),
+			}).Error; err == nil {
 			n++
 		}
 	}
@@ -860,6 +863,31 @@ func (uc *ProblemUseCase) markExistingPermanentFailures() int64 {
 		log.Infof("markExistingPermanentFailures: %d → FAILED_PERM", n)
 	}
 	return n
+}
+
+// isQOJFailedForbidden 历史 QOJ 题 error_msg 含 403 / status 403 → 无权限
+func isQOJFailedForbidden(p *model.Problem) bool {
+	if p == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(p.Platform), "QOJ") {
+		return false
+	}
+	msg := p.ErrorMsg
+	return strings.Contains(msg, "status 403") ||
+		strings.Contains(msg, "QOJ 无权限") ||
+		(strings.Contains(msg, "403") && strings.Contains(strings.ToLower(msg), "forbidden"))
+}
+
+func normalizeQOJForbiddenMsg(msg, platform string) string {
+	if strings.EqualFold(strings.TrimSpace(platform), "QOJ") &&
+		(strings.Contains(msg, "status 403") || isQOJForbiddenError(msg)) {
+		return "QOJ 无权限访问题面(403)"
+	}
+	if isPermanentFetchError(msg) {
+		return msg
+	}
+	return msg
 }
 
 type ListProblemFilter struct {
@@ -1522,7 +1550,12 @@ func (uc *ProblemUseCase) handleFetchError(p *model.Problem, err error) error {
 		"error_msg":      msg,
 	}
 
-	if isPermanentFetchError(msg) {
+	// QOJ 403 = 无权限：直接永久失效（即使文案仍是旧的 "status 403"）
+	if isPermanentFetchError(msg) || isQOJFailedForbidden(&model.Problem{Platform: p.Platform, ErrorMsg: msg}) {
+		if isQOJFailedForbidden(&model.Problem{Platform: p.Platform, ErrorMsg: msg}) {
+			msg = "QOJ 无权限访问题面(403)"
+			updates["error_msg"] = msg
+		}
 		st = model.ProblemStatusFailedPerm
 		updates["status"] = st
 		updates["fetch_fail_since"] = nil
@@ -1617,10 +1650,15 @@ func isTransientFetchError(msg string) bool {
 // isPermanentFetchError 不可恢复的爬取错误：不再重试、不再入队（软黑名单 FAILED_PERM）
 // 例如 CF/洛谷/牛客「未找到题面」、无 URL、不支持平台等
 // 注意：WAF/登录墙/Cloudflare/405 等拦截类一律可重试，不进黑名单
+// 例外：QOJ 403 = 无权限（比赛/私有题），直接永久失效
 func isPermanentFetchError(msg string) bool {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
 		return false
+	}
+	// QOJ 无权限：优先判定，避免被通用「status 403」瞬时规则吞掉
+	if isQOJForbiddenError(msg) {
+		return true
 	}
 	if isTransientFetchError(msg) {
 		return false
@@ -1644,6 +1682,22 @@ func isPermanentFetchError(msg string) bool {
 		if strings.Contains(msg, p) {
 			return true
 		}
+	}
+	return false
+}
+
+// isQOJForbiddenError 错误文案本身已标明 QOJ 无权限/403
+func isQOJForbiddenError(msg string) bool {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return false
+	}
+	if strings.Contains(msg, "QOJ 无权限访问题面") {
+		return true
+	}
+	// 带 QOJ 前缀的 status 403（新路径返回 "QOJ status 403" 时的兜底）
+	if strings.Contains(msg, "QOJ") && strings.Contains(msg, "status 403") {
+		return true
 	}
 	return false
 }
