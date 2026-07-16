@@ -202,7 +202,8 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 	var memberIDs []int64
 	queryUserId := req.UserId
 	// schema v6：个人 AC 去重走 user_ac_problem_* 预聚合
-	const periodCacheSchema = "6"
+	// s7：AC TotalRaw 与去重题数不变量（TotalRaw >= Total）
+	const periodCacheSchema = "7"
 	ttl := data2.DefaultCacheTTL
 	var cacheKey string
 

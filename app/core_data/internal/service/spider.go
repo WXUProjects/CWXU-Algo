@@ -227,9 +227,10 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 		}, nil
 	}
 	adminID := int64(auth.GetCurrentUserId(ctx))
-	// 全局锁防双点
+	const purgeLockKey = "ops:purge_submits"
+	// 全局锁防双点；结束后必须释放（成功/失败），重启服务也会在启动时清掉
 	if s.rdb != nil {
-		ok, err := s.rdb.SetNX(ctx, "ops:purge_submits", "1", 30*time.Minute).Result()
+		ok, err := s.rdb.SetNX(ctx, purgeLockKey, "1", 30*time.Minute).Result()
 		if err != nil {
 			log.Warnf("purge_submits lock redis: %v", err)
 		} else if !ok {
@@ -237,6 +238,8 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 				Code:    3,
 				Message: "已有清空任务在进行，请稍后再试",
 			}, nil
+		} else {
+			defer func() { _ = s.rdb.Del(context.Background(), purgeLockKey).Err() }()
 		}
 	}
 
@@ -275,7 +278,7 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 		deletedAc += res.RowsAffected
 	}
 
-	// 全局统计版本失效
+	// 全局统计版本失效 + 个人 ver 批量 bump 成本高，只 bump 全局
 	if s.rdb != nil {
 		_ = s.rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
 		_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
@@ -295,14 +298,24 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 		adminID, deletedLogs, deletedLedger, deletedDaily, deletedAc, len(userIds))
 
 	return &spider.PurgeSubmitsAndRecrawlRes{
-		Code:               0,
-		Message:            fmt.Sprintf("已清空提交相关数据，并为 %d 名已绑定用户触发全量重爬", len(userIds)),
-		DeletedSubmitLogs:  deletedLogs,
-		DeletedLedger:      deletedLedger,
-		DeletedDaily:       deletedDaily,
-		DeletedAc:          deletedAc,
-		EnqueuedUsers:      int64(len(userIds)),
+		Code:              0,
+		Message:           fmt.Sprintf("已清空提交相关数据，并为 %d 名已绑定用户触发全量重爬", len(userIds)),
+		DeletedSubmitLogs: deletedLogs,
+		DeletedLedger:     deletedLedger,
+		DeletedDaily:      deletedDaily,
+		DeletedAc:         deletedAc,
+		EnqueuedUsers:     int64(len(userIds)),
 	}, nil
+}
+
+// ClearPurgeLock 启动时清除运维 purge 锁（进程挂掉时可能残留）
+func ClearPurgeLock(rdb *redis.Client) {
+	if rdb == nil {
+		return
+	}
+	if err := rdb.Del(context.Background(), "ops:purge_submits").Err(); err != nil {
+		log.Warnf("clear ops:purge_submits: %v", err)
+	}
 }
 
 // deleteAllInBatches 分批清空表（避免大表长锁）
@@ -377,6 +390,10 @@ func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserD
 }
 
 func NewSpiderService(data *data.Data, spider *task.SpiderTask) *SpiderService {
+	// 进程启动清除残留 purge 锁（上次崩溃 / 未 defer 的旧版本）
+	if data != nil {
+		ClearPurgeLock(data.RDB)
+	}
 	return &SpiderService{
 		db:     data.DB,
 		rdb:    data.RDB,

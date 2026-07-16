@@ -145,6 +145,11 @@ func PeriodAcDistinctFromPreagg(db *gorm.DB, userId int64, now time.Time) (Perio
 		Where("user_id = ?", userId).
 		Scan(&raw).Error
 	ac.TotalRaw = raw.Total
+	// 不变量：累计 AC 次数 ≥ 去重题数（每题至少 1 次 AC）
+	// 日汇总与 user_ac 短暂不一致（清洗/重爬中）时以题数为下界，避免前端出现「557 次 / 1339 题」
+	if ac.TotalRaw < ac.Total {
+		ac.TotalRaw = ac.Total
+	}
 	return ac, nil
 }
 
