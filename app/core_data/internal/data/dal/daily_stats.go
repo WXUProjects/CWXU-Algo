@@ -2,7 +2,6 @@ package dal
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -39,8 +38,8 @@ func AggregateSubmitDeltas(logs []model.SubmitLog) []DailyDelta {
 			d = &DailyDelta{UserID: l.UserID, Day: day}
 			m[k] = d
 		}
-		// 合成 AC 不计提交热力
-		if !(l.Platform == "LeetCode" && strings.HasPrefix(l.SubmitID, "lc-ac-")) {
+		// 力扣合成 AC / 最近通过明细不计提交（避免与日历双计）
+		if model.CountsTowardSubmitStat(l.Platform, l.SubmitID) {
 			d.SubmitCnt++
 		}
 		if l.IsAC {
@@ -106,13 +105,13 @@ func BackfillDailyUserStatsIfEmpty(db *gorm.DB) {
 			user_id,
 			date_trunc('day', time)::date AS day,
 			COUNT(*) FILTER (
-				WHERE NOT (platform = 'LeetCode' AND submit_id LIKE 'lc-ac-%')
+				WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `
 			) AS submit_cnt,
 			COUNT(*) FILTER (WHERE is_ac = true) AS ac_cnt
 		FROM submit_logs
 		GROUP BY user_id, date_trunc('day', time)::date
 		HAVING
-			COUNT(*) FILTER (WHERE NOT (platform = 'LeetCode' AND submit_id LIKE 'lc-ac-%')) > 0
+			COUNT(*) FILTER (WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `) > 0
 			OR COUNT(*) FILTER (WHERE is_ac = true) > 0
 		ON CONFLICT (user_id, day) DO NOTHING
 	`)

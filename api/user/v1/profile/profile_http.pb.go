@@ -20,9 +20,12 @@ var _ = binding.EncodeURL
 const _ = http.SupportPackageIsVersion1
 
 const OperationProfileDelete = "/api.user.v1.Profile/Delete"
+const OperationProfileFilterPublicFeedUserIds = "/api.user.v1.Profile/FilterPublicFeedUserIds"
 const OperationProfileGetById = "/api.user.v1.Profile/GetById"
 const OperationProfileGetByIds = "/api.user.v1.Profile/GetByIds"
 const OperationProfileGetByName = "/api.user.v1.Profile/GetByName"
+const OperationProfileGetByUsername = "/api.user.v1.Profile/GetByUsername"
+const OperationProfileGetFollowingIds = "/api.user.v1.Profile/GetFollowingIds"
 const OperationProfileGetList = "/api.user.v1.Profile/GetList"
 const OperationProfileGetNonPublicOrgUserIds = "/api.user.v1.Profile/GetNonPublicOrgUserIds"
 const OperationProfileGetSyncPolicies = "/api.user.v1.Profile/GetSyncPolicies"
@@ -30,16 +33,24 @@ const OperationProfileGetUserIdsByGroup = "/api.user.v1.Profile/GetUserIdsByGrou
 const OperationProfileGetUserIdsByOrg = "/api.user.v1.Profile/GetUserIdsByOrg"
 const OperationProfileMoveGroup = "/api.user.v1.Profile/MoveGroup"
 const OperationProfileSetEmailEnabled = "/api.user.v1.Profile/SetEmailEnabled"
+const OperationProfileSetProblemPipeline = "/api.user.v1.Profile/SetProblemPipeline"
 const OperationProfileUpdate = "/api.user.v1.Profile/Update"
 
 type ProfileHTTPServer interface {
 	// Delete 管理员删除用户（硬删除）
 	Delete(context.Context, *DeleteReq) (*DeleteRes, error)
+	// FilterPublicFeedUserIds 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
+	FilterPublicFeedUserIds(context.Context, *FilterPublicFeedUserIdsReq) (*FilterPublicFeedUserIdsRes, error)
 	GetById(context.Context, *GetByIdReq) (*GetByIdRes, error)
 	GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error)
 	GetByName(context.Context, *GetByNameReq) (*GetByNameRes, error)
+	// GetByUsername 精确用户名查资料（公开；受公共域隐私约束）
+	GetByUsername(context.Context, *GetByUsernameReq) (*GetByIdRes, error)
+	// GetFollowingIds 某人关注的 userId 列表（供 core 动态/题库过滤；本人或公开）
+	GetFollowingIds(context.Context, *GetFollowingIdsReq) (*GetFollowingIdsRes, error)
 	GetList(context.Context, *GetListReq) (*GetListRes, error)
-	// GetNonPublicOrgUserIds 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+	// GetNonPublicOrgUserIds 题面流水线资格用户（供 core 闸门；内部调用）
+	// 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
 	GetNonPublicOrgUserIds(context.Context, *GetNonPublicOrgUserIdsReq) (*GetNonPublicOrgUserIdsRes, error)
 	// GetSyncPolicies 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
 	GetSyncPolicies(context.Context, *GetSyncPoliciesReq) (*GetSyncPoliciesRes, error)
@@ -48,6 +59,8 @@ type ProfileHTTPServer interface {
 	GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error)
 	MoveGroup(context.Context, *MoveGroupReq) (*MoveGroupRes, error)
 	SetEmailEnabled(context.Context, *SetEmailEnabledReq) (*SetEmailEnabledRes, error)
+	// SetProblemPipeline 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
+	SetProblemPipeline(context.Context, *SetProblemPipelineReq) (*SetProblemPipelineRes, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 }
 
@@ -59,12 +72,16 @@ func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r.POST("/v1/user/profile/update", _Profile_Update4_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/move-group", _Profile_MoveGroup0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-email-enabled", _Profile_SetEmailEnabled0_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/set-problem-pipeline", _Profile_SetProblemPipeline0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-group", _Profile_GetUserIdsByGroup0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-org", _Profile_GetUserIdsByOrg0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/non-public-org-user-ids", _Profile_GetNonPublicOrgUserIds0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/get-by-ids", _Profile_GetByIds0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/sync-policies", _Profile_GetSyncPolicies0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/delete", _Profile_Delete3_HTTP_Handler(srv))
+	r.GET("/v1/user/profile/get-by-username", _Profile_GetByUsername0_HTTP_Handler(srv))
+	r.GET("/v1/user/profile/following-ids", _Profile_GetFollowingIds0_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/filter-public-feed-user-ids", _Profile_FilterPublicFeedUserIds0_HTTP_Handler(srv))
 }
 
 func _Profile_GetById0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
@@ -186,6 +203,28 @@ func _Profile_SetEmailEnabled0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http
 			return err
 		}
 		reply := out.(*SetEmailEnabledRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Profile_SetProblemPipeline0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in SetProblemPipelineReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileSetProblemPipeline)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.SetProblemPipeline(ctx, req.(*SetProblemPipelineReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*SetProblemPipelineRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -313,14 +352,81 @@ func _Profile_Delete3_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context)
 	}
 }
 
+func _Profile_GetByUsername0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetByUsernameReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileGetByUsername)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetByUsername(ctx, req.(*GetByUsernameReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetByIdRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Profile_GetFollowingIds0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetFollowingIdsReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileGetFollowingIds)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetFollowingIds(ctx, req.(*GetFollowingIdsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetFollowingIdsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Profile_FilterPublicFeedUserIds0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in FilterPublicFeedUserIdsReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileFilterPublicFeedUserIds)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.FilterPublicFeedUserIds(ctx, req.(*FilterPublicFeedUserIdsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*FilterPublicFeedUserIdsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type ProfileHTTPClient interface {
 	// Delete 管理员删除用户（硬删除）
 	Delete(ctx context.Context, req *DeleteReq, opts ...http.CallOption) (rsp *DeleteRes, err error)
+	// FilterPublicFeedUserIds 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
+	FilterPublicFeedUserIds(ctx context.Context, req *FilterPublicFeedUserIdsReq, opts ...http.CallOption) (rsp *FilterPublicFeedUserIdsRes, err error)
 	GetById(ctx context.Context, req *GetByIdReq, opts ...http.CallOption) (rsp *GetByIdRes, err error)
 	GetByIds(ctx context.Context, req *GetByIdsReq, opts ...http.CallOption) (rsp *GetByIdsRes, err error)
 	GetByName(ctx context.Context, req *GetByNameReq, opts ...http.CallOption) (rsp *GetByNameRes, err error)
+	// GetByUsername 精确用户名查资料（公开；受公共域隐私约束）
+	GetByUsername(ctx context.Context, req *GetByUsernameReq, opts ...http.CallOption) (rsp *GetByIdRes, err error)
+	// GetFollowingIds 某人关注的 userId 列表（供 core 动态/题库过滤；本人或公开）
+	GetFollowingIds(ctx context.Context, req *GetFollowingIdsReq, opts ...http.CallOption) (rsp *GetFollowingIdsRes, err error)
 	GetList(ctx context.Context, req *GetListReq, opts ...http.CallOption) (rsp *GetListRes, err error)
-	// GetNonPublicOrgUserIds 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+	// GetNonPublicOrgUserIds 题面流水线资格用户（供 core 闸门；内部调用）
+	// 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
 	GetNonPublicOrgUserIds(ctx context.Context, req *GetNonPublicOrgUserIdsReq, opts ...http.CallOption) (rsp *GetNonPublicOrgUserIdsRes, err error)
 	// GetSyncPolicies 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
 	GetSyncPolicies(ctx context.Context, req *GetSyncPoliciesReq, opts ...http.CallOption) (rsp *GetSyncPoliciesRes, err error)
@@ -329,6 +435,8 @@ type ProfileHTTPClient interface {
 	GetUserIdsByOrg(ctx context.Context, req *GetUserIdsByOrgReq, opts ...http.CallOption) (rsp *GetUserIdsByOrgRes, err error)
 	MoveGroup(ctx context.Context, req *MoveGroupReq, opts ...http.CallOption) (rsp *MoveGroupRes, err error)
 	SetEmailEnabled(ctx context.Context, req *SetEmailEnabledReq, opts ...http.CallOption) (rsp *SetEmailEnabledRes, err error)
+	// SetProblemPipeline 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
+	SetProblemPipeline(ctx context.Context, req *SetProblemPipelineReq, opts ...http.CallOption) (rsp *SetProblemPipelineRes, err error)
 	Update(ctx context.Context, req *UpdateReq, opts ...http.CallOption) (rsp *UpdateRes, err error)
 }
 
@@ -346,6 +454,20 @@ func (c *ProfileHTTPClientImpl) Delete(ctx context.Context, in *DeleteReq, opts 
 	pattern := "/v1/user/profile/delete"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProfileDelete))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// FilterPublicFeedUserIds 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
+func (c *ProfileHTTPClientImpl) FilterPublicFeedUserIds(ctx context.Context, in *FilterPublicFeedUserIdsReq, opts ...http.CallOption) (*FilterPublicFeedUserIdsRes, error) {
+	var out FilterPublicFeedUserIdsRes
+	pattern := "/v1/user/profile/filter-public-feed-user-ids"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProfileFilterPublicFeedUserIds))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {
@@ -393,6 +515,34 @@ func (c *ProfileHTTPClientImpl) GetByName(ctx context.Context, in *GetByNameReq,
 	return &out, nil
 }
 
+// GetByUsername 精确用户名查资料（公开；受公共域隐私约束）
+func (c *ProfileHTTPClientImpl) GetByUsername(ctx context.Context, in *GetByUsernameReq, opts ...http.CallOption) (*GetByIdRes, error) {
+	var out GetByIdRes
+	pattern := "/v1/user/profile/get-by-username"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProfileGetByUsername))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetFollowingIds 某人关注的 userId 列表（供 core 动态/题库过滤；本人或公开）
+func (c *ProfileHTTPClientImpl) GetFollowingIds(ctx context.Context, in *GetFollowingIdsReq, opts ...http.CallOption) (*GetFollowingIdsRes, error) {
+	var out GetFollowingIdsRes
+	pattern := "/v1/user/profile/following-ids"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProfileGetFollowingIds))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *ProfileHTTPClientImpl) GetList(ctx context.Context, in *GetListReq, opts ...http.CallOption) (*GetListRes, error) {
 	var out GetListRes
 	pattern := "/v1/user/profile/list"
@@ -406,7 +556,8 @@ func (c *ProfileHTTPClientImpl) GetList(ctx context.Context, in *GetListReq, opt
 	return &out, nil
 }
 
-// GetNonPublicOrgUserIds 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+// GetNonPublicOrgUserIds 题面流水线资格用户（供 core 闸门；内部调用）
+// 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
 func (c *ProfileHTTPClientImpl) GetNonPublicOrgUserIds(ctx context.Context, in *GetNonPublicOrgUserIdsReq, opts ...http.CallOption) (*GetNonPublicOrgUserIdsRes, error) {
 	var out GetNonPublicOrgUserIdsRes
 	pattern := "/v1/user/profile/non-public-org-user-ids"
@@ -479,6 +630,20 @@ func (c *ProfileHTTPClientImpl) SetEmailEnabled(ctx context.Context, in *SetEmai
 	pattern := "/v1/user/profile/set-email-enabled"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProfileSetEmailEnabled))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SetProblemPipeline 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
+func (c *ProfileHTTPClientImpl) SetProblemPipeline(ctx context.Context, in *SetProblemPipelineReq, opts ...http.CallOption) (*SetProblemPipelineRes, error) {
+	var out SetProblemPipelineRes
+	pattern := "/v1/user/profile/set-problem-pipeline"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProfileSetProblemPipeline))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

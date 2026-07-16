@@ -54,23 +54,41 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 		fetchLimit = 30
 	}
 	var memberIDs []int64
-	if req.UserId == -1 {
+	queryUserID := req.UserId
+	// following_only：仅关注用户（与组织聚合流组合）
+	// userId=-1 或 following_only 时走 scoped 查询
+	if req.UserId == -1 || req.FollowingOnly {
+		queryUserID = -1
 		// 组织聚合动态：仅当前组织成员
-		ids, _, _, err := ResolveOrgMemberIDs(ctx, s.reg, 0, false)
+		// 注意：followingOnly 与具体 userId>0 互斥语义由调用方保证；
+		// 若同时传 followingOnly + userId>0，以 following 组织流为准（忽略单用户 id）。
+		ids, resolvedOrg, _, err := ResolveOrgMemberIDs(ctx, s.reg, 0, false)
 		if err != nil {
 			log.Warnf("org members for submit feed: %v", err)
 			ids = []int64{}
 		}
+		// 公共域：剔除关闭「公共域动态」的用户（隐私仅在公共域生效）
+		if isPublicOrgContext(ctx, s.reg, resolvedOrg) {
+			ids = filterPublicFeedUserIDs(ctx, s.reg, ids)
+		}
+		if req.FollowingOnly {
+			viewer := auth.GetCurrentUserId(ctx)
+			if viewer == 0 {
+				return &submit_log.GetSubmitLogRes{Data: nil}, nil
+			}
+			following := fetchFollowingIDs(ctx, s.reg, int64(viewer))
+			ids = intersectIDs(ids, following)
+		}
 		memberIDs = ids
 	}
-	d, err := s.sbDal.GetByUserIdScoped(ctx, req.UserId, req.Cursor, fetchLimit, memberIDs)
+	d, err := s.sbDal.GetByUserIdScoped(ctx, queryUserID, req.Cursor, fetchLimit, memberIDs)
 	if err != nil {
 		return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
 	}
 	r := make([]*submit_log.SubmitLog, 0, limit)
 	for _, v := range d {
-		// 力扣只参与热力图/统计，不进活动流
-		if v.Platform == "LeetCode" {
+		// 力扣：合成日历/补齐/生涯 AC 不进动态；最近通过 lc-prob-* 进提交历史与动态（无代码）
+		if model.IsLeetCodeSyntheticSubmit(v.Platform, v.SubmitID) {
 			continue
 		}
 		var problemID uint32

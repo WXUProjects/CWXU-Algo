@@ -19,20 +19,25 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Problem_List_FullMethodName            = "/api.core.v1.problem.Problem/List"
-	Problem_ListTags_FullMethodName        = "/api.core.v1.problem.Problem/ListTags"
-	Problem_Get_FullMethodName             = "/api.core.v1.problem.Problem/Get"
-	Problem_ListSubmissions_FullMethodName = "/api.core.v1.problem.Problem/ListSubmissions"
-	Problem_UserProfile_FullMethodName     = "/api.core.v1.problem.Problem/UserProfile"
-	Problem_Progress_FullMethodName        = "/api.core.v1.problem.Problem/Progress"
-	Problem_Backfill_FullMethodName        = "/api.core.v1.problem.Problem/Backfill"
-	Problem_EmergencyStop_FullMethodName   = "/api.core.v1.problem.Problem/EmergencyStop"
-	Problem_ResetAll_FullMethodName        = "/api.core.v1.problem.Problem/ResetAll"
-	Problem_Resume_FullMethodName          = "/api.core.v1.problem.Problem/Resume"
-	Problem_RetryFailed_FullMethodName     = "/api.core.v1.problem.Problem/RetryFailed"
-	Problem_ToggleAnalyze_FullMethodName   = "/api.core.v1.problem.Problem/ToggleAnalyze"
-	Problem_ToggleFetch_FullMethodName     = "/api.core.v1.problem.Problem/ToggleFetch"
-	Problem_ResetQueues_FullMethodName     = "/api.core.v1.problem.Problem/ResetQueues"
+	Problem_List_FullMethodName             = "/api.core.v1.problem.Problem/List"
+	Problem_ListTags_FullMethodName         = "/api.core.v1.problem.Problem/ListTags"
+	Problem_Get_FullMethodName              = "/api.core.v1.problem.Problem/Get"
+	Problem_ListSubmissions_FullMethodName  = "/api.core.v1.problem.Problem/ListSubmissions"
+	Problem_UserProfile_FullMethodName      = "/api.core.v1.problem.Problem/UserProfile"
+	Problem_Progress_FullMethodName         = "/api.core.v1.problem.Problem/Progress"
+	Problem_Backfill_FullMethodName         = "/api.core.v1.problem.Problem/Backfill"
+	Problem_EmergencyStop_FullMethodName    = "/api.core.v1.problem.Problem/EmergencyStop"
+	Problem_ResetAll_FullMethodName         = "/api.core.v1.problem.Problem/ResetAll"
+	Problem_Resume_FullMethodName           = "/api.core.v1.problem.Problem/Resume"
+	Problem_RetryFailed_FullMethodName      = "/api.core.v1.problem.Problem/RetryFailed"
+	Problem_ToggleAnalyze_FullMethodName    = "/api.core.v1.problem.Problem/ToggleAnalyze"
+	Problem_ToggleFetch_FullMethodName      = "/api.core.v1.problem.Problem/ToggleFetch"
+	Problem_ResetQueues_FullMethodName      = "/api.core.v1.problem.Problem/ResetQueues"
+	Problem_AdminUpdate_FullMethodName      = "/api.core.v1.problem.Problem/AdminUpdate"
+	Problem_ProposeEdit_FullMethodName      = "/api.core.v1.problem.Problem/ProposeEdit"
+	Problem_ListEditRequests_FullMethodName = "/api.core.v1.problem.Problem/ListEditRequests"
+	Problem_ReviewEdit_FullMethodName       = "/api.core.v1.problem.Problem/ReviewEdit"
+	Problem_MyPendingEdit_FullMethodName    = "/api.core.v1.problem.Problem/MyPendingEdit"
 )
 
 // ProblemClient is the client API for Problem service.
@@ -61,6 +66,16 @@ type ProblemClient interface {
 	ToggleFetch(ctx context.Context, in *TogglePipelineReq, opts ...grpc.CallOption) (*TogglePipelineRes, error)
 	// 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
 	ResetQueues(ctx context.Context, in *ResetQueuesReq, opts ...grpc.CallOption) (*ResetQueuesRes, error)
+	// 站点管理员：直接修改标签/题面（无需审核）
+	AdminUpdate(ctx context.Context, in *AdminUpdateProblemReq, opts ...grpc.CallOption) (*AdminUpdateProblemRes, error)
+	// 登录用户：提交标签/题面修改申请（站点管理员审核）
+	ProposeEdit(ctx context.Context, in *ProposeProblemEditReq, opts ...grpc.CallOption) (*ProposeProblemEditRes, error)
+	// 站点管理员：审核申请列表
+	ListEditRequests(ctx context.Context, in *ListProblemEditReq, opts ...grpc.CallOption) (*ListProblemEditRes, error)
+	// 站点管理员：通过/驳回申请
+	ReviewEdit(ctx context.Context, in *ReviewProblemEditReq, opts ...grpc.CallOption) (*ReviewProblemEditRes, error)
+	// 当前用户对该题的待审申请（详情页提示）
+	MyPendingEdit(ctx context.Context, in *MyPendingEditReq, opts ...grpc.CallOption) (*MyPendingEditRes, error)
 }
 
 type problemClient struct {
@@ -211,6 +226,56 @@ func (c *problemClient) ResetQueues(ctx context.Context, in *ResetQueuesReq, opt
 	return out, nil
 }
 
+func (c *problemClient) AdminUpdate(ctx context.Context, in *AdminUpdateProblemReq, opts ...grpc.CallOption) (*AdminUpdateProblemRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminUpdateProblemRes)
+	err := c.cc.Invoke(ctx, Problem_AdminUpdate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) ProposeEdit(ctx context.Context, in *ProposeProblemEditReq, opts ...grpc.CallOption) (*ProposeProblemEditRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProposeProblemEditRes)
+	err := c.cc.Invoke(ctx, Problem_ProposeEdit_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) ListEditRequests(ctx context.Context, in *ListProblemEditReq, opts ...grpc.CallOption) (*ListProblemEditRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListProblemEditRes)
+	err := c.cc.Invoke(ctx, Problem_ListEditRequests_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) ReviewEdit(ctx context.Context, in *ReviewProblemEditReq, opts ...grpc.CallOption) (*ReviewProblemEditRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReviewProblemEditRes)
+	err := c.cc.Invoke(ctx, Problem_ReviewEdit_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) MyPendingEdit(ctx context.Context, in *MyPendingEditReq, opts ...grpc.CallOption) (*MyPendingEditRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MyPendingEditRes)
+	err := c.cc.Invoke(ctx, Problem_MyPendingEdit_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProblemServer is the server API for Problem service.
 // All implementations must embed UnimplementedProblemServer
 // for forward compatibility.
@@ -237,6 +302,16 @@ type ProblemServer interface {
 	ToggleFetch(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error)
 	// 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
 	ResetQueues(context.Context, *ResetQueuesReq) (*ResetQueuesRes, error)
+	// 站点管理员：直接修改标签/题面（无需审核）
+	AdminUpdate(context.Context, *AdminUpdateProblemReq) (*AdminUpdateProblemRes, error)
+	// 登录用户：提交标签/题面修改申请（站点管理员审核）
+	ProposeEdit(context.Context, *ProposeProblemEditReq) (*ProposeProblemEditRes, error)
+	// 站点管理员：审核申请列表
+	ListEditRequests(context.Context, *ListProblemEditReq) (*ListProblemEditRes, error)
+	// 站点管理员：通过/驳回申请
+	ReviewEdit(context.Context, *ReviewProblemEditReq) (*ReviewProblemEditRes, error)
+	// 当前用户对该题的待审申请（详情页提示）
+	MyPendingEdit(context.Context, *MyPendingEditReq) (*MyPendingEditRes, error)
 	mustEmbedUnimplementedProblemServer()
 }
 
@@ -288,6 +363,21 @@ func (UnimplementedProblemServer) ToggleFetch(context.Context, *TogglePipelineRe
 }
 func (UnimplementedProblemServer) ResetQueues(context.Context, *ResetQueuesReq) (*ResetQueuesRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResetQueues not implemented")
+}
+func (UnimplementedProblemServer) AdminUpdate(context.Context, *AdminUpdateProblemReq) (*AdminUpdateProblemRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminUpdate not implemented")
+}
+func (UnimplementedProblemServer) ProposeEdit(context.Context, *ProposeProblemEditReq) (*ProposeProblemEditRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProposeEdit not implemented")
+}
+func (UnimplementedProblemServer) ListEditRequests(context.Context, *ListProblemEditReq) (*ListProblemEditRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListEditRequests not implemented")
+}
+func (UnimplementedProblemServer) ReviewEdit(context.Context, *ReviewProblemEditReq) (*ReviewProblemEditRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReviewEdit not implemented")
+}
+func (UnimplementedProblemServer) MyPendingEdit(context.Context, *MyPendingEditReq) (*MyPendingEditRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method MyPendingEdit not implemented")
 }
 func (UnimplementedProblemServer) mustEmbedUnimplementedProblemServer() {}
 func (UnimplementedProblemServer) testEmbeddedByValue()                 {}
@@ -562,6 +652,96 @@ func _Problem_ResetQueues_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Problem_AdminUpdate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminUpdateProblemReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).AdminUpdate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_AdminUpdate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).AdminUpdate(ctx, req.(*AdminUpdateProblemReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_ProposeEdit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProposeProblemEditReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).ProposeEdit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_ProposeEdit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).ProposeEdit(ctx, req.(*ProposeProblemEditReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_ListEditRequests_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProblemEditReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).ListEditRequests(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_ListEditRequests_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).ListEditRequests(ctx, req.(*ListProblemEditReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_ReviewEdit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReviewProblemEditReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).ReviewEdit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_ReviewEdit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).ReviewEdit(ctx, req.(*ReviewProblemEditReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_MyPendingEdit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MyPendingEditReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).MyPendingEdit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_MyPendingEdit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).MyPendingEdit(ctx, req.(*MyPendingEditReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Problem_ServiceDesc is the grpc.ServiceDesc for Problem service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -624,6 +804,26 @@ var Problem_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResetQueues",
 			Handler:    _Problem_ResetQueues_Handler,
+		},
+		{
+			MethodName: "AdminUpdate",
+			Handler:    _Problem_AdminUpdate_Handler,
+		},
+		{
+			MethodName: "ProposeEdit",
+			Handler:    _Problem_ProposeEdit_Handler,
+		},
+		{
+			MethodName: "ListEditRequests",
+			Handler:    _Problem_ListEditRequests_Handler,
+		},
+		{
+			MethodName: "ReviewEdit",
+			Handler:    _Problem_ReviewEdit_Handler,
+		},
+		{
+			MethodName: "MyPendingEdit",
+			Handler:    _Problem_MyPendingEdit_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

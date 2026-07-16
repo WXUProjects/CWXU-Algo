@@ -1,0 +1,242 @@
+package dal
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"cwxu-algo/app/core_data/internal/data"
+	"cwxu-algo/app/core_data/internal/data/model"
+	calspider "cwxu-algo/app/core_data/internal/spider/calendar"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+type ContestCalendarDal struct {
+	db *gorm.DB
+}
+
+func NewContestCalendarDal(d *data.Data) *ContestCalendarDal {
+	return &ContestCalendarDal{db: d.DB}
+}
+
+// NewContestCalendarDalDB 供 cron 等仅持有 *gorm.DB 的场景
+func NewContestCalendarDalDB(db *gorm.DB) *ContestCalendarDal {
+	return &ContestCalendarDal{db: db}
+}
+
+// UpsertItems 按 (platform, external_id) 写入/更新
+func (d *ContestCalendarDal) UpsertItems(items []calspider.Item) (int, error) {
+	if d.db == nil || len(items) == 0 {
+		return 0, nil
+	}
+	rows := make([]model.ContestCalendar, 0, len(items))
+	now := time.Now()
+	for _, it := range items {
+		if it.Platform == "" || it.ExternalID == "" {
+			continue
+		}
+		rows = append(rows, model.ContestCalendar{
+			Platform:     it.Platform,
+			PlatformName: it.PlatformName,
+			ExternalID:   it.ExternalID,
+			Name:         it.Name,
+			URL:          it.URL,
+			StartTime:    it.StartTime,
+			EndTime:      it.EndTime,
+			Source:       it.Source,
+			IconURL:      it.IconURL,
+			UpdatedAt:    now,
+		})
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	err := d.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "platform"}, {Name: "external_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"platform_name", "name", "url", "start_time", "end_time", "source", "icon_url", "updated_at",
+		}),
+	}).CreateInBatches(&rows, 50).Error
+	if err != nil {
+		return 0, err
+	}
+	return len(rows), nil
+}
+
+// CleanupEnded 删除 end_time 早于 keepBeforeUnix 的赛程（默认保留刚结束 7 天）
+func (d *ContestCalendarDal) CleanupEnded(keepBeforeUnix int64) (int64, error) {
+	res := d.db.Where("end_time < ?", keepBeforeUnix).Delete(&model.ContestCalendar{})
+	return res.RowsAffected, res.Error
+}
+
+type CalendarListQuery struct {
+	Platform string
+	Keyword  string
+	Status   string // upcoming | ongoing | all
+	Limit    int
+	Offset   int
+}
+
+func (d *ContestCalendarDal) List(q CalendarListQuery) ([]model.ContestCalendar, int64, error) {
+	now := time.Now().Unix()
+	db := d.db.Model(&model.ContestCalendar{})
+	if p := strings.TrimSpace(q.Platform); p != "" {
+		db = db.Where("platform = ?", strings.ToLower(p))
+	}
+	if kw := strings.TrimSpace(q.Keyword); kw != "" {
+		db = db.Where("name ILIKE ?", "%"+kw+"%")
+	}
+	switch strings.ToLower(strings.TrimSpace(q.Status)) {
+	case "ongoing":
+		db = db.Where("start_time <= ? AND end_time > ?", now, now)
+	case "all":
+		// no time filter
+	default: // upcoming
+		db = db.Where("start_time > ?", now)
+	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := q.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	var list []model.ContestCalendar
+	err := db.Order("start_time ASC").Limit(limit).Offset(offset).Find(&list).Error
+	return list, total, err
+}
+
+type PlatformStat struct {
+	Platform     string
+	PlatformName string
+	IconURL      string
+	Count        int64
+}
+
+func (d *ContestCalendarDal) ListPlatforms(upcomingOnly bool) ([]PlatformStat, error) {
+	now := time.Now().Unix()
+	db := d.db.Model(&model.ContestCalendar{})
+	if upcomingOnly {
+		db = db.Where("start_time > ?", now)
+	}
+	type row struct {
+		Platform     string
+		PlatformName string
+		IconURL      string
+		Count        int64
+	}
+	var rows []row
+	err := db.Select("platform, MAX(platform_name) as platform_name, MAX(icon_url) as icon_url, COUNT(*) as count").
+		Group("platform").
+		Order("platform ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PlatformStat, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, PlatformStat{
+			Platform:     r.Platform,
+			PlatformName: r.PlatformName,
+			IconURL:      r.IconURL,
+			Count:        r.Count,
+		})
+	}
+	return out, nil
+}
+
+func (d *ContestCalendarDal) GetByID(id uint) (*model.ContestCalendar, error) {
+	var m model.ContestCalendar
+	err := d.db.First(&m, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+func (d *ContestCalendarDal) ListSubsByUser(userID int64) ([]model.ContestCalendarSub, error) {
+	var list []model.ContestCalendarSub
+	err := d.db.Where("user_id = ?", userID).Order("scope ASC, platform ASC, calendar_id ASC").Find(&list).Error
+	return list, err
+}
+
+func (d *ContestCalendarDal) UpsertSub(sub *model.ContestCalendarSub) error {
+	if sub == nil {
+		return fmt.Errorf("nil sub")
+	}
+	// 用唯一键查找后更新或创建
+	var existing model.ContestCalendarSub
+	err := d.db.Where(
+		"user_id = ? AND scope = ? AND platform = ? AND calendar_id = ?",
+		sub.UserID, sub.Scope, sub.Platform, sub.CalendarID,
+	).First(&existing).Error
+	if err == gorm.ErrRecordNotFound {
+		return d.db.Create(sub).Error
+	}
+	if err != nil {
+		return err
+	}
+	existing.AdvanceMinutes = sub.AdvanceMinutes
+	existing.Enabled = sub.Enabled
+	existing.Platform = sub.Platform
+	return d.db.Save(&existing).Error
+}
+
+func (d *ContestCalendarDal) DeleteSub(userID int64, scope, platform string, calendarID uint) error {
+	q := d.db.Where("user_id = ? AND scope = ?", userID, scope)
+	if scope == model.CalScopePlatform {
+		q = q.Where("platform = ?", platform)
+	} else {
+		q = q.Where("calendar_id = ?", calendarID)
+	}
+	return q.Delete(&model.ContestCalendarSub{}).Error
+}
+
+// ListEnabledSubs 通知扫描用
+func (d *ContestCalendarDal) ListEnabledSubs() ([]model.ContestCalendarSub, error) {
+	var list []model.ContestCalendarSub
+	err := d.db.Where("enabled = ?", true).Find(&list).Error
+	return list, err
+}
+
+// ListUpcomingInWindow start_time in (now, now+maxAdvance]
+func (d *ContestCalendarDal) ListUpcomingInWindow(nowUnix, maxAdvanceSec int64) ([]model.ContestCalendar, error) {
+	var list []model.ContestCalendar
+	err := d.db.Where("start_time > ? AND start_time <= ?", nowUnix, nowUnix+maxAdvanceSec).
+		Order("start_time ASC").
+		Find(&list).Error
+	return list, err
+}
+
+func (d *ContestCalendarDal) HasNotifyLog(userID int64, calendarID uint, advance int) (bool, error) {
+	var n int64
+	err := d.db.Model(&model.ContestCalendarNotifyLog{}).
+		Where("user_id = ? AND calendar_id = ? AND advance_minutes = ?", userID, calendarID, advance).
+		Count(&n).Error
+	return n > 0, err
+}
+
+func (d *ContestCalendarDal) CreateNotifyLog(userID int64, calendarID uint, advance int) error {
+	return d.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.ContestCalendarNotifyLog{
+		UserID:         userID,
+		CalendarID:     calendarID,
+		AdvanceMinutes: advance,
+		SentAt:         time.Now(),
+	}).Error
+}
+
+// CleanupNotifyLogs 清理很久以前的日志
+func (d *ContestCalendarDal) CleanupNotifyLogs(before time.Time) (int64, error) {
+	res := d.db.Where("sent_at < ?", before).Delete(&model.ContestCalendarNotifyLog{})
+	return res.RowsAffected, res.Error
+}

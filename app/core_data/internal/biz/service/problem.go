@@ -27,9 +27,11 @@ type ProblemUseCase struct {
 	tagger *ProblemTagger
 	reg    *registry.Registrar
 
-	orgUsersMu    sync.Mutex
-	orgUsersCache map[int64]struct{}
-	orgUsersAt    time.Time
+	orgUsersMu          sync.Mutex
+	orgUsersCache       map[int64]struct{} // 兼容旧缓存（= fetch 集合）
+	orgUsersAt          time.Time
+	pipelineUsersCache  *pipelineUserSets
+	pipelineUsersAt     time.Time
 }
 
 func NewProblemUseCase(data *data.Data, mq *event.RabbitMQ, tagger *ProblemTagger, reg *discovery.Register) *ProblemUseCase {
@@ -70,7 +72,7 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*m
 	if err != nil {
 		return nil, false, err
 	}
-	// 不可爬平台（如 LeetCode）不进入题库
+	// SkipBank：明确不进题库的平台/记录
 	if parsed.SkipBank {
 		return nil, false, fmt.Errorf("skip bank: %s", parsed.Platform)
 	}
@@ -133,8 +135,8 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*m
 		prio = mqPriorityIncremental
 	}
 
-	// 题面爬取：仅近窗有组织用户提交才入队（公共域/散户只入库，前端「题面准备中」）
-	// AI：enqueueAnalyzePrio 内统一闸门
+	// 题面爬取：仅近窗有爬取资格用户提交才入队（默认非公共域组织，可个人覆盖）
+	// AI：enqueueAnalyzePrio 内统一闸门（独立资格）
 	allowFetch := !parsed.SkipFetch && uc.shouldEnqueueFetch(existing.ID)
 
 	// 新题且可爬
@@ -232,8 +234,8 @@ func (uc *ProblemUseCase) enqueueAnalyze(id uint) error {
 
 // enqueueAnalyzePrio 投递 AI 分析；统一闸门：
 // 1) 近 6 个月有提交（submit_logs）
-// 2) 近窗提交者中至少有一名组织用户（非纯公共域/散户）
-// 题面爬取不受影响。
+// 2) 近窗提交者中至少有一名「题面 AI 资格」用户（默认非公共域组织，可个人覆盖）
+// 题面爬取由 shouldEnqueueFetch / problemHasFetchSubmitter 单独闸门。
 func (uc *ProblemUseCase) enqueueAnalyzePrio(id uint, priority uint8) error {
 	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
@@ -247,9 +249,9 @@ func (uc *ProblemUseCase) enqueueAnalyzePrio(id uint, priority uint8) error {
 		log.Debugf("enqueueAnalyze skip out-of-window id=%d last=%v", id, p.LastSubmittedAt)
 		return nil
 	}
-	// 仅公共域/散户提交历史：只保留题面，不跑 AI
-	if !uc.problemHasOrgSubmitter(id) {
-		log.Debugf("enqueueAnalyze skip public-only submitters id=%d", id)
+	// 无 AI 资格用户近窗提交：只保留题面，不跑 AI
+	if !uc.problemHasAISubmitter(id) {
+		log.Debugf("enqueueAnalyze skip no AI-eligible submitters id=%d", id)
 		return nil
 	}
 	body, _ := json.Marshal(event.ProblemAnalyzeEvent{ProblemID: id})
@@ -279,18 +281,18 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if p.Status == model.ProblemStatusCompleted {
 		return nil
 	}
-	// 仅公共域/散户提交：不爬题面（旧消息防御；前端显示「题面准备中」）
+	// 无爬取资格用户近窗提交：不爬题面（旧消息防御；前端显示「题面准备中」）
 	if !uc.shouldEnqueueFetch(p.ID) {
-		log.Infof("ProcessFetch skip public-only submitters id=%d", p.ID)
+		log.Infof("ProcessFetch skip no fetch-eligible submitters id=%d", p.ID)
 		if strings.TrimSpace(p.ContentMD) == "" && p.Status != model.ProblemStatusSkipped {
 			_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
 				"status":    model.ProblemStatusPending,
-				"error_msg": "仅公共域/散户提交，暂不爬取题面",
+				"error_msg": "无题面爬取资格用户提交，暂不爬取题面",
 			}).Error
 		}
 		return nil
 	}
-	// 已有题面：不再爬取；入 AI 由 enqueueAnalyze 统一闸门（窗口 + 组织用户）
+	// 已有题面：不再爬取；入 AI 由 enqueueAnalyze 统一闸门（窗口 + AI 资格）
 	if strings.TrimSpace(p.ContentMD) != "" || p.Status == model.ProblemStatusTagging {
 		if p.Status != model.ProblemStatusCompleted {
 			_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
@@ -308,10 +310,7 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusFailedPerm).Error
 		return nil
 	}
-	if p.Platform == spider.LeetCode || p.Status == model.ProblemStatusSkipped {
-		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
-			"status": model.ProblemStatusSkipped,
-		}).Error
+	if p.Status == model.ProblemStatusSkipped {
 		return nil
 	}
 
@@ -375,12 +374,26 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 		log.Debugf("ProcessAnalyze skip completed id=%d", p.ID)
 		return nil
 	}
-	if p.Status == model.ProblemStatusSkipped || p.Platform == spider.LeetCode {
-		log.Debugf("ProcessAnalyze skip skipped/leetcode id=%d", p.ID)
+	if p.Status == model.ProblemStatusSkipped {
+		log.Debugf("ProcessAnalyze skip skipped id=%d", p.ID)
 		return nil
 	}
 	if p.Status == model.ProblemStatusFailedPerm {
 		log.Debugf("ProcessAnalyze skip failed_perm id=%d", p.ID)
+		return nil
+	}
+	// 标签已有（人工填写或历史分析）：跳过 AI，避免覆盖；标签为空仍继续分析
+	if len(nonEmptyTags(p.Tags)) > 0 {
+		if strings.TrimSpace(p.ContentMD) != "" {
+			log.Infof("ProcessAnalyze skip tags-already-set id=%d tags=%v", p.ID, p.Tags)
+			_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+				"status":    model.ProblemStatusCompleted,
+				"error_msg": "",
+			}).Error
+			return nil
+		}
+		// 有标签无题面：不跑 AI，等题面
+		log.Debugf("ProcessAnalyze skip tags-set-no-content id=%d", p.ID)
 		return nil
 	}
 	if strings.TrimSpace(p.ContentMD) == "" {
@@ -405,12 +418,12 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 		// 返回 error 会 requeue；此处 Ack 丢弃，靠重置/新提交再入队
 		return nil
 	}
-	// 仅公共域/散户：不跑题面 AI（题面已爬取可保留）
-	if !uc.problemHasOrgSubmitter(p.ID) {
-		log.Infof("ProcessAnalyze skip public-only submitters id=%d", p.ID)
+	// 无 AI 资格用户近窗提交：不跑题面 AI（题面已爬取可保留）
+	if !uc.problemHasAISubmitter(p.ID) {
+		log.Infof("ProcessAnalyze skip no AI-eligible submitters id=%d", p.ID)
 		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
 			"status":    model.ProblemStatusTagging,
-			"error_msg": "仅公共域/散户提交，已跳过题面AI",
+			"error_msg": "无题面AI资格用户提交，已跳过题面AI",
 		}).Error
 		return nil
 	}
@@ -536,9 +549,10 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 	// 1) 绑定近 6 个月未关联提交（resolveOne 按状态入爬/分析；已分析则丢弃）
 	cutoff := time.Now().Add(-backfillWindow)
 	var logs []model.SubmitLog
-	err = uc.data.DB.Where("(problem_id IS NULL OR problem_id = 0) AND platform != ?", spider.LeetCode).
+	err = uc.data.DB.Where("problem_id IS NULL OR problem_id = 0").
 		Where("time IS NULL OR time >= ?", cutoff).
-		Order("CASE WHEN platform = 'NowCoder' THEN 0 ELSE 1 END, id DESC").
+		// 力扣合成行（无 titleSlug）resolve 会失败跳过；lc-prob 可入库
+		Order("CASE WHEN platform = 'NowCoder' THEN 0 WHEN platform = 'LeetCode' THEN 1 ELSE 2 END, id DESC").
 		Limit(limit).Find(&logs).Error
 	if err != nil {
 		return
@@ -558,7 +572,7 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 	// 2) 近 6 月有提交的题：无题面补爬；有题面且未完成补分析；COMPLETED 跳过
 	recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
 	var todos []model.Problem
-	_ = uc.data.DB.Where("platform != ?", spider.LeetCode).
+	_ = uc.data.DB.
 		Where("status NOT IN ?", []string{
 			model.ProblemStatusSkipped,
 			model.ProblemStatusCompleted,
@@ -574,11 +588,16 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 			continue
 		}
 		seen[p.ID] = true
-		if !uc.problemHasOrgSubmitter(p.ID) {
-			// 公共域/散户：只入库，不爬题面、不 AI
+		hasFetch := uc.problemHasFetchSubmitter(p.ID)
+		hasAI := uc.problemHasAISubmitter(p.ID)
+		if !hasFetch && !hasAI {
+			// 无资格用户：只入库
 			continue
 		}
 		if strings.TrimSpace(p.ContentMD) == "" {
+			if !hasFetch {
+				continue
+			}
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 				Updates(map[string]interface{}{
 					"status":           model.ProblemStatusPending,
@@ -592,7 +611,10 @@ func (uc *ProblemUseCase) Backfill(limit int) (scanned, bound, created, enqueued
 			}
 			continue
 		}
-		// 有题面：入 AI
+		// 有题面：入 AI（enqueueAnalyzePrio 内再校验资格）
+		if !hasAI {
+			continue
+		}
 		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 			Updates(map[string]interface{}{
 				"status":    model.ProblemStatusTagging,
@@ -624,7 +646,7 @@ func (uc *ProblemUseCase) ResetQueues() (purgedFetch, purgedAnalyze, enqueuedFet
 
 	// 待爬取：PENDING / FETCHING；仅有组织用户提交的题才重灌
 	var fetchTodos []model.Problem
-	_ = uc.data.DB.Where("platform != ?", spider.LeetCode).
+	_ = uc.data.DB.
 		Where("status IN ?", []string{model.ProblemStatusPending, model.ProblemStatusFetching}).
 		Where("(content_md IS NULL OR content_md = '')").
 		Order("last_submitted_at DESC NULLS LAST, id DESC").
@@ -644,7 +666,7 @@ func (uc *ProblemUseCase) ResetQueues() (purgedFetch, purgedAnalyze, enqueuedFet
 	cutoff := time.Now().Add(-backfillWindow)
 	recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
 	var analyzeTodos []model.Problem
-	_ = uc.data.DB.Where("platform != ?", spider.LeetCode).
+	_ = uc.data.DB.
 		Where("status = ?", model.ProblemStatusTagging).
 		Where("content_md IS NOT NULL AND content_md != ''").
 		Where(recentClause, recentArgs...).
@@ -684,7 +706,6 @@ func (uc *ProblemUseCase) RetryFailed(limit int) (scanned, enqueued, blacklisted
 	// 仅近 6 个月；新题优先
 	cutoff := time.Now().Add(-backfillWindow)
 	q := uc.data.DB.Where("status = ?", model.ProblemStatusFailed).
-		Where("platform != ?", spider.LeetCode).
 		Where("last_submitted_at IS NULL OR last_submitted_at >= ?", cutoff).
 		Order("last_submitted_at DESC NULLS LAST, id DESC")
 	if limit > 0 {
@@ -755,15 +776,16 @@ func (uc *ProblemUseCase) markExistingPermanentFailures() int64 {
 }
 
 type ListProblemFilter struct {
-	Page       int64
-	PageSize   int64
-	Sort       string
-	Platforms  []string
-	Tags       []string
-	UserStatus string
-	UserID     int64
-	Keyword    string
-	Difficulty string
+	Page          int64
+	PageSize      int64
+	Sort          string
+	Platforms     []string
+	Tags          []string
+	UserStatus    string
+	UserID        int64
+	Keyword       string
+	Difficulty    string
+	FollowingIDs  []int64 // 非空：仅这些用户提交过的题
 }
 
 func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]string, int64, error) {
@@ -806,6 +828,15 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 	}
 	if d := strings.TrimSpace(f.Difficulty); d != "" {
 		q = q.Where("difficulty = ?", d)
+	}
+	if len(f.FollowingIDs) > 0 {
+		q = q.Where(`EXISTS (
+			SELECT 1 FROM submit_logs s
+			WHERE s.problem_id = problems.id AND s.user_id IN ?
+		)`, f.FollowingIDs)
+	} else if f.FollowingIDs != nil {
+		// 空切片：关注列表为空 → 无结果
+		q = q.Where("1 = 0")
 	}
 
 	// 用户状态：用 SQL 聚合，避免拉全量 submit_logs
@@ -929,7 +960,7 @@ func (uc *ProblemUseCase) Get(id uint) (*model.Problem, error) {
 	return &p, nil
 }
 
-func (uc *ProblemUseCase) ListSubmissions(problemID uint, userID, page, pageSize int64) ([]model.SubmitLog, int64, error) {
+func (uc *ProblemUseCase) ListSubmissions(problemID uint, userID, page, pageSize int64, followingIDs []int64) ([]model.SubmitLog, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -939,6 +970,12 @@ func (uc *ProblemUseCase) ListSubmissions(problemID uint, userID, page, pageSize
 	q := uc.data.DB.Model(&model.SubmitLog{}).Where("problem_id = ?", problemID)
 	if userID > 0 {
 		q = q.Where("user_id = ?", userID)
+	}
+	if followingIDs != nil {
+		if len(followingIDs) == 0 {
+			return []model.SubmitLog{}, 0, nil
+		}
+		q = q.Where("user_id IN ?", followingIDs)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -1265,7 +1302,6 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 			model.ProblemStatusFailed,
 		}).
 		Where("content_md IS NOT NULL AND content_md != ''").
-		Where("platform != ?", spider.LeetCode).
 		Updates(map[string]interface{}{
 			"status":         model.ProblemStatusTagging,
 			"problem_type":   "",
@@ -1285,7 +1321,6 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 	res2 := uc.data.DB.Model(&model.Problem{}).
 		Where("status IN ?", []string{model.ProblemStatusFailed, model.ProblemStatusFetching}).
 		Where("(content_md IS NULL OR content_md = '')").
-		Where("platform != ?", spider.LeetCode).
 		Updates(map[string]interface{}{
 			"status":    model.ProblemStatusPending,
 			"error_msg": "",
@@ -1316,7 +1351,7 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 		cutoff := time.Now().Add(-backfillWindow)
 		recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
 		var list []model.Problem
-		q := uc.data.DB.Where("status = ? AND platform != ?", model.ProblemStatusTagging, spider.LeetCode).
+		q := uc.data.DB.Where("status = ?", model.ProblemStatusTagging).
 			Where("content_md IS NOT NULL AND content_md != ''").
 			Where(recentClause, recentArgs...).
 			Order("last_submitted_at DESC NULLS LAST, id DESC")
@@ -1455,7 +1490,9 @@ func isPermanentFetchError(msg string) bool {
 		"未找到题面",
 		"未找到题面 DOM",
 		"无法解析 CF external_id",
-		"LeetCode 不支持爬取",
+		"力扣付费题/无公开题面",
+		"LeetCode 缺少 titleSlug",
+		"leetcode 题目不存在",
 		"不支持的平台",
 		"缺少题面 URL",
 		"竞赛题无稳定题面 URL",

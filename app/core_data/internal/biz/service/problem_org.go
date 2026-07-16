@@ -13,26 +13,39 @@ import (
 	"github.com/go-kratos/kratos/v2/transport/grpc"
 )
 
-// nonPublicOrgUserCacheTTL 非公共域组织用户集合缓存
-const nonPublicOrgUserCacheTTL = 2 * time.Minute
+// pipelineUserCacheTTL 题面流水线资格用户缓存
+const pipelineUserCacheTTL = 2 * time.Minute
 
-// problemHasOrgSubmitter 该题近 backfillWindow 内是否有「组织用户」（非纯公共域）提交。
-// 仅公共域/散户 → false：不爬题面、不跑题面 AI（题库仅入库，前端显示「题面准备中」）。
+// problemHasFetchSubmitter 近窗是否有「题面爬取资格」用户提交
+func (uc *ProblemUseCase) problemHasFetchSubmitter(problemID uint) bool {
+	return uc.problemHasPipelineSubmitter(problemID, "fetch")
+}
+
+// problemHasAISubmitter 近窗是否有「题面 AI 资格」用户提交
+func (uc *ProblemUseCase) problemHasAISubmitter(problemID uint) bool {
+	return uc.problemHasPipelineSubmitter(problemID, "ai")
+}
+
+// problemHasOrgSubmitter 兼容旧调用：等价于 AI 资格（题面 AI 闸门）
 func (uc *ProblemUseCase) problemHasOrgSubmitter(problemID uint) bool {
+	return uc.problemHasAISubmitter(problemID)
+}
+
+func (uc *ProblemUseCase) problemHasPipelineSubmitter(problemID uint, kind string) bool {
 	if problemID == 0 {
 		return false
 	}
-	orgUsers, ok := uc.nonPublicOrgUserIDs()
+	users, ok := uc.pipelineUserIDs(kind)
 	if !ok {
-		// 拉不到组织名单时保守放行，避免 user 短暂故障拖死流水线
-		log.Warnf("problemHasOrgSubmitter: org user list unavailable, allow id=%d", problemID)
+		// 拉不到名单时保守放行，避免 user 短暂故障拖死流水线
+		log.Warnf("problemHasPipelineSubmitter(%s): list unavailable, allow id=%d", kind, problemID)
 		return true
 	}
-	if len(orgUsers) == 0 {
+	if len(users) == 0 {
 		return false
 	}
-	ids := make([]int64, 0, len(orgUsers))
-	for id := range orgUsers {
+	ids := make([]int64, 0, len(users))
+	for id := range users {
 		ids = append(ids, id)
 	}
 	cutoff := time.Now().Add(-backfillWindow)
@@ -44,43 +57,73 @@ func (uc *ProblemUseCase) problemHasOrgSubmitter(problemID uint) bool {
 		Limit(1).
 		Count(&n).Error
 	if err != nil {
-		log.Warnf("problemHasOrgSubmitter query id=%d: %v", problemID, err)
+		log.Warnf("problemHasPipelineSubmitter(%s) query id=%d: %v", kind, problemID, err)
 		return true
 	}
 	return n > 0
 }
 
-// shouldEnqueueFetch 是否入队爬题面：仅近窗有组织用户提交时爬。
+// shouldEnqueueFetch 是否入队爬题面：近窗有爬取资格用户提交
 func (uc *ProblemUseCase) shouldEnqueueFetch(problemID uint) bool {
-	return uc.problemHasOrgSubmitter(problemID)
+	return uc.problemHasFetchSubmitter(problemID)
 }
 
-func (uc *ProblemUseCase) nonPublicOrgUserIDs() (map[int64]struct{}, bool) {
+func (uc *ProblemUseCase) pipelineUserIDs(kind string) (map[int64]struct{}, bool) {
 	uc.orgUsersMu.Lock()
 	defer uc.orgUsersMu.Unlock()
-	if uc.orgUsersCache != nil && time.Since(uc.orgUsersAt) < nonPublicOrgUserCacheTTL {
-		return uc.orgUsersCache, true
+	if uc.pipelineUsersCache != nil && time.Since(uc.pipelineUsersAt) < pipelineUserCacheTTL {
+		if kind == "ai" {
+			return uc.pipelineUsersCache.ai, true
+		}
+		return uc.pipelineUsersCache.fetch, true
 	}
-	ids, err := uc.fetchNonPublicOrgUserIDs()
+	fetchIDs, aiIDs, err := uc.fetchPipelineUserIDs()
 	if err != nil {
-		log.Warnf("fetchNonPublicOrgUserIDs: %v", err)
+		log.Warnf("fetchPipelineUserIDs: %v", err)
+		if uc.pipelineUsersCache != nil {
+			if kind == "ai" {
+				return uc.pipelineUsersCache.ai, true
+			}
+			return uc.pipelineUsersCache.fetch, true
+		}
+		// 回退旧缓存字段
 		if uc.orgUsersCache != nil {
 			return uc.orgUsersCache, true
 		}
 		return nil, false
 	}
-	m := make(map[int64]struct{}, len(ids))
-	for _, id := range ids {
-		m[id] = struct{}{}
+	fetchM := make(map[int64]struct{}, len(fetchIDs))
+	for _, id := range fetchIDs {
+		fetchM[id] = struct{}{}
 	}
-	uc.orgUsersCache = m
-	uc.orgUsersAt = time.Now()
-	return m, true
+	aiM := make(map[int64]struct{}, len(aiIDs))
+	for _, id := range aiIDs {
+		aiM[id] = struct{}{}
+	}
+	uc.pipelineUsersCache = &pipelineUserSets{fetch: fetchM, ai: aiM}
+	uc.pipelineUsersAt = time.Now()
+	// 兼容旧字段
+	uc.orgUsersCache = fetchM
+	uc.orgUsersAt = uc.pipelineUsersAt
+	if kind == "ai" {
+		return aiM, true
+	}
+	return fetchM, true
 }
 
-func (uc *ProblemUseCase) fetchNonPublicOrgUserIDs() ([]int64, error) {
+// nonPublicOrgUserIDs 兼容：返回爬取资格集合
+func (uc *ProblemUseCase) nonPublicOrgUserIDs() (map[int64]struct{}, bool) {
+	return uc.pipelineUserIDs("fetch")
+}
+
+type pipelineUserSets struct {
+	fetch map[int64]struct{}
+	ai    map[int64]struct{}
+}
+
+func (uc *ProblemUseCase) fetchPipelineUserIDs() (fetchIDs, aiIDs []int64, err error) {
 	if uc.reg == nil {
-		return nil, fmt.Errorf("registry nil")
+		return nil, nil, fmt.Errorf("registry nil")
 	}
 	conn, err := grpc.DialInsecure(
 		context.Background(),
@@ -89,17 +132,34 @@ func (uc *ProblemUseCase) fetchNonPublicOrgUserIDs() ([]int64, error) {
 		grpc.WithTimeout(15*time.Second),
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer conn.Close()
 	client := profile.NewProfileClient(conn)
 	res, err := client.GetNonPublicOrgUserIds(context.Background(), &profile.GetNonPublicOrgUserIdsReq{})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	ids := res.GetUserIds()
-	if ids == nil {
-		ids = []int64{}
+	fetchIDs = res.GetFetchUserIds()
+	if len(fetchIDs) == 0 {
+		// 旧 user 服务未返回 fetchUserIds 时回落 userIds
+		fetchIDs = res.GetUserIds()
 	}
-	return ids, nil
+	aiIDs = res.GetAiUserIds()
+	if len(aiIDs) == 0 {
+		// 旧服务无 ai 列表：与爬取共用
+		aiIDs = fetchIDs
+	}
+	if fetchIDs == nil {
+		fetchIDs = []int64{}
+	}
+	if aiIDs == nil {
+		aiIDs = []int64{}
+	}
+	return fetchIDs, aiIDs, nil
+}
+
+func (uc *ProblemUseCase) fetchNonPublicOrgUserIDs() ([]int64, error) {
+	fetch, _, err := uc.fetchPipelineUserIDs()
+	return fetch, err
 }

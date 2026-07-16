@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"cwxu-algo/app/core_data/internal/data/model"
+
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -108,7 +110,7 @@ func (d *StatisticDal) heatmapFromSubmitLogs(ctx context.Context, startDate, end
 	if isAc {
 		agg = agg.Where("is_ac = true")
 	} else {
-		agg = agg.Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
+		agg = agg.Where(model.SQLExcludeLeetCodeNonSubmit)
 	}
 	if userId != 0 {
 		agg = agg.Where("user_id = ?", userId)
@@ -448,7 +450,7 @@ func (d *StatisticDal) countQueryScoped(userId int64, start, end time.Time, memb
 	var count int64
 	query := d.db.Table("submit_logs").
 		Where("time >= ? AND time < ?", start, end).
-		Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
+		Where(model.SQLExcludeLeetCodeNonSubmit)
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
 	} else if memberIDs != nil {
@@ -470,7 +472,7 @@ func (d *StatisticDal) countQueryTotalScoped(userId int64, memberIDs []int64) in
 	}
 	var count int64
 	query := d.db.Table("submit_logs").
-		Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
+		Where(model.SQLExcludeLeetCodeNonSubmit)
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
 	} else if memberIDs != nil {

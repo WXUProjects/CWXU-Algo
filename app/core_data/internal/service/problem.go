@@ -159,16 +159,28 @@ func (s *ProblemService) ListTags(ctx context.Context, req *problem.ListTagsReq)
 }
 
 func (s *ProblemService) List(ctx context.Context, req *problem.ListProblemReq) (*problem.ListProblemRes, error) {
+	var followingIDs []int64
+	if req.FollowingOnly {
+		viewer := auth.GetCurrentUserId(ctx)
+		if viewer == 0 {
+			return &problem.ListProblemRes{Code: 0, Message: "success", Data: nil, Total: 0, Page: 1, PageSize: req.PageSize}, nil
+		}
+		followingIDs = fetchFollowingIDs(ctx, s.reg, int64(viewer))
+		if followingIDs == nil {
+			followingIDs = []int64{}
+		}
+	}
 	list, statusMap, total, err := s.uc.List(biz.ListProblemFilter{
-		Page:       req.Page,
-		PageSize:   req.PageSize,
-		Sort:       req.Sort,
-		Platforms:  splitCSV(req.Platforms),
-		Tags:       splitCSV(req.Tags),
-		UserStatus: req.UserStatus,
-		UserID:     req.UserId,
-		Keyword:    req.Keyword,
-		Difficulty: req.Difficulty,
+		Page:         req.Page,
+		PageSize:     req.PageSize,
+		Sort:         req.Sort,
+		Platforms:    splitCSV(req.Platforms),
+		Tags:         splitCSV(req.Tags),
+		UserStatus:   req.UserStatus,
+		UserID:       req.UserId,
+		Keyword:      req.Keyword,
+		Difficulty:   req.Difficulty,
+		FollowingIDs: followingIDs,
 	})
 	if err != nil {
 		return nil, errors.InternalServer("list failed", "service unavailable")
@@ -215,7 +227,18 @@ func (s *ProblemService) Get(ctx context.Context, req *problem.GetProblemReq) (*
 }
 
 func (s *ProblemService) ListSubmissions(ctx context.Context, req *problem.ListSubmissionsReq) (*problem.ListSubmissionsRes, error) {
-	list, total, err := s.uc.ListSubmissions(uint(req.ProblemId), req.UserId, req.Page, req.PageSize)
+	var followingIDs []int64
+	if req.FollowingOnly {
+		viewer := auth.GetCurrentUserId(ctx)
+		if viewer == 0 {
+			return &problem.ListSubmissionsRes{Code: 0, Message: "success", Data: nil, Total: 0}, nil
+		}
+		followingIDs = fetchFollowingIDs(ctx, s.reg, int64(viewer))
+		if followingIDs == nil {
+			followingIDs = []int64{}
+		}
+	}
+	list, total, err := s.uc.ListSubmissions(uint(req.ProblemId), req.UserId, req.Page, req.PageSize, followingIDs)
 	if err != nil {
 		return nil, errors.InternalServer("query failed", "service unavailable")
 	}
@@ -521,4 +544,197 @@ func (s *ProblemService) ToggleFetch(ctx context.Context, req *problem.TogglePip
 	}
 	s.uc.ResumeFetch()
 	return &problem.TogglePipelineRes{Code: 0, Message: "题面爬取已恢复", Paused: false}, nil
+}
+
+func (s *ProblemService) AdminUpdate(ctx context.Context, req *problem.AdminUpdateProblemReq) (*problem.AdminUpdateProblemRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return &problem.AdminUpdateProblemRes{Code: 1, Message: "仅站点管理员可直接修改"}, nil
+	}
+	if req == nil || req.Id == 0 {
+		return &problem.AdminUpdateProblemRes{Code: 1, Message: "题目 id 无效"}, nil
+	}
+	if !req.UpdateTags && !req.UpdateContent && strings.TrimSpace(req.Title) == "" {
+		return &problem.AdminUpdateProblemRes{Code: 1, Message: "没有需要修改的内容"}, nil
+	}
+	p, err := s.uc.ApplyProblemFields(
+		uint(req.Id),
+		req.UpdateTags, req.Tags,
+		req.UpdateContent, req.ContentMd,
+		req.Title,
+	)
+	if err != nil {
+		return &problem.AdminUpdateProblemRes{Code: 1, Message: err.Error()}, nil
+	}
+	return &problem.AdminUpdateProblemRes{
+		Code:    0,
+		Message: "已保存",
+		Data:    s.toInfo(p, ""),
+	}, nil
+}
+
+func (s *ProblemService) ProposeEdit(ctx context.Context, req *problem.ProposeProblemEditReq) (*problem.ProposeProblemEditRes, error) {
+	uid := auth.GetCurrentUserId(ctx)
+	if uid == 0 {
+		return &problem.ProposeProblemEditRes{Code: 1, Message: "请先登录"}, nil
+	}
+	// 站点管理员应走 AdminUpdate，这里也允许直接通过（省一步）
+	if auth.VerifySiteAdmin(ctx) {
+		p, err := s.uc.ApplyProblemFields(
+			uint(req.ProblemId),
+			req.UpdateTags, req.Tags,
+			req.UpdateContent, req.ContentMd,
+			req.Title,
+		)
+		if err != nil {
+			return &problem.ProposeProblemEditRes{Code: 1, Message: err.Error()}, nil
+		}
+		_ = p
+		return &problem.ProposeProblemEditRes{Code: 0, Message: "已直接保存（站点管理员）", RequestId: 0}, nil
+	}
+	if req == nil || req.ProblemId == 0 {
+		return &problem.ProposeProblemEditRes{Code: 1, Message: "题目 id 无效"}, nil
+	}
+	id, err := s.uc.ProposeProblemEdit(
+		uid, uint(req.ProblemId),
+		req.UpdateTags, req.Tags,
+		req.UpdateContent, req.ContentMd,
+		req.Title, req.Note,
+	)
+	if err != nil {
+		return &problem.ProposeProblemEditRes{Code: 1, Message: err.Error()}, nil
+	}
+	return &problem.ProposeProblemEditRes{
+		Code:      0,
+		Message:   "已提交，等待站点管理员审核",
+		RequestId: uint32(id),
+	}, nil
+}
+
+func (s *ProblemService) toEditInfo(r *model.ProblemEditRequest, p *model.Problem, userName string) *problem.ProblemEditInfo {
+	if r == nil {
+		return nil
+	}
+	info := &problem.ProblemEditInfo{
+		Id:                uint32(r.ID),
+		ProblemId:         uint32(r.ProblemID),
+		UserId:            uint32(r.UserID),
+		UserName:          userName,
+		HasTags:           r.HasTags,
+		HasContent:        r.HasContent,
+		ProposedTags:      []string(r.ProposedTags),
+		ProposedContentMd: r.ProposedContentMD,
+		ProposedTitle:     r.ProposedTitle,
+		Note:              r.Note,
+		Status:            r.Status,
+		ReviewNote:        r.ReviewNote,
+		CreatedAt:         r.CreatedAt.Unix(),
+		UpdatedAt:         r.UpdatedAt.Unix(),
+	}
+	if r.ReviewerID != nil {
+		info.ReviewerId = uint32(*r.ReviewerID)
+	}
+	if info.ProposedTags == nil {
+		info.ProposedTags = []string{}
+	}
+	if p != nil {
+		info.Platform = p.Platform
+		info.ExternalId = p.ExternalID
+		info.ProblemTitle = cleanDisplayTitle(p.Title)
+		info.CurrentTags = []string(p.Tags)
+		if info.CurrentTags == nil {
+			info.CurrentTags = []string{}
+		}
+		info.CurrentContentMd = p.ContentMD
+		info.CurrentTitle = cleanDisplayTitle(p.Title)
+	}
+	return info
+}
+
+func (s *ProblemService) ListEditRequests(ctx context.Context, req *problem.ListProblemEditReq) (*problem.ListProblemEditRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return &problem.ListProblemEditRes{Code: 1, Message: "仅站点管理员可查看审核列表"}, nil
+	}
+	page, ps := int64(1), int64(20)
+	status := ""
+	if req != nil {
+		page = req.Page
+		ps = req.PageSize
+		status = req.Status
+	}
+	list, total, probMap, err := s.uc.ListProblemEditRequests(page, ps, status)
+	if err != nil {
+		return nil, errors.InternalServer("list edit requests failed", "service unavailable")
+	}
+	uids := make([]int64, 0, len(list))
+	seen := map[int64]bool{}
+	for _, r := range list {
+		uid := int64(r.UserID)
+		if uid > 0 && !seen[uid] {
+			seen[uid] = true
+			uids = append(uids, uid)
+		}
+	}
+	names := s.fetchUserNames(ctx, uids)
+	data := make([]*problem.ProblemEditInfo, 0, len(list))
+	for i := range list {
+		r := &list[i]
+		name := names[int64(r.UserID)]
+		data = append(data, s.toEditInfo(r, probMap[r.ProblemID], name))
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if ps <= 0 {
+		ps = 20
+	}
+	return &problem.ListProblemEditRes{
+		Code:     0,
+		Message:  "success",
+		Data:     data,
+		Total:    total,
+		Page:     page,
+		PageSize: ps,
+	}, nil
+}
+
+func (s *ProblemService) ReviewEdit(ctx context.Context, req *problem.ReviewProblemEditReq) (*problem.ReviewProblemEditRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return &problem.ReviewProblemEditRes{Code: 1, Message: "仅站点管理员可审核"}, nil
+	}
+	if req == nil || req.Id == 0 {
+		return &problem.ReviewProblemEditRes{Code: 1, Message: "申请 id 无效"}, nil
+	}
+	uid := auth.GetCurrentUserId(ctx)
+	if err := s.uc.ReviewProblemEdit(uint(req.Id), uid, req.Approve, req.ReviewNote); err != nil {
+		return &problem.ReviewProblemEditRes{Code: 1, Message: err.Error()}, nil
+	}
+	msg := "已驳回"
+	if req.Approve {
+		msg = "已通过并应用修改"
+	}
+	return &problem.ReviewProblemEditRes{Code: 0, Message: msg}, nil
+}
+
+func (s *ProblemService) MyPendingEdit(ctx context.Context, req *problem.MyPendingEditReq) (*problem.MyPendingEditRes, error) {
+	uid := auth.GetCurrentUserId(ctx)
+	if uid == 0 {
+		return &problem.MyPendingEditRes{Code: 1, Message: "请先登录"}, nil
+	}
+	if req == nil || req.ProblemId == 0 {
+		return &problem.MyPendingEditRes{Code: 1, Message: "题目 id 无效"}, nil
+	}
+	r, err := s.uc.MyPendingProblemEdit(uid, uint(req.ProblemId))
+	if err != nil {
+		return nil, errors.InternalServer("query failed", "service unavailable")
+	}
+	if r == nil {
+		return &problem.MyPendingEditRes{Code: 0, Message: "success", HasPending: false}, nil
+	}
+	p, _ := s.uc.Get(r.ProblemID)
+	return &problem.MyPendingEditRes{
+		Code:       0,
+		Message:    "success",
+		HasPending: true,
+		Data:       s.toEditInfo(r, p, ""),
+	}, nil
 }

@@ -255,7 +255,9 @@ type ListProblemReq struct {
 	// 关键词：匹配 title / external_id（模糊）
 	Keyword string `protobuf:"bytes,8,opt,name=keyword,proto3" json:"keyword,omitempty"`
 	// 难度：简单 / 中等 / 困难
-	Difficulty    string `protobuf:"bytes,9,opt,name=difficulty,proto3" json:"difficulty,omitempty"`
+	Difficulty string `protobuf:"bytes,9,opt,name=difficulty,proto3" json:"difficulty,omitempty"`
+	// 仅显示关注用户提交过的题目（需登录）
+	FollowingOnly bool `protobuf:"varint,10,opt,name=following_only,json=followingOnly,proto3" json:"following_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -351,6 +353,13 @@ func (x *ListProblemReq) GetDifficulty() string {
 		return x.Difficulty
 	}
 	return ""
+}
+
+func (x *ListProblemReq) GetFollowingOnly() bool {
+	if x != nil {
+		return x.FollowingOnly
+	}
+	return false
 }
 
 type ListProblemRes struct {
@@ -807,11 +816,13 @@ func (x *SubmissionInfo) GetUserName() string {
 }
 
 type ListSubmissionsReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ProblemId     uint32                 `protobuf:"varint,1,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
-	Page          int64                  `protobuf:"varint,2,opt,name=page,proto3" json:"page,omitempty"`
-	PageSize      int64                  `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	UserId        int64                  `protobuf:"varint,4,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	ProblemId uint32                 `protobuf:"varint,1,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
+	Page      int64                  `protobuf:"varint,2,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize  int64                  `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	UserId    int64                  `protobuf:"varint,4,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// 仅显示关注用户的提交（需登录）
+	FollowingOnly bool `protobuf:"varint,5,opt,name=following_only,json=followingOnly,proto3" json:"following_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -872,6 +883,13 @@ func (x *ListSubmissionsReq) GetUserId() int64 {
 		return x.UserId
 	}
 	return 0
+}
+
+func (x *ListSubmissionsReq) GetFollowingOnly() bool {
+	if x != nil {
+		return x.FollowingOnly
+	}
+	return false
 }
 
 type ListSubmissionsRes struct {
@@ -2497,6 +2515,878 @@ func (x *TogglePipelineRes) GetPurged() int64 {
 	return 0
 }
 
+// 站点管理员直接改题：有字段才更新（update_tags / update_content 显式开关）
+type AdminUpdateProblemReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	UpdateTags    bool                   `protobuf:"varint,2,opt,name=update_tags,json=updateTags,proto3" json:"update_tags,omitempty"`
+	Tags          []string               `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
+	UpdateContent bool                   `protobuf:"varint,4,opt,name=update_content,json=updateContent,proto3" json:"update_content,omitempty"`
+	ContentMd     string                 `protobuf:"bytes,5,opt,name=content_md,json=contentMd,proto3" json:"content_md,omitempty"`
+	Title         string                 `protobuf:"bytes,6,opt,name=title,proto3" json:"title,omitempty"` // 非空才改标题
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminUpdateProblemReq) Reset() {
+	*x = AdminUpdateProblemReq{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminUpdateProblemReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminUpdateProblemReq) ProtoMessage() {}
+
+func (x *AdminUpdateProblemReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminUpdateProblemReq.ProtoReflect.Descriptor instead.
+func (*AdminUpdateProblemReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *AdminUpdateProblemReq) GetId() uint32 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *AdminUpdateProblemReq) GetUpdateTags() bool {
+	if x != nil {
+		return x.UpdateTags
+	}
+	return false
+}
+
+func (x *AdminUpdateProblemReq) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+func (x *AdminUpdateProblemReq) GetUpdateContent() bool {
+	if x != nil {
+		return x.UpdateContent
+	}
+	return false
+}
+
+func (x *AdminUpdateProblemReq) GetContentMd() string {
+	if x != nil {
+		return x.ContentMd
+	}
+	return ""
+}
+
+func (x *AdminUpdateProblemReq) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+type AdminUpdateProblemRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          *ProblemInfo           `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminUpdateProblemRes) Reset() {
+	*x = AdminUpdateProblemRes{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminUpdateProblemRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminUpdateProblemRes) ProtoMessage() {}
+
+func (x *AdminUpdateProblemRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminUpdateProblemRes.ProtoReflect.Descriptor instead.
+func (*AdminUpdateProblemRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *AdminUpdateProblemRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *AdminUpdateProblemRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *AdminUpdateProblemRes) GetData() *ProblemInfo {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+// 用户提交修改申请：至少改标签或题面其一
+type ProposeProblemEditReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProblemId     uint32                 `protobuf:"varint,1,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
+	UpdateTags    bool                   `protobuf:"varint,2,opt,name=update_tags,json=updateTags,proto3" json:"update_tags,omitempty"`
+	Tags          []string               `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
+	UpdateContent bool                   `protobuf:"varint,4,opt,name=update_content,json=updateContent,proto3" json:"update_content,omitempty"`
+	ContentMd     string                 `protobuf:"bytes,5,opt,name=content_md,json=contentMd,proto3" json:"content_md,omitempty"`
+	Title         string                 `protobuf:"bytes,6,opt,name=title,proto3" json:"title,omitempty"`
+	Note          string                 `protobuf:"bytes,7,opt,name=note,proto3" json:"note,omitempty"` // 可选说明
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProposeProblemEditReq) Reset() {
+	*x = ProposeProblemEditReq{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProposeProblemEditReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProposeProblemEditReq) ProtoMessage() {}
+
+func (x *ProposeProblemEditReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProposeProblemEditReq.ProtoReflect.Descriptor instead.
+func (*ProposeProblemEditReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *ProposeProblemEditReq) GetProblemId() uint32 {
+	if x != nil {
+		return x.ProblemId
+	}
+	return 0
+}
+
+func (x *ProposeProblemEditReq) GetUpdateTags() bool {
+	if x != nil {
+		return x.UpdateTags
+	}
+	return false
+}
+
+func (x *ProposeProblemEditReq) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+func (x *ProposeProblemEditReq) GetUpdateContent() bool {
+	if x != nil {
+		return x.UpdateContent
+	}
+	return false
+}
+
+func (x *ProposeProblemEditReq) GetContentMd() string {
+	if x != nil {
+		return x.ContentMd
+	}
+	return ""
+}
+
+func (x *ProposeProblemEditReq) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ProposeProblemEditReq) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
+type ProposeProblemEditRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	RequestId     uint32                 `protobuf:"varint,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProposeProblemEditRes) Reset() {
+	*x = ProposeProblemEditRes{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProposeProblemEditRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProposeProblemEditRes) ProtoMessage() {}
+
+func (x *ProposeProblemEditRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProposeProblemEditRes.ProtoReflect.Descriptor instead.
+func (*ProposeProblemEditRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *ProposeProblemEditRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *ProposeProblemEditRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *ProposeProblemEditRes) GetRequestId() uint32 {
+	if x != nil {
+		return x.RequestId
+	}
+	return 0
+}
+
+type ListProblemEditReq struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Page     int64                  `protobuf:"varint,1,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize int64                  `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// pending | approved | rejected | 空=全部
+	Status        string `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListProblemEditReq) Reset() {
+	*x = ListProblemEditReq{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListProblemEditReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListProblemEditReq) ProtoMessage() {}
+
+func (x *ListProblemEditReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListProblemEditReq.ProtoReflect.Descriptor instead.
+func (*ListProblemEditReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *ListProblemEditReq) GetPage() int64 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *ListProblemEditReq) GetPageSize() int64 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListProblemEditReq) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+type ProblemEditInfo struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	ProblemId         uint32                 `protobuf:"varint,2,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
+	Platform          string                 `protobuf:"bytes,3,opt,name=platform,proto3" json:"platform,omitempty"`
+	ExternalId        string                 `protobuf:"bytes,4,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	ProblemTitle      string                 `protobuf:"bytes,5,opt,name=problem_title,json=problemTitle,proto3" json:"problem_title,omitempty"`
+	UserId            uint32                 `protobuf:"varint,6,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	UserName          string                 `protobuf:"bytes,7,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`
+	HasTags           bool                   `protobuf:"varint,8,opt,name=has_tags,json=hasTags,proto3" json:"has_tags,omitempty"`
+	HasContent        bool                   `protobuf:"varint,9,opt,name=has_content,json=hasContent,proto3" json:"has_content,omitempty"`
+	ProposedTags      []string               `protobuf:"bytes,10,rep,name=proposed_tags,json=proposedTags,proto3" json:"proposed_tags,omitempty"`
+	ProposedContentMd string                 `protobuf:"bytes,11,opt,name=proposed_content_md,json=proposedContentMd,proto3" json:"proposed_content_md,omitempty"`
+	ProposedTitle     string                 `protobuf:"bytes,12,opt,name=proposed_title,json=proposedTitle,proto3" json:"proposed_title,omitempty"`
+	Note              string                 `protobuf:"bytes,13,opt,name=note,proto3" json:"note,omitempty"`
+	Status            string                 `protobuf:"bytes,14,opt,name=status,proto3" json:"status,omitempty"`
+	ReviewerId        uint32                 `protobuf:"varint,15,opt,name=reviewer_id,json=reviewerId,proto3" json:"reviewer_id,omitempty"`
+	ReviewNote        string                 `protobuf:"bytes,16,opt,name=review_note,json=reviewNote,proto3" json:"review_note,omitempty"`
+	CreatedAt         int64                  `protobuf:"varint,17,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt         int64                  `protobuf:"varint,18,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// 当前线上快照（便于对比）
+	CurrentTags      []string `protobuf:"bytes,19,rep,name=current_tags,json=currentTags,proto3" json:"current_tags,omitempty"`
+	CurrentContentMd string   `protobuf:"bytes,20,opt,name=current_content_md,json=currentContentMd,proto3" json:"current_content_md,omitempty"`
+	CurrentTitle     string   `protobuf:"bytes,21,opt,name=current_title,json=currentTitle,proto3" json:"current_title,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ProblemEditInfo) Reset() {
+	*x = ProblemEditInfo{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProblemEditInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProblemEditInfo) ProtoMessage() {}
+
+func (x *ProblemEditInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProblemEditInfo.ProtoReflect.Descriptor instead.
+func (*ProblemEditInfo) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *ProblemEditInfo) GetId() uint32 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *ProblemEditInfo) GetProblemId() uint32 {
+	if x != nil {
+		return x.ProblemId
+	}
+	return 0
+}
+
+func (x *ProblemEditInfo) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *ProblemEditInfo) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *ProblemEditInfo) GetProblemTitle() string {
+	if x != nil {
+		return x.ProblemTitle
+	}
+	return ""
+}
+
+func (x *ProblemEditInfo) GetUserId() uint32 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *ProblemEditInfo) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *ProblemEditInfo) GetHasTags() bool {
+	if x != nil {
+		return x.HasTags
+	}
+	return false
+}
+
+func (x *ProblemEditInfo) GetHasContent() bool {
+	if x != nil {
+		return x.HasContent
+	}
+	return false
+}
+
+func (x *ProblemEditInfo) GetProposedTags() []string {
+	if x != nil {
+		return x.ProposedTags
+	}
+	return nil
+}
+
+func (x *ProblemEditInfo) GetProposedContentMd() string {
+	if x != nil {
+		return x.ProposedContentMd
+	}
+	return ""
+}
+
+func (x *ProblemEditInfo) GetProposedTitle() string {
+	if x != nil {
+		return x.ProposedTitle
+	}
+	return ""
+}
+
+func (x *ProblemEditInfo) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
+func (x *ProblemEditInfo) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ProblemEditInfo) GetReviewerId() uint32 {
+	if x != nil {
+		return x.ReviewerId
+	}
+	return 0
+}
+
+func (x *ProblemEditInfo) GetReviewNote() string {
+	if x != nil {
+		return x.ReviewNote
+	}
+	return ""
+}
+
+func (x *ProblemEditInfo) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *ProblemEditInfo) GetUpdatedAt() int64 {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return 0
+}
+
+func (x *ProblemEditInfo) GetCurrentTags() []string {
+	if x != nil {
+		return x.CurrentTags
+	}
+	return nil
+}
+
+func (x *ProblemEditInfo) GetCurrentContentMd() string {
+	if x != nil {
+		return x.CurrentContentMd
+	}
+	return ""
+}
+
+func (x *ProblemEditInfo) GetCurrentTitle() string {
+	if x != nil {
+		return x.CurrentTitle
+	}
+	return ""
+}
+
+type ListProblemEditRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          []*ProblemEditInfo     `protobuf:"bytes,3,rep,name=data,proto3" json:"data,omitempty"`
+	Total         int64                  `protobuf:"varint,4,opt,name=total,proto3" json:"total,omitempty"`
+	Page          int64                  `protobuf:"varint,5,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize      int64                  `protobuf:"varint,6,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListProblemEditRes) Reset() {
+	*x = ListProblemEditRes{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListProblemEditRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListProblemEditRes) ProtoMessage() {}
+
+func (x *ListProblemEditRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListProblemEditRes.ProtoReflect.Descriptor instead.
+func (*ListProblemEditRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *ListProblemEditRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *ListProblemEditRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *ListProblemEditRes) GetData() []*ProblemEditInfo {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *ListProblemEditRes) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *ListProblemEditRes) GetPage() int64 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *ListProblemEditRes) GetPageSize() int64 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+type ReviewProblemEditReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Approve       bool                   `protobuf:"varint,2,opt,name=approve,proto3" json:"approve,omitempty"`
+	ReviewNote    string                 `protobuf:"bytes,3,opt,name=review_note,json=reviewNote,proto3" json:"review_note,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReviewProblemEditReq) Reset() {
+	*x = ReviewProblemEditReq{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReviewProblemEditReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReviewProblemEditReq) ProtoMessage() {}
+
+func (x *ReviewProblemEditReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReviewProblemEditReq.ProtoReflect.Descriptor instead.
+func (*ReviewProblemEditReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *ReviewProblemEditReq) GetId() uint32 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *ReviewProblemEditReq) GetApprove() bool {
+	if x != nil {
+		return x.Approve
+	}
+	return false
+}
+
+func (x *ReviewProblemEditReq) GetReviewNote() string {
+	if x != nil {
+		return x.ReviewNote
+	}
+	return ""
+}
+
+type ReviewProblemEditRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReviewProblemEditRes) Reset() {
+	*x = ReviewProblemEditRes{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReviewProblemEditRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReviewProblemEditRes) ProtoMessage() {}
+
+func (x *ReviewProblemEditRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReviewProblemEditRes.ProtoReflect.Descriptor instead.
+func (*ReviewProblemEditRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *ReviewProblemEditRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *ReviewProblemEditRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type MyPendingEditReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProblemId     uint32                 `protobuf:"varint,1,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MyPendingEditReq) Reset() {
+	*x = MyPendingEditReq{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MyPendingEditReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MyPendingEditReq) ProtoMessage() {}
+
+func (x *MyPendingEditReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MyPendingEditReq.ProtoReflect.Descriptor instead.
+func (*MyPendingEditReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *MyPendingEditReq) GetProblemId() uint32 {
+	if x != nil {
+		return x.ProblemId
+	}
+	return 0
+}
+
+type MyPendingEditRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	HasPending    bool                   `protobuf:"varint,3,opt,name=has_pending,json=hasPending,proto3" json:"has_pending,omitempty"`
+	Data          *ProblemEditInfo       `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MyPendingEditRes) Reset() {
+	*x = MyPendingEditRes{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MyPendingEditRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MyPendingEditRes) ProtoMessage() {}
+
+func (x *MyPendingEditRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MyPendingEditRes.ProtoReflect.Descriptor instead.
+func (*MyPendingEditRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *MyPendingEditRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *MyPendingEditRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *MyPendingEditRes) GetHasPending() bool {
+	if x != nil {
+		return x.HasPending
+	}
+	return false
+}
+
+func (x *MyPendingEditRes) GetData() *ProblemEditInfo {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
 var File_core_v1_problem_problem_proto protoreflect.FileDescriptor
 
 const file_core_v1_problem_problem_proto_rawDesc = "" +
@@ -2527,7 +3417,7 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\terror_msg\x18\f \x01(\tR\berrorMsg\x12*\n" +
 	"\x11last_submitted_at\x18\r \x01(\x03R\x0flastSubmittedAt\x12\x1f\n" +
 	"\vuser_status\x18\x0e \x01(\tR\n" +
-	"userStatus\"\xfb\x01\n" +
+	"userStatus\"\xa2\x02\n" +
 	"\x0eListProblemReq\x12\x12\n" +
 	"\x04page\x18\x01 \x01(\x03R\x04page\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\x03R\bpageSize\x12\x12\n" +
@@ -2540,7 +3430,9 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\akeyword\x18\b \x01(\tR\akeyword\x12\x1e\n" +
 	"\n" +
 	"difficulty\x18\t \x01(\tR\n" +
-	"difficulty\"\xbb\x01\n" +
+	"difficulty\x12%\n" +
+	"\x0efollowing_only\x18\n" +
+	" \x01(\bR\rfollowingOnly\"\xbb\x01\n" +
 	"\x0eListProblemRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x124\n" +
@@ -2572,13 +3464,14 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x06status\x18\x06 \x01(\tR\x06status\x12\x12\n" +
 	"\x04time\x18\a \x01(\x03R\x04time\x12\x18\n" +
 	"\acontest\x18\b \x01(\tR\acontest\x12\x1b\n" +
-	"\tuser_name\x18\t \x01(\tR\buserName\"}\n" +
+	"\tuser_name\x18\t \x01(\tR\buserName\"\xa4\x01\n" +
 	"\x12ListSubmissionsReq\x12\x1d\n" +
 	"\n" +
 	"problem_id\x18\x01 \x01(\rR\tproblemId\x12\x12\n" +
 	"\x04page\x18\x02 \x01(\x03R\x04page\x12\x1b\n" +
 	"\tpage_size\x18\x03 \x01(\x03R\bpageSize\x12\x17\n" +
-	"\auser_id\x18\x04 \x01(\x03R\x06userId\"\x91\x01\n" +
+	"\auser_id\x18\x04 \x01(\x03R\x06userId\x12%\n" +
+	"\x0efollowing_only\x18\x05 \x01(\bR\rfollowingOnly\"\x91\x01\n" +
 	"\x12ListSubmissionsRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x127\n" +
@@ -2702,7 +3595,94 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
 	"\x06paused\x18\x03 \x01(\bR\x06paused\x12\x16\n" +
-	"\x06purged\x18\x04 \x01(\x03R\x06purged2\xdc\r\n" +
+	"\x06purged\x18\x04 \x01(\x03R\x06purged\"\xb8\x01\n" +
+	"\x15AdminUpdateProblemReq\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1f\n" +
+	"\vupdate_tags\x18\x02 \x01(\bR\n" +
+	"updateTags\x12\x12\n" +
+	"\x04tags\x18\x03 \x03(\tR\x04tags\x12%\n" +
+	"\x0eupdate_content\x18\x04 \x01(\bR\rupdateContent\x12\x1d\n" +
+	"\n" +
+	"content_md\x18\x05 \x01(\tR\tcontentMd\x12\x14\n" +
+	"\x05title\x18\x06 \x01(\tR\x05title\"{\n" +
+	"\x15AdminUpdateProblemRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x124\n" +
+	"\x04data\x18\x03 \x01(\v2 .api.core.v1.problem.ProblemInfoR\x04data\"\xdb\x01\n" +
+	"\x15ProposeProblemEditReq\x12\x1d\n" +
+	"\n" +
+	"problem_id\x18\x01 \x01(\rR\tproblemId\x12\x1f\n" +
+	"\vupdate_tags\x18\x02 \x01(\bR\n" +
+	"updateTags\x12\x12\n" +
+	"\x04tags\x18\x03 \x03(\tR\x04tags\x12%\n" +
+	"\x0eupdate_content\x18\x04 \x01(\bR\rupdateContent\x12\x1d\n" +
+	"\n" +
+	"content_md\x18\x05 \x01(\tR\tcontentMd\x12\x14\n" +
+	"\x05title\x18\x06 \x01(\tR\x05title\x12\x12\n" +
+	"\x04note\x18\a \x01(\tR\x04note\"d\n" +
+	"\x15ProposeProblemEditRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x03 \x01(\rR\trequestId\"]\n" +
+	"\x12ListProblemEditReq\x12\x12\n" +
+	"\x04page\x18\x01 \x01(\x03R\x04page\x12\x1b\n" +
+	"\tpage_size\x18\x02 \x01(\x03R\bpageSize\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\"\xb2\x05\n" +
+	"\x0fProblemEditInfo\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1d\n" +
+	"\n" +
+	"problem_id\x18\x02 \x01(\rR\tproblemId\x12\x1a\n" +
+	"\bplatform\x18\x03 \x01(\tR\bplatform\x12\x1f\n" +
+	"\vexternal_id\x18\x04 \x01(\tR\n" +
+	"externalId\x12#\n" +
+	"\rproblem_title\x18\x05 \x01(\tR\fproblemTitle\x12\x17\n" +
+	"\auser_id\x18\x06 \x01(\rR\x06userId\x12\x1b\n" +
+	"\tuser_name\x18\a \x01(\tR\buserName\x12\x19\n" +
+	"\bhas_tags\x18\b \x01(\bR\ahasTags\x12\x1f\n" +
+	"\vhas_content\x18\t \x01(\bR\n" +
+	"hasContent\x12#\n" +
+	"\rproposed_tags\x18\n" +
+	" \x03(\tR\fproposedTags\x12.\n" +
+	"\x13proposed_content_md\x18\v \x01(\tR\x11proposedContentMd\x12%\n" +
+	"\x0eproposed_title\x18\f \x01(\tR\rproposedTitle\x12\x12\n" +
+	"\x04note\x18\r \x01(\tR\x04note\x12\x16\n" +
+	"\x06status\x18\x0e \x01(\tR\x06status\x12\x1f\n" +
+	"\vreviewer_id\x18\x0f \x01(\rR\n" +
+	"reviewerId\x12\x1f\n" +
+	"\vreview_note\x18\x10 \x01(\tR\n" +
+	"reviewNote\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x11 \x01(\x03R\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\x12 \x01(\x03R\tupdatedAt\x12!\n" +
+	"\fcurrent_tags\x18\x13 \x03(\tR\vcurrentTags\x12,\n" +
+	"\x12current_content_md\x18\x14 \x01(\tR\x10currentContentMd\x12#\n" +
+	"\rcurrent_title\x18\x15 \x01(\tR\fcurrentTitle\"\xc3\x01\n" +
+	"\x12ListProblemEditRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x128\n" +
+	"\x04data\x18\x03 \x03(\v2$.api.core.v1.problem.ProblemEditInfoR\x04data\x12\x14\n" +
+	"\x05total\x18\x04 \x01(\x03R\x05total\x12\x12\n" +
+	"\x04page\x18\x05 \x01(\x03R\x04page\x12\x1b\n" +
+	"\tpage_size\x18\x06 \x01(\x03R\bpageSize\"a\n" +
+	"\x14ReviewProblemEditReq\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\rR\x02id\x12\x18\n" +
+	"\aapprove\x18\x02 \x01(\bR\aapprove\x12\x1f\n" +
+	"\vreview_note\x18\x03 \x01(\tR\n" +
+	"reviewNote\"D\n" +
+	"\x14ReviewProblemEditRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"1\n" +
+	"\x10MyPendingEditReq\x12\x1d\n" +
+	"\n" +
+	"problem_id\x18\x01 \x01(\rR\tproblemId\"\x9b\x01\n" +
+	"\x10MyPendingEditRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
+	"\vhas_pending\x18\x03 \x01(\bR\n" +
+	"hasPending\x128\n" +
+	"\x04data\x18\x04 \x01(\v2$.api.core.v1.problem.ProblemEditInfoR\x04data2\xa7\x13\n" +
 	"\aProblem\x12o\n" +
 	"\x04List\x12#.api.core.v1.problem.ListProblemReq\x1a#.api.core.v1.problem.ListProblemRes\"\x1d\x82\xd3\xe4\x93\x02\x17\x12\x15/v1/core/problem/list\x12m\n" +
 	"\bListTags\x12 .api.core.v1.problem.ListTagsReq\x1a .api.core.v1.problem.ListTagsRes\"\x1d\x82\xd3\xe4\x93\x02\x17\x12\x15/v1/core/problem/tags\x12k\n" +
@@ -2717,7 +3697,13 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\vRetryFailed\x12#.api.core.v1.problem.RetryFailedReq\x1a#.api.core.v1.problem.RetryFailedRes\"(\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/v1/core/problem/retry-failed\x12\x8b\x01\n" +
 	"\rToggleAnalyze\x12&.api.core.v1.problem.TogglePipelineReq\x1a&.api.core.v1.problem.TogglePipelineRes\"*\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/v1/core/problem/toggle-analyze\x12\x87\x01\n" +
 	"\vToggleFetch\x12&.api.core.v1.problem.TogglePipelineReq\x1a&.api.core.v1.problem.TogglePipelineRes\"(\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/v1/core/problem/toggle-fetch\x12\x81\x01\n" +
-	"\vResetQueues\x12#.api.core.v1.problem.ResetQueuesReq\x1a#.api.core.v1.problem.ResetQueuesRes\"(\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/v1/core/problem/reset-queuesB>\n" +
+	"\vResetQueues\x12#.api.core.v1.problem.ResetQueuesReq\x1a#.api.core.v1.problem.ResetQueuesRes\"(\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/v1/core/problem/reset-queues\x12\x8f\x01\n" +
+	"\vAdminUpdate\x12*.api.core.v1.problem.AdminUpdateProblemReq\x1a*.api.core.v1.problem.AdminUpdateProblemRes\"(\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/v1/core/problem/admin-update\x12\x8f\x01\n" +
+	"\vProposeEdit\x12*.api.core.v1.problem.ProposeProblemEditReq\x1a*.api.core.v1.problem.ProposeProblemEditRes\"(\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/v1/core/problem/propose-edit\x12\x8c\x01\n" +
+	"\x10ListEditRequests\x12'.api.core.v1.problem.ListProblemEditReq\x1a'.api.core.v1.problem.ListProblemEditRes\"&\x82\xd3\xe4\x93\x02 \x12\x1e/v1/core/problem/edit-requests\x12\x8b\x01\n" +
+	"\n" +
+	"ReviewEdit\x12).api.core.v1.problem.ReviewProblemEditReq\x1a).api.core.v1.problem.ReviewProblemEditRes\"'\x82\xd3\xe4\x93\x02!:\x01*\"\x1c/v1/core/problem/review-edit\x12\x87\x01\n" +
+	"\rMyPendingEdit\x12%.api.core.v1.problem.MyPendingEditReq\x1a%.api.core.v1.problem.MyPendingEditRes\"(\x82\xd3\xe4\x93\x02\"\x12 /v1/core/problem/my-pending-editB>\n" +
 	"\x13api.core.v1.problemP\x01Z%cwxu-algo/api/core/v1/problem;problemb\x06proto3"
 
 var (
@@ -2732,44 +3718,55 @@ func file_core_v1_problem_problem_proto_rawDescGZIP() []byte {
 	return file_core_v1_problem_problem_proto_rawDescData
 }
 
-var file_core_v1_problem_problem_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
+var file_core_v1_problem_problem_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
 var file_core_v1_problem_problem_proto_goTypes = []any{
-	(*SolutionMeta)(nil),       // 0: api.core.v1.problem.SolutionMeta
-	(*ProblemInfo)(nil),        // 1: api.core.v1.problem.ProblemInfo
-	(*ListProblemReq)(nil),     // 2: api.core.v1.problem.ListProblemReq
-	(*ListProblemRes)(nil),     // 3: api.core.v1.problem.ListProblemRes
-	(*ListTagsReq)(nil),        // 4: api.core.v1.problem.ListTagsReq
-	(*TagCount)(nil),           // 5: api.core.v1.problem.TagCount
-	(*ListTagsRes)(nil),        // 6: api.core.v1.problem.ListTagsRes
-	(*GetProblemReq)(nil),      // 7: api.core.v1.problem.GetProblemReq
-	(*GetProblemRes)(nil),      // 8: api.core.v1.problem.GetProblemRes
-	(*SubmissionInfo)(nil),     // 9: api.core.v1.problem.SubmissionInfo
-	(*ListSubmissionsReq)(nil), // 10: api.core.v1.problem.ListSubmissionsReq
-	(*ListSubmissionsRes)(nil), // 11: api.core.v1.problem.ListSubmissionsRes
-	(*TagScore)(nil),           // 12: api.core.v1.problem.TagScore
-	(*NamedCount)(nil),         // 13: api.core.v1.problem.NamedCount
-	(*UserProfileReq)(nil),     // 14: api.core.v1.problem.UserProfileReq
-	(*UserProfileRes)(nil),     // 15: api.core.v1.problem.UserProfileRes
-	(*ProgressReq)(nil),        // 16: api.core.v1.problem.ProgressReq
-	(*ProgressItem)(nil),       // 17: api.core.v1.problem.ProgressItem
-	(*FailedProblem)(nil),      // 18: api.core.v1.problem.FailedProblem
-	(*ActiveJob)(nil),          // 19: api.core.v1.problem.ActiveJob
-	(*QueueStatus)(nil),        // 20: api.core.v1.problem.QueueStatus
-	(*ProgressRes)(nil),        // 21: api.core.v1.problem.ProgressRes
-	(*BackfillReq)(nil),        // 22: api.core.v1.problem.BackfillReq
-	(*BackfillRes)(nil),        // 23: api.core.v1.problem.BackfillRes
-	(*ResetQueuesReq)(nil),     // 24: api.core.v1.problem.ResetQueuesReq
-	(*ResetQueuesRes)(nil),     // 25: api.core.v1.problem.ResetQueuesRes
-	(*EmergencyStopReq)(nil),   // 26: api.core.v1.problem.EmergencyStopReq
-	(*EmergencyStopRes)(nil),   // 27: api.core.v1.problem.EmergencyStopRes
-	(*ResetAllReq)(nil),        // 28: api.core.v1.problem.ResetAllReq
-	(*ResetAllRes)(nil),        // 29: api.core.v1.problem.ResetAllRes
-	(*ResumeReq)(nil),          // 30: api.core.v1.problem.ResumeReq
-	(*ResumeRes)(nil),          // 31: api.core.v1.problem.ResumeRes
-	(*RetryFailedReq)(nil),     // 32: api.core.v1.problem.RetryFailedReq
-	(*RetryFailedRes)(nil),     // 33: api.core.v1.problem.RetryFailedRes
-	(*TogglePipelineReq)(nil),  // 34: api.core.v1.problem.TogglePipelineReq
-	(*TogglePipelineRes)(nil),  // 35: api.core.v1.problem.TogglePipelineRes
+	(*SolutionMeta)(nil),          // 0: api.core.v1.problem.SolutionMeta
+	(*ProblemInfo)(nil),           // 1: api.core.v1.problem.ProblemInfo
+	(*ListProblemReq)(nil),        // 2: api.core.v1.problem.ListProblemReq
+	(*ListProblemRes)(nil),        // 3: api.core.v1.problem.ListProblemRes
+	(*ListTagsReq)(nil),           // 4: api.core.v1.problem.ListTagsReq
+	(*TagCount)(nil),              // 5: api.core.v1.problem.TagCount
+	(*ListTagsRes)(nil),           // 6: api.core.v1.problem.ListTagsRes
+	(*GetProblemReq)(nil),         // 7: api.core.v1.problem.GetProblemReq
+	(*GetProblemRes)(nil),         // 8: api.core.v1.problem.GetProblemRes
+	(*SubmissionInfo)(nil),        // 9: api.core.v1.problem.SubmissionInfo
+	(*ListSubmissionsReq)(nil),    // 10: api.core.v1.problem.ListSubmissionsReq
+	(*ListSubmissionsRes)(nil),    // 11: api.core.v1.problem.ListSubmissionsRes
+	(*TagScore)(nil),              // 12: api.core.v1.problem.TagScore
+	(*NamedCount)(nil),            // 13: api.core.v1.problem.NamedCount
+	(*UserProfileReq)(nil),        // 14: api.core.v1.problem.UserProfileReq
+	(*UserProfileRes)(nil),        // 15: api.core.v1.problem.UserProfileRes
+	(*ProgressReq)(nil),           // 16: api.core.v1.problem.ProgressReq
+	(*ProgressItem)(nil),          // 17: api.core.v1.problem.ProgressItem
+	(*FailedProblem)(nil),         // 18: api.core.v1.problem.FailedProblem
+	(*ActiveJob)(nil),             // 19: api.core.v1.problem.ActiveJob
+	(*QueueStatus)(nil),           // 20: api.core.v1.problem.QueueStatus
+	(*ProgressRes)(nil),           // 21: api.core.v1.problem.ProgressRes
+	(*BackfillReq)(nil),           // 22: api.core.v1.problem.BackfillReq
+	(*BackfillRes)(nil),           // 23: api.core.v1.problem.BackfillRes
+	(*ResetQueuesReq)(nil),        // 24: api.core.v1.problem.ResetQueuesReq
+	(*ResetQueuesRes)(nil),        // 25: api.core.v1.problem.ResetQueuesRes
+	(*EmergencyStopReq)(nil),      // 26: api.core.v1.problem.EmergencyStopReq
+	(*EmergencyStopRes)(nil),      // 27: api.core.v1.problem.EmergencyStopRes
+	(*ResetAllReq)(nil),           // 28: api.core.v1.problem.ResetAllReq
+	(*ResetAllRes)(nil),           // 29: api.core.v1.problem.ResetAllRes
+	(*ResumeReq)(nil),             // 30: api.core.v1.problem.ResumeReq
+	(*ResumeRes)(nil),             // 31: api.core.v1.problem.ResumeRes
+	(*RetryFailedReq)(nil),        // 32: api.core.v1.problem.RetryFailedReq
+	(*RetryFailedRes)(nil),        // 33: api.core.v1.problem.RetryFailedRes
+	(*TogglePipelineReq)(nil),     // 34: api.core.v1.problem.TogglePipelineReq
+	(*TogglePipelineRes)(nil),     // 35: api.core.v1.problem.TogglePipelineRes
+	(*AdminUpdateProblemReq)(nil), // 36: api.core.v1.problem.AdminUpdateProblemReq
+	(*AdminUpdateProblemRes)(nil), // 37: api.core.v1.problem.AdminUpdateProblemRes
+	(*ProposeProblemEditReq)(nil), // 38: api.core.v1.problem.ProposeProblemEditReq
+	(*ProposeProblemEditRes)(nil), // 39: api.core.v1.problem.ProposeProblemEditRes
+	(*ListProblemEditReq)(nil),    // 40: api.core.v1.problem.ListProblemEditReq
+	(*ProblemEditInfo)(nil),       // 41: api.core.v1.problem.ProblemEditInfo
+	(*ListProblemEditRes)(nil),    // 42: api.core.v1.problem.ListProblemEditRes
+	(*ReviewProblemEditReq)(nil),  // 43: api.core.v1.problem.ReviewProblemEditReq
+	(*ReviewProblemEditRes)(nil),  // 44: api.core.v1.problem.ReviewProblemEditRes
+	(*MyPendingEditReq)(nil),      // 45: api.core.v1.problem.MyPendingEditReq
+	(*MyPendingEditRes)(nil),      // 46: api.core.v1.problem.MyPendingEditRes
 }
 var file_core_v1_problem_problem_proto_depIdxs = []int32{
 	0,  // 0: api.core.v1.problem.ProblemInfo.solutions:type_name -> api.core.v1.problem.SolutionMeta
@@ -2786,39 +3783,52 @@ var file_core_v1_problem_problem_proto_depIdxs = []int32{
 	20, // 11: api.core.v1.problem.ProgressRes.queues:type_name -> api.core.v1.problem.QueueStatus
 	18, // 12: api.core.v1.problem.ProgressRes.in_progress:type_name -> api.core.v1.problem.FailedProblem
 	18, // 13: api.core.v1.problem.ProgressRes.recent_failed_perm:type_name -> api.core.v1.problem.FailedProblem
-	2,  // 14: api.core.v1.problem.Problem.List:input_type -> api.core.v1.problem.ListProblemReq
-	4,  // 15: api.core.v1.problem.Problem.ListTags:input_type -> api.core.v1.problem.ListTagsReq
-	7,  // 16: api.core.v1.problem.Problem.Get:input_type -> api.core.v1.problem.GetProblemReq
-	10, // 17: api.core.v1.problem.Problem.ListSubmissions:input_type -> api.core.v1.problem.ListSubmissionsReq
-	14, // 18: api.core.v1.problem.Problem.UserProfile:input_type -> api.core.v1.problem.UserProfileReq
-	16, // 19: api.core.v1.problem.Problem.Progress:input_type -> api.core.v1.problem.ProgressReq
-	22, // 20: api.core.v1.problem.Problem.Backfill:input_type -> api.core.v1.problem.BackfillReq
-	26, // 21: api.core.v1.problem.Problem.EmergencyStop:input_type -> api.core.v1.problem.EmergencyStopReq
-	28, // 22: api.core.v1.problem.Problem.ResetAll:input_type -> api.core.v1.problem.ResetAllReq
-	30, // 23: api.core.v1.problem.Problem.Resume:input_type -> api.core.v1.problem.ResumeReq
-	32, // 24: api.core.v1.problem.Problem.RetryFailed:input_type -> api.core.v1.problem.RetryFailedReq
-	34, // 25: api.core.v1.problem.Problem.ToggleAnalyze:input_type -> api.core.v1.problem.TogglePipelineReq
-	34, // 26: api.core.v1.problem.Problem.ToggleFetch:input_type -> api.core.v1.problem.TogglePipelineReq
-	24, // 27: api.core.v1.problem.Problem.ResetQueues:input_type -> api.core.v1.problem.ResetQueuesReq
-	3,  // 28: api.core.v1.problem.Problem.List:output_type -> api.core.v1.problem.ListProblemRes
-	6,  // 29: api.core.v1.problem.Problem.ListTags:output_type -> api.core.v1.problem.ListTagsRes
-	8,  // 30: api.core.v1.problem.Problem.Get:output_type -> api.core.v1.problem.GetProblemRes
-	11, // 31: api.core.v1.problem.Problem.ListSubmissions:output_type -> api.core.v1.problem.ListSubmissionsRes
-	15, // 32: api.core.v1.problem.Problem.UserProfile:output_type -> api.core.v1.problem.UserProfileRes
-	21, // 33: api.core.v1.problem.Problem.Progress:output_type -> api.core.v1.problem.ProgressRes
-	23, // 34: api.core.v1.problem.Problem.Backfill:output_type -> api.core.v1.problem.BackfillRes
-	27, // 35: api.core.v1.problem.Problem.EmergencyStop:output_type -> api.core.v1.problem.EmergencyStopRes
-	29, // 36: api.core.v1.problem.Problem.ResetAll:output_type -> api.core.v1.problem.ResetAllRes
-	31, // 37: api.core.v1.problem.Problem.Resume:output_type -> api.core.v1.problem.ResumeRes
-	33, // 38: api.core.v1.problem.Problem.RetryFailed:output_type -> api.core.v1.problem.RetryFailedRes
-	35, // 39: api.core.v1.problem.Problem.ToggleAnalyze:output_type -> api.core.v1.problem.TogglePipelineRes
-	35, // 40: api.core.v1.problem.Problem.ToggleFetch:output_type -> api.core.v1.problem.TogglePipelineRes
-	25, // 41: api.core.v1.problem.Problem.ResetQueues:output_type -> api.core.v1.problem.ResetQueuesRes
-	28, // [28:42] is the sub-list for method output_type
-	14, // [14:28] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	1,  // 14: api.core.v1.problem.AdminUpdateProblemRes.data:type_name -> api.core.v1.problem.ProblemInfo
+	41, // 15: api.core.v1.problem.ListProblemEditRes.data:type_name -> api.core.v1.problem.ProblemEditInfo
+	41, // 16: api.core.v1.problem.MyPendingEditRes.data:type_name -> api.core.v1.problem.ProblemEditInfo
+	2,  // 17: api.core.v1.problem.Problem.List:input_type -> api.core.v1.problem.ListProblemReq
+	4,  // 18: api.core.v1.problem.Problem.ListTags:input_type -> api.core.v1.problem.ListTagsReq
+	7,  // 19: api.core.v1.problem.Problem.Get:input_type -> api.core.v1.problem.GetProblemReq
+	10, // 20: api.core.v1.problem.Problem.ListSubmissions:input_type -> api.core.v1.problem.ListSubmissionsReq
+	14, // 21: api.core.v1.problem.Problem.UserProfile:input_type -> api.core.v1.problem.UserProfileReq
+	16, // 22: api.core.v1.problem.Problem.Progress:input_type -> api.core.v1.problem.ProgressReq
+	22, // 23: api.core.v1.problem.Problem.Backfill:input_type -> api.core.v1.problem.BackfillReq
+	26, // 24: api.core.v1.problem.Problem.EmergencyStop:input_type -> api.core.v1.problem.EmergencyStopReq
+	28, // 25: api.core.v1.problem.Problem.ResetAll:input_type -> api.core.v1.problem.ResetAllReq
+	30, // 26: api.core.v1.problem.Problem.Resume:input_type -> api.core.v1.problem.ResumeReq
+	32, // 27: api.core.v1.problem.Problem.RetryFailed:input_type -> api.core.v1.problem.RetryFailedReq
+	34, // 28: api.core.v1.problem.Problem.ToggleAnalyze:input_type -> api.core.v1.problem.TogglePipelineReq
+	34, // 29: api.core.v1.problem.Problem.ToggleFetch:input_type -> api.core.v1.problem.TogglePipelineReq
+	24, // 30: api.core.v1.problem.Problem.ResetQueues:input_type -> api.core.v1.problem.ResetQueuesReq
+	36, // 31: api.core.v1.problem.Problem.AdminUpdate:input_type -> api.core.v1.problem.AdminUpdateProblemReq
+	38, // 32: api.core.v1.problem.Problem.ProposeEdit:input_type -> api.core.v1.problem.ProposeProblemEditReq
+	40, // 33: api.core.v1.problem.Problem.ListEditRequests:input_type -> api.core.v1.problem.ListProblemEditReq
+	43, // 34: api.core.v1.problem.Problem.ReviewEdit:input_type -> api.core.v1.problem.ReviewProblemEditReq
+	45, // 35: api.core.v1.problem.Problem.MyPendingEdit:input_type -> api.core.v1.problem.MyPendingEditReq
+	3,  // 36: api.core.v1.problem.Problem.List:output_type -> api.core.v1.problem.ListProblemRes
+	6,  // 37: api.core.v1.problem.Problem.ListTags:output_type -> api.core.v1.problem.ListTagsRes
+	8,  // 38: api.core.v1.problem.Problem.Get:output_type -> api.core.v1.problem.GetProblemRes
+	11, // 39: api.core.v1.problem.Problem.ListSubmissions:output_type -> api.core.v1.problem.ListSubmissionsRes
+	15, // 40: api.core.v1.problem.Problem.UserProfile:output_type -> api.core.v1.problem.UserProfileRes
+	21, // 41: api.core.v1.problem.Problem.Progress:output_type -> api.core.v1.problem.ProgressRes
+	23, // 42: api.core.v1.problem.Problem.Backfill:output_type -> api.core.v1.problem.BackfillRes
+	27, // 43: api.core.v1.problem.Problem.EmergencyStop:output_type -> api.core.v1.problem.EmergencyStopRes
+	29, // 44: api.core.v1.problem.Problem.ResetAll:output_type -> api.core.v1.problem.ResetAllRes
+	31, // 45: api.core.v1.problem.Problem.Resume:output_type -> api.core.v1.problem.ResumeRes
+	33, // 46: api.core.v1.problem.Problem.RetryFailed:output_type -> api.core.v1.problem.RetryFailedRes
+	35, // 47: api.core.v1.problem.Problem.ToggleAnalyze:output_type -> api.core.v1.problem.TogglePipelineRes
+	35, // 48: api.core.v1.problem.Problem.ToggleFetch:output_type -> api.core.v1.problem.TogglePipelineRes
+	25, // 49: api.core.v1.problem.Problem.ResetQueues:output_type -> api.core.v1.problem.ResetQueuesRes
+	37, // 50: api.core.v1.problem.Problem.AdminUpdate:output_type -> api.core.v1.problem.AdminUpdateProblemRes
+	39, // 51: api.core.v1.problem.Problem.ProposeEdit:output_type -> api.core.v1.problem.ProposeProblemEditRes
+	42, // 52: api.core.v1.problem.Problem.ListEditRequests:output_type -> api.core.v1.problem.ListProblemEditRes
+	44, // 53: api.core.v1.problem.Problem.ReviewEdit:output_type -> api.core.v1.problem.ReviewProblemEditRes
+	46, // 54: api.core.v1.problem.Problem.MyPendingEdit:output_type -> api.core.v1.problem.MyPendingEditRes
+	36, // [36:55] is the sub-list for method output_type
+	17, // [17:36] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_core_v1_problem_problem_proto_init() }
@@ -2832,7 +3842,7 @@ func file_core_v1_problem_problem_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_problem_problem_proto_rawDesc), len(file_core_v1_problem_problem_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   36,
+			NumMessages:   47,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -94,6 +94,39 @@ service Problem {
       body: "*"
     };
   }
+  // 站点管理员：直接修改标签/题面（无需审核）
+  rpc AdminUpdate (AdminUpdateProblemReq) returns (AdminUpdateProblemRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/admin-update"
+      body: "*"
+    };
+  }
+  // 登录用户：提交标签/题面修改申请（站点管理员审核）
+  rpc ProposeEdit (ProposeProblemEditReq) returns (ProposeProblemEditRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/propose-edit"
+      body: "*"
+    };
+  }
+  // 站点管理员：审核申请列表
+  rpc ListEditRequests (ListProblemEditReq) returns (ListProblemEditRes) {
+    option (google.api.http) = {
+      get: "/v1/core/problem/edit-requests"
+    };
+  }
+  // 站点管理员：通过/驳回申请
+  rpc ReviewEdit (ReviewProblemEditReq) returns (ReviewProblemEditRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/review-edit"
+      body: "*"
+    };
+  }
+  // 当前用户对该题的待审申请（详情页提示）
+  rpc MyPendingEdit (MyPendingEditReq) returns (MyPendingEditRes) {
+    option (google.api.http) = {
+      get: "/v1/core/problem/my-pending-edit"
+    };
+  }
 }
 
 message SolutionMeta {
@@ -137,6 +170,8 @@ message ListProblemReq {
   string keyword = 8;
   // 难度：简单 / 中等 / 困难
   string difficulty = 9;
+  // 仅显示关注用户提交过的题目（需登录）
+  bool following_only = 10;
 }
 
 message ListProblemRes {
@@ -191,6 +226,8 @@ message ListSubmissionsReq {
   int64 page = 2;
   int64 page_size = 3;
   int64 user_id = 4;
+  // 仅显示关注用户的提交（需登录）
+  bool following_only = 5;
 }
 
 message ListSubmissionsRes {
@@ -362,4 +399,100 @@ message TogglePipelineRes {
   bool paused = 3;
   // 兼容字段：暂停不再 purge，恒为 0
   int64 purged = 4;
+}
+
+// 站点管理员直接改题：有字段才更新（update_tags / update_content 显式开关）
+message AdminUpdateProblemReq {
+  uint32 id = 1;
+  bool update_tags = 2;
+  repeated string tags = 3;
+  bool update_content = 4;
+  string content_md = 5;
+  string title = 6; // 非空才改标题
+}
+
+message AdminUpdateProblemRes {
+  int64 code = 1;
+  string message = 2;
+  ProblemInfo data = 3;
+}
+
+// 用户提交修改申请：至少改标签或题面其一
+message ProposeProblemEditReq {
+  uint32 problem_id = 1;
+  bool update_tags = 2;
+  repeated string tags = 3;
+  bool update_content = 4;
+  string content_md = 5;
+  string title = 6;
+  string note = 7; // 可选说明
+}
+
+message ProposeProblemEditRes {
+  int64 code = 1;
+  string message = 2;
+  uint32 request_id = 3;
+}
+
+message ListProblemEditReq {
+  int64 page = 1;
+  int64 page_size = 2;
+  // pending | approved | rejected | 空=全部
+  string status = 3;
+}
+
+message ProblemEditInfo {
+  uint32 id = 1;
+  uint32 problem_id = 2;
+  string platform = 3;
+  string external_id = 4;
+  string problem_title = 5;
+  uint32 user_id = 6;
+  string user_name = 7;
+  bool has_tags = 8;
+  bool has_content = 9;
+  repeated string proposed_tags = 10;
+  string proposed_content_md = 11;
+  string proposed_title = 12;
+  string note = 13;
+  string status = 14;
+  uint32 reviewer_id = 15;
+  string review_note = 16;
+  int64 created_at = 17;
+  int64 updated_at = 18;
+  // 当前线上快照（便于对比）
+  repeated string current_tags = 19;
+  string current_content_md = 20;
+  string current_title = 21;
+}
+
+message ListProblemEditRes {
+  int64 code = 1;
+  string message = 2;
+  repeated ProblemEditInfo data = 3;
+  int64 total = 4;
+  int64 page = 5;
+  int64 page_size = 6;
+}
+
+message ReviewProblemEditReq {
+  uint32 id = 1;
+  bool approve = 2;
+  string review_note = 3;
+}
+
+message ReviewProblemEditRes {
+  int64 code = 1;
+  string message = 2;
+}
+
+message MyPendingEditReq {
+  uint32 problem_id = 1;
+}
+
+message MyPendingEditRes {
+  int64 code = 1;
+  string message = 2;
+  bool has_pending = 3;
+  ProblemEditInfo data = 4;
 }

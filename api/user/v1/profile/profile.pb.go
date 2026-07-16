@@ -737,6 +737,119 @@ func (x *SetEmailEnabledRes) GetMessage() string {
 	return ""
 }
 
+type SetProblemPipelineReq struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	UserId  int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	Enabled bool                   `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// kind: fetch（题面爬取）| ai（题面 AI 分析）
+	Kind          string `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetProblemPipelineReq) Reset() {
+	*x = SetProblemPipelineReq{}
+	mi := &file_user_v1_profile_profile_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetProblemPipelineReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetProblemPipelineReq) ProtoMessage() {}
+
+func (x *SetProblemPipelineReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_profile_profile_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetProblemPipelineReq.ProtoReflect.Descriptor instead.
+func (*SetProblemPipelineReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *SetProblemPipelineReq) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *SetProblemPipelineReq) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *SetProblemPipelineReq) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+type SetProblemPipelineRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetProblemPipelineRes) Reset() {
+	*x = SetProblemPipelineRes{}
+	mi := &file_user_v1_profile_profile_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetProblemPipelineRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetProblemPipelineRes) ProtoMessage() {}
+
+func (x *SetProblemPipelineRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_profile_profile_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetProblemPipelineRes.ProtoReflect.Descriptor instead.
+func (*SetProblemPipelineRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *SetProblemPipelineRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *SetProblemPipelineRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 type GetUserIdsByGroupReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	GroupId       int64                  `protobuf:"varint,1,opt,name=groupId,proto3" json:"groupId,omitempty"`
@@ -746,7 +859,7 @@ type GetUserIdsByGroupReq struct {
 
 func (x *GetUserIdsByGroupReq) Reset() {
 	*x = GetUserIdsByGroupReq{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[12]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -758,7 +871,7 @@ func (x *GetUserIdsByGroupReq) String() string {
 func (*GetUserIdsByGroupReq) ProtoMessage() {}
 
 func (x *GetUserIdsByGroupReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[12]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -771,7 +884,7 @@ func (x *GetUserIdsByGroupReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserIdsByGroupReq.ProtoReflect.Descriptor instead.
 func (*GetUserIdsByGroupReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{12}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetUserIdsByGroupReq) GetGroupId() int64 {
@@ -790,7 +903,7 @@ type GetUserIdsByGroupRes struct {
 
 func (x *GetUserIdsByGroupRes) Reset() {
 	*x = GetUserIdsByGroupRes{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[13]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -802,7 +915,7 @@ func (x *GetUserIdsByGroupRes) String() string {
 func (*GetUserIdsByGroupRes) ProtoMessage() {}
 
 func (x *GetUserIdsByGroupRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[13]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -815,7 +928,7 @@ func (x *GetUserIdsByGroupRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserIdsByGroupRes.ProtoReflect.Descriptor instead.
 func (*GetUserIdsByGroupRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{13}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GetUserIdsByGroupRes) GetUserIds() []int64 {
@@ -834,7 +947,7 @@ type GetUserIdsByOrgReq struct {
 
 func (x *GetUserIdsByOrgReq) Reset() {
 	*x = GetUserIdsByOrgReq{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[14]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -846,7 +959,7 @@ func (x *GetUserIdsByOrgReq) String() string {
 func (*GetUserIdsByOrgReq) ProtoMessage() {}
 
 func (x *GetUserIdsByOrgReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[14]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -859,7 +972,7 @@ func (x *GetUserIdsByOrgReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserIdsByOrgReq.ProtoReflect.Descriptor instead.
 func (*GetUserIdsByOrgReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{14}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GetUserIdsByOrgReq) GetOrgId() int64 {
@@ -879,7 +992,7 @@ type GetUserIdsByOrgRes struct {
 
 func (x *GetUserIdsByOrgRes) Reset() {
 	*x = GetUserIdsByOrgRes{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[15]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -891,7 +1004,7 @@ func (x *GetUserIdsByOrgRes) String() string {
 func (*GetUserIdsByOrgRes) ProtoMessage() {}
 
 func (x *GetUserIdsByOrgRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[15]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -904,7 +1017,7 @@ func (x *GetUserIdsByOrgRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserIdsByOrgRes.ProtoReflect.Descriptor instead.
 func (*GetUserIdsByOrgRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{15}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GetUserIdsByOrgRes) GetUserIds() []int64 {
@@ -929,7 +1042,7 @@ type GetNonPublicOrgUserIdsReq struct {
 
 func (x *GetNonPublicOrgUserIdsReq) Reset() {
 	*x = GetNonPublicOrgUserIdsReq{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[16]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -941,7 +1054,7 @@ func (x *GetNonPublicOrgUserIdsReq) String() string {
 func (*GetNonPublicOrgUserIdsReq) ProtoMessage() {}
 
 func (x *GetNonPublicOrgUserIdsReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[16]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -954,19 +1067,24 @@ func (x *GetNonPublicOrgUserIdsReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNonPublicOrgUserIdsReq.ProtoReflect.Descriptor instead.
 func (*GetNonPublicOrgUserIdsReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{16}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{18}
 }
 
 type GetNonPublicOrgUserIdsRes struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserIds       []int64                `protobuf:"varint,1,rep,packed,name=userIds,proto3" json:"userIds,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 兼容旧调用：与 fetchUserIds 相同（题面爬取资格）
+	UserIds []int64 `protobuf:"varint,1,rep,packed,name=userIds,proto3" json:"userIds,omitempty"`
+	// 近窗提交可触发题面爬取的用户
+	FetchUserIds []int64 `protobuf:"varint,2,rep,packed,name=fetchUserIds,proto3" json:"fetchUserIds,omitempty"`
+	// 近窗提交可触发题面 AI 的用户
+	AiUserIds     []int64 `protobuf:"varint,3,rep,packed,name=aiUserIds,proto3" json:"aiUserIds,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetNonPublicOrgUserIdsRes) Reset() {
 	*x = GetNonPublicOrgUserIdsRes{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[17]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -978,7 +1096,7 @@ func (x *GetNonPublicOrgUserIdsRes) String() string {
 func (*GetNonPublicOrgUserIdsRes) ProtoMessage() {}
 
 func (x *GetNonPublicOrgUserIdsRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[17]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -991,12 +1109,26 @@ func (x *GetNonPublicOrgUserIdsRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNonPublicOrgUserIdsRes.ProtoReflect.Descriptor instead.
 func (*GetNonPublicOrgUserIdsRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{17}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GetNonPublicOrgUserIdsRes) GetUserIds() []int64 {
 	if x != nil {
 		return x.UserIds
+	}
+	return nil
+}
+
+func (x *GetNonPublicOrgUserIdsRes) GetFetchUserIds() []int64 {
+	if x != nil {
+		return x.FetchUserIds
+	}
+	return nil
+}
+
+func (x *GetNonPublicOrgUserIdsRes) GetAiUserIds() []int64 {
+	if x != nil {
+		return x.AiUserIds
 	}
 	return nil
 }
@@ -1012,7 +1144,7 @@ type GetByIdsReq struct {
 
 func (x *GetByIdsReq) Reset() {
 	*x = GetByIdsReq{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[18]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1024,7 +1156,7 @@ func (x *GetByIdsReq) String() string {
 func (*GetByIdsReq) ProtoMessage() {}
 
 func (x *GetByIdsReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[18]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1037,7 +1169,7 @@ func (x *GetByIdsReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetByIdsReq.ProtoReflect.Descriptor instead.
 func (*GetByIdsReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{18}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *GetByIdsReq) GetUserIds() []int64 {
@@ -1063,7 +1195,7 @@ type GetByIdsRes struct {
 
 func (x *GetByIdsRes) Reset() {
 	*x = GetByIdsRes{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[19]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1075,7 +1207,7 @@ func (x *GetByIdsRes) String() string {
 func (*GetByIdsRes) ProtoMessage() {}
 
 func (x *GetByIdsRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[19]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1088,7 +1220,7 @@ func (x *GetByIdsRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetByIdsRes.ProtoReflect.Descriptor instead.
 func (*GetByIdsRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{19}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *GetByIdsRes) GetProfiles() []*GetByIdsRes_UserProfile {
@@ -1107,7 +1239,7 @@ type DeleteReq struct {
 
 func (x *DeleteReq) Reset() {
 	*x = DeleteReq{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[20]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1119,7 +1251,7 @@ func (x *DeleteReq) String() string {
 func (*DeleteReq) ProtoMessage() {}
 
 func (x *DeleteReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[20]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1132,7 +1264,7 @@ func (x *DeleteReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteReq.ProtoReflect.Descriptor instead.
 func (*DeleteReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{20}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DeleteReq) GetUserId() int64 {
@@ -1152,7 +1284,7 @@ type DeleteRes struct {
 
 func (x *DeleteRes) Reset() {
 	*x = DeleteRes{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[21]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1164,7 +1296,7 @@ func (x *DeleteRes) String() string {
 func (*DeleteRes) ProtoMessage() {}
 
 func (x *DeleteRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[21]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1177,7 +1309,7 @@ func (x *DeleteRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRes.ProtoReflect.Descriptor instead.
 func (*DeleteRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{21}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DeleteRes) GetCode() int64 {
@@ -1204,7 +1336,7 @@ type GetSyncPoliciesReq struct {
 
 func (x *GetSyncPoliciesReq) Reset() {
 	*x = GetSyncPoliciesReq{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[22]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1216,7 +1348,7 @@ func (x *GetSyncPoliciesReq) String() string {
 func (*GetSyncPoliciesReq) ProtoMessage() {}
 
 func (x *GetSyncPoliciesReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[22]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1229,7 +1361,7 @@ func (x *GetSyncPoliciesReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSyncPoliciesReq.ProtoReflect.Descriptor instead.
 func (*GetSyncPoliciesReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{22}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *GetSyncPoliciesReq) GetUserIds() []int64 {
@@ -1257,7 +1389,7 @@ type UserSyncPolicy struct {
 
 func (x *UserSyncPolicy) Reset() {
 	*x = UserSyncPolicy{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[23]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1269,7 +1401,7 @@ func (x *UserSyncPolicy) String() string {
 func (*UserSyncPolicy) ProtoMessage() {}
 
 func (x *UserSyncPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[23]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1282,7 +1414,7 @@ func (x *UserSyncPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserSyncPolicy.ProtoReflect.Descriptor instead.
 func (*UserSyncPolicy) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{23}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *UserSyncPolicy) GetUserId() int64 {
@@ -1364,7 +1496,7 @@ type GetSyncPoliciesRes struct {
 
 func (x *GetSyncPoliciesRes) Reset() {
 	*x = GetSyncPoliciesRes{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[24]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1376,7 +1508,7 @@ func (x *GetSyncPoliciesRes) String() string {
 func (*GetSyncPoliciesRes) ProtoMessage() {}
 
 func (x *GetSyncPoliciesRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[24]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1389,12 +1521,232 @@ func (x *GetSyncPoliciesRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSyncPoliciesRes.ProtoReflect.Descriptor instead.
 func (*GetSyncPoliciesRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{24}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GetSyncPoliciesRes) GetPolicies() []*UserSyncPolicy {
 	if x != nil {
 		return x.Policies
+	}
+	return nil
+}
+
+type GetByUsernameReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetByUsernameReq) Reset() {
+	*x = GetByUsernameReq{}
+	mi := &file_user_v1_profile_profile_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetByUsernameReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetByUsernameReq) ProtoMessage() {}
+
+func (x *GetByUsernameReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_profile_profile_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetByUsernameReq.ProtoReflect.Descriptor instead.
+func (*GetByUsernameReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *GetByUsernameReq) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+type GetFollowingIdsReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"` // 0 = 当前登录用户
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFollowingIdsReq) Reset() {
+	*x = GetFollowingIdsReq{}
+	mi := &file_user_v1_profile_profile_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFollowingIdsReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFollowingIdsReq) ProtoMessage() {}
+
+func (x *GetFollowingIdsReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_profile_profile_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFollowingIdsReq.ProtoReflect.Descriptor instead.
+func (*GetFollowingIdsReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *GetFollowingIdsReq) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+type GetFollowingIdsRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserIds       []int64                `protobuf:"varint,1,rep,packed,name=userIds,proto3" json:"userIds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFollowingIdsRes) Reset() {
+	*x = GetFollowingIdsRes{}
+	mi := &file_user_v1_profile_profile_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFollowingIdsRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFollowingIdsRes) ProtoMessage() {}
+
+func (x *GetFollowingIdsRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_profile_profile_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFollowingIdsRes.ProtoReflect.Descriptor instead.
+func (*GetFollowingIdsRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *GetFollowingIdsRes) GetUserIds() []int64 {
+	if x != nil {
+		return x.UserIds
+	}
+	return nil
+}
+
+type FilterPublicFeedUserIdsReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserIds       []int64                `protobuf:"varint,1,rep,packed,name=userIds,proto3" json:"userIds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FilterPublicFeedUserIdsReq) Reset() {
+	*x = FilterPublicFeedUserIdsReq{}
+	mi := &file_user_v1_profile_profile_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FilterPublicFeedUserIdsReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FilterPublicFeedUserIdsReq) ProtoMessage() {}
+
+func (x *FilterPublicFeedUserIdsReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_profile_profile_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FilterPublicFeedUserIdsReq.ProtoReflect.Descriptor instead.
+func (*FilterPublicFeedUserIdsReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *FilterPublicFeedUserIdsReq) GetUserIds() []int64 {
+	if x != nil {
+		return x.UserIds
+	}
+	return nil
+}
+
+type FilterPublicFeedUserIdsRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserIds       []int64                `protobuf:"varint,1,rep,packed,name=userIds,proto3" json:"userIds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FilterPublicFeedUserIdsRes) Reset() {
+	*x = FilterPublicFeedUserIdsRes{}
+	mi := &file_user_v1_profile_profile_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FilterPublicFeedUserIdsRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FilterPublicFeedUserIdsRes) ProtoMessage() {}
+
+func (x *FilterPublicFeedUserIdsRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_profile_profile_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FilterPublicFeedUserIdsRes.ProtoReflect.Descriptor instead.
+func (*FilterPublicFeedUserIdsRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *FilterPublicFeedUserIdsRes) GetUserIds() []int64 {
+	if x != nil {
+		return x.UserIds
 	}
 	return nil
 }
@@ -1409,7 +1761,7 @@ type GetByIdRes_Spiders struct {
 
 func (x *GetByIdRes_Spiders) Reset() {
 	*x = GetByIdRes_Spiders{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[25]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1421,7 +1773,7 @@ func (x *GetByIdRes_Spiders) String() string {
 func (*GetByIdRes_Spiders) ProtoMessage() {}
 
 func (x *GetByIdRes_Spiders) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[25]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1462,7 +1814,7 @@ type GetByNameRes_UserList struct {
 
 func (x *GetByNameRes_UserList) Reset() {
 	*x = GetByNameRes_UserList{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[26]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1474,7 +1826,7 @@ func (x *GetByNameRes_UserList) String() string {
 func (*GetByNameRes_UserList) ProtoMessage() {}
 
 func (x *GetByNameRes_UserList) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[26]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1522,7 +1874,7 @@ type GetListRes_OrgBrief struct {
 
 func (x *GetListRes_OrgBrief) Reset() {
 	*x = GetListRes_OrgBrief{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[27]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1534,7 +1886,7 @@ func (x *GetListRes_OrgBrief) String() string {
 func (*GetListRes_OrgBrief) ProtoMessage() {}
 
 func (x *GetListRes_OrgBrief) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[27]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1588,13 +1940,16 @@ type GetListRes_List struct {
 	EmailWeeklyEnabled      bool `protobuf:"varint,13,opt,name=emailWeeklyEnabled,proto3" json:"emailWeeklyEnabled,omitempty"`
 	EmailAllowedByOrg       bool `protobuf:"varint,14,opt,name=emailAllowedByOrg,proto3" json:"emailAllowedByOrg,omitempty"`
 	EmailWeeklyAllowedByOrg bool `protobuf:"varint,15,opt,name=emailWeeklyAllowedByOrg,proto3" json:"emailWeeklyAllowedByOrg,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	// 题面流水线有效状态（已应用个人覆盖；null 覆盖时按是否非公共域组织）
+	ProblemFetchEnabled bool `protobuf:"varint,16,opt,name=problemFetchEnabled,proto3" json:"problemFetchEnabled,omitempty"`
+	ProblemAiEnabled    bool `protobuf:"varint,17,opt,name=problemAiEnabled,proto3" json:"problemAiEnabled,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *GetListRes_List) Reset() {
 	*x = GetListRes_List{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[28]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1606,7 +1961,7 @@ func (x *GetListRes_List) String() string {
 func (*GetListRes_List) ProtoMessage() {}
 
 func (x *GetListRes_List) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[28]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1720,6 +2075,20 @@ func (x *GetListRes_List) GetEmailWeeklyAllowedByOrg() bool {
 	return false
 }
 
+func (x *GetListRes_List) GetProblemFetchEnabled() bool {
+	if x != nil {
+		return x.ProblemFetchEnabled
+	}
+	return false
+}
+
+func (x *GetListRes_List) GetProblemAiEnabled() bool {
+	if x != nil {
+		return x.ProblemAiEnabled
+	}
+	return false
+}
+
 type GetByIdsRes_UserProfile struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
@@ -1731,7 +2100,7 @@ type GetByIdsRes_UserProfile struct {
 
 func (x *GetByIdsRes_UserProfile) Reset() {
 	*x = GetByIdsRes_UserProfile{}
-	mi := &file_user_v1_profile_profile_proto_msgTypes[29]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1743,7 +2112,7 @@ func (x *GetByIdsRes_UserProfile) String() string {
 func (*GetByIdsRes_UserProfile) ProtoMessage() {}
 
 func (x *GetByIdsRes_UserProfile) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_profile_profile_proto_msgTypes[29]
+	mi := &file_user_v1_profile_profile_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1756,7 +2125,7 @@ func (x *GetByIdsRes_UserProfile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetByIdsRes_UserProfile.ProtoReflect.Descriptor instead.
 func (*GetByIdsRes_UserProfile) Descriptor() ([]byte, []int) {
-	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{19, 0}
+	return file_user_v1_profile_profile_proto_rawDescGZIP(), []int{21, 0}
 }
 
 func (x *GetByIdsRes_UserProfile) GetUserId() int64 {
@@ -1818,7 +2187,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"GetListReq\x12\x1a\n" +
 	"\bpageSize\x18\x01 \x01(\x03R\bpageSize\x12\x18\n" +
 	"\apageNum\x18\x02 \x01(\x03R\apageNum\x12\x14\n" +
-	"\x05scope\x18\x03 \x01(\tR\x05scope\"\x8b\x05\n" +
+	"\x05scope\x18\x03 \x01(\tR\x05scope\"\xe9\x05\n" +
 	"\n" +
 	"GetListRes\x120\n" +
 	"\x04list\x18\x01 \x03(\v2\x1c.api.user.v1.GetListRes.ListR\x04list\x12\x14\n" +
@@ -1826,7 +2195,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\bOrgBrief\x12\x14\n" +
 	"\x05orgId\x18\x01 \x01(\x04R\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\x1a\xea\x03\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\x1a\xc8\x04\n" +
 	"\x04List\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
@@ -1844,7 +2213,9 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\femailEnabled\x18\f \x01(\bR\femailEnabled\x12.\n" +
 	"\x12emailWeeklyEnabled\x18\r \x01(\bR\x12emailWeeklyEnabled\x12,\n" +
 	"\x11emailAllowedByOrg\x18\x0e \x01(\bR\x11emailAllowedByOrg\x128\n" +
-	"\x17emailWeeklyAllowedByOrg\x18\x0f \x01(\bR\x17emailWeeklyAllowedByOrg\"e\n" +
+	"\x17emailWeeklyAllowedByOrg\x18\x0f \x01(\bR\x17emailWeeklyAllowedByOrg\x120\n" +
+	"\x13problemFetchEnabled\x18\x10 \x01(\bR\x13problemFetchEnabled\x12*\n" +
+	"\x10problemAiEnabled\x18\x11 \x01(\bR\x10problemAiEnabled\"e\n" +
 	"\tUpdateReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
@@ -1865,6 +2236,13 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x04kind\x18\x03 \x01(\tR\x04kind\"B\n" +
 	"\x12SetEmailEnabledRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"]\n" +
+	"\x15SetProblemPipelineReq\x12\x16\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x18\n" +
+	"\aenabled\x18\x02 \x01(\bR\aenabled\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\"E\n" +
+	"\x15SetProblemPipelineRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"0\n" +
 	"\x14GetUserIdsByGroupReq\x12\x18\n" +
 	"\agroupId\x18\x01 \x01(\x03R\agroupId\"0\n" +
@@ -1875,9 +2253,11 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x12GetUserIdsByOrgRes\x12\x18\n" +
 	"\auserIds\x18\x01 \x03(\x03R\auserIds\x12\x14\n" +
 	"\x05orgId\x18\x02 \x01(\x03R\x05orgId\"\x1b\n" +
-	"\x19GetNonPublicOrgUserIdsReq\"5\n" +
+	"\x19GetNonPublicOrgUserIdsReq\"w\n" +
 	"\x19GetNonPublicOrgUserIdsRes\x12\x18\n" +
-	"\auserIds\x18\x01 \x03(\x03R\auserIds\"=\n" +
+	"\auserIds\x18\x01 \x03(\x03R\auserIds\x12\"\n" +
+	"\ffetchUserIds\x18\x02 \x03(\x03R\ffetchUserIds\x12\x1c\n" +
+	"\taiUserIds\x18\x03 \x03(\x03R\taiUserIds\"=\n" +
 	"\vGetByIdsReq\x12\x18\n" +
 	"\auserIds\x18\x01 \x03(\x03R\auserIds\x12\x14\n" +
 	"\x05orgId\x18\x02 \x01(\x03R\x05orgId\"\xa2\x01\n" +
@@ -1909,21 +2289,34 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x12emailWeeklyEnabled\x18\n" +
 	" \x01(\bR\x12emailWeeklyEnabled\"M\n" +
 	"\x12GetSyncPoliciesRes\x127\n" +
-	"\bpolicies\x18\x01 \x03(\v2\x1b.api.user.v1.UserSyncPolicyR\bpolicies2\xdd\n" +
-	"\n" +
+	"\bpolicies\x18\x01 \x03(\v2\x1b.api.user.v1.UserSyncPolicyR\bpolicies\".\n" +
+	"\x10GetByUsernameReq\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\",\n" +
+	"\x12GetFollowingIdsReq\x12\x16\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\".\n" +
+	"\x12GetFollowingIdsRes\x12\x18\n" +
+	"\auserIds\x18\x01 \x03(\x03R\auserIds\"6\n" +
+	"\x1aFilterPublicFeedUserIdsReq\x12\x18\n" +
+	"\auserIds\x18\x01 \x03(\x03R\auserIds\"6\n" +
+	"\x1aFilterPublicFeedUserIdsRes\x12\x18\n" +
+	"\auserIds\x18\x01 \x03(\x03R\auserIds2\x85\x0f\n" +
 	"\aProfile\x12_\n" +
 	"\aGetById\x12\x17.api.user.v1.GetByIdReq\x1a\x17.api.user.v1.GetByIdRes\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/user/profile/get-by-id\x12g\n" +
 	"\tGetByName\x12\x19.api.user.v1.GetByNameReq\x1a\x19.api.user.v1.GetByNameRes\"$\x82\xd3\xe4\x93\x02\x1e\x12\x1c/v1/user/profile/get-by-name\x12Z\n" +
 	"\aGetList\x12\x17.api.user.v1.GetListReq\x1a\x17.api.user.v1.GetListRes\"\x1d\x82\xd3\xe4\x93\x02\x17\x12\x15/v1/user/profile/list\x12\\\n" +
 	"\x06Update\x12\x16.api.user.v1.UpdateReq\x1a\x16.api.user.v1.UpdateRes\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/user/profile/update\x12i\n" +
 	"\tMoveGroup\x12\x19.api.user.v1.MoveGroupReq\x1a\x19.api.user.v1.MoveGroupRes\"&\x82\xd3\xe4\x93\x02 :\x01*\"\x1b/v1/user/profile/move-group\x12\x82\x01\n" +
-	"\x0fSetEmailEnabled\x12\x1f.api.user.v1.SetEmailEnabledReq\x1a\x1f.api.user.v1.SetEmailEnabledRes\"-\x82\xd3\xe4\x93\x02':\x01*\"\"/v1/user/profile/set-email-enabled\x12\x80\x01\n" +
+	"\x0fSetEmailEnabled\x12\x1f.api.user.v1.SetEmailEnabledReq\x1a\x1f.api.user.v1.SetEmailEnabledRes\"-\x82\xd3\xe4\x93\x02':\x01*\"\"/v1/user/profile/set-email-enabled\x12\x8e\x01\n" +
+	"\x12SetProblemPipeline\x12\".api.user.v1.SetProblemPipelineReq\x1a\".api.user.v1.SetProblemPipelineRes\"0\x82\xd3\xe4\x93\x02*:\x01*\"%/v1/user/profile/set-problem-pipeline\x12\x80\x01\n" +
 	"\x11GetUserIdsByGroup\x12!.api.user.v1.GetUserIdsByGroupReq\x1a!.api.user.v1.GetUserIdsByGroupRes\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/user/profile/ids-by-group\x12x\n" +
 	"\x0fGetUserIdsByOrg\x12\x1f.api.user.v1.GetUserIdsByOrgReq\x1a\x1f.api.user.v1.GetUserIdsByOrgRes\"#\x82\xd3\xe4\x93\x02\x1d\x12\x1b/v1/user/profile/ids-by-org\x12\x9a\x01\n" +
 	"\x16GetNonPublicOrgUserIds\x12&.api.user.v1.GetNonPublicOrgUserIdsReq\x1a&.api.user.v1.GetNonPublicOrgUserIdsRes\"0\x82\xd3\xe4\x93\x02*\x12(/v1/user/profile/non-public-org-user-ids\x12f\n" +
 	"\bGetByIds\x12\x18.api.user.v1.GetByIdsReq\x1a\x18.api.user.v1.GetByIdsRes\"&\x82\xd3\xe4\x93\x02 :\x01*\"\x1b/v1/user/profile/get-by-ids\x12~\n" +
 	"\x0fGetSyncPolicies\x12\x1f.api.user.v1.GetSyncPoliciesReq\x1a\x1f.api.user.v1.GetSyncPoliciesRes\")\x82\xd3\xe4\x93\x02#:\x01*\"\x1e/v1/user/profile/sync-policies\x12\\\n" +
-	"\x06Delete\x12\x16.api.user.v1.DeleteReq\x1a\x16.api.user.v1.DeleteRes\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/user/profile/deleteB6\n" +
+	"\x06Delete\x12\x16.api.user.v1.DeleteReq\x1a\x16.api.user.v1.DeleteRes\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/user/profile/delete\x12q\n" +
+	"\rGetByUsername\x12\x1d.api.user.v1.GetByUsernameReq\x1a\x17.api.user.v1.GetByIdRes\"(\x82\xd3\xe4\x93\x02\"\x12 /v1/user/profile/get-by-username\x12{\n" +
+	"\x0fGetFollowingIds\x12\x1f.api.user.v1.GetFollowingIdsReq\x1a\x1f.api.user.v1.GetFollowingIdsRes\"&\x82\xd3\xe4\x93\x02 \x12\x1e/v1/user/profile/following-ids\x12\xa4\x01\n" +
+	"\x17FilterPublicFeedUserIds\x12'.api.user.v1.FilterPublicFeedUserIdsReq\x1a'.api.user.v1.FilterPublicFeedUserIdsRes\"7\x82\xd3\xe4\x93\x021:\x01*\",/v1/user/profile/filter-public-feed-user-idsB6\n" +
 	"\vapi.user.v1P\x01Z%cwxu-algo/api/user/v1/profile;profileb\x06proto3"
 
 var (
@@ -1938,72 +2331,87 @@ func file_user_v1_profile_profile_proto_rawDescGZIP() []byte {
 	return file_user_v1_profile_profile_proto_rawDescData
 }
 
-var file_user_v1_profile_profile_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_user_v1_profile_profile_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_user_v1_profile_profile_proto_goTypes = []any{
-	(*GetByIdReq)(nil),                // 0: api.user.v1.GetByIdReq
-	(*GetByIdRes)(nil),                // 1: api.user.v1.GetByIdRes
-	(*GetByNameReq)(nil),              // 2: api.user.v1.GetByNameReq
-	(*GetByNameRes)(nil),              // 3: api.user.v1.GetByNameRes
-	(*GetListReq)(nil),                // 4: api.user.v1.GetListReq
-	(*GetListRes)(nil),                // 5: api.user.v1.GetListRes
-	(*UpdateReq)(nil),                 // 6: api.user.v1.UpdateReq
-	(*UpdateRes)(nil),                 // 7: api.user.v1.UpdateRes
-	(*MoveGroupReq)(nil),              // 8: api.user.v1.MoveGroupReq
-	(*MoveGroupRes)(nil),              // 9: api.user.v1.MoveGroupRes
-	(*SetEmailEnabledReq)(nil),        // 10: api.user.v1.SetEmailEnabledReq
-	(*SetEmailEnabledRes)(nil),        // 11: api.user.v1.SetEmailEnabledRes
-	(*GetUserIdsByGroupReq)(nil),      // 12: api.user.v1.GetUserIdsByGroupReq
-	(*GetUserIdsByGroupRes)(nil),      // 13: api.user.v1.GetUserIdsByGroupRes
-	(*GetUserIdsByOrgReq)(nil),        // 14: api.user.v1.GetUserIdsByOrgReq
-	(*GetUserIdsByOrgRes)(nil),        // 15: api.user.v1.GetUserIdsByOrgRes
-	(*GetNonPublicOrgUserIdsReq)(nil), // 16: api.user.v1.GetNonPublicOrgUserIdsReq
-	(*GetNonPublicOrgUserIdsRes)(nil), // 17: api.user.v1.GetNonPublicOrgUserIdsRes
-	(*GetByIdsReq)(nil),               // 18: api.user.v1.GetByIdsReq
-	(*GetByIdsRes)(nil),               // 19: api.user.v1.GetByIdsRes
-	(*DeleteReq)(nil),                 // 20: api.user.v1.DeleteReq
-	(*DeleteRes)(nil),                 // 21: api.user.v1.DeleteRes
-	(*GetSyncPoliciesReq)(nil),        // 22: api.user.v1.GetSyncPoliciesReq
-	(*UserSyncPolicy)(nil),            // 23: api.user.v1.UserSyncPolicy
-	(*GetSyncPoliciesRes)(nil),        // 24: api.user.v1.GetSyncPoliciesRes
-	(*GetByIdRes_Spiders)(nil),        // 25: api.user.v1.GetByIdRes.Spiders
-	(*GetByNameRes_UserList)(nil),     // 26: api.user.v1.GetByNameRes.UserList
-	(*GetListRes_OrgBrief)(nil),       // 27: api.user.v1.GetListRes.OrgBrief
-	(*GetListRes_List)(nil),           // 28: api.user.v1.GetListRes.List
-	(*GetByIdsRes_UserProfile)(nil),   // 29: api.user.v1.GetByIdsRes.UserProfile
+	(*GetByIdReq)(nil),                 // 0: api.user.v1.GetByIdReq
+	(*GetByIdRes)(nil),                 // 1: api.user.v1.GetByIdRes
+	(*GetByNameReq)(nil),               // 2: api.user.v1.GetByNameReq
+	(*GetByNameRes)(nil),               // 3: api.user.v1.GetByNameRes
+	(*GetListReq)(nil),                 // 4: api.user.v1.GetListReq
+	(*GetListRes)(nil),                 // 5: api.user.v1.GetListRes
+	(*UpdateReq)(nil),                  // 6: api.user.v1.UpdateReq
+	(*UpdateRes)(nil),                  // 7: api.user.v1.UpdateRes
+	(*MoveGroupReq)(nil),               // 8: api.user.v1.MoveGroupReq
+	(*MoveGroupRes)(nil),               // 9: api.user.v1.MoveGroupRes
+	(*SetEmailEnabledReq)(nil),         // 10: api.user.v1.SetEmailEnabledReq
+	(*SetEmailEnabledRes)(nil),         // 11: api.user.v1.SetEmailEnabledRes
+	(*SetProblemPipelineReq)(nil),      // 12: api.user.v1.SetProblemPipelineReq
+	(*SetProblemPipelineRes)(nil),      // 13: api.user.v1.SetProblemPipelineRes
+	(*GetUserIdsByGroupReq)(nil),       // 14: api.user.v1.GetUserIdsByGroupReq
+	(*GetUserIdsByGroupRes)(nil),       // 15: api.user.v1.GetUserIdsByGroupRes
+	(*GetUserIdsByOrgReq)(nil),         // 16: api.user.v1.GetUserIdsByOrgReq
+	(*GetUserIdsByOrgRes)(nil),         // 17: api.user.v1.GetUserIdsByOrgRes
+	(*GetNonPublicOrgUserIdsReq)(nil),  // 18: api.user.v1.GetNonPublicOrgUserIdsReq
+	(*GetNonPublicOrgUserIdsRes)(nil),  // 19: api.user.v1.GetNonPublicOrgUserIdsRes
+	(*GetByIdsReq)(nil),                // 20: api.user.v1.GetByIdsReq
+	(*GetByIdsRes)(nil),                // 21: api.user.v1.GetByIdsRes
+	(*DeleteReq)(nil),                  // 22: api.user.v1.DeleteReq
+	(*DeleteRes)(nil),                  // 23: api.user.v1.DeleteRes
+	(*GetSyncPoliciesReq)(nil),         // 24: api.user.v1.GetSyncPoliciesReq
+	(*UserSyncPolicy)(nil),             // 25: api.user.v1.UserSyncPolicy
+	(*GetSyncPoliciesRes)(nil),         // 26: api.user.v1.GetSyncPoliciesRes
+	(*GetByUsernameReq)(nil),           // 27: api.user.v1.GetByUsernameReq
+	(*GetFollowingIdsReq)(nil),         // 28: api.user.v1.GetFollowingIdsReq
+	(*GetFollowingIdsRes)(nil),         // 29: api.user.v1.GetFollowingIdsRes
+	(*FilterPublicFeedUserIdsReq)(nil), // 30: api.user.v1.FilterPublicFeedUserIdsReq
+	(*FilterPublicFeedUserIdsRes)(nil), // 31: api.user.v1.FilterPublicFeedUserIdsRes
+	(*GetByIdRes_Spiders)(nil),         // 32: api.user.v1.GetByIdRes.Spiders
+	(*GetByNameRes_UserList)(nil),      // 33: api.user.v1.GetByNameRes.UserList
+	(*GetListRes_OrgBrief)(nil),        // 34: api.user.v1.GetListRes.OrgBrief
+	(*GetListRes_List)(nil),            // 35: api.user.v1.GetListRes.List
+	(*GetByIdsRes_UserProfile)(nil),    // 36: api.user.v1.GetByIdsRes.UserProfile
 }
 var file_user_v1_profile_profile_proto_depIdxs = []int32{
-	25, // 0: api.user.v1.GetByIdRes.spiders:type_name -> api.user.v1.GetByIdRes.Spiders
-	26, // 1: api.user.v1.GetByNameRes.list:type_name -> api.user.v1.GetByNameRes.UserList
-	28, // 2: api.user.v1.GetListRes.list:type_name -> api.user.v1.GetListRes.List
-	29, // 3: api.user.v1.GetByIdsRes.profiles:type_name -> api.user.v1.GetByIdsRes.UserProfile
-	23, // 4: api.user.v1.GetSyncPoliciesRes.policies:type_name -> api.user.v1.UserSyncPolicy
-	27, // 5: api.user.v1.GetListRes.List.orgs:type_name -> api.user.v1.GetListRes.OrgBrief
+	32, // 0: api.user.v1.GetByIdRes.spiders:type_name -> api.user.v1.GetByIdRes.Spiders
+	33, // 1: api.user.v1.GetByNameRes.list:type_name -> api.user.v1.GetByNameRes.UserList
+	35, // 2: api.user.v1.GetListRes.list:type_name -> api.user.v1.GetListRes.List
+	36, // 3: api.user.v1.GetByIdsRes.profiles:type_name -> api.user.v1.GetByIdsRes.UserProfile
+	25, // 4: api.user.v1.GetSyncPoliciesRes.policies:type_name -> api.user.v1.UserSyncPolicy
+	34, // 5: api.user.v1.GetListRes.List.orgs:type_name -> api.user.v1.GetListRes.OrgBrief
 	0,  // 6: api.user.v1.Profile.GetById:input_type -> api.user.v1.GetByIdReq
 	2,  // 7: api.user.v1.Profile.GetByName:input_type -> api.user.v1.GetByNameReq
 	4,  // 8: api.user.v1.Profile.GetList:input_type -> api.user.v1.GetListReq
 	6,  // 9: api.user.v1.Profile.Update:input_type -> api.user.v1.UpdateReq
 	8,  // 10: api.user.v1.Profile.MoveGroup:input_type -> api.user.v1.MoveGroupReq
 	10, // 11: api.user.v1.Profile.SetEmailEnabled:input_type -> api.user.v1.SetEmailEnabledReq
-	12, // 12: api.user.v1.Profile.GetUserIdsByGroup:input_type -> api.user.v1.GetUserIdsByGroupReq
-	14, // 13: api.user.v1.Profile.GetUserIdsByOrg:input_type -> api.user.v1.GetUserIdsByOrgReq
-	16, // 14: api.user.v1.Profile.GetNonPublicOrgUserIds:input_type -> api.user.v1.GetNonPublicOrgUserIdsReq
-	18, // 15: api.user.v1.Profile.GetByIds:input_type -> api.user.v1.GetByIdsReq
-	22, // 16: api.user.v1.Profile.GetSyncPolicies:input_type -> api.user.v1.GetSyncPoliciesReq
-	20, // 17: api.user.v1.Profile.Delete:input_type -> api.user.v1.DeleteReq
-	1,  // 18: api.user.v1.Profile.GetById:output_type -> api.user.v1.GetByIdRes
-	3,  // 19: api.user.v1.Profile.GetByName:output_type -> api.user.v1.GetByNameRes
-	5,  // 20: api.user.v1.Profile.GetList:output_type -> api.user.v1.GetListRes
-	7,  // 21: api.user.v1.Profile.Update:output_type -> api.user.v1.UpdateRes
-	9,  // 22: api.user.v1.Profile.MoveGroup:output_type -> api.user.v1.MoveGroupRes
-	11, // 23: api.user.v1.Profile.SetEmailEnabled:output_type -> api.user.v1.SetEmailEnabledRes
-	13, // 24: api.user.v1.Profile.GetUserIdsByGroup:output_type -> api.user.v1.GetUserIdsByGroupRes
-	15, // 25: api.user.v1.Profile.GetUserIdsByOrg:output_type -> api.user.v1.GetUserIdsByOrgRes
-	17, // 26: api.user.v1.Profile.GetNonPublicOrgUserIds:output_type -> api.user.v1.GetNonPublicOrgUserIdsRes
-	19, // 27: api.user.v1.Profile.GetByIds:output_type -> api.user.v1.GetByIdsRes
-	24, // 28: api.user.v1.Profile.GetSyncPolicies:output_type -> api.user.v1.GetSyncPoliciesRes
-	21, // 29: api.user.v1.Profile.Delete:output_type -> api.user.v1.DeleteRes
-	18, // [18:30] is the sub-list for method output_type
-	6,  // [6:18] is the sub-list for method input_type
+	12, // 12: api.user.v1.Profile.SetProblemPipeline:input_type -> api.user.v1.SetProblemPipelineReq
+	14, // 13: api.user.v1.Profile.GetUserIdsByGroup:input_type -> api.user.v1.GetUserIdsByGroupReq
+	16, // 14: api.user.v1.Profile.GetUserIdsByOrg:input_type -> api.user.v1.GetUserIdsByOrgReq
+	18, // 15: api.user.v1.Profile.GetNonPublicOrgUserIds:input_type -> api.user.v1.GetNonPublicOrgUserIdsReq
+	20, // 16: api.user.v1.Profile.GetByIds:input_type -> api.user.v1.GetByIdsReq
+	24, // 17: api.user.v1.Profile.GetSyncPolicies:input_type -> api.user.v1.GetSyncPoliciesReq
+	22, // 18: api.user.v1.Profile.Delete:input_type -> api.user.v1.DeleteReq
+	27, // 19: api.user.v1.Profile.GetByUsername:input_type -> api.user.v1.GetByUsernameReq
+	28, // 20: api.user.v1.Profile.GetFollowingIds:input_type -> api.user.v1.GetFollowingIdsReq
+	30, // 21: api.user.v1.Profile.FilterPublicFeedUserIds:input_type -> api.user.v1.FilterPublicFeedUserIdsReq
+	1,  // 22: api.user.v1.Profile.GetById:output_type -> api.user.v1.GetByIdRes
+	3,  // 23: api.user.v1.Profile.GetByName:output_type -> api.user.v1.GetByNameRes
+	5,  // 24: api.user.v1.Profile.GetList:output_type -> api.user.v1.GetListRes
+	7,  // 25: api.user.v1.Profile.Update:output_type -> api.user.v1.UpdateRes
+	9,  // 26: api.user.v1.Profile.MoveGroup:output_type -> api.user.v1.MoveGroupRes
+	11, // 27: api.user.v1.Profile.SetEmailEnabled:output_type -> api.user.v1.SetEmailEnabledRes
+	13, // 28: api.user.v1.Profile.SetProblemPipeline:output_type -> api.user.v1.SetProblemPipelineRes
+	15, // 29: api.user.v1.Profile.GetUserIdsByGroup:output_type -> api.user.v1.GetUserIdsByGroupRes
+	17, // 30: api.user.v1.Profile.GetUserIdsByOrg:output_type -> api.user.v1.GetUserIdsByOrgRes
+	19, // 31: api.user.v1.Profile.GetNonPublicOrgUserIds:output_type -> api.user.v1.GetNonPublicOrgUserIdsRes
+	21, // 32: api.user.v1.Profile.GetByIds:output_type -> api.user.v1.GetByIdsRes
+	26, // 33: api.user.v1.Profile.GetSyncPolicies:output_type -> api.user.v1.GetSyncPoliciesRes
+	23, // 34: api.user.v1.Profile.Delete:output_type -> api.user.v1.DeleteRes
+	1,  // 35: api.user.v1.Profile.GetByUsername:output_type -> api.user.v1.GetByIdRes
+	29, // 36: api.user.v1.Profile.GetFollowingIds:output_type -> api.user.v1.GetFollowingIdsRes
+	31, // 37: api.user.v1.Profile.FilterPublicFeedUserIds:output_type -> api.user.v1.FilterPublicFeedUserIdsRes
+	22, // [22:38] is the sub-list for method output_type
+	6,  // [6:22] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -2020,7 +2428,7 @@ func file_user_v1_profile_profile_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_v1_profile_profile_proto_rawDesc), len(file_user_v1_profile_profile_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   30,
+			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

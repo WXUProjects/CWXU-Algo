@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"cwxu-algo/api/core/v1/bulletin"
+	"cwxu-algo/api/core/v1/contest_calendar"
 	"cwxu-algo/api/core/v1/contest_log"
 	"cwxu-algo/api/core/v1/emergency"
 	"cwxu-algo/api/core/v1/problem"
@@ -43,6 +44,8 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.core.v1.problem.Problem/Get":                   "",
 		"/api.core.v1.problem.Problem/ListSubmissions":       "",
 		"/api.core.v1.problem.Problem/UserProfile":           "",
+		"/api.core.v1.contest_calendar.ContestCalendar/ListCalendar":  "",
+		"/api.core.v1.contest_calendar.ContestCalendar/ListPlatforms": "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		//log.Info(operation)
@@ -54,7 +57,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 }
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService, contestLogService *service.ContestLogService, bulletinService *service.BulletinService, problemService *service.ProblemService, emergencyService *service.EmergencyService) *http.Server {
+func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService, contestLogService *service.ContestLogService, bulletinService *service.BulletinService, problemService *service.ProblemService, emergencyService *service.EmergencyService, contestCalendarService *service.ContestCalendarService) *http.Server {
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
@@ -87,5 +90,6 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 	bulletin.RegisterBulletinHTTPServer(srv, bulletinService)
 	problem.RegisterProblemHTTPServer(srv, problemService)
 	emergency.RegisterEmergencyHTTPServer(srv, emergencyService)
+	contest_calendar.RegisterContestCalendarHTTPServer(srv, contestCalendarService)
 	return srv
 }

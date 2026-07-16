@@ -119,6 +119,108 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.bulletin.UpdateBulletinRes'
+    /v1/core/contest-calendar/list:
+        get:
+            tags:
+                - ContestCalendar
+            description: 赛程列表（公开）
+            operationId: ContestCalendar_ListCalendar
+            parameters:
+                - name: platform
+                  in: query
+                  schema:
+                    type: string
+                - name: keyword
+                  in: query
+                  schema:
+                    type: string
+                - name: status
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: string
+                - name: offset
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.contest_calendar.ListCalendarRes'
+    /v1/core/contest-calendar/platforms:
+        get:
+            tags:
+                - ContestCalendar
+            description: 平台列表及场次统计（公开）
+            operationId: ContestCalendar_ListPlatforms
+            parameters:
+                - name: upcomingOnly
+                  in: query
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.contest_calendar.ListPlatformsRes'
+    /v1/core/contest-calendar/sub:
+        get:
+            tags:
+                - ContestCalendar
+            description: 我的订阅（需登录）
+            operationId: ContestCalendar_GetMySubs
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.contest_calendar.GetMySubsRes'
+        post:
+            tags:
+                - ContestCalendar
+            description: 创建/更新订阅（需登录）
+            operationId: ContestCalendar_UpsertSub
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.contest_calendar.UpsertSubReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.contest_calendar.UpsertSubRes'
+    /v1/core/contest-calendar/sub/delete:
+        post:
+            tags:
+                - ContestCalendar
+            description: 删除订阅（需登录）
+            operationId: ContestCalendar_DeleteSub
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.contest_calendar.DeleteSubReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.contest_calendar.DeleteSubRes'
     /v1/core/contest/history:
         get:
             tags:
@@ -300,6 +402,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.emergency.UpdateEmergencyRes'
+    /v1/core/problem/admin-update:
+        post:
+            tags:
+                - Problem
+            description: 站点管理员：直接修改标签/题面（无需审核）
+            operationId: Problem_AdminUpdate
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.AdminUpdateProblemReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.AdminUpdateProblemRes'
     /v1/core/problem/backfill:
         post:
             tags:
@@ -318,6 +439,33 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.BackfillRes'
+    /v1/core/problem/edit-requests:
+        get:
+            tags:
+                - Problem
+            description: 站点管理员：审核申请列表
+            operationId: Problem_ListEditRequests
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: string
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: string
+                - name: status
+                  in: query
+                  description: pending | approved | rejected | 空=全部
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ListProblemEditRes'
     /v1/core/problem/emergency-stop:
         post:
             tags:
@@ -403,6 +551,11 @@ paths:
                   description: 难度：简单 / 中等 / 困难
                   schema:
                     type: string
+                - name: followingOnly
+                  in: query
+                  description: 仅显示关注用户提交过的题目（需登录）
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     description: OK
@@ -410,6 +563,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.ListProblemRes'
+    /v1/core/problem/my-pending-edit:
+        get:
+            tags:
+                - Problem
+            description: 当前用户对该题的待审申请（详情页提示）
+            operationId: Problem_MyPendingEdit
+            parameters:
+                - name: problemId
+                  in: query
+                  schema:
+                    type: integer
+                    format: uint32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.MyPendingEditRes'
     /v1/core/problem/progress:
         get:
             tags:
@@ -422,6 +594,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.ProgressRes'
+    /v1/core/problem/propose-edit:
+        post:
+            tags:
+                - Problem
+            description: 登录用户：提交标签/题面修改申请（站点管理员审核）
+            operationId: Problem_ProposeEdit
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.ProposeProblemEditReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ProposeProblemEditRes'
     /v1/core/problem/reset-all:
         post:
             tags:
@@ -498,6 +689,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.RetryFailedRes'
+    /v1/core/problem/review-edit:
+        post:
+            tags:
+                - Problem
+            description: 站点管理员：通过/驳回申请
+            operationId: Problem_ReviewEdit
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.ReviewProblemEditReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ReviewProblemEditRes'
     /v1/core/problem/submissions:
         get:
             tags:
@@ -521,6 +731,11 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: followingOnly
+                  in: query
+                  description: 仅显示关注用户的提交（需登录）
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     description: OK
@@ -765,6 +980,11 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: followingOnly
+                  in: query
+                  description: 仅关注用户（需登录；与 user_id=-1 组织聚合流组合，或单独表示关注流）
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     description: OK
@@ -995,6 +1215,43 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.DeleteRes'
+    /v1/user/profile/filter-public-feed-user-ids:
+        post:
+            tags:
+                - Profile
+            description: 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
+            operationId: Profile_FilterPublicFeedUserIds
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.FilterPublicFeedUserIdsReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.FilterPublicFeedUserIdsRes'
+    /v1/user/profile/following-ids:
+        get:
+            tags:
+                - Profile
+            description: 某人关注的 userId 列表（供 core 动态/题库过滤；本人或公开）
+            operationId: Profile_GetFollowingIds
+            parameters:
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.GetFollowingIdsRes'
     /v1/user/profile/get-by-id:
         get:
             tags:
@@ -1047,6 +1304,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.GetByNameRes'
+    /v1/user/profile/get-by-username:
+        get:
+            tags:
+                - Profile
+            description: 精确用户名查资料（公开；受公共域隐私约束）
+            operationId: Profile_GetByUsername
+            parameters:
+                - name: username
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.GetByIdRes'
     /v1/user/profile/ids-by-group:
         get:
             tags:
@@ -1130,7 +1405,9 @@ paths:
         get:
             tags:
                 - Profile
-            description: 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+            description: |-
+                题面流水线资格用户（供 core 闸门；内部调用）
+                 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
             operationId: Profile_GetNonPublicOrgUserIds
             responses:
                 "200":
@@ -1157,6 +1434,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.SetEmailEnabledRes'
+    /v1/user/profile/set-problem-pipeline:
+        post:
+            tags:
+                - Profile
+            description: 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
+            operationId: Profile_SetProblemPipeline
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.SetProblemPipelineReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.SetProblemPipelineRes'
     /v1/user/profile/sync-policies:
         post:
             tags:
@@ -1444,6 +1740,143 @@ components:
                     type: string
                 data:
                     $ref: '#/components/schemas/api.core.v1.bulletin.BulletinInfo'
+        api.core.v1.contest_calendar.CalendarItem:
+            type: object
+            properties:
+                id:
+                    type: integer
+                    format: uint32
+                platform:
+                    type: string
+                platformName:
+                    type: string
+                externalId:
+                    type: string
+                name:
+                    type: string
+                url:
+                    type: string
+                startTime:
+                    type: string
+                endTime:
+                    type: string
+                source:
+                    type: string
+                iconUrl:
+                    type: string
+                subscribed:
+                    type: boolean
+        api.core.v1.contest_calendar.DeleteSubReq:
+            type: object
+            properties:
+                scope:
+                    type: string
+                platform:
+                    type: string
+                calendarId:
+                    type: integer
+                    format: uint32
+        api.core.v1.contest_calendar.DeleteSubRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+        api.core.v1.contest_calendar.GetMySubsRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.contest_calendar.SubItem'
+        api.core.v1.contest_calendar.ListCalendarRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.contest_calendar.CalendarItem'
+                total:
+                    type: string
+        api.core.v1.contest_calendar.ListPlatformsRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.contest_calendar.PlatformItem'
+        api.core.v1.contest_calendar.PlatformItem:
+            type: object
+            properties:
+                platform:
+                    type: string
+                platformName:
+                    type: string
+                iconUrl:
+                    type: string
+                count:
+                    type: string
+        api.core.v1.contest_calendar.SubItem:
+            type: object
+            properties:
+                id:
+                    type: integer
+                    format: uint32
+                scope:
+                    type: string
+                platform:
+                    type: string
+                calendarId:
+                    type: integer
+                    format: uint32
+                advanceMinutes:
+                    type: integer
+                    format: int32
+                enabled:
+                    type: boolean
+                contestName:
+                    type: string
+                contestUrl:
+                    type: string
+                startTime:
+                    type: string
+        api.core.v1.contest_calendar.UpsertSubReq:
+            type: object
+            properties:
+                scope:
+                    type: string
+                platform:
+                    type: string
+                calendarId:
+                    type: integer
+                    format: uint32
+                advanceMinutes:
+                    type: integer
+                    format: int32
+                enabled:
+                    type: boolean
+        api.core.v1.contest_calendar.UpsertSubRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/api.core.v1.contest_calendar.SubItem'
         api.core.v1.contest_log.ContestLog:
             type: object
             properties:
@@ -1641,6 +2074,34 @@ components:
                     type: string
                 startedAt:
                     type: string
+        api.core.v1.problem.AdminUpdateProblemReq:
+            type: object
+            properties:
+                id:
+                    type: integer
+                    format: uint32
+                updateTags:
+                    type: boolean
+                tags:
+                    type: array
+                    items:
+                        type: string
+                updateContent:
+                    type: boolean
+                contentMd:
+                    type: string
+                title:
+                    type: string
+            description: 站点管理员直接改题：有字段才更新（update_tags / update_content 显式开关）
+        api.core.v1.problem.AdminUpdateProblemRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/api.core.v1.problem.ProblemInfo'
         api.core.v1.problem.BackfillReq:
             type: object
             properties:
@@ -1711,6 +2172,23 @@ components:
                     type: string
                 data:
                     $ref: '#/components/schemas/api.core.v1.problem.ProblemInfo'
+        api.core.v1.problem.ListProblemEditRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.ProblemEditInfo'
+                total:
+                    type: string
+                page:
+                    type: string
+                pageSize:
+                    type: string
         api.core.v1.problem.ListProblemRes:
             type: object
             properties:
@@ -1752,12 +2230,77 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/api.core.v1.problem.TagCount'
+        api.core.v1.problem.MyPendingEditRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                hasPending:
+                    type: boolean
+                data:
+                    $ref: '#/components/schemas/api.core.v1.problem.ProblemEditInfo'
         api.core.v1.problem.NamedCount:
             type: object
             properties:
                 name:
                     type: string
                 count:
+                    type: string
+        api.core.v1.problem.ProblemEditInfo:
+            type: object
+            properties:
+                id:
+                    type: integer
+                    format: uint32
+                problemId:
+                    type: integer
+                    format: uint32
+                platform:
+                    type: string
+                externalId:
+                    type: string
+                problemTitle:
+                    type: string
+                userId:
+                    type: integer
+                    format: uint32
+                userName:
+                    type: string
+                hasTags:
+                    type: boolean
+                hasContent:
+                    type: boolean
+                proposedTags:
+                    type: array
+                    items:
+                        type: string
+                proposedContentMd:
+                    type: string
+                proposedTitle:
+                    type: string
+                note:
+                    type: string
+                status:
+                    type: string
+                reviewerId:
+                    type: integer
+                    format: uint32
+                reviewNote:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                currentTags:
+                    type: array
+                    items:
+                        type: string
+                    description: 当前线上快照（便于对比）
+                currentContentMd:
+                    type: string
+                currentTitle:
                     type: string
         api.core.v1.problem.ProblemInfo:
             type: object
@@ -1842,6 +2385,37 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/api.core.v1.problem.FailedProblem'
+        api.core.v1.problem.ProposeProblemEditReq:
+            type: object
+            properties:
+                problemId:
+                    type: integer
+                    format: uint32
+                updateTags:
+                    type: boolean
+                tags:
+                    type: array
+                    items:
+                        type: string
+                updateContent:
+                    type: boolean
+                contentMd:
+                    type: string
+                title:
+                    type: string
+                note:
+                    type: string
+            description: 用户提交修改申请：至少改标签或题面其一
+        api.core.v1.problem.ProposeProblemEditRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                requestId:
+                    type: integer
+                    format: uint32
         api.core.v1.problem.QueueStatus:
             type: object
             properties:
@@ -1928,6 +2502,23 @@ components:
                 blacklisted:
                     type: string
                     description: 升为 FAILED_PERM（黑名单）的数量
+        api.core.v1.problem.ReviewProblemEditReq:
+            type: object
+            properties:
+                id:
+                    type: integer
+                    format: uint32
+                approve:
+                    type: boolean
+                reviewNote:
+                    type: string
+        api.core.v1.problem.ReviewProblemEditRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
         api.core.v1.problem.SolutionMeta:
             type: object
             properties:
@@ -2299,6 +2890,20 @@ components:
                     type: string
                 message:
                     type: string
+        api.user.v1.FilterPublicFeedUserIdsReq:
+            type: object
+            properties:
+                userIds:
+                    type: array
+                    items:
+                        type: string
+        api.user.v1.FilterPublicFeedUserIdsRes:
+            type: object
+            properties:
+                userIds:
+                    type: array
+                    items:
+                        type: string
         api.user.v1.GetByIdRes:
             type: object
             properties:
@@ -2379,6 +2984,13 @@ components:
                     type: string
                 username:
                     type: string
+        api.user.v1.GetFollowingIdsRes:
+            type: object
+            properties:
+                userIds:
+                    type: array
+                    items:
+                        type: string
         api.user.v1.GetListRes:
             type: object
             properties:
@@ -2423,6 +3035,11 @@ components:
                     type: boolean
                 emailWeeklyAllowedByOrg:
                     type: boolean
+                problemFetchEnabled:
+                    type: boolean
+                    description: 题面流水线有效状态（已应用个人覆盖；null 覆盖时按是否非公共域组织）
+                problemAiEnabled:
+                    type: boolean
         api.user.v1.GetListRes_OrgBrief:
             type: object
             properties:
@@ -2439,6 +3056,17 @@ components:
                     type: array
                     items:
                         type: string
+                    description: 兼容旧调用：与 fetchUserIds 相同（题面爬取资格）
+                fetchUserIds:
+                    type: array
+                    items:
+                        type: string
+                    description: 近窗提交可触发题面爬取的用户
+                aiUserIds:
+                    type: array
+                    items:
+                        type: string
+                    description: 近窗提交可触发题面 AI 的用户
         api.user.v1.GetSyncPoliciesReq:
             type: object
             properties:
@@ -2570,6 +3198,23 @@ components:
                     type: string
                     description: 'kind: daily(默认) | weekly'
         api.user.v1.SetEmailEnabledRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+        api.user.v1.SetProblemPipelineReq:
+            type: object
+            properties:
+                userId:
+                    type: string
+                enabled:
+                    type: boolean
+                kind:
+                    type: string
+                    description: 'kind: fetch（题面爬取）| ai（题面 AI 分析）'
+        api.user.v1.SetProblemPipelineRes:
             type: object
             properties:
                 code:
@@ -2945,6 +3590,8 @@ tags:
       description: 公告服务：管理员和教练可发布/编辑/删除公告，所有人可查看
     - name: Contest
       description: 竞赛服务
+    - name: ContestCalendar
+      description: 比赛日历：公开赛程聚合 + 邮件订阅
     - name: Emergency
       description: 紧急通知：全站强制弹窗，仅站点管理员可管理
     - name: Group

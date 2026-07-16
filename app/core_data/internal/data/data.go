@@ -54,10 +54,14 @@ func migrateModels(db *gorm.DB) {
 		&model.ContestLog{},
 		&model.Bulletin{},
 		&model.Problem{},
+		&model.ProblemEditRequest{},
 		&model.EmergencyNotice{},
 		&model.DailyUserStat{},
 		&model.UserACProblem{},
 		&model.UserACProblemDay{},
+		&model.ContestCalendar{},
+		&model.ContestCalendarSub{},
+		&model.ContestCalendarNotifyLog{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
@@ -90,13 +94,13 @@ func backfillDailyUserStatsIfEmpty(db *gorm.DB) {
 			user_id,
 			date_trunc('day', time)::date AS day,
 			COUNT(*) FILTER (
-				WHERE NOT (platform = 'LeetCode' AND submit_id LIKE 'lc-ac-%')
+				WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `
 			) AS submit_cnt,
 			COUNT(*) FILTER (WHERE is_ac = true) AS ac_cnt
 		FROM submit_logs
 		GROUP BY user_id, date_trunc('day', time)::date
 		HAVING
-			COUNT(*) FILTER (WHERE NOT (platform = 'LeetCode' AND submit_id LIKE 'lc-ac-%')) > 0
+			COUNT(*) FILTER (WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `) > 0
 			OR COUNT(*) FILTER (WHERE is_ac = true) > 0
 		ON CONFLICT (user_id, day) DO NOTHING
 	`)
@@ -202,12 +206,12 @@ func ensureSubmitLogPerf(db *gorm.DB) {
 		`CREATE INDEX IF NOT EXISTS idx_submit_user_isac_time ON submit_logs (user_id, is_ac, time DESC)`,
 		// 全站/组织 AC 热力：时间窗 + is_ac
 		`CREATE INDEX IF NOT EXISTS idx_submit_isac_time ON submit_logs (time DESC) WHERE is_ac = true`,
-		// 提交热力（排除力扣合成 AC）
+		// 提交热力（排除力扣合成 AC / 最近通过明细）
 		`CREATE INDEX IF NOT EXISTS idx_submit_user_time_nonsynthetic ON submit_logs (user_id, time DESC)
-			WHERE NOT (platform = 'LeetCode' AND submit_id LIKE 'lc-ac-%')`,
+			WHERE ` + model.SQLExcludeLeetCodeNonSubmit,
 		// 组织提交热力时间窗
 		`CREATE INDEX IF NOT EXISTS idx_submit_time_nonsynthetic ON submit_logs (time DESC)
-			WHERE NOT (platform = 'LeetCode' AND submit_id LIKE 'lc-ac-%')`,
+			WHERE ` + model.SQLExcludeLeetCodeNonSubmit,
 		// 日汇总：按日聚合组织热力
 		`CREATE INDEX IF NOT EXISTS idx_daily_stats_day ON daily_user_stats (day)`,
 		`CREATE INDEX IF NOT EXISTS idx_daily_stats_day_user ON daily_user_stats (day, user_id)`,

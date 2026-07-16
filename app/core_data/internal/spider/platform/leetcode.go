@@ -1,8 +1,8 @@
 package platform
 
 import (
-	"cwxu-algo/app/common/utils/ojhttp"
 	"bytes"
+	"cwxu-algo/app/common/utils/ojhttp"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
 	"encoding/json"
@@ -14,14 +14,21 @@ import (
 )
 
 // NewLeetCode 力扣（leetcode.cn）爬虫
-// 策略：不抓具体提交明细，只把「每日提交次数」和「累计 AC 题数」写成合成 SubmitLog，
-// 供热力图 / 总提交 / 总做题数统计；活动流侧会过滤 LeetCode 平台。
+//
+// 策略（submit_id 前缀约定，见 model.CountsTowardSubmitStat）：
+//  1. lc-cal-*  日历每日提交次数 → 提交热力 / 提交数
+//  2. lc-pad-*  生涯 totalSubmissions 与日历差量 → 补齐生涯提交（修 AC 率）
+//  3. lc-prob-* 最近通过明细（有 titleSlug）→ 题库 / AI / 动态与提交历史（默认 AC，无代码）
+//  4. lc-ac-*   合成 AC（acTotal 条）→ 生涯做题数；与 lc-prob 并存时总数可能略高
+//
+// 活动流：仅展示 lc-prob-*；合成行（lc-cal / lc-pad / lc-ac）仍过滤。
 type NewLeetCode struct{}
 
 const (
-	lcGraphQL = "https://leetcode.cn/graphql/"
-	lcCalAPI  = "https://leetcode.cn/api/user_submission_calendar/%s/"
-	// 初始化时把历史 AC 锚到很早的日期，避免「今日 AC」被刷成全量
+	lcGraphQL    = "https://leetcode.cn/graphql/"
+	lcGraphQLNoj = "https://leetcode.cn/graphql/noj-go/"
+	lcCalAPI     = "https://leetcode.cn/api/user_submission_calendar/%s/"
+	// 历史 AC / 提交补齐锚到很早的日期，避免「今日」被刷成全量
 	lcACBaselineDay = "2000-01-01"
 )
 
@@ -39,6 +46,36 @@ type lcProfileResp struct {
 	} `json:"errors"`
 }
 
+type lcRecentACResp struct {
+	Data struct {
+		RecentACSubmissions []struct {
+			SubmissionID int64 `json:"submissionId"`
+			SubmitTime   int64 `json:"submitTime"`
+			Question     *struct {
+				TitleSlug         string `json:"titleSlug"`
+				Title             string `json:"title"`
+				TranslatedTitle   string `json:"translatedTitle"`
+				QuestionFrontendID string `json:"questionFrontendId"`
+			} `json:"question"`
+		} `json:"recentACSubmissions"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
+type lcProgress struct {
+	AcTotal          int
+	TotalSubmissions int
+}
+
+type lcRecentAC struct {
+	SubmissionID int64
+	SubmitTime   time.Time
+	TitleSlug    string
+	Title        string // 展示用（中文优先）
+}
+
 func (p NewLeetCode) Name() string {
 	return spider.LeetCode
 }
@@ -52,24 +89,30 @@ func (p NewLeetCode) FetchSubmitLog(userId int64, username string, needAll bool)
 	if err != nil {
 		return nil, err
 	}
-	acTotal, err := fetchLeetCodeAcTotal(username)
+	prog, err := fetchLeetCodeProgress(username)
 	if err != nil {
 		return nil, err
+	}
+	// 最近通过失败不阻断热力/总数；题库侧只是少几题
+	recent, recentErr := fetchLeetCodeRecentAC(username)
+	if recentErr != nil {
+		recent = nil
 	}
 
 	now := time.Now()
 	loc := now.Location()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, loc)
+	baselineDay, _ := time.ParseInLocation("2006-01-02", lcACBaselineDay, loc)
+	baselineDay = time.Date(baselineDay.Year(), baselineDay.Month(), baselineDay.Day(), 12, 0, 0, 0, loc)
 
-	// 增量：只关心最近几天日历 + 今日 AC 增量占位（由上层按已有数据差量落库；
-	// 这里仍产出「全量稳定 ID」记录，依赖 submit_id 唯一 + OnConflict DoNothing 去重）
+	// 增量：只关心最近几天日历；更早的日历记录若已入库会因 submit_id 冲突被忽略
 	cutoff := time.Time{}
 	if !needAll {
-		// 最近 14 天足够覆盖增量；更早的日历记录若已入库会因 submit_id 冲突被忽略
 		cutoff = today.AddDate(0, 0, -14)
 	}
 
-	res := make([]model.SubmitLog, 0, 512)
+	res := make([]model.SubmitLog, 0, 512+len(recent))
+	calSum := 0
 
 	// 1) 日历 → 每日提交次数（status 不含 AC，只进「提交热力图 / 提交次数」）
 	for dayUnix, cnt := range cal {
@@ -77,19 +120,19 @@ func (p NewLeetCode) FetchSubmitLog(userId int64, username string, needAll bool)
 			continue
 		}
 		day := time.Unix(dayUnix, 0).In(time.UTC)
-		// 用当天中午，避免时区边界把日期挤到前后一天
 		dayLocal := time.Date(day.Year(), day.Month(), day.Day(), 12, 0, 0, 0, loc)
+		calSum += cnt
 		if !needAll && dayLocal.Before(cutoff) {
+			// 增量不产出旧日历行，但仍计入 calSum 以便 pad 正确
+			// 注意：增量时 pad 依赖全量 calSum，所以仍要扫完全部日历计数
 			continue
 		}
 		for i := 0; i < cnt; i++ {
 			res = append(res, model.SubmitLog{
 				UserID:   userId,
 				Platform: spider.LeetCode,
-				// 稳定 ID：同一天同一序号永远相同，便于全量/增量幂等
 				SubmitID: fmt.Sprintf("lc-cal-%d-%s-%d", userId, dayLocal.Format("20060102"), i),
 				Contest:  "leetcode",
-				// 日历提交不是题级记录：固定 problem，且不写 external_id，避免误入 AC 题数
 				Problem:  "leetcode-submit",
 				Lang:     "LeetCode",
 				Status:   "SUBMIT",
@@ -98,18 +141,57 @@ func (p NewLeetCode) FetchSubmitLog(userId int64, username string, needAll bool)
 		}
 	}
 
-	// 2) 累计 AC 题数 → 合成 AC 记录（status=AC，进「AC 热力图 / 做题数」）
-	//    力扣接口只给已去重的 acTotal，每题对应一条 submit，不再二次按提交去重。
-	//    - 全量：历史 AC 锚到 baseline，只保证 Total，不污染 Today
-	//    - 增量：稳定 submit_id；已存在 DoNothing，仅新增 i 记到今天
-	//    external_id / problem 均为题级稳定键（与统计 AC 去重键一致）
-	baselineDay, _ := time.ParseInLocation("2006-01-02", lcACBaselineDay, loc)
-	baselineDay = time.Date(baselineDay.Year(), baselineDay.Month(), baselineDay.Day(), 12, 0, 0, 0, loc)
+	// 增量路径：上面 continue 了旧日，calSum 仍是全量；但 pad 需要全量 cal 之和
+	// 若 needAll=false 时我们 continue 前已 calSum+=cnt，OK
 
-	for i := 0; i < acTotal; i++ {
+	// 2) 生涯提交补齐：totalSubmissions - 日历合计 → baseline 日 SUBMIT
+	//    修 AC 率：分子生涯 AC 题数 / 分母生涯提交（不再只剩近一年日历）
+	pad := prog.TotalSubmissions - calSum
+	if pad < 0 {
+		pad = 0
+	}
+	for i := 0; i < pad; i++ {
+		res = append(res, model.SubmitLog{
+			UserID:   userId,
+			Platform: spider.LeetCode,
+			SubmitID: fmt.Sprintf("lc-pad-%d-%d", userId, i),
+			Contest:  "leetcode",
+			Problem:  "leetcode-submit",
+			Lang:     "LeetCode",
+			Status:   "SUBMIT",
+			Time:     baselineDay.Add(time.Duration(i%60) * time.Second),
+		})
+	}
+
+	// 3) 最近通过 → 真实题级 AC（进题库 / 动态 / 提交历史；不计提交数以免与日历双计）
+	//    公开接口只有通过记录，无源码 → 状态固定 AC，前端不提供「查看代码」链接。
+	//    与合成 AC 的 external_id 空间不同，生涯去重题数可能略高于 acTotal（约 +最近通过去重数）。
+	for _, r := range recent {
+		if r.TitleSlug == "" || r.SubmissionID == 0 {
+			continue
+		}
+		title := r.Title
+		if title == "" {
+			title = r.TitleSlug
+		}
+		res = append(res, model.SubmitLog{
+			UserID:     userId,
+			Platform:   spider.LeetCode,
+			SubmitID:   fmt.Sprintf("lc-prob-%d", r.SubmissionID),
+			Contest:    "leetcode",
+			Problem:    fmt.Sprintf("%s %s", r.TitleSlug, title),
+			ExternalID: r.TitleSlug,
+			Lang:       "-", // 公开最近通过无语言/代码
+			Status:     "AC",
+			Time:       r.SubmitTime,
+		})
+	}
+
+	// 4) 累计 AC 题数 → 合成 AC（status=AC，进「AC 热力图 / 做题数」）
+	//    力扣接口只给已去重的 acTotal；稳定 submit_id，全量锚 baseline，增量新行记今天。
+	for i := 0; i < prog.AcTotal; i++ {
 		t := baselineDay
 		if !needAll {
-			// 增量：统一标今天；旧 ID 冲突忽略，新 ID 记到今天
 			t = today
 		}
 		ext := fmt.Sprintf("ac-%d", i)
@@ -165,7 +247,6 @@ func fetchLeetCodeCalendar(username string) (map[int64]int, error) {
 			return nil, fmt.Errorf("leetcode calendar 内层解析失败: %w", err)
 		}
 	} else {
-		// key 是字符串时间戳
 		var tmp map[string]int
 		if err := json.Unmarshal(raw, &tmp); err != nil {
 			return nil, fmt.Errorf("leetcode calendar object 解析失败: %w", err)
@@ -184,7 +265,7 @@ func fetchLeetCodeCalendar(username string) (map[int64]int, error) {
 	return out, nil
 }
 
-func fetchLeetCodeAcTotal(username string) (int, error) {
+func fetchLeetCodeProgress(username string) (lcProgress, error) {
 	payload := map[string]interface{}{
 		"query": `query userPublicProfile($userSlug: String!) {
 			userProfilePublicProfile(userSlug: $userSlug) {
@@ -196,35 +277,108 @@ func fetchLeetCodeAcTotal(username string) (int, error) {
 	b, _ := json.Marshal(payload)
 	req, err := http.NewRequest(http.MethodPost, lcGraphQL, bytes.NewReader(b))
 	if err != nil {
-		return 0, err
+		return lcProgress{}, err
 	}
 	setLCHeaders(req, username)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := ojhttp.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("leetcode profile 请求失败: %w", err)
+		return lcProgress{}, fmt.Errorf("leetcode profile 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, fmt.Errorf("leetcode profile 读 body 失败: %w", err)
+		return lcProgress{}, fmt.Errorf("leetcode profile 读 body 失败: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("leetcode profile 状态码 %d: %s", resp.StatusCode, string(body))
+		return lcProgress{}, fmt.Errorf("leetcode profile 状态码 %d: %s", resp.StatusCode, string(body))
 	}
 
 	var pr lcProfileResp
 	if err := json.Unmarshal(body, &pr); err != nil {
-		return 0, fmt.Errorf("leetcode profile 解析失败: %w", err)
+		return lcProgress{}, fmt.Errorf("leetcode profile 解析失败: %w", err)
 	}
 	if len(pr.Errors) > 0 {
-		return 0, fmt.Errorf("leetcode profile graphql 错误: %s", pr.Errors[0].Message)
+		return lcProgress{}, fmt.Errorf("leetcode profile graphql 错误: %s", pr.Errors[0].Message)
 	}
 	if pr.Data.UserProfilePublicProfile == nil || pr.Data.UserProfilePublicProfile.SubmissionProgress == nil {
-		return 0, fmt.Errorf("leetcode 用户不存在或资料不可见: %s", username)
+		return lcProgress{}, fmt.Errorf("leetcode 用户不存在或资料不可见: %s", username)
 	}
-	return pr.Data.UserProfilePublicProfile.SubmissionProgress.AcTotal, nil
+	sp := pr.Data.UserProfilePublicProfile.SubmissionProgress
+	return lcProgress{
+		AcTotal:          sp.AcTotal,
+		TotalSubmissions: sp.TotalSubmissions,
+	}, nil
+}
+
+func fetchLeetCodeRecentAC(username string) ([]lcRecentAC, error) {
+	payload := map[string]interface{}{
+		"query": `query recentACSubmissions($userSlug: String!) {
+			recentACSubmissions(userSlug: $userSlug) {
+				submissionId
+				submitTime
+				question {
+					titleSlug
+					title
+					translatedTitle
+					questionFrontendId
+				}
+			}
+		}`,
+		"variables": map[string]string{"userSlug": username},
+	}
+	b, _ := json.Marshal(payload)
+	req, err := http.NewRequest(http.MethodPost, lcGraphQLNoj, bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	setLCHeaders(req, username)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := ojhttp.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("leetcode recentAC 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("leetcode recentAC 读 body 失败: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("leetcode recentAC 状态码 %d: %s", resp.StatusCode, string(body))
+	}
+
+	var pr lcRecentACResp
+	if err := json.Unmarshal(body, &pr); err != nil {
+		return nil, fmt.Errorf("leetcode recentAC 解析失败: %w", err)
+	}
+	if len(pr.Errors) > 0 {
+		return nil, fmt.Errorf("leetcode recentAC graphql 错误: %s", pr.Errors[0].Message)
+	}
+
+	out := make([]lcRecentAC, 0, len(pr.Data.RecentACSubmissions))
+	for _, item := range pr.Data.RecentACSubmissions {
+		if item.Question == nil || item.Question.TitleSlug == "" {
+			continue
+		}
+		title := item.Question.TranslatedTitle
+		if title == "" {
+			title = item.Question.Title
+		}
+		// submitTime 为 Unix 秒
+		t := time.Unix(item.SubmitTime, 0)
+		if item.SubmitTime <= 0 {
+			t = time.Now()
+		}
+		out = append(out, lcRecentAC{
+			SubmissionID: item.SubmissionID,
+			SubmitTime:   t,
+			TitleSlug:    item.Question.TitleSlug,
+			Title:        title,
+		})
+	}
+	return out, nil
 }
 
 func setLCHeaders(req *http.Request, username string) {

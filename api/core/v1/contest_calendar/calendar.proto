@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package api.core.v1.contest_calendar;
+
+import "google/api/annotations.proto";
+
+option go_package = "cwxu-algo/api/core/v1/contest_calendar;contest_calendar";
+option java_multiple_files = true;
+option java_package = "api.core.v1.contest_calendar";
+
+// 比赛日历：公开赛程聚合 + 邮件订阅
+service ContestCalendar {
+  // 赛程列表（公开）
+  rpc ListCalendar (ListCalendarReq) returns (ListCalendarRes) {
+    option (google.api.http) = {
+      get: "/v1/core/contest-calendar/list"
+    };
+  }
+
+  // 平台列表及场次统计（公开）
+  rpc ListPlatforms (ListPlatformsReq) returns (ListPlatformsRes) {
+    option (google.api.http) = {
+      get: "/v1/core/contest-calendar/platforms"
+    };
+  }
+
+  // 我的订阅（需登录）
+  rpc GetMySubs (GetMySubsReq) returns (GetMySubsRes) {
+    option (google.api.http) = {
+      get: "/v1/core/contest-calendar/sub"
+    };
+  }
+
+  // 创建/更新订阅（需登录）
+  rpc UpsertSub (UpsertSubReq) returns (UpsertSubRes) {
+    option (google.api.http) = {
+      post: "/v1/core/contest-calendar/sub"
+      body: "*"
+    };
+  }
+
+  // 删除订阅（需登录）
+  rpc DeleteSub (DeleteSubReq) returns (DeleteSubRes) {
+    option (google.api.http) = {
+      post: "/v1/core/contest-calendar/sub/delete"
+      body: "*"
+    };
+  }
+}
+
+message CalendarItem {
+  uint32 id = 1;
+  string platform = 2;
+  string platformName = 3;
+  string externalId = 4;
+  string name = 5;
+  string url = 6;
+  int64 startTime = 7;
+  int64 endTime = 8;
+  string source = 9;
+  string iconUrl = 10;
+  bool subscribed = 11; // 当前用户是否有该场或平台级订阅（需登录上下文时填充）
+}
+
+message ListCalendarReq {
+  string platform = 1;
+  string keyword = 2;
+  string status = 3; // upcoming | ongoing | all
+  int64 limit = 4;
+  int64 offset = 5;
+}
+
+message ListCalendarRes {
+  int64 code = 1;
+  string message = 2;
+  repeated CalendarItem data = 3;
+  int64 total = 4;
+}
+
+message PlatformItem {
+  string platform = 1;
+  string platformName = 2;
+  string iconUrl = 3;
+  int64 count = 4;
+}
+
+message ListPlatformsReq {
+  bool upcomingOnly = 1; // 默认 true
+}
+
+message ListPlatformsRes {
+  int64 code = 1;
+  string message = 2;
+  repeated PlatformItem data = 3;
+}
+
+message SubItem {
+  uint32 id = 1;
+  string scope = 2; // platform | contest
+  string platform = 3;
+  uint32 calendarId = 4;
+  int32 advanceMinutes = 5;
+  bool enabled = 6;
+  string contestName = 7; // contest 订阅时回填
+  string contestUrl = 8;
+  int64 startTime = 9;
+}
+
+message GetMySubsReq {}
+
+message GetMySubsRes {
+  int64 code = 1;
+  string message = 2;
+  repeated SubItem data = 3;
+}
+
+message UpsertSubReq {
+  string scope = 1;          // platform | contest
+  string platform = 2;       // platform 订阅必填；contest 可省略（服务端从日历补）
+  uint32 calendarId = 3;     // contest 订阅必填
+  int32 advanceMinutes = 4;  // 白名单分钟
+  bool enabled = 5;
+}
+
+message UpsertSubRes {
+  int64 code = 1;
+  string message = 2;
+  SubItem data = 3;
+}
+
+message DeleteSubReq {
+  string scope = 1;
+  string platform = 2;
+  uint32 calendarId = 3;
+}
+
+message DeleteSubRes {
+  int64 code = 1;
+  string message = 2;
+}

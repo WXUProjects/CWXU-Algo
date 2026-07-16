@@ -10,6 +10,7 @@ import (
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/biz"
+	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/dal"
 	"cwxu-algo/app/user/internal/data/model"
 	"strconv"
@@ -33,6 +34,7 @@ type ProfileService struct {
 	reg            *discovery.Register
 	profileDal     *dal.ProfileDal
 	profileUseCase *biz.ProfileUseCase
+	socialDal      *dal.SocialDal
 }
 
 func (p *ProfileService) GetByName(ctx context.Context, req *profile.GetByNameReq) (*profile.GetByNameRes, error) {
@@ -189,6 +191,14 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 
 	dailyGrant, weeklyGrant := p.profileDal.BatchEmailGrants(ctx, ids)
 
+	// 非公共域组织用户集合（题面流水线默认资格）
+	nonPublicSet := map[int64]struct{}{}
+	if npIDs, e := p.profileDal.GetNonPublicOrgUserIds(ctx); e == nil {
+		for _, id := range npIDs {
+			nonPublicSet[id] = struct{}{}
+		}
+	}
+
 	res := &profile.GetListRes{
 		List:  make([]*profile.GetListRes_List, 0),
 		Total: total,
@@ -218,6 +228,7 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			}
 		}
 		uid := int64(v.ID)
+		_, isNonPublic := nonPublicSet[uid]
 		item := &profile.GetListRes_List{
 			UserId:                  uint64(v.ID),
 			Username:                v.Username,
@@ -232,6 +243,8 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			EmailWeeklyEnabled:      v.EmailWeeklyEnabled,
 			EmailAllowedByOrg:       dailyGrant[uid],
 			EmailWeeklyAllowedByOrg: weeklyGrant[uid],
+			ProblemFetchEnabled:     dal.EffectiveProblemPipeline(v.ProblemFetchEnabled, isNonPublic),
+			ProblemAiEnabled:        dal.EffectiveProblemPipeline(v.ProblemAIEnabled, isNonPublic),
 		}
 		if briefs := orgMap[v.ID]; len(briefs) > 0 {
 			item.Orgs = make([]*profile.GetListRes_OrgBrief, 0, len(briefs))
@@ -276,6 +289,86 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
+	if err := p.enforceProfileVisibility(ctx, pf.ID); err != nil {
+		return nil, err
+	}
+	return p.buildGetByIdRes(ctx, pf)
+}
+
+func (p *ProfileService) GetByUsername(ctx context.Context, req *profile.GetByUsernameReq) (*profile.GetByIdRes, error) {
+	if p.socialDal == nil {
+		return nil, errors.InternalServer("内部错误", "社交模块未就绪")
+	}
+	pf, err := p.socialDal.GetByUsername(ctx, req.Username)
+	if err != nil {
+		return nil, errors.NotFound("未找到", "用户不存在")
+	}
+	if err := p.enforceProfileVisibility(ctx, pf.ID); err != nil {
+		return nil, err
+	}
+	return p.buildGetByIdRes(ctx, pf)
+}
+
+func (p *ProfileService) GetFollowingIds(ctx context.Context, req *profile.GetFollowingIdsReq) (*profile.GetFollowingIdsRes, error) {
+	uid := uint(req.UserId)
+	if uid == 0 {
+		uid = auth.GetCurrentUserId(ctx)
+	}
+	if uid == 0 {
+		return &profile.GetFollowingIdsRes{UserIds: []int64{}}, nil
+	}
+	if p.socialDal == nil {
+		return &profile.GetFollowingIdsRes{UserIds: []int64{}}, nil
+	}
+	ids, err := p.socialDal.FollowingIDs(ctx, uid)
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	return &profile.GetFollowingIdsRes{UserIds: ids}, nil
+}
+
+func (p *ProfileService) FilterPublicFeedUserIds(ctx context.Context, req *profile.FilterPublicFeedUserIdsReq) (*profile.FilterPublicFeedUserIdsRes, error) {
+	if p.socialDal == nil || len(req.UserIds) == 0 {
+		return &profile.FilterPublicFeedUserIdsRes{UserIds: req.UserIds}, nil
+	}
+	ids, err := p.socialDal.FilterPublicFeedUserIDs(ctx, req.UserIds)
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	return &profile.FilterPublicFeedUserIdsRes{UserIds: ids}, nil
+}
+
+// enforceProfileVisibility 公共域下尊重隐私；
+// 私人域仅当「查看者与目标同属当前私人组织」时配置失效（不可因身处私人域就看全站隐藏资料）。
+func (p *ProfileService) enforceProfileVisibility(ctx context.Context, targetUID uint) error {
+	if auth.VerifySelfOrAbove(ctx, targetUID) {
+		return nil
+	}
+	if p.socialDal == nil {
+		return nil
+	}
+	orgID := uint(0)
+	if pd := auth.GetCurrentUser(ctx); pd != nil {
+		orgID = pd.OrgID
+	}
+	// 私人域 + 目标同组织：隐私配置失效
+	if orgID > 0 && !p.socialDal.IsPublicOrg(ctx, orgID) {
+		if p.profileDal.IsMemberOfOrg(ctx, int64(targetUID), orgID) {
+			return nil
+		}
+		// 非同组织成员：仍按公共域隐私处理
+	}
+	ok, err := p.socialDal.CanViewPublicProfile(ctx, targetUID)
+	if err != nil {
+		return errors.InternalServer("内部错误", err.Error())
+	}
+	if !ok {
+		return errors.Forbidden("隐私限制", "该用户未开放公共域个人资料")
+	}
+	return nil
+}
+
+func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*profile.GetByIdRes, error) {
 	// 获取 platform spider 信息
 	conn, err := p.coreDataRPC()
 	if err != nil {
@@ -283,7 +376,7 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 	}
 	defer conn.Close()
 	s := spider.NewSpiderClient(conn)
-	sp, err := s.GetSpider(ctx, &spider.GetSpiderReq{UserId: req.UserId})
+	sp, err := s.GetSpider(ctx, &spider.GetSpiderReq{UserId: int64(pf.ID)})
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
@@ -294,12 +387,12 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 			Username: v.Username,
 		})
 	}
-	canViewPrivate := auth.VerifySelfOrAbove(ctx, uint(req.UserId))
+	canViewPrivate := auth.VerifySelfOrAbove(ctx, pf.ID)
 	dailyGrant, weeklyGrant := false, false
 	emailOn, weeklyOn := false, false
 	if canViewPrivate {
-		dailyGrant = p.profileDal.UserHasOrgDailyEmailGrant(ctx, req.UserId)
-		weeklyGrant = p.profileDal.UserHasOrgWeeklyEmailGrant(ctx, req.UserId)
+		dailyGrant = p.profileDal.UserHasOrgDailyEmailGrant(ctx, int64(pf.ID))
+		weeklyGrant = p.profileDal.UserHasOrgWeeklyEmailGrant(ctx, int64(pf.ID))
 		emailOn = pf.EmailEnabled && dailyGrant
 		weeklyOn = pf.EmailWeeklyEnabled && weeklyGrant
 	}
@@ -330,18 +423,19 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 	if canViewPrivate {
 		reply.Email = pf.Email
 		if pd := auth.GetCurrentUser(ctx); pd != nil {
-			reply.GroupId = p.profileDal.GroupIDForOrg(ctx, req.UserId, pd.OrgID)
+			reply.GroupId = p.profileDal.GroupIDForOrg(ctx, int64(pf.ID), pd.OrgID)
 		}
 		reply.RoleId = int32(pf.RoleID)
 	}
 	return reply, nil
 }
 
-func NewProfileService(profileDal *dal.ProfileDal, reg *discovery.Register, profileUseCase *biz.ProfileUseCase) *ProfileService {
+func NewProfileService(profileDal *dal.ProfileDal, reg *discovery.Register, profileUseCase *biz.ProfileUseCase, d *data.Data) *ProfileService {
 	return &ProfileService{
 		profileDal:     profileDal,
 		reg:            reg,
 		profileUseCase: profileUseCase,
+		socialDal:      dal.NewSocialDal(d),
 	}
 }
 
@@ -422,16 +516,51 @@ func (p *ProfileService) GetUserIdsByOrg(ctx context.Context, req *profile.GetUs
 	return &profile.GetUserIdsByOrgRes{UserIds: ids, OrgId: int64(orgID)}, nil
 }
 
-// GetNonPublicOrgUserIds 非公共域组织用户（题面 AI 闸门）
+// GetNonPublicOrgUserIds 题面流水线资格用户（爬取 / AI；含个人覆盖）
 func (p *ProfileService) GetNonPublicOrgUserIds(ctx context.Context, _ *profile.GetNonPublicOrgUserIdsReq) (*profile.GetNonPublicOrgUserIdsRes, error) {
-	ids, err := p.profileDal.GetNonPublicOrgUserIds(ctx)
+	fetchIDs, aiIDs, err := p.profileDal.GetProblemPipelineUserIds(ctx)
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
-	if ids == nil {
-		ids = []int64{}
+	if fetchIDs == nil {
+		fetchIDs = []int64{}
 	}
-	return &profile.GetNonPublicOrgUserIdsRes{UserIds: ids}, nil
+	if aiIDs == nil {
+		aiIDs = []int64{}
+	}
+	return &profile.GetNonPublicOrgUserIdsRes{
+		UserIds:      fetchIDs,
+		FetchUserIds: fetchIDs,
+		AiUserIds:    aiIDs,
+	}, nil
+}
+
+// SetProblemPipeline 站点管理员设置个人题面爬取 / AI 覆盖
+func (p *ProfileService) SetProblemPipeline(ctx context.Context, req *profile.SetProblemPipelineReq) (*profile.SetProblemPipelineRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "仅站点管理员可设置题面流水线开关")
+	}
+	if req.UserId <= 0 {
+		return nil, errors.BadRequest("参数错误", "用户ID无效")
+	}
+	kind := strings.TrimSpace(req.Kind)
+	if kind == "" {
+		kind = "fetch"
+	}
+	if kind != "fetch" && kind != "ai" {
+		return nil, errors.BadRequest("参数错误", "kind 须为 fetch 或 ai")
+	}
+	if _, err := p.profileDal.GetById(ctx, req.UserId); err != nil {
+		return nil, errors.BadRequest("参数错误", "用户不存在")
+	}
+	if err := p.profileDal.SetProblemPipeline(ctx, req.UserId, kind, req.Enabled); err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	msg := "已更新题面爬取开关"
+	if kind == "ai" {
+		msg = "已更新题面 AI 开关"
+	}
+	return &profile.SetProblemPipelineRes{Code: 0, Message: msg}, nil
 }
 
 // GetByIds 批量获取用户展示名（当前组织 / 指定 org 的组织内名称）

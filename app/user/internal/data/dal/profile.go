@@ -360,6 +360,102 @@ func (d *ProfileDal) GetNonPublicOrgUserIds(ctx context.Context) ([]int64, error
 	return ids, err
 }
 
+// GetProblemPipelineUserIds 题面爬取 / AI 资格用户：
+// 默认=非公共域组织成员；个人 *bool 覆盖 true 强制开、false 强制关、null 跟默认。
+func (d *ProfileDal) GetProblemPipelineUserIds(ctx context.Context) (fetchIDs, aiIDs []int64, err error) {
+	orgIDs, err := d.GetNonPublicOrgUserIds(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	orgSet := make(map[int64]struct{}, len(orgIDs))
+	for _, id := range orgIDs {
+		orgSet[id] = struct{}{}
+	}
+
+	type overrideRow struct {
+		ID                  int64
+		ProblemFetchEnabled *bool
+		ProblemAIEnabled    *bool
+	}
+	var rows []overrideRow
+	// 只拉有覆盖的用户 + 组织用户（组织用户也需读覆盖）
+	// 简化：拉全部有覆盖的，再与 org 合并
+	if err = d.db.WithContext(ctx).Model(&model.User{}).
+		Select("id, problem_fetch_enabled, problem_ai_enabled").
+		Where("problem_fetch_enabled IS NOT NULL OR problem_ai_enabled IS NOT NULL").
+		Find(&rows).Error; err != nil {
+		return nil, nil, err
+	}
+	fetchOff := map[int64]struct{}{}
+	fetchOn := map[int64]struct{}{}
+	aiOff := map[int64]struct{}{}
+	aiOn := map[int64]struct{}{}
+	for _, r := range rows {
+		if r.ProblemFetchEnabled != nil {
+			if *r.ProblemFetchEnabled {
+				fetchOn[r.ID] = struct{}{}
+			} else {
+				fetchOff[r.ID] = struct{}{}
+			}
+		}
+		if r.ProblemAIEnabled != nil {
+			if *r.ProblemAIEnabled {
+				aiOn[r.ID] = struct{}{}
+			} else {
+				aiOff[r.ID] = struct{}{}
+			}
+		}
+	}
+
+	fetchSet := make(map[int64]struct{}, len(orgIDs)+len(fetchOn))
+	aiSet := make(map[int64]struct{}, len(orgIDs)+len(aiOn))
+	for id := range orgSet {
+		if _, off := fetchOff[id]; !off {
+			fetchSet[id] = struct{}{}
+		}
+		if _, off := aiOff[id]; !off {
+			aiSet[id] = struct{}{}
+		}
+	}
+	for id := range fetchOn {
+		fetchSet[id] = struct{}{}
+	}
+	for id := range aiOn {
+		aiSet[id] = struct{}{}
+	}
+	fetchIDs = make([]int64, 0, len(fetchSet))
+	for id := range fetchSet {
+		fetchIDs = append(fetchIDs, id)
+	}
+	aiIDs = make([]int64, 0, len(aiSet))
+	for id := range aiSet {
+		aiIDs = append(aiIDs, id)
+	}
+	return fetchIDs, aiIDs, nil
+}
+
+// SetProblemPipeline 设置题面爬取/AI 覆盖（强制 true/false）
+func (d *ProfileDal) SetProblemPipeline(ctx context.Context, userID int64, kind string, enabled bool) error {
+	col := "problem_fetch_enabled"
+	if kind == "ai" {
+		col = "problem_ai_enabled"
+	}
+	cacheKey := fmt.Sprintf("user:%d:profile", userID)
+	return data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
+		return d.db.WithContext(ctx).Model(&model.User{}).
+			Where("id = ?", userID).
+			Update(col, enabled).Error
+	})
+}
+
+// EffectiveProblemPipeline 计算列表展示用有效开关（覆盖优先，否则是否非公共域组织）
+func EffectiveProblemPipeline(override *bool, isNonPublicOrg bool) bool {
+	if override != nil {
+		return *override
+	}
+	return isNonPublicOrg
+}
+
 // UserSyncPolicy 一人多组织聚合后的定时策略
 type UserSyncPolicy struct {
 	UserID               int64
@@ -650,6 +746,10 @@ func (d *ProfileDal) Delete(ctx context.Context, userId int64) error {
 	return data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
 		return d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			uid := uint(userId)
+			if err := tx.Where("follower_id = ? OR followee_id = ?", uid, uid).
+				Delete(&model.UserFollow{}).Error; err != nil {
+				return err
+			}
 			if err := tx.Where("user_id = ?", uid).Delete(&model.OrgMember{}).Error; err != nil {
 				return err
 			}

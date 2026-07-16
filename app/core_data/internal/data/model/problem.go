@@ -112,3 +112,28 @@ type Problem struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
+
+// 题库人工修改审核状态
+const (
+	ProblemEditPending  = "pending"
+	ProblemEditApproved = "approved"
+	ProblemEditRejected = "rejected"
+)
+
+// ProblemEditRequest 题面/标签人工修改申请（站点管理员审核；站管直改不经此表）
+type ProblemEditRequest struct {
+	ID                uint        `gorm:"primaryKey"`
+	ProblemID         uint        `gorm:"index;not null"`
+	UserID            uint        `gorm:"index;not null"`
+	HasTags           bool        `gorm:"default:false"`
+	HasContent        bool        `gorm:"default:false"`
+	ProposedTags      StringArray `gorm:"type:jsonb;default:'[]'"`
+	ProposedContentMD string      `gorm:"type:text"`
+	ProposedTitle     string      `gorm:"size:512"`
+	Note              string      `gorm:"type:text"` // 提交说明
+	Status            string      `gorm:"size:16;index;default:'pending'"`
+	ReviewerID        *uint       `gorm:"index"`
+	ReviewNote        string      `gorm:"type:text"`
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}

@@ -40,6 +40,13 @@ service Profile {
       body: "*",
     };
   }
+  // 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
+  rpc SetProblemPipeline (SetProblemPipelineReq) returns (SetProblemPipelineRes) {
+    option (google.api.http) = {
+      post: "/v1/user/profile/set-problem-pipeline",
+      body: "*",
+    };
+  }
   rpc GetUserIdsByGroup (GetUserIdsByGroupReq) returns (GetUserIdsByGroupRes) {
     option (google.api.http) = {
       get: "/v1/user/profile/ids-by-group"
@@ -51,7 +58,8 @@ service Profile {
       get: "/v1/user/profile/ids-by-org"
     };
   }
-  // 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+  // 题面流水线资格用户（供 core 闸门；内部调用）
+  // 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
   rpc GetNonPublicOrgUserIds (GetNonPublicOrgUserIdsReq) returns (GetNonPublicOrgUserIdsRes) {
     option (google.api.http) = {
       get: "/v1/user/profile/non-public-org-user-ids"
@@ -74,6 +82,25 @@ service Profile {
   rpc Delete (DeleteReq) returns (DeleteRes) {
     option (google.api.http) = {
       post: "/v1/user/profile/delete",
+      body: "*",
+    };
+  }
+  // 精确用户名查资料（公开；受公共域隐私约束）
+  rpc GetByUsername (GetByUsernameReq) returns (GetByIdRes) {
+    option (google.api.http) = {
+      get: "/v1/user/profile/get-by-username"
+    };
+  }
+  // 某人关注的 userId 列表（供 core 动态/题库过滤；本人或公开）
+  rpc GetFollowingIds (GetFollowingIdsReq) returns (GetFollowingIdsRes) {
+    option (google.api.http) = {
+      get: "/v1/user/profile/following-ids"
+    };
+  }
+  // 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
+  rpc FilterPublicFeedUserIds (FilterPublicFeedUserIdsReq) returns (FilterPublicFeedUserIdsRes) {
+    option (google.api.http) = {
+      post: "/v1/user/profile/filter-public-feed-user-ids",
       body: "*",
     };
   }
@@ -145,6 +172,9 @@ message GetListRes {
     bool emailWeeklyEnabled = 13;
     bool emailAllowedByOrg = 14;
     bool emailWeeklyAllowedByOrg = 15;
+    // 题面流水线有效状态（已应用个人覆盖；null 覆盖时按是否非公共域组织）
+    bool problemFetchEnabled = 16;
+    bool problemAiEnabled = 17;
   }
   repeated List list = 1;
   int64 total = 2;
@@ -185,6 +215,18 @@ message SetEmailEnabledRes {
   string message = 2;
 }
 
+message SetProblemPipelineReq {
+  int64 userId = 1;
+  bool enabled = 2;
+  // kind: fetch（题面爬取）| ai（题面 AI 分析）
+  string kind = 3;
+}
+
+message SetProblemPipelineRes {
+  int64 code = 1;
+  string message = 2;
+}
+
 message GetUserIdsByGroupReq {
   int64 groupId = 1;
 }
@@ -205,7 +247,12 @@ message GetUserIdsByOrgRes {
 message GetNonPublicOrgUserIdsReq {}
 
 message GetNonPublicOrgUserIdsRes {
+  // 兼容旧调用：与 fetchUserIds 相同（题面爬取资格）
   repeated int64 userIds = 1;
+  // 近窗提交可触发题面爬取的用户
+  repeated int64 fetchUserIds = 2;
+  // 近窗提交可触发题面 AI 的用户
+  repeated int64 aiUserIds = 3;
 }
 
 message GetByIdsReq {
@@ -252,4 +299,24 @@ message UserSyncPolicy {
 
 message GetSyncPoliciesRes {
   repeated UserSyncPolicy policies = 1;
+}
+
+message GetByUsernameReq {
+  string username = 1;
+}
+
+message GetFollowingIdsReq {
+  int64 userId = 1; // 0 = 当前登录用户
+}
+
+message GetFollowingIdsRes {
+  repeated int64 userIds = 1;
+}
+
+message FilterPublicFeedUserIdsReq {
+  repeated int64 userIds = 1;
+}
+
+message FilterPublicFeedUserIdsRes {
+  repeated int64 userIds = 1;
 }

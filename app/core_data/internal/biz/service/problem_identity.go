@@ -14,7 +14,7 @@ type ParsedProblem struct {
 	Title      string
 	URL        string
 	SkipFetch  bool // 不可爬取（若仍入库则 SKIPPED）
-	SkipBank   bool // 不进入题库（如 LeetCode）
+	SkipBank   bool // 不进入题库
 }
 
 var (
@@ -26,6 +26,8 @@ var (
 	reNowCoderProblemURL     = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/acm/problem/(\d+)`)
 	reNowCoderPracticeURL    = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/practice/([0-9a-fA-F-]{32,36})`)
 	reNowCoderUUID           = regexp.MustCompile(`(?i)^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$|^[0-9a-f]{32}$`)
+	// 力扣 titleSlug：小写字母/数字/连字符
+	reLeetCodeSlug = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 )
 
 // ParseProblemIdentity 从 SubmitLog 字段解析 (platform, external_id)
@@ -49,13 +51,7 @@ func ParseProblemIdentity(platform, contest, problem string) (*ParsedProblem, er
 	case spider.QOJ:
 		return parseQOJ(problem)
 	case spider.LeetCode:
-		// 力扣不可爬，不入库题库
-		return &ParsedProblem{
-			Platform:  platform,
-			Title:     problem,
-			SkipFetch: true,
-			SkipBank:  true,
-		}, nil
+		return parseLeetCode(problem)
 	default:
 		// 兜底：用 problem 文本 hash 级 id
 		ext := sanitizeExternalID(problem)
@@ -277,4 +273,45 @@ func sanitizeExternalID(s string) string {
 		s = s[:120]
 	}
 	return s
+}
+
+// parseLeetCode 解析最近通过明细：problem 形如 "{titleSlug} {中文标题}"
+// 合成 AC（lc-ac-problem-* / leetcode-submit）无 slug → 跳过题库
+func parseLeetCode(problem string) (*ParsedProblem, error) {
+	problem = strings.TrimSpace(problem)
+	if problem == "" || problem == "leetcode-submit" || strings.HasPrefix(problem, "lc-ac-problem-") {
+		return nil, fmt.Errorf("leetcode synthetic skip bank: %q", problem)
+	}
+	// URL 中的 slug
+	if i := strings.Index(problem, "leetcode.cn/problems/"); i >= 0 {
+		rest := problem[i+len("leetcode.cn/problems/"):]
+		slug := strings.Split(rest, "/")[0]
+		slug = strings.TrimSpace(slug)
+		if reLeetCodeSlug.MatchString(slug) {
+			return &ParsedProblem{
+				Platform:   spider.LeetCode,
+				ExternalID: slug,
+				Title:      slug,
+				URL:        "https://leetcode.cn/problems/" + slug + "/",
+			}, nil
+		}
+	}
+	fields := strings.Fields(problem)
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("leetcode empty problem")
+	}
+	slug := fields[0]
+	if !reLeetCodeSlug.MatchString(slug) {
+		return nil, fmt.Errorf("leetcode missing titleSlug: %q", problem)
+	}
+	title := slug
+	if len(fields) > 1 {
+		title = strings.Join(fields[1:], " ")
+	}
+	return &ParsedProblem{
+		Platform:   spider.LeetCode,
+		ExternalID: slug,
+		Title:      title,
+		URL:        "https://leetcode.cn/problems/" + slug + "/",
+	}, nil
 }

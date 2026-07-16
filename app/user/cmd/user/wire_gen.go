@@ -33,7 +33,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, sm
 	profileDal := dal.NewProfileDal(dataData)
 	register := discovery.NewConsulRegister(confServer)
 	profileUseCase := biz.NewProfileUseCase(profileDal)
-	profileService := service.NewProfileService(profileDal, register, profileUseCase)
+	profileService := service.NewProfileService(profileDal, register, profileUseCase, dataData)
 	grpcServer := server.NewGRPCServer(confServer, logger, profileService)
 	authService := service.NewAuthService(dataData, smtp)
 	groupDal := dal.NewGroupDal(dataData)
@@ -43,7 +43,8 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, sm
 	siteService := service.NewSiteService(dataData, smtp)
 	orgService := service.NewOrgService(dataData)
 	pasteService := service.NewPasteService(dataData)
-	httpServer := server.NewHTTPServer(confServer, dataData, authService, profileService, groupService, roleService, siteService, orgService, pasteService, logger)
+	socialService := service.NewSocialService(dataData)
+	httpServer := server.NewHTTPServer(confServer, dataData, authService, profileService, groupService, roleService, siteService, orgService, pasteService, socialService, logger)
 	app := newApp(logger, grpcServer, httpServer, register)
 	return app, func() {
 		cleanup()

@@ -22,7 +22,7 @@ type FetchedContent struct {
 	ContentMD string
 }
 
-// Fetch 按平台爬取题面 Markdown（LeetCode 调用方应跳过）
+// Fetch 按平台爬取题面 Markdown
 func Fetch(platform, externalID, problemURL string) (*FetchedContent, error) {
 	switch platform {
 	case "CodeForces":
@@ -36,7 +36,7 @@ func Fetch(platform, externalID, problemURL string) (*FetchedContent, error) {
 	case "NowCoder":
 		return fetchNowCoder(externalID, problemURL)
 	case "LeetCode":
-		return nil, fmt.Errorf("LeetCode 不支持爬取")
+		return fetchLeetCode(externalID, problemURL)
 	default:
 		if problemURL != "" {
 			return fetchGeneric(problemURL)
@@ -1000,6 +1000,200 @@ func fetchQOJ(externalID, problemURL string) (*FetchedContent, error) {
 		problemURL = "https://qoj.ac/problem/" + externalID
 	}
 	return fetchGeneric(problemURL)
+}
+
+// fetchLeetCode 通过 GraphQL 拉中文题面；付费题无公开 content → 永久错误
+func fetchLeetCode(externalID, problemURL string) (*FetchedContent, error) {
+	slug := strings.TrimSpace(externalID)
+	if slug == "" && problemURL != "" {
+		// https://leetcode.cn/problems/{slug}/
+		if i := strings.Index(problemURL, "/problems/"); i >= 0 {
+			rest := problemURL[i+len("/problems/"):]
+			slug = strings.Split(strings.Trim(rest, "/"), "/")[0]
+		}
+	}
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return nil, fmt.Errorf("LeetCode 缺少 titleSlug")
+	}
+
+	payload := map[string]interface{}{
+		"query": `query($titleSlug: String!) {
+			question(titleSlug: $titleSlug) {
+				questionFrontendId
+				title
+				titleSlug
+				translatedTitle
+				difficulty
+				content
+				translatedContent
+				isPaidOnly
+			}
+		}`,
+		"variables": map[string]string{"titleSlug": slug},
+	}
+	b, _ := json.Marshal(payload)
+	req, err := http.NewRequest(http.MethodPost, "https://leetcode.cn/graphql/", strings.NewReader(string(b)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", browserUA)
+	req.Header.Set("Referer", "https://leetcode.cn/problems/"+slug+"/")
+	req.Header.Set("Origin", "https://leetcode.cn")
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("leetcode question 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("leetcode question 读 body 失败: %w", err)
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("leetcode question status %d: %s", resp.StatusCode, truncate(string(body), 200))
+	}
+
+	var root struct {
+		Data struct {
+			Question *struct {
+				QuestionFrontendID string `json:"questionFrontendId"`
+				Title              string `json:"title"`
+				TitleSlug          string `json:"titleSlug"`
+				TranslatedTitle    string `json:"translatedTitle"`
+				Difficulty         string `json:"difficulty"`
+				Content            string `json:"content"`
+				TranslatedContent  string `json:"translatedContent"`
+				IsPaidOnly         bool   `json:"isPaidOnly"`
+			} `json:"question"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &root); err != nil {
+		return nil, fmt.Errorf("leetcode question 解析失败: %w", err)
+	}
+	if len(root.Errors) > 0 {
+		return nil, fmt.Errorf("leetcode question graphql: %s", root.Errors[0].Message)
+	}
+	q := root.Data.Question
+	if q == nil {
+		return nil, fmt.Errorf("leetcode 题目不存在: %s", slug)
+	}
+	if q.IsPaidOnly {
+		return nil, fmt.Errorf("力扣付费题/无公开题面")
+	}
+	html := strings.TrimSpace(q.TranslatedContent)
+	if html == "" {
+		html = strings.TrimSpace(q.Content)
+	}
+	if html == "" {
+		return nil, fmt.Errorf("力扣付费题/无公开题面")
+	}
+
+	title := strings.TrimSpace(q.TranslatedTitle)
+	if title == "" {
+		title = strings.TrimSpace(q.Title)
+	}
+	if title == "" {
+		title = slug
+	}
+	if q.QuestionFrontendID != "" {
+		title = q.QuestionFrontendID + ". " + title
+	}
+
+	md := leetcodeHTMLToMD(title, html)
+	if len(strings.TrimSpace(md)) < 8 {
+		return nil, fmt.Errorf("leetcode 题面为空")
+	}
+	return &FetchedContent{Title: title, ContentMD: md}, nil
+}
+
+// leetcodeHTMLToMD 将力扣题面 HTML 转为简易 Markdown
+func leetcodeHTMLToMD(title, html string) string {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader("<div id='lc-root'>" + html + "</div>"))
+	if err != nil {
+		// fallback：粗剥标签
+		plain := regexp.MustCompile(`(?s)<[^>]+>`).ReplaceAllString(html, "")
+		plain = collapseBlankLines(strings.TrimSpace(plain))
+		return "# " + title + "\n\n" + plain
+	}
+	root := doc.Find("#lc-root")
+	// 公式 img → $alt$
+	root.Find("img").Each(func(_ int, img *goquery.Selection) {
+		alt, _ := img.Attr("alt")
+		alt = strings.TrimSpace(alt)
+		if alt != "" {
+			img.ReplaceWithHtml("$" + strings.ReplaceAll(alt, "$", "") + "$")
+		} else {
+			img.ReplaceWithHtml("")
+		}
+	})
+	root.Find("br").Each(func(_ int, br *goquery.Selection) {
+		br.ReplaceWithHtml("\n")
+	})
+	root.Find("pre").Each(func(_ int, pre *goquery.Selection) {
+		code := strings.TrimRight(pre.Text(), "\n")
+		pre.ReplaceWithHtml("\n```\n" + code + "\n```\n")
+	})
+	root.Find("code").Each(func(_ int, code *goquery.Selection) {
+		// 跳过已在 pre 内被替换的
+		if code.ParentsFiltered("pre").Length() > 0 {
+			return
+		}
+		t := strings.TrimSpace(code.Text())
+		if t != "" {
+			code.ReplaceWithHtml("`" + t + "`")
+		}
+	})
+	root.Find("strong,b").Each(func(_ int, s *goquery.Selection) {
+		t := strings.TrimSpace(s.Text())
+		if t != "" {
+			s.ReplaceWithHtml("**" + t + "**")
+		}
+	})
+	root.Find("em,i").Each(func(_ int, s *goquery.Selection) {
+		t := strings.TrimSpace(s.Text())
+		if t != "" {
+			s.ReplaceWithHtml("*" + t + "*")
+		}
+	})
+	root.Find("ul").Each(func(_ int, ul *goquery.Selection) {
+		var b strings.Builder
+		ul.Find("li").Each(func(_ int, li *goquery.Selection) {
+			b.WriteString("- ")
+			b.WriteString(normalizeSpace(li.Text()))
+			b.WriteString("\n")
+		})
+		ul.ReplaceWithHtml("\n" + b.String() + "\n")
+	})
+	root.Find("ol").Each(func(_ int, ol *goquery.Selection) {
+		var b strings.Builder
+		i := 1
+		ol.Find("li").Each(func(_ int, li *goquery.Selection) {
+			b.WriteString(fmt.Sprintf("%d. ", i))
+			b.WriteString(normalizeSpace(li.Text()))
+			b.WriteString("\n")
+			i++
+		})
+		ol.ReplaceWithHtml("\n" + b.String() + "\n")
+	})
+	root.Find("p").Each(func(_ int, p *goquery.Selection) {
+		t := strings.TrimSpace(p.Text())
+		p.ReplaceWithHtml(t + "\n\n")
+	})
+
+	body := collapseBlankLines(strings.TrimSpace(root.Text()))
+	// 清理 HTML 实体常见残留
+	body = strings.ReplaceAll(body, "\u00a0", " ")
+	var b strings.Builder
+	b.WriteString("# ")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+	b.WriteString(body)
+	return collapseBlankLines(b.String())
 }
 
 func fetchGeneric(problemURL string) (*FetchedContent, error) {

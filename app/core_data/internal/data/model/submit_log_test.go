@@ -36,3 +36,21 @@ func TestFillIsAC(t *testing.T) {
 		t.Fatalf("FillIsACBatch unexpected: %+v", logs)
 	}
 }
+
+func TestIsLeetCodeSyntheticSubmit(t *testing.T) {
+	if IsLeetCodeSyntheticSubmit("LeetCode", "lc-prob-123") {
+		t.Fatal("lc-prob should show in activity")
+	}
+	if !IsLeetCodeSyntheticSubmit("LeetCode", "lc-cal-1-20260101-0") {
+		t.Fatal("lc-cal should be hidden")
+	}
+	if !IsLeetCodeSyntheticSubmit("LeetCode", "lc-pad-1-0") {
+		t.Fatal("lc-pad should be hidden")
+	}
+	if !IsLeetCodeSyntheticSubmit("LeetCode", "lc-ac-1-0") {
+		t.Fatal("lc-ac should be hidden")
+	}
+	if IsLeetCodeSyntheticSubmit("CodeForces", "123") {
+		t.Fatal("non-LC never synthetic")
+	}
+}

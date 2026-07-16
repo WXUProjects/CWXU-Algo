@@ -53,3 +53,39 @@ func FillIsACBatch(logs []SubmitLog) {
 		logs[i].FillIsAC()
 	}
 }
+
+// 力扣 submit_id 前缀约定（见 spider/platform/leetcode.go）：
+//   lc-cal-*  日历提交次数 → 计入提交统计；不进动态
+//   lc-pad-*  生涯提交补齐 → 计入提交统计；不进动态
+//   lc-ac-*   合成 AC（无题号）→ 不计提交，计 AC；不进动态
+//   lc-prob-* 最近通过明细 → 不计提交（避免与日历双计）；计 AC + 题库；**进动态/提交历史**（无代码）
+
+// CountsTowardSubmitStat 是否计入提交次数 / 提交热力
+// 力扣仅 lc-cal / lc-pad 计入；lc-ac / lc-prob 只服务 AC 与题库（lc-prob 另进活动流）。
+func CountsTowardSubmitStat(platform, submitID string) bool {
+	if platform != "LeetCode" {
+		return true
+	}
+	return !IsLeetCodeNonSubmitCountID(submitID)
+}
+
+// IsLeetCodeNonSubmitCountID 力扣不计入提交数的 submit_id（合成 AC + 最近通过明细）
+func IsLeetCodeNonSubmitCountID(submitID string) bool {
+	return strings.HasPrefix(submitID, "lc-ac-") || strings.HasPrefix(submitID, "lc-prob-")
+}
+
+// IsLeetCodeSyntheticSubmit 力扣合成/补齐行：不进活动流与提交明细列表
+// 最近通过 lc-prob-* 返回 false（应展示）。
+func IsLeetCodeSyntheticSubmit(platform, submitID string) bool {
+	if platform != "LeetCode" {
+		return false
+	}
+	// 仅真实最近通过进动态；其余 lc-* 均为合成
+	if strings.HasPrefix(submitID, "lc-prob-") {
+		return false
+	}
+	return true
+}
+
+// SQLExcludeLeetCodeNonSubmit 提交统计 SQL 片段：排除力扣合成 AC 与最近通过明细
+const SQLExcludeLeetCodeNonSubmit = `NOT (platform = 'LeetCode' AND (submit_id LIKE 'lc-ac-%' OR submit_id LIKE 'lc-prob-%'))`

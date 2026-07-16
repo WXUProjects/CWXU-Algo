@@ -27,14 +27,18 @@ import (
 
 func NewWhiteListMatcher() selector.MatchFunc {
 	whiteList := map[string]string{
-		"/api.user.v1.Auth/Login":          "",
-		"/api.user.v1.Auth/Register":       "",
-		"/api.user.v1.Auth/SendCode":       "",
-		"/api.user.v1.Auth/ResetPassword":  "",
-		"/api.user.v1.Profile/GetById":     "",
-		"/api.user.v1.role.Role/List":      "",
-		"/api.user.v1.site.Site/GetConfig": "",
-		"/api.user.v1.site.Site/VisitPing": "",
+		"/api.user.v1.Auth/Login":                    "",
+		"/api.user.v1.Auth/Register":                 "",
+		"/api.user.v1.Auth/SendCode":                 "",
+		"/api.user.v1.Auth/ResetPassword":            "",
+		"/api.user.v1.Profile/GetById":               "",
+		"/api.user.v1.Profile/GetByUsername":         "",
+		"/api.user.v1.Profile/GetByName":             "",
+		"/api.user.v1.Profile/GetFollowingIds":       "",
+		"/api.user.v1.Profile/FilterPublicFeedUserIds": "",
+		"/api.user.v1.role.Role/List":                "",
+		"/api.user.v1.site.Site/GetConfig":           "",
+		"/api.user.v1.site.Site/VisitPing":           "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		if strings.Contains(operation, "auth/logout") {
@@ -46,6 +50,15 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		}
 		// 粘贴板公开查看
 		if strings.Contains(operation, "paste/get") {
+			return false
+		}
+		// 社交：搜索/列表/计数公开（关注操作仍需登录）
+		if strings.Contains(operation, "social/search") ||
+			strings.Contains(operation, "social/following") ||
+			strings.Contains(operation, "social/followers") ||
+			strings.Contains(operation, "social/counts") ||
+			strings.Contains(operation, "social/relation") ||
+			strings.Contains(operation, "privacy/status") {
 			return false
 		}
 		if _, ok := whiteList[operation]; ok {
@@ -66,6 +79,7 @@ func NewHTTPServer(
 	siteService *service.SiteService,
 	orgService *service.OrgService,
 	pasteService *service.PasteService,
+	socialService *service.SocialService,
 	logger log.Logger,
 
 ) *http.Server {
@@ -103,6 +117,7 @@ func NewHTTPServer(
 	service.RegisterUploadRoutes(srv)
 	service.RegisterOrgRoutes(srv, orgService)
 	service.RegisterPasteRoutes(srv, pasteService)
+	service.RegisterSocialRoutes(srv, socialService)
 	service.RegisterBackupRoutes(srv, d)
 	return srv
 }

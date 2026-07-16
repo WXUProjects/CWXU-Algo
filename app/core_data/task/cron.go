@@ -309,6 +309,18 @@ func (t *CronTask) Do() {
 	_, _ = t.cron.AddFunc("*/5 * * * *", func() {
 		t.runRecentSummaryTick()
 	})
+	// 比赛日历：每 12 小时爬取 cpolar + 力扣；每 5 分钟检查邮件提醒
+	_, _ = t.cron.AddFunc("0 */12 * * *", func() {
+		t.runCalendarCrawl()
+	})
+	_, _ = t.cron.AddFunc("*/5 * * * *", func() {
+		t.runCalendarNotify()
+	})
+	// 启动后异步跑一次爬取，避免空库等到下一个 12h 点
+	go func() {
+		time.Sleep(8 * time.Second)
+		t.runCalendarCrawl()
+	}()
 	t.cron.Start()
-	log.Infof("CronTask started: spider/summary every 5m with per-user MIN org intervals")
+	log.Infof("CronTask started: spider/summary every 5m; calendar crawl 12h + notify 5m")
 }

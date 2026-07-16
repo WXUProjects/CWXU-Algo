@@ -19,18 +19,22 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Profile_GetById_FullMethodName                = "/api.user.v1.Profile/GetById"
-	Profile_GetByName_FullMethodName              = "/api.user.v1.Profile/GetByName"
-	Profile_GetList_FullMethodName                = "/api.user.v1.Profile/GetList"
-	Profile_Update_FullMethodName                 = "/api.user.v1.Profile/Update"
-	Profile_MoveGroup_FullMethodName              = "/api.user.v1.Profile/MoveGroup"
-	Profile_SetEmailEnabled_FullMethodName        = "/api.user.v1.Profile/SetEmailEnabled"
-	Profile_GetUserIdsByGroup_FullMethodName      = "/api.user.v1.Profile/GetUserIdsByGroup"
-	Profile_GetUserIdsByOrg_FullMethodName        = "/api.user.v1.Profile/GetUserIdsByOrg"
-	Profile_GetNonPublicOrgUserIds_FullMethodName = "/api.user.v1.Profile/GetNonPublicOrgUserIds"
-	Profile_GetByIds_FullMethodName               = "/api.user.v1.Profile/GetByIds"
-	Profile_GetSyncPolicies_FullMethodName        = "/api.user.v1.Profile/GetSyncPolicies"
-	Profile_Delete_FullMethodName                 = "/api.user.v1.Profile/Delete"
+	Profile_GetById_FullMethodName                 = "/api.user.v1.Profile/GetById"
+	Profile_GetByName_FullMethodName               = "/api.user.v1.Profile/GetByName"
+	Profile_GetList_FullMethodName                 = "/api.user.v1.Profile/GetList"
+	Profile_Update_FullMethodName                  = "/api.user.v1.Profile/Update"
+	Profile_MoveGroup_FullMethodName               = "/api.user.v1.Profile/MoveGroup"
+	Profile_SetEmailEnabled_FullMethodName         = "/api.user.v1.Profile/SetEmailEnabled"
+	Profile_SetProblemPipeline_FullMethodName      = "/api.user.v1.Profile/SetProblemPipeline"
+	Profile_GetUserIdsByGroup_FullMethodName       = "/api.user.v1.Profile/GetUserIdsByGroup"
+	Profile_GetUserIdsByOrg_FullMethodName         = "/api.user.v1.Profile/GetUserIdsByOrg"
+	Profile_GetNonPublicOrgUserIds_FullMethodName  = "/api.user.v1.Profile/GetNonPublicOrgUserIds"
+	Profile_GetByIds_FullMethodName                = "/api.user.v1.Profile/GetByIds"
+	Profile_GetSyncPolicies_FullMethodName         = "/api.user.v1.Profile/GetSyncPolicies"
+	Profile_Delete_FullMethodName                  = "/api.user.v1.Profile/Delete"
+	Profile_GetByUsername_FullMethodName           = "/api.user.v1.Profile/GetByUsername"
+	Profile_GetFollowingIds_FullMethodName         = "/api.user.v1.Profile/GetFollowingIds"
+	Profile_FilterPublicFeedUserIds_FullMethodName = "/api.user.v1.Profile/FilterPublicFeedUserIds"
 )
 
 // ProfileClient is the client API for Profile service.
@@ -43,16 +47,25 @@ type ProfileClient interface {
 	Update(ctx context.Context, in *UpdateReq, opts ...grpc.CallOption) (*UpdateRes, error)
 	MoveGroup(ctx context.Context, in *MoveGroupReq, opts ...grpc.CallOption) (*MoveGroupRes, error)
 	SetEmailEnabled(ctx context.Context, in *SetEmailEnabledReq, opts ...grpc.CallOption) (*SetEmailEnabledRes, error)
+	// 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
+	SetProblemPipeline(ctx context.Context, in *SetProblemPipelineReq, opts ...grpc.CallOption) (*SetProblemPipelineRes, error)
 	GetUserIdsByGroup(ctx context.Context, in *GetUserIdsByGroupReq, opts ...grpc.CallOption) (*GetUserIdsByGroupRes, error)
 	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(ctx context.Context, in *GetUserIdsByOrgReq, opts ...grpc.CallOption) (*GetUserIdsByOrgRes, error)
-	// 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+	// 题面流水线资格用户（供 core 闸门；内部调用）
+	// 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
 	GetNonPublicOrgUserIds(ctx context.Context, in *GetNonPublicOrgUserIdsReq, opts ...grpc.CallOption) (*GetNonPublicOrgUserIdsRes, error)
 	GetByIds(ctx context.Context, in *GetByIdsReq, opts ...grpc.CallOption) (*GetByIdsRes, error)
 	// 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
 	GetSyncPolicies(ctx context.Context, in *GetSyncPoliciesReq, opts ...grpc.CallOption) (*GetSyncPoliciesRes, error)
 	// 管理员删除用户（硬删除）
 	Delete(ctx context.Context, in *DeleteReq, opts ...grpc.CallOption) (*DeleteRes, error)
+	// 精确用户名查资料（公开；受公共域隐私约束）
+	GetByUsername(ctx context.Context, in *GetByUsernameReq, opts ...grpc.CallOption) (*GetByIdRes, error)
+	// 某人关注的 userId 列表（供 core 动态/题库过滤；本人或公开）
+	GetFollowingIds(ctx context.Context, in *GetFollowingIdsReq, opts ...grpc.CallOption) (*GetFollowingIdsRes, error)
+	// 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
+	FilterPublicFeedUserIds(ctx context.Context, in *FilterPublicFeedUserIdsReq, opts ...grpc.CallOption) (*FilterPublicFeedUserIdsRes, error)
 }
 
 type profileClient struct {
@@ -123,6 +136,16 @@ func (c *profileClient) SetEmailEnabled(ctx context.Context, in *SetEmailEnabled
 	return out, nil
 }
 
+func (c *profileClient) SetProblemPipeline(ctx context.Context, in *SetProblemPipelineReq, opts ...grpc.CallOption) (*SetProblemPipelineRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetProblemPipelineRes)
+	err := c.cc.Invoke(ctx, Profile_SetProblemPipeline_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *profileClient) GetUserIdsByGroup(ctx context.Context, in *GetUserIdsByGroupReq, opts ...grpc.CallOption) (*GetUserIdsByGroupRes, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetUserIdsByGroupRes)
@@ -183,6 +206,36 @@ func (c *profileClient) Delete(ctx context.Context, in *DeleteReq, opts ...grpc.
 	return out, nil
 }
 
+func (c *profileClient) GetByUsername(ctx context.Context, in *GetByUsernameReq, opts ...grpc.CallOption) (*GetByIdRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetByIdRes)
+	err := c.cc.Invoke(ctx, Profile_GetByUsername_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *profileClient) GetFollowingIds(ctx context.Context, in *GetFollowingIdsReq, opts ...grpc.CallOption) (*GetFollowingIdsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetFollowingIdsRes)
+	err := c.cc.Invoke(ctx, Profile_GetFollowingIds_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *profileClient) FilterPublicFeedUserIds(ctx context.Context, in *FilterPublicFeedUserIdsReq, opts ...grpc.CallOption) (*FilterPublicFeedUserIdsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FilterPublicFeedUserIdsRes)
+	err := c.cc.Invoke(ctx, Profile_FilterPublicFeedUserIds_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProfileServer is the server API for Profile service.
 // All implementations must embed UnimplementedProfileServer
 // for forward compatibility.
@@ -193,16 +246,25 @@ type ProfileServer interface {
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 	MoveGroup(context.Context, *MoveGroupReq) (*MoveGroupRes, error)
 	SetEmailEnabled(context.Context, *SetEmailEnabledReq) (*SetEmailEnabledRes, error)
+	// 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
+	SetProblemPipeline(context.Context, *SetProblemPipelineReq) (*SetProblemPipelineRes, error)
 	GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error)
 	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error)
-	// 至少属于一个非公共域组织的用户（供 core 题面 AI 闸门；内部调用）
+	// 题面流水线资格用户（供 core 闸门；内部调用）
+	// 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
 	GetNonPublicOrgUserIds(context.Context, *GetNonPublicOrgUserIdsReq) (*GetNonPublicOrgUserIdsRes, error)
 	GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error)
 	// 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
 	GetSyncPolicies(context.Context, *GetSyncPoliciesReq) (*GetSyncPoliciesRes, error)
 	// 管理员删除用户（硬删除）
 	Delete(context.Context, *DeleteReq) (*DeleteRes, error)
+	// 精确用户名查资料（公开；受公共域隐私约束）
+	GetByUsername(context.Context, *GetByUsernameReq) (*GetByIdRes, error)
+	// 某人关注的 userId 列表（供 core 动态/题库过滤；本人或公开）
+	GetFollowingIds(context.Context, *GetFollowingIdsReq) (*GetFollowingIdsRes, error)
+	// 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
+	FilterPublicFeedUserIds(context.Context, *FilterPublicFeedUserIdsReq) (*FilterPublicFeedUserIdsRes, error)
 	mustEmbedUnimplementedProfileServer()
 }
 
@@ -231,6 +293,9 @@ func (UnimplementedProfileServer) MoveGroup(context.Context, *MoveGroupReq) (*Mo
 func (UnimplementedProfileServer) SetEmailEnabled(context.Context, *SetEmailEnabledReq) (*SetEmailEnabledRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetEmailEnabled not implemented")
 }
+func (UnimplementedProfileServer) SetProblemPipeline(context.Context, *SetProblemPipelineReq) (*SetProblemPipelineRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetProblemPipeline not implemented")
+}
 func (UnimplementedProfileServer) GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUserIdsByGroup not implemented")
 }
@@ -248,6 +313,15 @@ func (UnimplementedProfileServer) GetSyncPolicies(context.Context, *GetSyncPolic
 }
 func (UnimplementedProfileServer) Delete(context.Context, *DeleteReq) (*DeleteRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Delete not implemented")
+}
+func (UnimplementedProfileServer) GetByUsername(context.Context, *GetByUsernameReq) (*GetByIdRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetByUsername not implemented")
+}
+func (UnimplementedProfileServer) GetFollowingIds(context.Context, *GetFollowingIdsReq) (*GetFollowingIdsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetFollowingIds not implemented")
+}
+func (UnimplementedProfileServer) FilterPublicFeedUserIds(context.Context, *FilterPublicFeedUserIdsReq) (*FilterPublicFeedUserIdsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method FilterPublicFeedUserIds not implemented")
 }
 func (UnimplementedProfileServer) mustEmbedUnimplementedProfileServer() {}
 func (UnimplementedProfileServer) testEmbeddedByValue()                 {}
@@ -378,6 +452,24 @@ func _Profile_SetEmailEnabled_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Profile_SetProblemPipeline_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetProblemPipelineReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).SetProblemPipeline(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_SetProblemPipeline_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).SetProblemPipeline(ctx, req.(*SetProblemPipelineReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Profile_GetUserIdsByGroup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetUserIdsByGroupReq)
 	if err := dec(in); err != nil {
@@ -486,6 +578,60 @@ func _Profile_Delete_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Profile_GetByUsername_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetByUsernameReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).GetByUsername(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_GetByUsername_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).GetByUsername(ctx, req.(*GetByUsernameReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Profile_GetFollowingIds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetFollowingIdsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).GetFollowingIds(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_GetFollowingIds_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).GetFollowingIds(ctx, req.(*GetFollowingIdsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Profile_FilterPublicFeedUserIds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FilterPublicFeedUserIdsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).FilterPublicFeedUserIds(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_FilterPublicFeedUserIds_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).FilterPublicFeedUserIds(ctx, req.(*FilterPublicFeedUserIdsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Profile_ServiceDesc is the grpc.ServiceDesc for Profile service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -518,6 +664,10 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Profile_SetEmailEnabled_Handler,
 		},
 		{
+			MethodName: "SetProblemPipeline",
+			Handler:    _Profile_SetProblemPipeline_Handler,
+		},
+		{
 			MethodName: "GetUserIdsByGroup",
 			Handler:    _Profile_GetUserIdsByGroup_Handler,
 		},
@@ -540,6 +690,18 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Delete",
 			Handler:    _Profile_Delete_Handler,
+		},
+		{
+			MethodName: "GetByUsername",
+			Handler:    _Profile_GetByUsername_Handler,
+		},
+		{
+			MethodName: "GetFollowingIds",
+			Handler:    _Profile_GetFollowingIds_Handler,
+		},
+		{
+			MethodName: "FilterPublicFeedUserIds",
+			Handler:    _Profile_FilterPublicFeedUserIds_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

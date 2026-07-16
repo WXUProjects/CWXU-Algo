@@ -20,4 +20,18 @@ type User struct {
 	EmailEnabled bool `gorm:"comment:个人日报邮件;default:false"`
 	// EmailWeeklyEnabled 个人周报（教练/队长/组织管理员）；与日报独立
 	EmailWeeklyEnabled bool `gorm:"comment:个人周报邮件;default:false"`
+
+	// —— 公共域隐私（私人域组织内本配置不生效）——
+	// PrivacyConfigured 是否已确认过隐私设置；未配置时前端强制弹窗
+	PrivacyConfigured bool `gorm:"default:false;comment:已配置公共域隐私"`
+	// AllowPublicProfile 公共域中是否允许他人查看个人资料（默认允许）
+	AllowPublicProfile bool `gorm:"default:true;comment:公共域允许查看资料"`
+	// AllowPublicFeed 是否出现在公共域动态中（默认加入）
+	AllowPublicFeed bool `gorm:"default:true;comment:公共域动态可见"`
+
+	// —— 题面流水线覆盖（null=按是否属于非公共域组织；true/false=强制）——
+	// ProblemFetchEnabled 该用户近窗提交是否触发题面爬取
+	ProblemFetchEnabled *bool `gorm:"comment:题面爬取覆盖 null=按组织"`
+	// ProblemAIEnabled 该用户近窗提交是否触发题面 AI 分析
+	ProblemAIEnabled *bool `gorm:"comment:题面AI覆盖 null=按组织"`
 }

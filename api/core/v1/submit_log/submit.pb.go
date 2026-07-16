@@ -171,10 +171,12 @@ func (x *SubmitLog) GetProblemDifficulty() string {
 }
 
 type GetSubmitLogReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Limit         int64                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
-	Cursor        int64                  `protobuf:"varint,3,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	UserId int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit  int64                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor int64                  `protobuf:"varint,3,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	// 仅关注用户（需登录；与 user_id=-1 组织聚合流组合，或单独表示关注流）
+	FollowingOnly bool `protobuf:"varint,4,opt,name=following_only,json=followingOnly,proto3" json:"following_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -228,6 +230,13 @@ func (x *GetSubmitLogReq) GetCursor() int64 {
 		return x.Cursor
 	}
 	return 0
+}
+
+func (x *GetSubmitLogReq) GetFollowingOnly() bool {
+	if x != nil {
+		return x.FollowingOnly
+	}
+	return false
 }
 
 type GetSubmitLogRes struct {
@@ -383,11 +392,12 @@ const file_core_v1_submit_log_submit_proto_rawDesc = "" +
 	"\tuser_name\x18\v \x01(\tR\buserName\x12#\n" +
 	"\rproblem_title\x18\f \x01(\tR\fproblemTitle\x12!\n" +
 	"\fproblem_tags\x18\r \x03(\tR\vproblemTags\x12-\n" +
-	"\x12problem_difficulty\x18\x0e \x01(\tR\x11problemDifficulty\"X\n" +
+	"\x12problem_difficulty\x18\x0e \x01(\tR\x11problemDifficulty\"\x7f\n" +
 	"\x0fGetSubmitLogReq\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x03R\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x03 \x01(\x03R\x06cursor\"H\n" +
+	"\x06cursor\x18\x03 \x01(\x03R\x06cursor\x12%\n" +
+	"\x0efollowing_only\x18\x04 \x01(\bR\rfollowingOnly\"H\n" +
 	"\x0fGetSubmitLogRes\x125\n" +
 	"\x04data\x18\x01 \x03(\v2!.api.core.v1.submit_log.SubmitLogR\x04data\"-\n" +
 	"\x11LastSubmitTimeReq\x12\x18\n" +

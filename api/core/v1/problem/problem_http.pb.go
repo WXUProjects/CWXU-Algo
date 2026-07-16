@@ -19,31 +19,44 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
+const OperationProblemAdminUpdate = "/api.core.v1.problem.Problem/AdminUpdate"
 const OperationProblemBackfill = "/api.core.v1.problem.Problem/Backfill"
 const OperationProblemEmergencyStop = "/api.core.v1.problem.Problem/EmergencyStop"
 const OperationProblemGet = "/api.core.v1.problem.Problem/Get"
 const OperationProblemList = "/api.core.v1.problem.Problem/List"
+const OperationProblemListEditRequests = "/api.core.v1.problem.Problem/ListEditRequests"
 const OperationProblemListSubmissions = "/api.core.v1.problem.Problem/ListSubmissions"
 const OperationProblemListTags = "/api.core.v1.problem.Problem/ListTags"
+const OperationProblemMyPendingEdit = "/api.core.v1.problem.Problem/MyPendingEdit"
 const OperationProblemProgress = "/api.core.v1.problem.Problem/Progress"
+const OperationProblemProposeEdit = "/api.core.v1.problem.Problem/ProposeEdit"
 const OperationProblemResetAll = "/api.core.v1.problem.Problem/ResetAll"
 const OperationProblemResetQueues = "/api.core.v1.problem.Problem/ResetQueues"
 const OperationProblemResume = "/api.core.v1.problem.Problem/Resume"
 const OperationProblemRetryFailed = "/api.core.v1.problem.Problem/RetryFailed"
+const OperationProblemReviewEdit = "/api.core.v1.problem.Problem/ReviewEdit"
 const OperationProblemToggleAnalyze = "/api.core.v1.problem.Problem/ToggleAnalyze"
 const OperationProblemToggleFetch = "/api.core.v1.problem.Problem/ToggleFetch"
 const OperationProblemUserProfile = "/api.core.v1.problem.Problem/UserProfile"
 
 type ProblemHTTPServer interface {
+	// AdminUpdate 站点管理员：直接修改标签/题面（无需审核）
+	AdminUpdate(context.Context, *AdminUpdateProblemReq) (*AdminUpdateProblemRes, error)
 	Backfill(context.Context, *BackfillReq) (*BackfillRes, error)
 	// EmergencyStop 紧急停止：暂停 AI 并清空分析队列（兼容）
 	EmergencyStop(context.Context, *EmergencyStopReq) (*EmergencyStopRes, error)
 	Get(context.Context, *GetProblemReq) (*GetProblemRes, error)
 	List(context.Context, *ListProblemReq) (*ListProblemRes, error)
+	// ListEditRequests 站点管理员：审核申请列表
+	ListEditRequests(context.Context, *ListProblemEditReq) (*ListProblemEditRes, error)
 	ListSubmissions(context.Context, *ListSubmissionsReq) (*ListSubmissionsRes, error)
 	// ListTags 标签聚合（名称 + 题量），供筛选器选择
 	ListTags(context.Context, *ListTagsReq) (*ListTagsRes, error)
+	// MyPendingEdit 当前用户对该题的待审申请（详情页提示）
+	MyPendingEdit(context.Context, *MyPendingEditReq) (*MyPendingEditRes, error)
 	Progress(context.Context, *ProgressReq) (*ProgressRes, error)
+	// ProposeEdit 登录用户：提交标签/题面修改申请（站点管理员审核）
+	ProposeEdit(context.Context, *ProposeProblemEditReq) (*ProposeProblemEditRes, error)
 	// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(context.Context, *ResetAllReq) (*ResetAllRes, error)
 	// ResetQueues 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
@@ -52,6 +65,8 @@ type ProblemHTTPServer interface {
 	Resume(context.Context, *ResumeReq) (*ResumeRes, error)
 	// RetryFailed 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
 	RetryFailed(context.Context, *RetryFailedReq) (*RetryFailedRes, error)
+	// ReviewEdit 站点管理员：通过/驳回申请
+	ReviewEdit(context.Context, *ReviewProblemEditReq) (*ReviewProblemEditRes, error)
 	// ToggleAnalyze 暂停/恢复 AI 分析（仅停消费，不清空队列）
 	ToggleAnalyze(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error)
 	// ToggleFetch 暂停/恢复题面爬取（仅停消费，不清空队列）
@@ -75,6 +90,11 @@ func RegisterProblemHTTPServer(s *http.Server, srv ProblemHTTPServer) {
 	r.POST("/v1/core/problem/toggle-analyze", _Problem_ToggleAnalyze0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/toggle-fetch", _Problem_ToggleFetch0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/reset-queues", _Problem_ResetQueues0_HTTP_Handler(srv))
+	r.POST("/v1/core/problem/admin-update", _Problem_AdminUpdate0_HTTP_Handler(srv))
+	r.POST("/v1/core/problem/propose-edit", _Problem_ProposeEdit0_HTTP_Handler(srv))
+	r.GET("/v1/core/problem/edit-requests", _Problem_ListEditRequests0_HTTP_Handler(srv))
+	r.POST("/v1/core/problem/review-edit", _Problem_ReviewEdit0_HTTP_Handler(srv))
+	r.GET("/v1/core/problem/my-pending-edit", _Problem_MyPendingEdit0_HTTP_Handler(srv))
 }
 
 func _Problem_List0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
@@ -367,16 +387,128 @@ func _Problem_ResetQueues0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Con
 	}
 }
 
+func _Problem_AdminUpdate0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in AdminUpdateProblemReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemAdminUpdate)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.AdminUpdate(ctx, req.(*AdminUpdateProblemReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*AdminUpdateProblemRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problem_ProposeEdit0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ProposeProblemEditReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemProposeEdit)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ProposeEdit(ctx, req.(*ProposeProblemEditReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ProposeProblemEditRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problem_ListEditRequests0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ListProblemEditReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemListEditRequests)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ListEditRequests(ctx, req.(*ListProblemEditReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ListProblemEditRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problem_ReviewEdit0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ReviewProblemEditReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemReviewEdit)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ReviewEdit(ctx, req.(*ReviewProblemEditReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ReviewProblemEditRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problem_MyPendingEdit0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in MyPendingEditReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemMyPendingEdit)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.MyPendingEdit(ctx, req.(*MyPendingEditReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*MyPendingEditRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type ProblemHTTPClient interface {
+	// AdminUpdate 站点管理员：直接修改标签/题面（无需审核）
+	AdminUpdate(ctx context.Context, req *AdminUpdateProblemReq, opts ...http.CallOption) (rsp *AdminUpdateProblemRes, err error)
 	Backfill(ctx context.Context, req *BackfillReq, opts ...http.CallOption) (rsp *BackfillRes, err error)
 	// EmergencyStop 紧急停止：暂停 AI 并清空分析队列（兼容）
 	EmergencyStop(ctx context.Context, req *EmergencyStopReq, opts ...http.CallOption) (rsp *EmergencyStopRes, err error)
 	Get(ctx context.Context, req *GetProblemReq, opts ...http.CallOption) (rsp *GetProblemRes, err error)
 	List(ctx context.Context, req *ListProblemReq, opts ...http.CallOption) (rsp *ListProblemRes, err error)
+	// ListEditRequests 站点管理员：审核申请列表
+	ListEditRequests(ctx context.Context, req *ListProblemEditReq, opts ...http.CallOption) (rsp *ListProblemEditRes, err error)
 	ListSubmissions(ctx context.Context, req *ListSubmissionsReq, opts ...http.CallOption) (rsp *ListSubmissionsRes, err error)
 	// ListTags 标签聚合（名称 + 题量），供筛选器选择
 	ListTags(ctx context.Context, req *ListTagsReq, opts ...http.CallOption) (rsp *ListTagsRes, err error)
+	// MyPendingEdit 当前用户对该题的待审申请（详情页提示）
+	MyPendingEdit(ctx context.Context, req *MyPendingEditReq, opts ...http.CallOption) (rsp *MyPendingEditRes, err error)
 	Progress(ctx context.Context, req *ProgressReq, opts ...http.CallOption) (rsp *ProgressRes, err error)
+	// ProposeEdit 登录用户：提交标签/题面修改申请（站点管理员审核）
+	ProposeEdit(ctx context.Context, req *ProposeProblemEditReq, opts ...http.CallOption) (rsp *ProposeProblemEditRes, err error)
 	// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(ctx context.Context, req *ResetAllReq, opts ...http.CallOption) (rsp *ResetAllRes, err error)
 	// ResetQueues 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
@@ -385,6 +517,8 @@ type ProblemHTTPClient interface {
 	Resume(ctx context.Context, req *ResumeReq, opts ...http.CallOption) (rsp *ResumeRes, err error)
 	// RetryFailed 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
 	RetryFailed(ctx context.Context, req *RetryFailedReq, opts ...http.CallOption) (rsp *RetryFailedRes, err error)
+	// ReviewEdit 站点管理员：通过/驳回申请
+	ReviewEdit(ctx context.Context, req *ReviewProblemEditReq, opts ...http.CallOption) (rsp *ReviewProblemEditRes, err error)
 	// ToggleAnalyze 暂停/恢复 AI 分析（仅停消费，不清空队列）
 	ToggleAnalyze(ctx context.Context, req *TogglePipelineReq, opts ...http.CallOption) (rsp *TogglePipelineRes, err error)
 	// ToggleFetch 暂停/恢复题面爬取（仅停消费，不清空队列）
@@ -398,6 +532,20 @@ type ProblemHTTPClientImpl struct {
 
 func NewProblemHTTPClient(client *http.Client) ProblemHTTPClient {
 	return &ProblemHTTPClientImpl{client}
+}
+
+// AdminUpdate 站点管理员：直接修改标签/题面（无需审核）
+func (c *ProblemHTTPClientImpl) AdminUpdate(ctx context.Context, in *AdminUpdateProblemReq, opts ...http.CallOption) (*AdminUpdateProblemRes, error) {
+	var out AdminUpdateProblemRes
+	pattern := "/v1/core/problem/admin-update"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemAdminUpdate))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (c *ProblemHTTPClientImpl) Backfill(ctx context.Context, in *BackfillReq, opts ...http.CallOption) (*BackfillRes, error) {
@@ -453,6 +601,20 @@ func (c *ProblemHTTPClientImpl) List(ctx context.Context, in *ListProblemReq, op
 	return &out, nil
 }
 
+// ListEditRequests 站点管理员：审核申请列表
+func (c *ProblemHTTPClientImpl) ListEditRequests(ctx context.Context, in *ListProblemEditReq, opts ...http.CallOption) (*ListProblemEditRes, error) {
+	var out ListProblemEditRes
+	pattern := "/v1/core/problem/edit-requests"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProblemListEditRequests))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *ProblemHTTPClientImpl) ListSubmissions(ctx context.Context, in *ListSubmissionsReq, opts ...http.CallOption) (*ListSubmissionsRes, error) {
 	var out ListSubmissionsRes
 	pattern := "/v1/core/problem/submissions"
@@ -480,6 +642,20 @@ func (c *ProblemHTTPClientImpl) ListTags(ctx context.Context, in *ListTagsReq, o
 	return &out, nil
 }
 
+// MyPendingEdit 当前用户对该题的待审申请（详情页提示）
+func (c *ProblemHTTPClientImpl) MyPendingEdit(ctx context.Context, in *MyPendingEditReq, opts ...http.CallOption) (*MyPendingEditRes, error) {
+	var out MyPendingEditRes
+	pattern := "/v1/core/problem/my-pending-edit"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProblemMyPendingEdit))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *ProblemHTTPClientImpl) Progress(ctx context.Context, in *ProgressReq, opts ...http.CallOption) (*ProgressRes, error) {
 	var out ProgressRes
 	pattern := "/v1/core/problem/progress"
@@ -487,6 +663,20 @@ func (c *ProblemHTTPClientImpl) Progress(ctx context.Context, in *ProgressReq, o
 	opts = append(opts, http.Operation(OperationProblemProgress))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ProposeEdit 登录用户：提交标签/题面修改申请（站点管理员审核）
+func (c *ProblemHTTPClientImpl) ProposeEdit(ctx context.Context, in *ProposeProblemEditReq, opts ...http.CallOption) (*ProposeProblemEditRes, error) {
+	var out ProposeProblemEditRes
+	pattern := "/v1/core/problem/propose-edit"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemProposeEdit))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -541,6 +731,20 @@ func (c *ProblemHTTPClientImpl) RetryFailed(ctx context.Context, in *RetryFailed
 	pattern := "/v1/core/problem/retry-failed"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProblemRetryFailed))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ReviewEdit 站点管理员：通过/驳回申请
+func (c *ProblemHTTPClientImpl) ReviewEdit(ctx context.Context, in *ReviewProblemEditReq, opts ...http.CallOption) (*ReviewProblemEditRes, error) {
+	var out ReviewProblemEditRes
+	pattern := "/v1/core/problem/review-edit"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemReviewEdit))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

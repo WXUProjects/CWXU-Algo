@@ -35,6 +35,8 @@ message GetSubmitLogReq {
   int64 user_id = 1;
   int64 limit = 2;
   int64 cursor = 3;
+  // 仅关注用户（需登录；与 user_id=-1 组织聚合流组合，或单独表示关注流）
+  bool following_only = 4;
 }
 message GetSubmitLogRes {
   repeated SubmitLog data = 1;
