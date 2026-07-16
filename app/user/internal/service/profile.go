@@ -246,6 +246,9 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			ProblemFetchEnabled:     dal.EffectiveProblemPipeline(v.ProblemFetchEnabled, isNonPublic),
 			ProblemAiEnabled:        dal.EffectiveProblemPipeline(v.ProblemAIEnabled, isNonPublic),
 		}
+		if !v.CreatedAt.IsZero() {
+			item.CreatedAt = v.CreatedAt.Unix()
+		}
 		if briefs := orgMap[v.ID]; len(briefs) > 0 {
 			item.Orgs = make([]*profile.GetListRes_OrgBrief, 0, len(briefs))
 			for _, b := range briefs {

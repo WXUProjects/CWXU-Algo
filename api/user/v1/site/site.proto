@@ -171,6 +171,8 @@ message AccessDayStat {
   int64 uv = 4;
   // 独立 IP 数（精确集合基数）
   int64 unique_ip = 5;
+  // 当日新注册用户数
+  int64 new_users = 6;
 }
 
 message AccessPathStat {

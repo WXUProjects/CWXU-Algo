@@ -418,6 +418,57 @@ func (d *Data) CountRegisteredUsers(ctx context.Context) int64 {
 	return n
 }
 
+// CountRegistrationsByDay 近 days 天（含今天）每日新注册用户数，key 为 yyyy-MM-dd（Asia/Shanghai）
+func (d *Data) CountRegistrationsByDay(ctx context.Context, days int) map[string]int64 {
+	out := make(map[string]int64)
+	if d == nil || d.DB == nil {
+		return out
+	}
+	if days < 1 {
+		days = 30
+	}
+	if days > 90 {
+		days = 90
+	}
+	now := time.Now().In(visitLoc)
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, visitLoc).
+		AddDate(0, 0, -(days - 1))
+
+	type row struct {
+		Day string
+		Cnt int64
+	}
+	var rows []row
+	// 按上海时区自然日聚合；兼容 timestamptz / timestamp
+	err := d.DB.WithContext(ctx).Raw(`
+		SELECT to_char((created_at AT TIME ZONE 'Asia/Shanghai'), 'YYYY-MM-DD') AS day,
+		       COUNT(*)::bigint AS cnt
+		FROM users
+		WHERE created_at >= ?
+		GROUP BY 1
+	`, start).Scan(&rows).Error
+	if err != nil {
+		// 回退：拉时间戳后在内存按日统计
+		var created []time.Time
+		if e := d.DB.WithContext(ctx).Model(&model.User{}).
+			Where("created_at >= ?", start).
+			Pluck("created_at", &created).Error; e != nil {
+			return out
+		}
+		for _, t := range created {
+			k := t.In(visitLoc).Format("2006-01-02")
+			out[k]++
+		}
+		return out
+	}
+	for _, r := range rows {
+		if r.Day != "" {
+			out[r.Day] = r.Cnt
+		}
+	}
+	return out
+}
+
 // CountMAU 当月活跃用户
 func (d *Data) CountMAU(ctx context.Context) int64 {
 	if d == nil || d.RDB == nil {

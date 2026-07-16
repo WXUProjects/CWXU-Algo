@@ -117,8 +117,15 @@ func (t *CronTask) runCalendarNotify() {
 			if nowUnix >= c.StartTime {
 				continue
 			}
-			has, err := t.calDal().HasNotifyLog(sub.UserID, c.ID, sub.AdvanceMinutes)
-			if err != nil || has {
+			// 先原子占坑再发信，避免「SMTP 已投递但日志未写」导致下轮 cron 重发；
+			// 多实例并发时也只有一个能 claim 成功。
+			claimed, err := t.calDal().TryClaimNotifyLog(sub.UserID, c.ID, sub.AdvanceMinutes)
+			if err != nil {
+				log.Warnf("CronTask calendar claim user=%d contest=%d: %v", sub.UserID, c.ID, err)
+				skipped++
+				continue
+			}
+			if !claimed {
 				skipped++
 				continue
 			}
@@ -128,16 +135,19 @@ func (t *CronTask) runCalendarNotify() {
 				emailCache[sub.UserID] = to
 			}
 			if strings.TrimSpace(to) == "" {
+				// 无邮箱：释放占坑，绑定后仍可收到提醒
+				_ = t.calDal().DeleteNotifyLog(sub.UserID, c.ID, sub.AdvanceMinutes)
 				skipped++
 				continue
 			}
 			subject, body := buildCalendarMail(rt.SiteTitle, &c, sub.AdvanceMinutes)
 			if err := sender.Send(to, subject, body); err != nil {
 				log.Warnf("CronTask calendar mail user=%d contest=%d: %v", sub.UserID, c.ID, err)
+				// SMTP 明确失败才释放，允许下次重试；成功则保留日志防重发
+				_ = t.calDal().DeleteNotifyLog(sub.UserID, c.ID, sub.AdvanceMinutes)
 				skipped++
 				continue
 			}
-			_ = t.calDal().CreateNotifyLog(sub.UserID, c.ID, sub.AdvanceMinutes)
 			sent++
 			if sent >= batchLimit {
 				log.Infof("CronTask calendar notify: hit batch limit %d sent=%d skipped=%d", batchLimit, sent, skipped)

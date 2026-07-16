@@ -438,6 +438,7 @@ func (s *SiteService) GetAccessStats(ctx context.Context, req *site.GetAccessSta
 	topPaths := s.data.ListTopPaths(ctx, time.Now(), pathLimit)
 	categories := s.data.ListCategoryStats(ctx, time.Now())
 	ips := s.data.ListIPItems(ctx, time.Now(), ipLimit)
+	regByDay := s.data.CountRegistrationsByDay(ctx, int(days))
 	ops := opsmetrics.ReadSnapshot(ctx, s.data.RDB)
 
 	toPB := func(st data.DayVisitStat) *site.AccessDayStat {
@@ -447,6 +448,7 @@ func (s *SiteService) GetAccessStats(ctx context.Context, req *site.GetAccessSta
 			Dau:      st.DAU,
 			Uv:       st.UV,
 			UniqueIp: st.UniqueIP,
+			NewUsers: regByDay[st.Date],
 		}
 	}
 	pbSeries := make([]*site.AccessDayStat, 0, len(series))
@@ -481,8 +483,8 @@ func (s *SiteService) GetAccessStats(ctx context.Context, req *site.GetAccessSta
 		mau = ops.MAU
 	}
 	note := "自建统计：PV=页面浏览（同页约30秒节流）；DAU=当日登录用户访问去重；MAU=当月登录用户访问去重；" +
-		"独立IP取自 CF-Connecting-IP / X-Real-IP / XFF；API 请求量与并发峰值为网关/服务侧精确日计数；" +
-		"爬虫数据量为当日新写入提交记录条数。"
+		"新增注册=按上海时区自然日统计账号创建时间；独立IP取自 CF-Connecting-IP / X-Real-IP / XFF；" +
+		"API 请求量与并发峰值为网关/服务侧精确日计数；爬虫数据量为当日新写入提交记录条数。"
 	return &site.GetAccessStatsRes{
 		Code:                0,
 		Message:             "success",

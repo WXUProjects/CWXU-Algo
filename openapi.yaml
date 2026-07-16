@@ -3096,6 +3096,9 @@ components:
                     description: 题面流水线有效状态（已应用个人覆盖；null 覆盖时按是否非公共域组织）
                 problemAiEnabled:
                     type: boolean
+                createdAt:
+                    type: string
+                    description: 注册时间（unix 秒）
         api.user.v1.GetListRes_OrgBrief:
             type: object
             properties:
@@ -3379,6 +3382,9 @@ components:
                 uniqueIp:
                     type: string
                     description: 独立 IP 数（精确集合基数）
+                newUsers:
+                    type: string
+                    description: 当日新注册用户数
         api.user.v1.site.AccessIpItem:
             type: object
             properties:

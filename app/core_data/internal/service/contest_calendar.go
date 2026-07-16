@@ -220,7 +220,8 @@ func (s *ContestCalendarService) UpsertSub(ctx context.Context, req *contest_cal
 		sub.Platform = cal.Platform
 	}
 
-	if err := s.dal.UpsertSub(sub); err != nil {
+	created, prevEnabled, err := s.dal.UpsertSub(sub)
+	if err != nil {
 		log.Errorf("UpsertSub: %v", err)
 		return nil, errors.InternalServer("保存失败", "服务暂时不可用")
 	}
@@ -237,8 +238,8 @@ func (s *ContestCalendarService) UpsertSub(ctx context.Context, req *contest_cal
 		saved = sub
 	}
 
-	// 订阅开启成功：发送确认邮件（失败不影响订阅结果）
-	if req.GetEnabled() {
+	// 仅首次创建，或从关闭→开启时发确认信；改提前量/重复保存不再重发
+	if req.GetEnabled() && (created || !prevEnabled) {
 		s.sendSubscribeConfirmMail(email, saved, cal)
 	}
 

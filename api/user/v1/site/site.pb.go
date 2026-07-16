@@ -965,7 +965,9 @@ type AccessDayStat struct {
 	// 独立访客 UV（visitorId / IP 去重）
 	Uv int64 `protobuf:"varint,4,opt,name=uv,proto3" json:"uv,omitempty"`
 	// 独立 IP 数（精确集合基数）
-	UniqueIp      int64 `protobuf:"varint,5,opt,name=unique_ip,json=uniqueIp,proto3" json:"unique_ip,omitempty"`
+	UniqueIp int64 `protobuf:"varint,5,opt,name=unique_ip,json=uniqueIp,proto3" json:"unique_ip,omitempty"`
+	// 当日新注册用户数
+	NewUsers      int64 `protobuf:"varint,6,opt,name=new_users,json=newUsers,proto3" json:"new_users,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1031,6 +1033,13 @@ func (x *AccessDayStat) GetUv() int64 {
 func (x *AccessDayStat) GetUniqueIp() int64 {
 	if x != nil {
 		return x.UniqueIp
+	}
+	return 0
+}
+
+func (x *AccessDayStat) GetNewUsers() int64 {
+	if x != nil {
+		return x.NewUsers
 	}
 	return 0
 }
@@ -1548,13 +1557,14 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x04days\x18\x01 \x01(\x05R\x04days\x12\x19\n" +
 	"\bip_limit\x18\x02 \x01(\x05R\aipLimit\x12\x1d\n" +
 	"\n" +
-	"path_limit\x18\x03 \x01(\x05R\tpathLimit\"r\n" +
+	"path_limit\x18\x03 \x01(\x05R\tpathLimit\"\x8f\x01\n" +
 	"\rAccessDayStat\x12\x12\n" +
 	"\x04date\x18\x01 \x01(\tR\x04date\x12\x0e\n" +
 	"\x02pv\x18\x02 \x01(\x03R\x02pv\x12\x10\n" +
 	"\x03dau\x18\x03 \x01(\x03R\x03dau\x12\x0e\n" +
 	"\x02uv\x18\x04 \x01(\x03R\x02uv\x12\x1b\n" +
-	"\tunique_ip\x18\x05 \x01(\x03R\buniqueIp\"f\n" +
+	"\tunique_ip\x18\x05 \x01(\x03R\buniqueIp\x12\x1b\n" +
+	"\tnew_users\x18\x06 \x01(\x03R\bnewUsers\"f\n" +
 	"\x0eAccessPathStat\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1a\n" +
 	"\bcategory\x18\x02 \x01(\tR\bcategory\x12\x0e\n" +

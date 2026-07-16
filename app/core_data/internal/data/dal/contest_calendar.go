@@ -170,26 +170,35 @@ func (d *ContestCalendarDal) ListSubsByUser(userID int64) ([]model.ContestCalend
 	return list, err
 }
 
-func (d *ContestCalendarDal) UpsertSub(sub *model.ContestCalendarSub) error {
+// UpsertSub 创建或更新订阅。
+// created=true 表示新建；prevEnabled 为更新前是否已开启（新建时为 false）。
+func (d *ContestCalendarDal) UpsertSub(sub *model.ContestCalendarSub) (created bool, prevEnabled bool, err error) {
 	if sub == nil {
-		return fmt.Errorf("nil sub")
+		return false, false, fmt.Errorf("nil sub")
 	}
 	// 用唯一键查找后更新或创建
 	var existing model.ContestCalendarSub
-	err := d.db.Where(
+	err = d.db.Where(
 		"user_id = ? AND scope = ? AND platform = ? AND calendar_id = ?",
 		sub.UserID, sub.Scope, sub.Platform, sub.CalendarID,
 	).First(&existing).Error
 	if err == gorm.ErrRecordNotFound {
-		return d.db.Create(sub).Error
+		if e := d.db.Create(sub).Error; e != nil {
+			return false, false, e
+		}
+		return true, false, nil
 	}
 	if err != nil {
-		return err
+		return false, false, err
 	}
+	prevEnabled = existing.Enabled
 	existing.AdvanceMinutes = sub.AdvanceMinutes
 	existing.Enabled = sub.Enabled
 	existing.Platform = sub.Platform
-	return d.db.Save(&existing).Error
+	if e := d.db.Save(&existing).Error; e != nil {
+		return false, prevEnabled, e
+	}
+	return false, prevEnabled, nil
 }
 
 func (d *ContestCalendarDal) DeleteSub(userID int64, scope, platform string, calendarID uint) error {
@@ -233,6 +242,29 @@ func (d *ContestCalendarDal) CreateNotifyLog(userID int64, calendarID uint, adva
 		AdvanceMinutes: advance,
 		SentAt:         time.Now(),
 	}).Error
+}
+
+// TryClaimNotifyLog 原子占坑：插入成功则本进程负责发送；冲突则已发过/他人在发。
+// 发送失败时调用 DeleteNotifyLog 释放，供后续 cron 重试。
+func (d *ContestCalendarDal) TryClaimNotifyLog(userID int64, calendarID uint, advance int) (claimed bool, err error) {
+	res := d.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.ContestCalendarNotifyLog{
+		UserID:         userID,
+		CalendarID:     calendarID,
+		AdvanceMinutes: advance,
+		SentAt:         time.Now(),
+	})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
+// DeleteNotifyLog 释放发送占坑（SMTP 失败时允许下次重试）
+func (d *ContestCalendarDal) DeleteNotifyLog(userID int64, calendarID uint, advance int) error {
+	return d.db.Where(
+		"user_id = ? AND calendar_id = ? AND advance_minutes = ?",
+		userID, calendarID, advance,
+	).Delete(&model.ContestCalendarNotifyLog{}).Error
 }
 
 // CleanupNotifyLogs 清理很久以前的日志

@@ -177,6 +177,8 @@ message GetListRes {
     // 题面流水线有效状态（已应用个人覆盖；null 覆盖时按是否非公共域组织）
     bool problemFetchEnabled = 16;
     bool problemAiEnabled = 17;
+    // 注册时间（unix 秒）
+    int64 createdAt = 18;
   }
   repeated List list = 1;
   int64 total = 2;

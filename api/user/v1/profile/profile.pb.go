@@ -2032,8 +2032,10 @@ type GetListRes_List struct {
 	// 题面流水线有效状态（已应用个人覆盖；null 覆盖时按是否非公共域组织）
 	ProblemFetchEnabled bool `protobuf:"varint,16,opt,name=problemFetchEnabled,proto3" json:"problemFetchEnabled,omitempty"`
 	ProblemAiEnabled    bool `protobuf:"varint,17,opt,name=problemAiEnabled,proto3" json:"problemAiEnabled,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// 注册时间（unix 秒）
+	CreatedAt     int64 `protobuf:"varint,18,opt,name=createdAt,proto3" json:"createdAt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetListRes_List) Reset() {
@@ -2178,6 +2180,13 @@ func (x *GetListRes_List) GetProblemAiEnabled() bool {
 	return false
 }
 
+func (x *GetListRes_List) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
 type GetByIdsRes_UserProfile struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
@@ -2284,7 +2293,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"GetListReq\x12\x1a\n" +
 	"\bpageSize\x18\x01 \x01(\x03R\bpageSize\x12\x18\n" +
 	"\apageNum\x18\x02 \x01(\x03R\apageNum\x12\x14\n" +
-	"\x05scope\x18\x03 \x01(\tR\x05scope\"\xe9\x05\n" +
+	"\x05scope\x18\x03 \x01(\tR\x05scope\"\x87\x06\n" +
 	"\n" +
 	"GetListRes\x120\n" +
 	"\x04list\x18\x01 \x03(\v2\x1c.api.user.v1.GetListRes.ListR\x04list\x12\x14\n" +
@@ -2292,7 +2301,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\bOrgBrief\x12\x14\n" +
 	"\x05orgId\x18\x01 \x01(\x04R\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\x1a\xc8\x04\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\x1a\xe6\x04\n" +
 	"\x04List\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
@@ -2312,7 +2321,8 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x11emailAllowedByOrg\x18\x0e \x01(\bR\x11emailAllowedByOrg\x128\n" +
 	"\x17emailWeeklyAllowedByOrg\x18\x0f \x01(\bR\x17emailWeeklyAllowedByOrg\x120\n" +
 	"\x13problemFetchEnabled\x18\x10 \x01(\bR\x13problemFetchEnabled\x12*\n" +
-	"\x10problemAiEnabled\x18\x11 \x01(\bR\x10problemAiEnabled\"e\n" +
+	"\x10problemAiEnabled\x18\x11 \x01(\bR\x10problemAiEnabled\x12\x1c\n" +
+	"\tcreatedAt\x18\x12 \x01(\x03R\tcreatedAt\"e\n" +
 	"\tUpdateReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
