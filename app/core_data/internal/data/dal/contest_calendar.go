@@ -171,10 +171,10 @@ func (d *ContestCalendarDal) ListSubsByUser(userID int64) ([]model.ContestCalend
 }
 
 // UpsertSub 创建或更新订阅。
-// created=true 表示新建；prevEnabled 为更新前是否已开启（新建时为 false）。
-func (d *ContestCalendarDal) UpsertSub(sub *model.ContestCalendarSub) (created bool, prevEnabled bool, err error) {
+// created=true 表示新建；prevEnabled / prevAdvance 为更新前状态（新建时 false / 0）。
+func (d *ContestCalendarDal) UpsertSub(sub *model.ContestCalendarSub) (created bool, prevEnabled bool, prevAdvance int, err error) {
 	if sub == nil {
-		return false, false, fmt.Errorf("nil sub")
+		return false, false, 0, fmt.Errorf("nil sub")
 	}
 	// 用唯一键查找后更新或创建
 	var existing model.ContestCalendarSub
@@ -184,21 +184,22 @@ func (d *ContestCalendarDal) UpsertSub(sub *model.ContestCalendarSub) (created b
 	).First(&existing).Error
 	if err == gorm.ErrRecordNotFound {
 		if e := d.db.Create(sub).Error; e != nil {
-			return false, false, e
+			return false, false, 0, e
 		}
-		return true, false, nil
+		return true, false, 0, nil
 	}
 	if err != nil {
-		return false, false, err
+		return false, false, 0, err
 	}
 	prevEnabled = existing.Enabled
+	prevAdvance = existing.AdvanceMinutes
 	existing.AdvanceMinutes = sub.AdvanceMinutes
 	existing.Enabled = sub.Enabled
 	existing.Platform = sub.Platform
 	if e := d.db.Save(&existing).Error; e != nil {
-		return false, prevEnabled, e
+		return false, prevEnabled, prevAdvance, e
 	}
-	return false, prevEnabled, nil
+	return false, prevEnabled, prevAdvance, nil
 }
 
 func (d *ContestCalendarDal) DeleteSub(userID int64, scope, platform string, calendarID uint) error {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -18,16 +19,25 @@ import (
 
 	"github.com/go-kratos/kratos/v2/log"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 type OrgService struct {
-	db *gorm.DB
+	db  *gorm.DB
+	rdb *redis.Client
 }
 
 func NewOrgService(d *data.Data) *OrgService {
-	return &OrgService{db: d.DB}
+	return &OrgService{db: d.DB, rdb: d.RDB}
+}
+
+func (s *OrgService) invalidateUserProfileCache(userID uint) {
+	if s == nil || s.rdb == nil || userID == 0 {
+		return
+	}
+	_ = s.rdb.Del(context.Background(), fmt.Sprintf("user:%d:profile", userID)).Err()
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -1209,6 +1219,8 @@ func (s *OrgService) handleSetDisplayName(ctx khttp.Context) error {
 		(o.IsSystem || o.Slug == model.PublicOrgSlug) {
 		_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("name", displayName).Error
 	}
+	// 旁路更新 users.name 后清资料缓存，避免编辑页仍显示旧昵称/旧字段
+	s.invalidateUserProfileCache(uid)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更新组织内名称"})
 	return nil
 }

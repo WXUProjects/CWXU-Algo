@@ -3238,7 +3238,7 @@ components:
                     type: string
                 purpose:
                     type: string
-            description: 'purpose: register | reset'
+            description: 'purpose: register | reset | change_email'
         api.user.v1.SendCodeRes:
             type: object
             properties:
@@ -3287,10 +3287,14 @@ components:
                     type: string
                 name:
                     type: string
+                    description: 已废弃：昵称请在「我的组织」改组织内称呼（公共域同步全局昵称）；本字段忽略
                 email:
                     type: string
                 avatar:
                     type: string
+                emailCode:
+                    type: string
+                    description: 修改/绑定邮箱时必填：发往新邮箱的验证码（purpose=change_email）
         api.user.v1.UpdateRes:
             type: object
             properties:

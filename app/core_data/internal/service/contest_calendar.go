@@ -220,7 +220,7 @@ func (s *ContestCalendarService) UpsertSub(ctx context.Context, req *contest_cal
 		sub.Platform = cal.Platform
 	}
 
-	created, prevEnabled, err := s.dal.UpsertSub(sub)
+	created, prevEnabled, prevAdvance, err := s.dal.UpsertSub(sub)
 	if err != nil {
 		log.Errorf("UpsertSub: %v", err)
 		return nil, errors.InternalServer("保存失败", "服务暂时不可用")
@@ -238,9 +238,12 @@ func (s *ContestCalendarService) UpsertSub(ctx context.Context, req *contest_cal
 		saved = sub
 	}
 
-	// 仅首次创建，或从关闭→开启时发确认信；改提前量/重复保存不再重发
-	if req.GetEnabled() && (created || !prevEnabled) {
-		s.sendSubscribeConfirmMail(email, saved, cal)
+	// 订阅成功确认信（与开赛提醒独立）：
+	// enabled 保存成功即异步发信。新建/重开/改提前量必发；
+	// 已开启且参数不变（如重绑邮箱后再点订阅）也发，但 5 分钟限流防连点刷信。
+	if req.GetEnabled() {
+		rateLimited := !created && prevEnabled && prevAdvance == saved.AdvanceMinutes
+		go s.sendSubscribeConfirmMail(email, saved, cal, true, rateLimited)
 	}
 
 	return &contest_calendar.UpsertSubRes{
@@ -291,14 +294,36 @@ func (s *ContestCalendarService) lookupUserEmail(ctx context.Context, userID int
 	return strings.TrimSpace(res.GetEmail()), nil
 }
 
-func (s *ContestCalendarService) sendSubscribeConfirmMail(to string, sub *model.ContestCalendarSub, cal *model.ContestCalendar) {
-	if s.data == nil || strings.TrimSpace(to) == "" || sub == nil {
+// sendSubscribeConfirmMail 异步发送订阅成功确认信。
+// rateLimited=true 时：5 分钟内同一订阅最多发一封（防连点）；新建/重开/改提前量不受限。
+func (s *ContestCalendarService) sendSubscribeConfirmMail(
+	to string,
+	sub *model.ContestCalendarSub,
+	cal *model.ContestCalendar,
+	doSend bool,
+	rateLimited bool,
+) {
+	if !doSend || s.data == nil || strings.TrimSpace(to) == "" || sub == nil {
 		return
 	}
+	if rateLimited && s.data.RDB != nil {
+		key := fmt.Sprintf("cal:sub:confirm:%d:%s:%s:%d",
+			sub.UserID, sub.Scope, sub.Platform, sub.CalendarID)
+		ok, err := s.data.RDB.SetNX(context.Background(), key, "1", 5*time.Minute).Result()
+		if err != nil {
+			log.Warnf("UpsertSub confirm rate key: %v", err)
+			// Redis 故障时仍尝试发送，避免漏信
+		} else if !ok {
+			log.Infof("UpsertSub confirm skipped (rate limit) user=%d scope=%s plat=%s cal=%d",
+				sub.UserID, sub.Scope, sub.Platform, sub.CalendarID)
+			return
+		}
+	}
+
 	rt := sitesettings.Load(context.Background(), s.data.RDB, s.data.DB)
 	sender := rt.MailSender()
 	if sender == nil || !sender.Configured() {
-		log.Warnf("UpsertSub confirm mail: SMTP not configured, skip")
+		log.Warnf("UpsertSub confirm mail: SMTP not configured, skip to=%s", to)
 		return
 	}
 	siteTitle := rt.SiteTitle
@@ -333,8 +358,10 @@ func (s *ContestCalendarService) sendSubscribeConfirmMail(to string, sub *model.
 </body></html>`,
 		html.EscapeString(scopeLabel), html.EscapeString(scopeLabel), detail, html.EscapeString(advLabel), html.EscapeString(siteTitle))
 	if err := sender.Send(to, subject, body); err != nil {
-		log.Warnf("UpsertSub confirm mail to=%s: %v", to, err)
+		log.Warnf("UpsertSub confirm mail FAIL to=%s user=%d: %v", to, sub.UserID, err)
+		return
 	}
+	log.Infof("UpsertSub confirm mail OK to=%s user=%d scope=%s", to, sub.UserID, sub.Scope)
 }
 
 func formatAdvanceMinutes(m int) string {

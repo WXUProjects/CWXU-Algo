@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"strings"
 
 	_const "cwxu-algo/app/common/const"
@@ -41,29 +43,109 @@ func parsePayload(ctx context.Context) *JwtPayload {
 	if tokenString == "" {
 		return nil
 	}
+	keyFunc := func(token *jwt.Token) (interface{}, error) {
+		if token.Method != jwt.SigningMethodHS256 {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return []byte(_const.JWTSecret()), nil
+	}
+
+	// 优先严格校验 iss/aud；旧 token 可能无 iss/aud，再宽松解析一次
 	pd := &JwtPayload{}
 	token, err := jwt.ParseWithClaims(
 		tokenString,
 		pd,
-		func(token *jwt.Token) (interface{}, error) {
-			if token.Method != jwt.SigningMethodHS256 {
-				return nil, jwt.ErrSignatureInvalid
-			}
-			return []byte(_const.JWTSecret()), nil
-		},
+		keyFunc,
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuer("goalgo"),
 		jwt.WithAudience("goalgo-web"),
 	)
 	if err != nil || !token.Valid || pd.UserID == 0 {
-		return nil
+		pd = &JwtPayload{}
+		token, err = jwt.ParseWithClaims(
+			tokenString,
+			pd,
+			keyFunc,
+			jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+			jwt.WithExpirationRequired(),
+		)
+		if err != nil || !token.Valid || pd.UserID == 0 {
+			// MapClaims 兜底：userId 可能是 float64 / json.Number
+			if id := userIDFromMapToken(tokenString, keyFunc); id > 0 {
+				pd = &JwtPayload{UserID: id}
+				if mc, ok := parseMapClaims(tokenString, keyFunc); ok {
+					pd.Username, _ = mc["username"].(string)
+					pd.Name, _ = mc["name"].(string)
+					pd.Email, _ = mc["email"].(string)
+					pd.OrgRole, _ = mc["orgRole"].(string)
+					pd.IsSiteAdmin = asBool(mc["isSiteAdmin"])
+					pd.RoleID = asInt(mc["roleId"])
+					pd.OrgID = uint(asInt(mc["orgId"]))
+				}
+			} else {
+				return nil
+			}
+		}
 	}
 	// 兼容：旧 token 无 isSiteAdmin 时用 roleId==1
 	if !pd.IsSiteAdmin && pd.RoleID == permission.RoleAdmin {
 		pd.IsSiteAdmin = true
 	}
 	return pd
+}
+
+func parseMapClaims(tokenString string, keyFunc jwt.Keyfunc) (jwt.MapClaims, bool) {
+	token, err := jwt.Parse(tokenString, keyFunc, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired())
+	if err != nil || !token.Valid {
+		return nil, false
+	}
+	mc, ok := token.Claims.(jwt.MapClaims)
+	return mc, ok
+}
+
+func userIDFromMapToken(tokenString string, keyFunc jwt.Keyfunc) uint {
+	mc, ok := parseMapClaims(tokenString, keyFunc)
+	if !ok {
+		return 0
+	}
+	return uint(asInt(mc["userId"]))
+}
+
+func asInt(v interface{}) int {
+	switch t := v.(type) {
+	case float64:
+		return int(t)
+	case float32:
+		return int(t)
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case json.Number:
+		n, _ := t.Int64()
+		return int(n)
+	case string:
+		n, _ := strconv.Atoi(strings.TrimSpace(t))
+		return n
+	default:
+		return 0
+	}
+}
+
+func asBool(v interface{}) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case float64:
+		return t != 0
+	case int:
+		return t != 0
+	case string:
+		return t == "true" || t == "1"
+	default:
+		return false
+	}
 }
 
 // VerifyMinRole 兼容旧权限序

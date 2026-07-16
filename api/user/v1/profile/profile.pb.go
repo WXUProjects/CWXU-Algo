@@ -401,11 +401,14 @@ func (x *GetListRes) GetTotal() int64 {
 }
 
 type UpdateReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        uint64                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Email         string                 `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
-	Avatar        string                 `protobuf:"bytes,6,opt,name=avatar,proto3" json:"avatar,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	UserId uint64                 `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	// 已废弃：昵称请在「我的组织」改组织内称呼（公共域同步全局昵称）；本字段忽略
+	Name   string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Email  string `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
+	Avatar string `protobuf:"bytes,6,opt,name=avatar,proto3" json:"avatar,omitempty"`
+	// 修改/绑定邮箱时必填：发往新邮箱的验证码（purpose=change_email）
+	EmailCode     string `protobuf:"bytes,7,opt,name=emailCode,proto3" json:"emailCode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -464,6 +467,13 @@ func (x *UpdateReq) GetEmail() string {
 func (x *UpdateReq) GetAvatar() string {
 	if x != nil {
 		return x.Avatar
+	}
+	return ""
+}
+
+func (x *UpdateReq) GetEmailCode() string {
+	if x != nil {
+		return x.EmailCode
 	}
 	return ""
 }
@@ -2322,12 +2332,13 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x17emailWeeklyAllowedByOrg\x18\x0f \x01(\bR\x17emailWeeklyAllowedByOrg\x120\n" +
 	"\x13problemFetchEnabled\x18\x10 \x01(\bR\x13problemFetchEnabled\x12*\n" +
 	"\x10problemAiEnabled\x18\x11 \x01(\bR\x10problemAiEnabled\x12\x1c\n" +
-	"\tcreatedAt\x18\x12 \x01(\x03R\tcreatedAt\"e\n" +
+	"\tcreatedAt\x18\x12 \x01(\x03R\tcreatedAt\"\x83\x01\n" +
 	"\tUpdateReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
 	"\x05email\x18\x04 \x01(\tR\x05email\x12\x16\n" +
-	"\x06avatar\x18\x06 \x01(\tR\x06avatar\"9\n" +
+	"\x06avatar\x18\x06 \x01(\tR\x06avatar\x12\x1c\n" +
+	"\temailCode\x18\a \x01(\tR\temailCode\"9\n" +
 	"\tUpdateRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"@\n" +

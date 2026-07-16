@@ -2,6 +2,11 @@ package service
 
 import (
 	"context"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
 	"cwxu-algo/api/core/v1/spider"
 	"cwxu-algo/api/core/v1/submit_log"
 	"cwxu-algo/api/user/v1/profile"
@@ -13,9 +18,6 @@ import (
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/dal"
 	"cwxu-algo/app/user/internal/data/model"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
@@ -23,6 +25,9 @@ import (
 	"github.com/go-kratos/kratos/v2/transport/grpc"
 	grpc2 "google.golang.org/grpc"
 )
+
+// 与 auth 包校验规则一致
+var profileEmailRe = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 
 var (
 	UpdateForbidden = errors.Forbidden("禁止访问", "您无权更新该用户资料")
@@ -269,22 +274,53 @@ func (p *ProfileService) Update(ctx context.Context, req *profile.UpdateReq) (*p
 	if !auth.VerifySelfOrAbove(ctx, uint(req.UserId)) {
 		return nil, UpdateForbidden
 	}
-	// 构建 User
+	cur, err := p.profileDal.GetById(ctx, int64(req.UserId))
+	if err != nil || cur == nil {
+		return &profile.UpdateRes{Code: 1, Message: "用户不存在"}, nil
+	}
+
+	newEmail := strings.ToLower(strings.TrimSpace(req.GetEmail()))
+	oldEmail := strings.ToLower(strings.TrimSpace(cur.Email))
+	emailChanged := newEmail != oldEmail
+
+	if emailChanged {
+		if newEmail == "" {
+			return &profile.UpdateRes{Code: 2, Message: "邮箱不能为空"}, nil
+		}
+		if !profileEmailRe.MatchString(newEmail) {
+			return &profile.UpdateRes{Code: 3, Message: "请输入有效邮箱"}, nil
+		}
+		// 新邮箱验证码（purpose=change_email）
+		code := strings.TrimSpace(req.GetEmailCode())
+		if code == "" {
+			return &profile.UpdateRes{Code: 4, Message: "请填写发往新邮箱的验证码"}, nil
+		}
+		if !VerifyEmailCode(ctx, p.profileDal.RDB(), purposeChangeEmail, newEmail, code) {
+			return &profile.UpdateRes{Code: 5, Message: "验证码错误或已过期"}, nil
+		}
+		// 唯一性（排除自己）
+		taken, tErr := p.profileDal.EmailTakenByOther(ctx, newEmail, cur.ID)
+		if tErr != nil {
+			return nil, errors.InternalServer("内部错误", tErr.Error())
+		}
+		if taken {
+			return &profile.UpdateRes{Code: 6, Message: "该邮箱已被其他账号使用"}, nil
+		}
+	}
+
+	// 昵称不再由此接口修改（请走组织内称呼）；仅更新头像 / 邮箱
 	pro := model.User{
 		ID:     uint(req.UserId),
 		Avatar: req.Avatar,
-		Name:   req.Name,
-		Email:  req.Email,
+		Email:  newEmail,
 	}
-	err := p.profileDal.Update(ctx, pro)
-	if err == nil {
-		res := &profile.UpdateRes{
-			Code:    0,
-			Message: "更新成功",
-		}
-		return res, nil
+	if !emailChanged {
+		pro.Email = cur.Email
 	}
-	return nil, errors.InternalServer("内部错误", err.Error())
+	if err := p.profileDal.UpdateAvatarEmail(ctx, pro, emailChanged); err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	return &profile.UpdateRes{Code: 0, Message: "更新成功"}, nil
 }
 
 func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (*profile.GetByIdRes, error) {
@@ -372,23 +408,23 @@ func (p *ProfileService) enforceProfileVisibility(ctx context.Context, targetUID
 }
 
 func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*profile.GetByIdRes, error) {
-	// 获取 platform spider 信息
-	conn, err := p.coreDataRPC()
-	if err != nil {
-		return nil, errors.InternalServer("内部错误", err.Error())
-	}
-	defer conn.Close()
-	s := spider.NewSpiderClient(conn)
-	sp, err := s.GetSpider(ctx, &spider.GetSpiderReq{UserId: int64(pf.ID)})
-	if err != nil {
-		return nil, errors.InternalServer("内部错误", err.Error())
-	}
+	// 获取 platform spider 信息（失败不阻断资料：旧用户/core 暂不可用时仍应能看邮箱与昵称）
 	spiders := make([]*profile.GetByIdRes_Spiders, 0)
-	for _, v := range sp.Data {
-		spiders = append(spiders, &profile.GetByIdRes_Spiders{
-			Platform: v.Platform,
-			Username: v.Username,
-		})
+	if conn, err := p.coreDataRPC(); err != nil {
+		log.Warnf("GetById spider dial user=%d: %v", pf.ID, err)
+	} else {
+		defer conn.Close()
+		s := spider.NewSpiderClient(conn)
+		if sp, err := s.GetSpider(ctx, &spider.GetSpiderReq{UserId: int64(pf.ID)}); err != nil {
+			log.Warnf("GetById spider user=%d: %v", pf.ID, err)
+		} else if sp != nil {
+			for _, v := range sp.Data {
+				spiders = append(spiders, &profile.GetByIdRes_Spiders{
+					Platform: v.Platform,
+					Username: v.Username,
+				})
+			}
+		}
 	}
 	canViewPrivate := auth.VerifySelfOrAbove(ctx, pf.ID)
 	dailyGrant, weeklyGrant := false, false

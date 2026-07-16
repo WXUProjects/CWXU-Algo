@@ -77,7 +77,7 @@ message RegisterRes {
 
 message RefreshReq {}
 
-// purpose: register | reset
+// purpose: register | reset | change_email
 message SendCodeReq {
   string email = 1;
   string purpose = 2;

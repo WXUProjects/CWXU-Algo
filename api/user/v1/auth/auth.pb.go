@@ -308,7 +308,7 @@ func (*RefreshReq) Descriptor() ([]byte, []int) {
 	return file_user_v1_auth_auth_proto_rawDescGZIP(), []int{4}
 }
 
-// purpose: register | reset
+// purpose: register | reset | change_email
 type SendCodeReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`

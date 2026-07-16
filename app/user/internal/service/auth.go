@@ -243,7 +243,7 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 	return
 }
 
-// SendCode 发送邮箱验证码（register | reset）
+// SendCode 发送邮箱验证码（register | reset | change_email）
 func (s *AuthService) SendCode(ctx context.Context, req *pb.SendCodeReq) (*pb.SendCodeRes, error) {
 	res := &pb.SendCodeRes{}
 	email := strings.ToLower(strings.TrimSpace(req.Email))
@@ -251,7 +251,7 @@ func (s *AuthService) SendCode(ctx context.Context, req *pb.SendCodeReq) (*pb.Se
 	if purpose == "" {
 		purpose = purposeRegister
 	}
-	if purpose != purposeRegister && purpose != purposeReset {
+	if purpose != purposeRegister && purpose != purposeReset && purpose != purposeChangeEmail {
 		res.Success = false
 		res.Message = "无效的验证用途"
 		return res, nil
@@ -260,6 +260,15 @@ func (s *AuthService) SendCode(ctx context.Context, req *pb.SendCodeReq) (*pb.Se
 		res.Success = false
 		res.Message = "请输入有效邮箱"
 		return res, nil
+	}
+	// 绑定/修改邮箱须登录
+	if purpose == purposeChangeEmail {
+		pd := auth.GetCurrentUser(ctx)
+		if pd == nil || pd.UserID == 0 {
+			res.Success = false
+			res.Message = "请先登录后再绑定邮箱"
+			return res, nil
+		}
 	}
 	sender := s.mailSender(ctx)
 	if sender == nil || !sender.Configured() {
@@ -280,6 +289,22 @@ func (s *AuthService) SendCode(ctx context.Context, req *pb.SendCodeReq) (*pb.Se
 		res.Success = true
 		res.Message = "若该邮箱已注册，验证码将很快送达"
 		return res, nil
+	}
+	if purpose == purposeChangeEmail {
+		pd := auth.GetCurrentUser(ctx)
+		if count >= 1 {
+			var owner model.User
+			if err := s.db.Select("id").Where("LOWER(email) = ?", email).First(&owner).Error; err == nil && pd != nil {
+				if owner.ID == pd.UserID {
+					res.Success = false
+					res.Message = "这已是你当前绑定的邮箱"
+					return res, nil
+				}
+				res.Success = false
+				res.Message = "该邮箱已被其他账号使用"
+				return res, nil
+			}
+		}
 	}
 
 	cdKey := cooldownPrefix + purpose + ":" + email
@@ -435,25 +460,7 @@ func (s *AuthService) Refresh(ctx context.Context, _ *pb.RefreshReq) (*pb.LoginR
 }
 
 func (s *AuthService) verifyCode(ctx context.Context, purpose, email, code string) bool {
-	if s.rdb == nil || code == "" {
-		return false
-	}
-	key := codeKeyPrefix + purpose + ":" + email
-	attemptKey := codeAttemptPrefix + purpose + ":" + email
-	const verifyAndConsume = `
-local attempts = redis.call('INCR', KEYS[2])
-if attempts == 1 then redis.call('PEXPIRE', KEYS[2], ARGV[3]) end
-if attempts > tonumber(ARGV[2]) then
-  redis.call('DEL', KEYS[1])
-  return 0
-end
-local stored = redis.call('GET', KEYS[1])
-if not stored or stored ~= ARGV[1] then return 0 end
-redis.call('DEL', KEYS[1], KEYS[2])
-return 1`
-	result, err := s.rdb.Eval(ctx, verifyAndConsume, []string{key, attemptKey},
-		code, maxCodeAttempts, codeTTL.Milliseconds()).Int()
-	return err == nil && result == 1
+	return VerifyEmailCode(ctx, s.rdb, purpose, email, code)
 }
 
 func (s *AuthService) allowLoginAttempt(ctx context.Context, key string, maximum int64) (bool, error) {
@@ -522,6 +529,15 @@ func codeMailContent(purpose, code, brand string) (subject, body string) {
 		body = fmt.Sprintf(`<div style="font-family:sans-serif;line-height:1.6">
 <p>你好，</p>
 <p>你正在重置 %s 账号密码，验证码为：</p>
+<p style="font-size:24px;font-weight:bold;letter-spacing:4px">%s</p>
+<p>验证码 %d 分钟内有效。如非本人操作，请忽略本邮件。</p>
+<p style="color:#888">%s</p>
+</div>`, brand, code, int(codeTTL.Minutes()), brand)
+	case purposeChangeEmail:
+		subject = fmt.Sprintf("【%s】绑定邮箱验证码", brand)
+		body = fmt.Sprintf(`<div style="font-family:sans-serif;line-height:1.6">
+<p>你好，</p>
+<p>你正在为 %s 账号绑定或更换此邮箱，验证码为：</p>
 <p style="font-size:24px;font-weight:bold;letter-spacing:4px">%s</p>
 <p>验证码 %d 分钟内有效。如非本人操作，请忽略本邮件。</p>
 <p style="color:#888">%s</p>

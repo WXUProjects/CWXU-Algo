@@ -56,8 +56,50 @@ func (d *ProfileDal) GetByName(ctx context.Context, name string) ([]*model.User,
 	return userList, nil
 }
 
-// Update 更新用户信息
-// users.name（全局昵称）与公共域 org_display_name 为同一语义，改昵称时同步公共域称呼
+// RDB 供验证码等跨层使用
+func (d *ProfileDal) RDB() *redis.Client {
+	if d == nil {
+		return nil
+	}
+	return d.rdb
+}
+
+// EmailTakenByOther 邮箱是否被其他用户占用
+func (d *ProfileDal) EmailTakenByOther(ctx context.Context, email string, selfID uint) (bool, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return false, nil
+	}
+	var n int64
+	err := d.db.WithContext(ctx).Model(&model.User{}).
+		Where("LOWER(email) = ? AND id <> ?", email, selfID).
+		Count(&n).Error
+	return n > 0, err
+}
+
+// InvalidateProfileCache 删除资料缓存（组织内称呼等旁路更新后调用）
+func (d *ProfileDal) InvalidateProfileCache(ctx context.Context, userID uint) {
+	if d == nil || d.rdb == nil || userID == 0 {
+		return
+	}
+	_ = d.rdb.Del(ctx, fmt.Sprintf("user:%d:profile", userID)).Err()
+}
+
+// UpdateAvatarEmail 更新头像；emailChanged 时同时写邮箱。不再改 name（昵称走组织内称呼）。
+func (d *ProfileDal) UpdateAvatarEmail(ctx context.Context, profile model.User, emailChanged bool) error {
+	cacheKey := fmt.Sprintf("user:%d:profile", profile.ID)
+	return data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
+		updates := map[string]interface{}{
+			"avatar": profile.Avatar,
+		}
+		if emailChanged {
+			updates["email"] = strings.ToLower(strings.TrimSpace(profile.Email))
+		}
+		return d.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", profile.ID).Updates(updates).Error
+	})
+}
+
+// Update 兼容旧调用：头像+邮箱+昵称（管理端等）；新编辑资料走 UpdateAvatarEmail
 func (d *ProfileDal) Update(ctx context.Context, profile model.User) error {
 	cacheKey := fmt.Sprintf("user:%d:profile", profile.ID)
 	err := data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
