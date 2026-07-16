@@ -556,7 +556,7 @@ type SubmitInventoryRes struct {
 	SubmitLogsRealTotal int64 `protobuf:"varint,4,opt,name=submitLogsRealTotal,proto3" json:"submitLogsRealTotal,omitempty"`
 	// counted_submit_ids 账本行数
 	CountedSubmitIdsTotal int64 `protobuf:"varint,5,opt,name=countedSubmitIdsTotal,proto3" json:"countedSubmitIdsTotal,omitempty"`
-	// 热表时间范围（unix 秒；无数据为 0）
+	// 明细时间范围（unix 秒；无数据为 0）
 	OldestTime    int64 `protobuf:"varint,6,opt,name=oldestTime,proto3" json:"oldestTime,omitempty"`
 	NewestTime    int64 `protobuf:"varint,7,opt,name=newestTime,proto3" json:"newestTime,omitempty"`
 	unknownFields protoimpl.UnknownFields

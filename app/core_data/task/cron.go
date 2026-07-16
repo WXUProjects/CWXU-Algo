@@ -9,7 +9,6 @@ import (
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/core_data/internal/data"
-	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -421,10 +420,6 @@ func (t *CronTask) Do() {
 	_, _ = c.AddFunc("*/5 * * * *", func() {
 		t.runCalendarNotify()
 	})
-	// 每日裁剪热窗外 submit_logs（默认近 4 个日历月；预聚合/账本不动）
-	_, _ = c.AddFunc("20 3 * * *", func() {
-		t.runSubmitLogPrune()
-	})
 	// 启动后异步跑一次爬取，避免空库等到下一个 12h 点
 	go func() {
 		time.Sleep(8 * time.Second)
@@ -435,16 +430,13 @@ func (t *CronTask) Do() {
 		}
 		t.runCalendarCrawl()
 	}()
-	// 启动后异步跑 submit 热表清洗（幂等；已 hot_only 则 skip，日常靠 prune 收紧）
-	go t.runSubmitRetentionMigrateOnce()
 	c.Start()
 	t.cron = c
 	t.running = true
 	stopCh := t.stopCh
 	t.mu.Unlock()
 
-	log.Infof("CronTask started: spider/summary every 5m; calendar crawl 12h + notify 5m; submit prune 03:20 (hot=%dm)",
-		model.SubmitLogRetentionMonths)
+	log.Infof("CronTask started: spider/summary every 5m; calendar crawl 12h + notify 5m")
 
 	defer func() {
 		t.mu.Lock()
@@ -464,43 +456,3 @@ func (t *CronTask) Do() {
 	log.Infof("CronTask stopped")
 }
 
-// runSubmitRetentionMigrateOnce 回填写死层/账本并删除热窗外明细（幂等；已完成则 skip）
-func (t *CronTask) runSubmitRetentionMigrateOnce() {
-	time.Sleep(15 * time.Second)
-	select {
-	case <-t.stopCh:
-		return
-	default:
-	}
-	if t.db == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
-	defer cancel()
-	res, err := dal.RunSubmitRetentionMigrate(ctx, t.db, t.rdb, false)
-	if err != nil {
-		log.Errorf("submit_retention migrate failed: %v", err)
-		return
-	}
-	if res != nil && res.Skipped {
-		log.Infof("submit_retention migrate skipped (already done)")
-	}
-}
-
-// runSubmitLogPrune 热表只保留 SubmitLogRetentionMonths 个日历月内明细
-func (t *CronTask) runSubmitLogPrune() {
-	if !t.tryCronLock("submit_prune", 2*time.Hour) {
-		return
-	}
-	if t.db == nil {
-		return
-	}
-	n, err := dal.PruneColdSubmitLogs(context.Background(), t.db, time.Now(), 5000)
-	if err != nil {
-		log.Errorf("CronTask submit_prune failed: %v", err)
-		return
-	}
-	if n > 0 {
-		log.Infof("CronTask submit_prune deleted=%d", n)
-	}
-}

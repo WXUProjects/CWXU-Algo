@@ -29,7 +29,7 @@ type SpiderHTTPServer interface {
 	// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
 	PurgeSubmitsAndRecrawl(context.Context, *PurgeSubmitsAndRecrawlReq) (*PurgeSubmitsAndRecrawlRes, error)
 	SetSpider(context.Context, *SetSpiderReq) (*SetSpiderRep, error)
-	// SubmitInventory 运维：提交库存（热表 / 账本真实行数，仅站管）
+	// SubmitInventory 运维：提交库存（明细 / 账本真实行数，仅站管）
 	SubmitInventory(context.Context, *SubmitInventoryReq) (*SubmitInventoryRes, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 	// UpdateAll 管理员一键全量更新所有已绑定 OJ 的用户
@@ -156,7 +156,7 @@ type SpiderHTTPClient interface {
 	// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
 	PurgeSubmitsAndRecrawl(ctx context.Context, req *PurgeSubmitsAndRecrawlReq, opts ...http.CallOption) (rsp *PurgeSubmitsAndRecrawlRes, err error)
 	SetSpider(ctx context.Context, req *SetSpiderReq, opts ...http.CallOption) (rsp *SetSpiderRep, err error)
-	// SubmitInventory 运维：提交库存（热表 / 账本真实行数，仅站管）
+	// SubmitInventory 运维：提交库存（明细 / 账本真实行数，仅站管）
 	SubmitInventory(ctx context.Context, req *SubmitInventoryReq, opts ...http.CallOption) (rsp *SubmitInventoryRes, err error)
 	Update(ctx context.Context, req *UpdateReq, opts ...http.CallOption) (rsp *UpdateRes, err error)
 	// UpdateAll 管理员一键全量更新所有已绑定 OJ 的用户
@@ -198,7 +198,7 @@ func (c *SpiderHTTPClientImpl) SetSpider(ctx context.Context, in *SetSpiderReq, 
 	return &out, nil
 }
 
-// SubmitInventory 运维：提交库存（热表 / 账本真实行数，仅站管）
+// SubmitInventory 运维：提交库存（明细 / 账本真实行数，仅站管）
 func (c *SpiderHTTPClientImpl) SubmitInventory(ctx context.Context, in *SubmitInventoryReq, opts ...http.CallOption) (*SubmitInventoryRes, error) {
 	var out SubmitInventoryRes
 	pattern := "/v1/core/spider/submit-inventory"

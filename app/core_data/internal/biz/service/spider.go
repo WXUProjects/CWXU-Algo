@@ -141,7 +141,7 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 			log.Infof("Spider: pruned %d duplicate leetcode recent-AC rows user=%d", n, userId)
 		}
 	}
-	// 账本去重：已计入预聚合的 submit_id 不再累加（热表可已删；冷只在账本）
+	// 账本去重：已计入预聚合的 submit_id 不再累加（防全量重爬双计）
 	neu, err := dal.FilterUncountedSubmits(ctx, uc.data.DB, tmp)
 	if err != nil {
 		return 0, err
@@ -149,14 +149,13 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 	if len(neu) == 0 {
 		return 0, nil
 	}
-	// 异常大批量：多为账本残缺后全量把冷历史当新行（冷数据双计）
+	// 异常大批量：多为账本残缺后全量把历史当新行叠统计
 	if len(neu) >= 2000 {
 		log.Warnf("Spider: large uncounted batch user=%d platform=%s fetched=%d uncounted=%d needAll=%v (check counted_submit_ids)",
 			userId, plat.Platform, len(tmp), len(neu), needAll)
 	}
 
-	// 先预聚合+账本，再只把近 6 个月写入热表
-	now := time.Now()
+	// 预聚合+账本，并全量写入 submit_logs（不再做热窗裁剪）
 	err = uc.data.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := dal.ApplyDailyDeltas(ctx, tx, dal.AggregateSubmitDeltas(neu)); err != nil {
 			return err
@@ -167,14 +166,10 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 		if err := dal.InsertCountedSubmitIDs(ctx, tx, neu); err != nil {
 			return err
 		}
-		hot := dal.FilterHotSubmitLogs(neu, now)
-		if len(hot) == 0 {
-			return nil
-		}
 		return tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "submit_id"}},
 			DoNothing: true,
-		}).CreateInBatches(&hot, submitInsertBatchSize).Error
+		}).CreateInBatches(&neu, submitInsertBatchSize).Error
 	})
 	if err != nil {
 		return 0, err

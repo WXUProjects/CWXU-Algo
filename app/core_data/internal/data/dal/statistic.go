@@ -75,8 +75,7 @@ func (d *StatisticDal) HeatmapQueryScoped(ctx context.Context, startDate, endDat
 	if err != nil {
 		return nil, err
 	}
-	// 汇总表尚未回填时可能全 0：仅当该用户/范围完全无预聚合行时回退热表
-	// （热表仅 6 个月，回退不能当全历史真相）
+	// 汇总表尚未回填时可能全 0：仅当该用户/范围完全无预聚合行时回退 submit_logs
 	if heatmapAllZero(result) {
 		var n int64
 		probe := d.db.WithContext(ctx).Table("daily_user_stats")

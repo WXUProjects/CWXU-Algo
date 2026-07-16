@@ -5,6 +5,7 @@ import (
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
 	"cwxu-algo/app/core_data/internal/data"
+	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
 	"cwxu-algo/app/core_data/internal/spider/problem_fetch"
@@ -66,6 +67,10 @@ func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) {
 		if _, _, err := uc.resolveOne(&logs[i], true); err != nil {
 			log.Debugf("resolve submit %d: %v", logs[i].ID, err)
 		}
+	}
+	// 已绑定但预聚合仍停在 e:/n: 的存量键一并升级（画像 JOIN 也兼容 e:）
+	if err := dal.PromoteUserACFromBoundSubmits(context.Background(), uc.data.DB, userId); err != nil {
+		log.Warnf("PromoteUserACFromBoundSubmits user=%d: %v", userId, err)
 	}
 }
 
@@ -133,6 +138,20 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*m
 		"problem_id":  pid,
 		"external_id": parsed.ExternalID,
 	}).Error
+	sl.ProblemID = &pid
+	sl.ExternalID = parsed.ExternalID
+
+	// 画像预聚合：绑题后把 e:/n: 键升级为 p:{id}（写路径在绑题前多写 e:/n:）
+	if sl.IsAC {
+		oldKeys := []string{
+			model.ACProblemKey(sl.Platform, parsed.ExternalID, sl.Problem, nil),
+			model.ACProblemKey(sl.Platform, sl.ExternalID, sl.Problem, nil),
+			model.ACProblemKey(parsed.Platform, parsed.ExternalID, sl.Problem, nil),
+		}
+		if err := dal.PromoteUserACKeysToProblemID(context.Background(), uc.data.DB, sl.UserID, oldKeys, pid); err != nil {
+			log.Warnf("PromoteUserACKeys user=%d pid=%d: %v", sl.UserID, pid, err)
+		}
+	}
 
 	prio := mqPriorityBulk
 	if highPriority {
@@ -1168,17 +1187,25 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	Count int64
 }, totalAC int64, err error) {
 
-	// 画像读 user_ac_problems（生涯写死层），不依赖仅保留 6 个月的 submit_logs
+	// 画像读 user_ac_problems（生涯预聚合）；JOIN 兼容 p:{id} 与 e:platform:external_id
 	type tagRow struct {
 		Tag   string
 		Count int64
 	}
 	var tags []tagRow
-	// problem_key = p:{id} 时才能 join 题库标签
+	const userACJoinProblems = `
+		FROM user_ac_problems u
+		JOIN problems p ON (
+			u.problem_key = 'p:' || p.id::text
+			OR (
+				p.external_id IS NOT NULL AND btrim(p.external_id) <> ''
+				AND u.problem_key = 'e:' || p.platform || ':' || p.external_id
+			)
+		)
+	`
 	err = uc.data.DB.Raw(`
 		SELECT tag, COUNT(DISTINCT p.id) AS count
-		FROM user_ac_problems u
-		JOIN problems p ON u.problem_key = 'p:' || p.id::text
+		`+userACJoinProblems+`
 		CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(p.tags::jsonb, '[]'::jsonb)) AS tag
 		WHERE u.user_id = ? AND p.status = ?
 		  AND p.tags IS NOT NULL AND p.tags::text NOT IN ('', '[]', 'null')
@@ -1217,8 +1244,7 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	var plats []nc
 	if e := uc.data.DB.Raw(`
 		SELECT COALESCE(NULLIF(btrim(u.platform), ''), p.platform) AS name, COUNT(DISTINCT p.id) AS count
-		FROM user_ac_problems u
-		JOIN problems p ON u.problem_key = 'p:' || p.id::text
+		`+userACJoinProblems+`
 		WHERE u.user_id = ?
 		GROUP BY 1
 	`, userID).Scan(&plats).Error; e != nil {
@@ -1234,8 +1260,7 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	var diffs []nc
 	if e := uc.data.DB.Raw(`
 		SELECT p.difficulty AS name, COUNT(DISTINCT p.id) AS count
-		FROM user_ac_problems u
-		JOIN problems p ON u.problem_key = 'p:' || p.id::text
+		`+userACJoinProblems+`
 		WHERE u.user_id = ?
 		  AND p.difficulty IS NOT NULL AND BTRIM(p.difficulty) <> ''
 		  AND UPPER(BTRIM(p.difficulty)) NOT IN ('UNKNOWN','NULL','NONE')

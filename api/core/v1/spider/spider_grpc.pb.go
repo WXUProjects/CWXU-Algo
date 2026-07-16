@@ -39,7 +39,7 @@ type SpiderClient interface {
 	UpdateAll(ctx context.Context, in *UpdateAllReq, opts ...grpc.CallOption) (*UpdateAllRes, error)
 	// 删除用户时清空该用户在 core 的全部数据（OJ 绑定 / 提交 / 比赛记录）
 	PurgeUserData(ctx context.Context, in *PurgeUserDataReq, opts ...grpc.CallOption) (*PurgeUserDataRes, error)
-	// 运维：提交库存（热表 / 账本真实行数，仅站管）
+	// 运维：提交库存（明细 / 账本真实行数，仅站管）
 	SubmitInventory(ctx context.Context, in *SubmitInventoryReq, opts ...grpc.CallOption) (*SubmitInventoryRes, error)
 	// 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
 	PurgeSubmitsAndRecrawl(ctx context.Context, in *PurgeSubmitsAndRecrawlReq, opts ...grpc.CallOption) (*PurgeSubmitsAndRecrawlRes, error)
@@ -134,7 +134,7 @@ type SpiderServer interface {
 	UpdateAll(context.Context, *UpdateAllReq) (*UpdateAllRes, error)
 	// 删除用户时清空该用户在 core 的全部数据（OJ 绑定 / 提交 / 比赛记录）
 	PurgeUserData(context.Context, *PurgeUserDataReq) (*PurgeUserDataRes, error)
-	// 运维：提交库存（热表 / 账本真实行数，仅站管）
+	// 运维：提交库存（明细 / 账本真实行数，仅站管）
 	SubmitInventory(context.Context, *SubmitInventoryReq) (*SubmitInventoryRes, error)
 	// 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
 	PurgeSubmitsAndRecrawl(context.Context, *PurgeSubmitsAndRecrawlReq) (*PurgeSubmitsAndRecrawlRes, error)

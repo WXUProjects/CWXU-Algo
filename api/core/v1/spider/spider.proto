@@ -30,7 +30,7 @@ service Spider {
   }
   // 删除用户时清空该用户在 core 的全部数据（OJ 绑定 / 提交 / 比赛记录）
   rpc PurgeUserData (PurgeUserDataReq) returns (PurgeUserDataRes) {}
-  // 运维：提交库存（热表 / 账本真实行数，仅站管）
+  // 运维：提交库存（明细 / 账本真实行数，仅站管）
   rpc SubmitInventory (SubmitInventoryReq) returns (SubmitInventoryRes) {
     option (google.api.http) = {
       get: "/v1/core/spider/submit-inventory"
@@ -105,7 +105,7 @@ message SubmitInventoryRes {
   int64 submitLogsRealTotal = 4;
   // counted_submit_ids 账本行数
   int64 countedSubmitIdsTotal = 5;
-  // 热表时间范围（unix 秒；无数据为 0）
+  // 明细时间范围（unix 秒；无数据为 0）
   int64 oldestTime = 6;
   int64 newestTime = 7;
 }

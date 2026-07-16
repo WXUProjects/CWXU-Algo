@@ -43,20 +43,6 @@ func TestAggregateSubmitDeltas(t *testing.T) {
 	}
 }
 
-func TestFilterHotSubmitLogs(t *testing.T) {
-	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.Local)
-	old := now.AddDate(0, -7, 0)
-	hot := now.AddDate(0, -1, 0)
-	logs := []model.SubmitLog{
-		{SubmitID: "old", Time: old},
-		{SubmitID: "hot", Time: hot},
-	}
-	out := FilterHotSubmitLogs(logs, now)
-	if len(out) != 1 || out[0].SubmitID != "hot" {
-		t.Fatalf("got %+v", out)
-	}
-}
-
 func TestDedupeSubmitLogsBySubmitID(t *testing.T) {
 	logs := []model.SubmitLog{
 		{SubmitID: "a", Problem: "1"},

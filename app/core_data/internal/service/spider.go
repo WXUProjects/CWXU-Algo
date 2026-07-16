@@ -134,7 +134,7 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 		if err := tx.Where("user_id = ? AND platform = ?", req.UserId, platformName).Delete(&model.ContestLog{}).Error; err != nil {
 			return err
 		}
-		// 按平台剪枝预聚合 + 账本（热表仅 6 个月，不可再从残缺明细 Rebuild）
+		// 按平台剪枝预聚合 + 账本，再全量重爬该平台
 		if err := dal.DeletePlatformDailyStats(ctx, tx, req.UserId, platformName); err != nil {
 			return err
 		}
@@ -301,11 +301,7 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 	// Redis：全局 ver + 每用户训练相关缓存/爬虫锁
 	s.purgeTrainingCaches(ctx, userIds)
 
-	// 标记 hot_only + done：禁止重启后 migrate 用空热表 destructive 重建预聚合
-	// （全量重爬写路径会重新灌 daily/user_ac/ledger；冷明细仍只落预聚合）
-	dal.MarkRetentionAfterPurge(s.db, s.rdb)
-
-	// 全部入队全量重爬
+	// 全部入队全量重爬（写路径会重新灌 submit_logs + daily/user_ac/ledger）
 	go s.spider.DoBatch(context.Background(), userIds, true, 0, 0)
 
 	log.Warnf("ops purge-submits admin=%d logs=%d ledger=%d daily=%d ac=%d contests=%d enqueued=%d",
@@ -332,7 +328,6 @@ func (s SpiderService) purgeTrainingCaches(ctx context.Context, userIds []int64)
 	}
 	_ = s.rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
 	_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
-	// 仅清 migrate 锁；done/hot_only 由 MarkRetentionAfterPurge 重写，勿只 Del 导致重启再重建
 
 	plats := []string{"AtCoder", "Codeforces", "LuoGu", "NowCoder", "QOJ", "LeetCode", "CodeForces"}
 	const chunk = 200

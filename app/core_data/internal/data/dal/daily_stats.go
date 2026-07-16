@@ -127,28 +127,13 @@ func InsertCountedSubmitIDs(ctx context.Context, db *gorm.DB, logs []model.Submi
 	return nil
 }
 
-// FilterHotSubmitLogs 仅保留热窗内明细（近 6 个月）
-func FilterHotSubmitLogs(logs []model.SubmitLog, now time.Time) []model.SubmitLog {
-	if len(logs) == 0 {
-		return nil
-	}
-	cutoff := model.SubmitLogHotCutoff(now)
-	out := make([]model.SubmitLog, 0, len(logs))
-	for i := range logs {
-		if !logs[i].Time.Before(cutoff) {
-			out = append(out, logs[i])
-		}
-	}
-	return out
-}
-
 // FilterUncountedSubmits 入库前去重（账本为真相）：
 //  1) 本批内按 submit_id 去重
-//  2) 去掉 counted_submit_ids 已有（冷明细剪掉后仍靠账本防双计）
-//  3) 热表 submit_logs 兜底（账本未写完/迁移前）
+//  2) 去掉 counted_submit_ids 已有（防全量重爬双计）
+//  3) submit_logs 兜底（账本未写完时）
 //  4) 力扣 lc-prob：同一用户同一 titleSlug 已有则跳过
 //
-// 注意：daily_user_stats 是累加语义；若账本残缺，全量爬会把冷历史再次 ApplyDaily。
+// 注意：daily_user_stats 是累加语义；若账本残缺，全量爬会把历史再次 ApplyDaily。
 func FilterUncountedSubmits(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) ([]model.SubmitLog, error) {
 	if len(logs) == 0 {
 		return nil, nil
@@ -166,7 +151,7 @@ func FilterUncountedSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 	const chunk = 500
 	exist := make(map[string]struct{}, len(ids)/2)
 	hasLedger := db.Migrator().HasTable(&model.CountedSubmitID{})
-	// 账本为唯一真相；热表仅兜底（冷提交不在热表）
+	// 账本为唯一真相；submit_logs 仅兜底
 	for i := 0; i < len(ids); i += chunk {
 		j := i + chunk
 		if j > len(ids) {
@@ -184,7 +169,7 @@ func FilterUncountedSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 				exist[id] = struct{}{}
 			}
 		}
-		// 热表兜底：防止账本短暂落后时热窗口双计
+		// submit_logs 兜底：防止账本短暂落后时双计
 		var foundHot []string
 		if err := db.WithContext(ctx).Model(&model.SubmitLog{}).
 			Where("submit_id IN ?", part).
@@ -222,7 +207,7 @@ func FilterNewSubmitLogs(ctx context.Context, db *gorm.DB, logs []model.SubmitLo
 }
 
 // BackfillDailyUserStatsIfEmpty 表为空时从 submit_logs 全量聚合一次（启动幂等）
-// 含 platform 维度；迁移完整流程见 RunSubmitRetentionMigrate。
+// 含 platform 维度。
 func BackfillDailyUserStatsIfEmpty(db *gorm.DB) {
 	if db == nil || !db.Migrator().HasTable(&model.DailyUserStat{}) {
 		return
@@ -453,36 +438,4 @@ func DeleteUserCountedIDs(ctx context.Context, db *gorm.DB, userID int64) error 
 	return db.WithContext(ctx).Where("user_id = ?", userID).Delete(&model.CountedSubmitID{}).Error
 }
 
-// PruneColdSubmitLogs 分批删除热窗外明细；返回累计删除行数
-func PruneColdSubmitLogs(ctx context.Context, db *gorm.DB, now time.Time, batchSize int) (int64, error) {
-	if db == nil {
-		return 0, nil
-	}
-	if batchSize <= 0 {
-		batchSize = 5000
-	}
-	cutoff := model.SubmitLogHotCutoff(now)
-	var total int64
-	for {
-		res := db.WithContext(ctx).Exec(`
-			DELETE FROM submit_logs
-			WHERE ctid IN (
-				SELECT ctid FROM submit_logs
-				WHERE time < ?
-				LIMIT ?
-			)
-		`, cutoff, batchSize)
-		if res.Error != nil {
-			return total, res.Error
-		}
-		total += res.RowsAffected
-		if res.RowsAffected == 0 {
-			break
-		}
-		// 大批量时让出连接
-		if res.RowsAffected < int64(batchSize) {
-			break
-		}
-	}
-	return total, nil
-}
+
