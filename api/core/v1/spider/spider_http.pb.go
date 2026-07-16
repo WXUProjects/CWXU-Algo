@@ -19,12 +19,18 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
+const OperationSpiderPurgeSubmitsAndRecrawl = "/api.core.v1.spider.Spider/PurgeSubmitsAndRecrawl"
 const OperationSpiderSetSpider = "/api.core.v1.spider.Spider/SetSpider"
+const OperationSpiderSubmitInventory = "/api.core.v1.spider.Spider/SubmitInventory"
 const OperationSpiderUpdate = "/api.core.v1.spider.Spider/Update"
 const OperationSpiderUpdateAll = "/api.core.v1.spider.Spider/UpdateAll"
 
 type SpiderHTTPServer interface {
+	// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
+	PurgeSubmitsAndRecrawl(context.Context, *PurgeSubmitsAndRecrawlReq) (*PurgeSubmitsAndRecrawlRes, error)
 	SetSpider(context.Context, *SetSpiderReq) (*SetSpiderRep, error)
+	// SubmitInventory 运维：提交库存（热表 / 账本真实行数，仅站管）
+	SubmitInventory(context.Context, *SubmitInventoryReq) (*SubmitInventoryRes, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 	// UpdateAll 管理员一键全量更新所有已绑定 OJ 的用户
 	UpdateAll(context.Context, *UpdateAllReq) (*UpdateAllRes, error)
@@ -35,6 +41,8 @@ func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
 	r.POST("/v1/core/spider/set", _Spider_SetSpider0_HTTP_Handler(srv))
 	r.POST("/v1/core/spider/update", _Spider_Update1_HTTP_Handler(srv))
 	r.POST("/v1/core/spider/update-all", _Spider_UpdateAll0_HTTP_Handler(srv))
+	r.GET("/v1/core/spider/submit-inventory", _Spider_SubmitInventory0_HTTP_Handler(srv))
+	r.POST("/v1/core/spider/purge-submits-and-recrawl", _Spider_PurgeSubmitsAndRecrawl0_HTTP_Handler(srv))
 }
 
 func _Spider_SetSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
@@ -103,8 +111,53 @@ func _Spider_UpdateAll0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context
 	}
 }
 
+func _Spider_SubmitInventory0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in SubmitInventoryReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderSubmitInventory)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.SubmitInventory(ctx, req.(*SubmitInventoryReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*SubmitInventoryRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Spider_PurgeSubmitsAndRecrawl0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in PurgeSubmitsAndRecrawlReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderPurgeSubmitsAndRecrawl)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.PurgeSubmitsAndRecrawl(ctx, req.(*PurgeSubmitsAndRecrawlReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*PurgeSubmitsAndRecrawlRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SpiderHTTPClient interface {
+	// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
+	PurgeSubmitsAndRecrawl(ctx context.Context, req *PurgeSubmitsAndRecrawlReq, opts ...http.CallOption) (rsp *PurgeSubmitsAndRecrawlRes, err error)
 	SetSpider(ctx context.Context, req *SetSpiderReq, opts ...http.CallOption) (rsp *SetSpiderRep, err error)
+	// SubmitInventory 运维：提交库存（热表 / 账本真实行数，仅站管）
+	SubmitInventory(ctx context.Context, req *SubmitInventoryReq, opts ...http.CallOption) (rsp *SubmitInventoryRes, err error)
 	Update(ctx context.Context, req *UpdateReq, opts ...http.CallOption) (rsp *UpdateRes, err error)
 	// UpdateAll 管理员一键全量更新所有已绑定 OJ 的用户
 	UpdateAll(ctx context.Context, req *UpdateAllReq, opts ...http.CallOption) (rsp *UpdateAllRes, err error)
@@ -118,6 +171,20 @@ func NewSpiderHTTPClient(client *http.Client) SpiderHTTPClient {
 	return &SpiderHTTPClientImpl{client}
 }
 
+// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
+func (c *SpiderHTTPClientImpl) PurgeSubmitsAndRecrawl(ctx context.Context, in *PurgeSubmitsAndRecrawlReq, opts ...http.CallOption) (*PurgeSubmitsAndRecrawlRes, error) {
+	var out PurgeSubmitsAndRecrawlRes
+	pattern := "/v1/core/spider/purge-submits-and-recrawl"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationSpiderPurgeSubmitsAndRecrawl))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *SpiderHTTPClientImpl) SetSpider(ctx context.Context, in *SetSpiderReq, opts ...http.CallOption) (*SetSpiderRep, error) {
 	var out SetSpiderRep
 	pattern := "/v1/core/spider/set"
@@ -125,6 +192,20 @@ func (c *SpiderHTTPClientImpl) SetSpider(ctx context.Context, in *SetSpiderReq, 
 	opts = append(opts, http.Operation(OperationSpiderSetSpider))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SubmitInventory 运维：提交库存（热表 / 账本真实行数，仅站管）
+func (c *SpiderHTTPClientImpl) SubmitInventory(ctx context.Context, in *SubmitInventoryReq, opts ...http.CallOption) (*SubmitInventoryRes, error) {
+	var out SubmitInventoryRes
+	pattern := "/v1/core/spider/submit-inventory"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationSpiderSubmitInventory))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {
 		return nil, err
 	}

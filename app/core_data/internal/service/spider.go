@@ -170,6 +170,168 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 	}, nil
 }
 
+const purgeSubmitsConfirm = "PURGE_SUBMITS"
+
+// SubmitInventory 运维：真实入库提交库存（仅站点管理员）
+func (s SpiderService) SubmitInventory(ctx context.Context, _ *spider.SubmitInventoryReq) (*spider.SubmitInventoryRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "仅站点管理员可查看提交库存")
+	}
+	var total, realTotal, ledger int64
+	if err := s.db.WithContext(ctx).Model(&model.SubmitLog{}).Count(&total).Error; err != nil {
+		return nil, InternalError
+	}
+	if err := s.db.WithContext(ctx).Model(&model.SubmitLog{}).
+		Where(model.SQLExcludeLeetCodeNonSubmit).
+		Count(&realTotal).Error; err != nil {
+		return nil, InternalError
+	}
+	if s.db.Migrator().HasTable(&model.CountedSubmitID{}) {
+		_ = s.db.WithContext(ctx).Model(&model.CountedSubmitID{}).Count(&ledger).Error
+	}
+	var bounds struct {
+		Oldest *time.Time
+		Newest *time.Time
+	}
+	_ = s.db.WithContext(ctx).Model(&model.SubmitLog{}).
+		Select("MIN(time) AS oldest, MAX(time) AS newest").
+		Scan(&bounds).Error
+	var oldest, newest int64
+	if bounds.Oldest != nil {
+		oldest = bounds.Oldest.Unix()
+	}
+	if bounds.Newest != nil {
+		newest = bounds.Newest.Unix()
+	}
+	return &spider.SubmitInventoryRes{
+		Code:                  0,
+		Message:               "ok",
+		SubmitLogsTotal:       total,
+		SubmitLogsRealTotal:   realTotal,
+		CountedSubmitIdsTotal: ledger,
+		OldestTime:            oldest,
+		NewestTime:            newest,
+	}, nil
+}
+
+// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管）
+// 删除 submit_logs / 账本 / 日汇总 / AC 预聚合；保留 platforms 与 contest_logs。
+func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.PurgeSubmitsAndRecrawlReq) (*spider.PurgeSubmitsAndRecrawlRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "仅站点管理员可执行此运维操作")
+	}
+	if strings.TrimSpace(req.GetConfirm()) != purgeSubmitsConfirm {
+		return &spider.PurgeSubmitsAndRecrawlRes{
+			Code:    2,
+			Message: "请输入确认口令 PURGE_SUBMITS",
+		}, nil
+	}
+	adminID := int64(auth.GetCurrentUserId(ctx))
+	// 全局锁防双点
+	if s.rdb != nil {
+		ok, err := s.rdb.SetNX(ctx, "ops:purge_submits", "1", 30*time.Minute).Result()
+		if err != nil {
+			log.Warnf("purge_submits lock redis: %v", err)
+		} else if !ok {
+			return &spider.PurgeSubmitsAndRecrawlRes{
+				Code:    3,
+				Message: "已有清空任务在进行，请稍后再试",
+			}, nil
+		}
+	}
+
+	deletedLogs, err := deleteAllInBatches(ctx, s.db, "submit_logs", 5000)
+	if err != nil {
+		log.Errorf("purge submit_logs: %v", err)
+		return nil, InternalError
+	}
+	var deletedLedger, deletedDaily, deletedAc int64
+	if s.db.Migrator().HasTable(&model.CountedSubmitID{}) {
+		res := s.db.WithContext(ctx).Where("1 = 1").Delete(&model.CountedSubmitID{})
+		if res.Error != nil {
+			return nil, InternalError
+		}
+		deletedLedger = res.RowsAffected
+	}
+	if s.db.Migrator().HasTable(&model.DailyUserStat{}) {
+		res := s.db.WithContext(ctx).Where("1 = 1").Delete(&model.DailyUserStat{})
+		if res.Error != nil {
+			return nil, InternalError
+		}
+		deletedDaily = res.RowsAffected
+	}
+	if s.db.Migrator().HasTable(&model.UserACProblem{}) {
+		res := s.db.WithContext(ctx).Where("1 = 1").Delete(&model.UserACProblem{})
+		if res.Error != nil {
+			return nil, InternalError
+		}
+		deletedAc += res.RowsAffected
+	}
+	if s.db.Migrator().HasTable(&model.UserACProblemDay{}) {
+		res := s.db.WithContext(ctx).Where("1 = 1").Delete(&model.UserACProblemDay{})
+		if res.Error != nil {
+			return nil, InternalError
+		}
+		deletedAc += res.RowsAffected
+	}
+
+	// 全局统计版本失效
+	if s.rdb != nil {
+		_ = s.rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
+		_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
+	}
+
+	var userIds []int64
+	if err := s.db.Model(&model.Platform{}).
+		Distinct("user_id").
+		Pluck("user_id", &userIds).Error; err != nil {
+		log.Errorf("purge recrawl list users: %v", err)
+		return nil, InternalError
+	}
+	// 异步分批全量重爬
+	go s.spider.DoBatch(context.Background(), userIds, true, 20, time.Minute)
+
+	log.Warnf("ops purge-submits admin=%d deleted_logs=%d ledger=%d daily=%d ac=%d enqueued=%d",
+		adminID, deletedLogs, deletedLedger, deletedDaily, deletedAc, len(userIds))
+
+	return &spider.PurgeSubmitsAndRecrawlRes{
+		Code:               0,
+		Message:            fmt.Sprintf("已清空提交相关数据，并为 %d 名已绑定用户触发全量重爬", len(userIds)),
+		DeletedSubmitLogs:  deletedLogs,
+		DeletedLedger:      deletedLedger,
+		DeletedDaily:       deletedDaily,
+		DeletedAc:          deletedAc,
+		EnqueuedUsers:      int64(len(userIds)),
+	}, nil
+}
+
+// deleteAllInBatches 分批清空表（避免大表长锁）
+func deleteAllInBatches(ctx context.Context, db *gorm.DB, table string, batch int) (int64, error) {
+	if db == nil || table == "" {
+		return 0, nil
+	}
+	if batch <= 0 {
+		batch = 5000
+	}
+	var total int64
+	for {
+		res := db.WithContext(ctx).Exec(fmt.Sprintf(`
+			DELETE FROM %s
+			WHERE ctid IN (
+				SELECT ctid FROM %s LIMIT %d
+			)
+		`, table, table, batch))
+		if res.Error != nil {
+			return total, res.Error
+		}
+		total += res.RowsAffected
+		if res.RowsAffected == 0 {
+			break
+		}
+	}
+	return total, nil
+}
+
 // PurgeUserData 硬删除用户在 core 库的全部关联数据（删除用户时调用）
 func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserDataReq) (*spider.PurgeUserDataRes, error) {
 	if req.UserId <= 0 {

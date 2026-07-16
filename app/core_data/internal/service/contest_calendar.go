@@ -239,11 +239,13 @@ func (s *ContestCalendarService) UpsertSub(ctx context.Context, req *contest_cal
 	}
 
 	// 订阅成功确认信（与开赛提醒独立）：
-	// enabled 保存成功即异步发信。新建/重开/改提前量必发；
-	// 已开启且参数不变（如重绑邮箱后再点订阅）也发，但 5 分钟限流防连点刷信。
+	// enabled=true 保存成功后**每次**异步发信（含已订阅再点、取消后再订）；不限流。
+	// enabled=false（关闭）不发「订阅成功」信。
+	_ = created
+	_ = prevEnabled
+	_ = prevAdvance
 	if req.GetEnabled() {
-		rateLimited := !created && prevEnabled && prevAdvance == saved.AdvanceMinutes
-		go s.sendSubscribeConfirmMail(email, saved, cal, true, rateLimited)
+		go s.sendSubscribeConfirmMail(email, saved, cal, true, false)
 	}
 
 	return &contest_calendar.UpsertSubRes{
@@ -295,29 +297,16 @@ func (s *ContestCalendarService) lookupUserEmail(ctx context.Context, userID int
 }
 
 // sendSubscribeConfirmMail 异步发送订阅成功确认信。
-// rateLimited=true 时：5 分钟内同一订阅最多发一封（防连点）；新建/重开/改提前量不受限。
+// rateLimited 参数保留兼容调用方；产品要求每次订阅都发，调用处传 false。
 func (s *ContestCalendarService) sendSubscribeConfirmMail(
 	to string,
 	sub *model.ContestCalendarSub,
 	cal *model.ContestCalendar,
 	doSend bool,
-	rateLimited bool,
+	_ bool, // rateLimited: 已禁用限流
 ) {
 	if !doSend || s.data == nil || strings.TrimSpace(to) == "" || sub == nil {
 		return
-	}
-	if rateLimited && s.data.RDB != nil {
-		key := fmt.Sprintf("cal:sub:confirm:%d:%s:%s:%d",
-			sub.UserID, sub.Scope, sub.Platform, sub.CalendarID)
-		ok, err := s.data.RDB.SetNX(context.Background(), key, "1", 5*time.Minute).Result()
-		if err != nil {
-			log.Warnf("UpsertSub confirm rate key: %v", err)
-			// Redis 故障时仍尝试发送，避免漏信
-		} else if !ok {
-			log.Infof("UpsertSub confirm skipped (rate limit) user=%d scope=%s plat=%s cal=%d",
-				sub.UserID, sub.Scope, sub.Platform, sub.CalendarID)
-			return
-		}
 	}
 
 	rt := sitesettings.Load(context.Background(), s.data.RDB, s.data.DB)

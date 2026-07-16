@@ -30,6 +30,19 @@ service Spider {
   }
   // 删除用户时清空该用户在 core 的全部数据（OJ 绑定 / 提交 / 比赛记录）
   rpc PurgeUserData (PurgeUserDataReq) returns (PurgeUserDataRes) {}
+  // 运维：提交库存（热表 / 账本真实行数，仅站管）
+  rpc SubmitInventory (SubmitInventoryReq) returns (SubmitInventoryRes) {
+    option (google.api.http) = {
+      get: "/v1/core/spider/submit-inventory"
+    };
+  }
+  // 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
+  rpc PurgeSubmitsAndRecrawl (PurgeSubmitsAndRecrawlReq) returns (PurgeSubmitsAndRecrawlRes) {
+    option (google.api.http) = {
+      post: "/v1/core/spider/purge-submits-and-recrawl",
+      body: "*"
+    };
+  }
 }
 
 message SetSpiderReq {
@@ -79,5 +92,36 @@ message PurgeUserDataReq {
 message PurgeUserDataRes {
   int64 code = 1;
   string message = 2;
+}
+
+message SubmitInventoryReq {}
+
+message SubmitInventoryRes {
+  int64 code = 1;
+  string message = 2;
+  // submit_logs 总行数（含力扣合成）
+  int64 submitLogsTotal = 3;
+  // 计入提交统计的行（排除 lc-ac / lc-prob）
+  int64 submitLogsRealTotal = 4;
+  // counted_submit_ids 账本行数
+  int64 countedSubmitIdsTotal = 5;
+  // 热表时间范围（unix 秒；无数据为 0）
+  int64 oldestTime = 6;
+  int64 newestTime = 7;
+}
+
+message PurgeSubmitsAndRecrawlReq {
+  // 必须为 PURGE_SUBMITS
+  string confirm = 1;
+}
+
+message PurgeSubmitsAndRecrawlRes {
+  int64 code = 1;
+  string message = 2;
+  int64 deletedSubmitLogs = 3;
+  int64 deletedLedger = 4;
+  int64 deletedDaily = 5;
+  int64 deletedAc = 6;
+  int64 enqueuedUsers = 7;
 }
 

@@ -19,11 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Spider_SetSpider_FullMethodName     = "/api.core.v1.spider.Spider/SetSpider"
-	Spider_GetSpider_FullMethodName     = "/api.core.v1.spider.Spider/GetSpider"
-	Spider_Update_FullMethodName        = "/api.core.v1.spider.Spider/Update"
-	Spider_UpdateAll_FullMethodName     = "/api.core.v1.spider.Spider/UpdateAll"
-	Spider_PurgeUserData_FullMethodName = "/api.core.v1.spider.Spider/PurgeUserData"
+	Spider_SetSpider_FullMethodName              = "/api.core.v1.spider.Spider/SetSpider"
+	Spider_GetSpider_FullMethodName              = "/api.core.v1.spider.Spider/GetSpider"
+	Spider_Update_FullMethodName                 = "/api.core.v1.spider.Spider/Update"
+	Spider_UpdateAll_FullMethodName              = "/api.core.v1.spider.Spider/UpdateAll"
+	Spider_PurgeUserData_FullMethodName          = "/api.core.v1.spider.Spider/PurgeUserData"
+	Spider_SubmitInventory_FullMethodName        = "/api.core.v1.spider.Spider/SubmitInventory"
+	Spider_PurgeSubmitsAndRecrawl_FullMethodName = "/api.core.v1.spider.Spider/PurgeSubmitsAndRecrawl"
 )
 
 // SpiderClient is the client API for Spider service.
@@ -37,6 +39,10 @@ type SpiderClient interface {
 	UpdateAll(ctx context.Context, in *UpdateAllReq, opts ...grpc.CallOption) (*UpdateAllRes, error)
 	// 删除用户时清空该用户在 core 的全部数据（OJ 绑定 / 提交 / 比赛记录）
 	PurgeUserData(ctx context.Context, in *PurgeUserDataReq, opts ...grpc.CallOption) (*PurgeUserDataRes, error)
+	// 运维：提交库存（热表 / 账本真实行数，仅站管）
+	SubmitInventory(ctx context.Context, in *SubmitInventoryReq, opts ...grpc.CallOption) (*SubmitInventoryRes, error)
+	// 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
+	PurgeSubmitsAndRecrawl(ctx context.Context, in *PurgeSubmitsAndRecrawlReq, opts ...grpc.CallOption) (*PurgeSubmitsAndRecrawlRes, error)
 }
 
 type spiderClient struct {
@@ -97,6 +103,26 @@ func (c *spiderClient) PurgeUserData(ctx context.Context, in *PurgeUserDataReq, 
 	return out, nil
 }
 
+func (c *spiderClient) SubmitInventory(ctx context.Context, in *SubmitInventoryReq, opts ...grpc.CallOption) (*SubmitInventoryRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubmitInventoryRes)
+	err := c.cc.Invoke(ctx, Spider_SubmitInventory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *spiderClient) PurgeSubmitsAndRecrawl(ctx context.Context, in *PurgeSubmitsAndRecrawlReq, opts ...grpc.CallOption) (*PurgeSubmitsAndRecrawlRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PurgeSubmitsAndRecrawlRes)
+	err := c.cc.Invoke(ctx, Spider_PurgeSubmitsAndRecrawl_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SpiderServer is the server API for Spider service.
 // All implementations must embed UnimplementedSpiderServer
 // for forward compatibility.
@@ -108,6 +134,10 @@ type SpiderServer interface {
 	UpdateAll(context.Context, *UpdateAllReq) (*UpdateAllRes, error)
 	// 删除用户时清空该用户在 core 的全部数据（OJ 绑定 / 提交 / 比赛记录）
 	PurgeUserData(context.Context, *PurgeUserDataReq) (*PurgeUserDataRes, error)
+	// 运维：提交库存（热表 / 账本真实行数，仅站管）
+	SubmitInventory(context.Context, *SubmitInventoryReq) (*SubmitInventoryRes, error)
+	// 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
+	PurgeSubmitsAndRecrawl(context.Context, *PurgeSubmitsAndRecrawlReq) (*PurgeSubmitsAndRecrawlRes, error)
 	mustEmbedUnimplementedSpiderServer()
 }
 
@@ -132,6 +162,12 @@ func (UnimplementedSpiderServer) UpdateAll(context.Context, *UpdateAllReq) (*Upd
 }
 func (UnimplementedSpiderServer) PurgeUserData(context.Context, *PurgeUserDataReq) (*PurgeUserDataRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method PurgeUserData not implemented")
+}
+func (UnimplementedSpiderServer) SubmitInventory(context.Context, *SubmitInventoryReq) (*SubmitInventoryRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitInventory not implemented")
+}
+func (UnimplementedSpiderServer) PurgeSubmitsAndRecrawl(context.Context, *PurgeSubmitsAndRecrawlReq) (*PurgeSubmitsAndRecrawlRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method PurgeSubmitsAndRecrawl not implemented")
 }
 func (UnimplementedSpiderServer) mustEmbedUnimplementedSpiderServer() {}
 func (UnimplementedSpiderServer) testEmbeddedByValue()                {}
@@ -244,6 +280,42 @@ func _Spider_PurgeUserData_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Spider_SubmitInventory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubmitInventoryReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).SubmitInventory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_SubmitInventory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).SubmitInventory(ctx, req.(*SubmitInventoryReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Spider_PurgeSubmitsAndRecrawl_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PurgeSubmitsAndRecrawlReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).PurgeSubmitsAndRecrawl(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_PurgeSubmitsAndRecrawl_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).PurgeSubmitsAndRecrawl(ctx, req.(*PurgeSubmitsAndRecrawlReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Spider_ServiceDesc is the grpc.ServiceDesc for Spider service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -270,6 +342,14 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PurgeUserData",
 			Handler:    _Spider_PurgeUserData_Handler,
+		},
+		{
+			MethodName: "SubmitInventory",
+			Handler:    _Spider_SubmitInventory_Handler,
+		},
+		{
+			MethodName: "PurgeSubmitsAndRecrawl",
+			Handler:    _Spider_PurgeSubmitsAndRecrawl_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

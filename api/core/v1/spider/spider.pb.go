@@ -510,6 +510,275 @@ func (x *PurgeUserDataRes) GetMessage() string {
 	return ""
 }
 
+type SubmitInventoryReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubmitInventoryReq) Reset() {
+	*x = SubmitInventoryReq{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitInventoryReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitInventoryReq) ProtoMessage() {}
+
+func (x *SubmitInventoryReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitInventoryReq.ProtoReflect.Descriptor instead.
+func (*SubmitInventoryReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{10}
+}
+
+type SubmitInventoryRes struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Code    int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	// submit_logs 总行数（含力扣合成）
+	SubmitLogsTotal int64 `protobuf:"varint,3,opt,name=submitLogsTotal,proto3" json:"submitLogsTotal,omitempty"`
+	// 计入提交统计的行（排除 lc-ac / lc-prob）
+	SubmitLogsRealTotal int64 `protobuf:"varint,4,opt,name=submitLogsRealTotal,proto3" json:"submitLogsRealTotal,omitempty"`
+	// counted_submit_ids 账本行数
+	CountedSubmitIdsTotal int64 `protobuf:"varint,5,opt,name=countedSubmitIdsTotal,proto3" json:"countedSubmitIdsTotal,omitempty"`
+	// 热表时间范围（unix 秒；无数据为 0）
+	OldestTime    int64 `protobuf:"varint,6,opt,name=oldestTime,proto3" json:"oldestTime,omitempty"`
+	NewestTime    int64 `protobuf:"varint,7,opt,name=newestTime,proto3" json:"newestTime,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubmitInventoryRes) Reset() {
+	*x = SubmitInventoryRes{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitInventoryRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitInventoryRes) ProtoMessage() {}
+
+func (x *SubmitInventoryRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitInventoryRes.ProtoReflect.Descriptor instead.
+func (*SubmitInventoryRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SubmitInventoryRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *SubmitInventoryRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *SubmitInventoryRes) GetSubmitLogsTotal() int64 {
+	if x != nil {
+		return x.SubmitLogsTotal
+	}
+	return 0
+}
+
+func (x *SubmitInventoryRes) GetSubmitLogsRealTotal() int64 {
+	if x != nil {
+		return x.SubmitLogsRealTotal
+	}
+	return 0
+}
+
+func (x *SubmitInventoryRes) GetCountedSubmitIdsTotal() int64 {
+	if x != nil {
+		return x.CountedSubmitIdsTotal
+	}
+	return 0
+}
+
+func (x *SubmitInventoryRes) GetOldestTime() int64 {
+	if x != nil {
+		return x.OldestTime
+	}
+	return 0
+}
+
+func (x *SubmitInventoryRes) GetNewestTime() int64 {
+	if x != nil {
+		return x.NewestTime
+	}
+	return 0
+}
+
+type PurgeSubmitsAndRecrawlReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 必须为 PURGE_SUBMITS
+	Confirm       string `protobuf:"bytes,1,opt,name=confirm,proto3" json:"confirm,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PurgeSubmitsAndRecrawlReq) Reset() {
+	*x = PurgeSubmitsAndRecrawlReq{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PurgeSubmitsAndRecrawlReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PurgeSubmitsAndRecrawlReq) ProtoMessage() {}
+
+func (x *PurgeSubmitsAndRecrawlReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PurgeSubmitsAndRecrawlReq.ProtoReflect.Descriptor instead.
+func (*PurgeSubmitsAndRecrawlReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *PurgeSubmitsAndRecrawlReq) GetConfirm() string {
+	if x != nil {
+		return x.Confirm
+	}
+	return ""
+}
+
+type PurgeSubmitsAndRecrawlRes struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Code              int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message           string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	DeletedSubmitLogs int64                  `protobuf:"varint,3,opt,name=deletedSubmitLogs,proto3" json:"deletedSubmitLogs,omitempty"`
+	DeletedLedger     int64                  `protobuf:"varint,4,opt,name=deletedLedger,proto3" json:"deletedLedger,omitempty"`
+	DeletedDaily      int64                  `protobuf:"varint,5,opt,name=deletedDaily,proto3" json:"deletedDaily,omitempty"`
+	DeletedAc         int64                  `protobuf:"varint,6,opt,name=deletedAc,proto3" json:"deletedAc,omitempty"`
+	EnqueuedUsers     int64                  `protobuf:"varint,7,opt,name=enqueuedUsers,proto3" json:"enqueuedUsers,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *PurgeSubmitsAndRecrawlRes) Reset() {
+	*x = PurgeSubmitsAndRecrawlRes{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PurgeSubmitsAndRecrawlRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PurgeSubmitsAndRecrawlRes) ProtoMessage() {}
+
+func (x *PurgeSubmitsAndRecrawlRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PurgeSubmitsAndRecrawlRes.ProtoReflect.Descriptor instead.
+func (*PurgeSubmitsAndRecrawlRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *PurgeSubmitsAndRecrawlRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *PurgeSubmitsAndRecrawlRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *PurgeSubmitsAndRecrawlRes) GetDeletedSubmitLogs() int64 {
+	if x != nil {
+		return x.DeletedSubmitLogs
+	}
+	return 0
+}
+
+func (x *PurgeSubmitsAndRecrawlRes) GetDeletedLedger() int64 {
+	if x != nil {
+		return x.DeletedLedger
+	}
+	return 0
+}
+
+func (x *PurgeSubmitsAndRecrawlRes) GetDeletedDaily() int64 {
+	if x != nil {
+		return x.DeletedDaily
+	}
+	return 0
+}
+
+func (x *PurgeSubmitsAndRecrawlRes) GetDeletedAc() int64 {
+	if x != nil {
+		return x.DeletedAc
+	}
+	return 0
+}
+
+func (x *PurgeSubmitsAndRecrawlRes) GetEnqueuedUsers() int64 {
+	if x != nil {
+		return x.EnqueuedUsers
+	}
+	return 0
+}
+
 type GetSpiderRep_Data struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Platform      string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
@@ -520,7 +789,7 @@ type GetSpiderRep_Data struct {
 
 func (x *GetSpiderRep_Data) Reset() {
 	*x = GetSpiderRep_Data{}
-	mi := &file_core_v1_spider_spider_proto_msgTypes[10]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -532,7 +801,7 @@ func (x *GetSpiderRep_Data) String() string {
 func (*GetSpiderRep_Data) ProtoMessage() {}
 
 func (x *GetSpiderRep_Data) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_spider_spider_proto_msgTypes[10]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -595,13 +864,38 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\"@\n" +
 	"\x10PurgeUserDataRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage2\x8e\x04\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x14\n" +
+	"\x12SubmitInventoryReq\"\x94\x02\n" +
+	"\x12SubmitInventoryRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12(\n" +
+	"\x0fsubmitLogsTotal\x18\x03 \x01(\x03R\x0fsubmitLogsTotal\x120\n" +
+	"\x13submitLogsRealTotal\x18\x04 \x01(\x03R\x13submitLogsRealTotal\x124\n" +
+	"\x15countedSubmitIdsTotal\x18\x05 \x01(\x03R\x15countedSubmitIdsTotal\x12\x1e\n" +
+	"\n" +
+	"oldestTime\x18\x06 \x01(\x03R\n" +
+	"oldestTime\x12\x1e\n" +
+	"\n" +
+	"newestTime\x18\a \x01(\x03R\n" +
+	"newestTime\"5\n" +
+	"\x19PurgeSubmitsAndRecrawlReq\x12\x18\n" +
+	"\aconfirm\x18\x01 \x01(\tR\aconfirm\"\x85\x02\n" +
+	"\x19PurgeSubmitsAndRecrawlRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12,\n" +
+	"\x11deletedSubmitLogs\x18\x03 \x01(\x03R\x11deletedSubmitLogs\x12$\n" +
+	"\rdeletedLedger\x18\x04 \x01(\x03R\rdeletedLedger\x12\"\n" +
+	"\fdeletedDaily\x18\x05 \x01(\x03R\fdeletedDaily\x12\x1c\n" +
+	"\tdeletedAc\x18\x06 \x01(\x03R\tdeletedAc\x12$\n" +
+	"\renqueuedUsers\x18\a \x01(\x03R\renqueuedUsers2\xcb\x06\n" +
 	"\x06Spider\x12o\n" +
 	"\tSetSpider\x12 .api.core.v1.spider.SetSpiderReq\x1a .api.core.v1.spider.SetSpiderRep\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/v1/core/spider/set\x12Q\n" +
 	"\tGetSpider\x12 .api.core.v1.spider.GetSpiderReq\x1a .api.core.v1.spider.GetSpiderRep\"\x00\x12i\n" +
 	"\x06Update\x12\x1d.api.core.v1.spider.UpdateReq\x1a\x1d.api.core.v1.spider.UpdateRes\"!\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/v1/core/spider/update\x12v\n" +
 	"\tUpdateAll\x12 .api.core.v1.spider.UpdateAllReq\x1a .api.core.v1.spider.UpdateAllRes\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/v1/core/spider/update-all\x12]\n" +
-	"\rPurgeUserData\x12$.api.core.v1.spider.PurgeUserDataReq\x1a$.api.core.v1.spider.PurgeUserDataRes\"\x00B;\n" +
+	"\rPurgeUserData\x12$.api.core.v1.spider.PurgeUserDataReq\x1a$.api.core.v1.spider.PurgeUserDataRes\"\x00\x12\x8b\x01\n" +
+	"\x0fSubmitInventory\x12&.api.core.v1.spider.SubmitInventoryReq\x1a&.api.core.v1.spider.SubmitInventoryRes\"(\x82\xd3\xe4\x93\x02\"\x12 /v1/core/spider/submit-inventory\x12\xac\x01\n" +
+	"\x16PurgeSubmitsAndRecrawl\x12-.api.core.v1.spider.PurgeSubmitsAndRecrawlReq\x1a-.api.core.v1.spider.PurgeSubmitsAndRecrawlRes\"4\x82\xd3\xe4\x93\x02.:\x01*\")/v1/core/spider/purge-submits-and-recrawlB;\n" +
 	"\x12api.core.v1.spiderP\x01Z#cwxu-algo/api/core/v1/spider;spiderb\x06proto3"
 
 var (
@@ -616,34 +910,42 @@ func file_core_v1_spider_spider_proto_rawDescGZIP() []byte {
 	return file_core_v1_spider_spider_proto_rawDescData
 }
 
-var file_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_core_v1_spider_spider_proto_goTypes = []any{
-	(*SetSpiderReq)(nil),      // 0: api.core.v1.spider.SetSpiderReq
-	(*SetSpiderRep)(nil),      // 1: api.core.v1.spider.SetSpiderRep
-	(*GetSpiderReq)(nil),      // 2: api.core.v1.spider.GetSpiderReq
-	(*GetSpiderRep)(nil),      // 3: api.core.v1.spider.GetSpiderRep
-	(*UpdateReq)(nil),         // 4: api.core.v1.spider.UpdateReq
-	(*UpdateRes)(nil),         // 5: api.core.v1.spider.UpdateRes
-	(*UpdateAllReq)(nil),      // 6: api.core.v1.spider.UpdateAllReq
-	(*UpdateAllRes)(nil),      // 7: api.core.v1.spider.UpdateAllRes
-	(*PurgeUserDataReq)(nil),  // 8: api.core.v1.spider.PurgeUserDataReq
-	(*PurgeUserDataRes)(nil),  // 9: api.core.v1.spider.PurgeUserDataRes
-	(*GetSpiderRep_Data)(nil), // 10: api.core.v1.spider.GetSpiderRep.Data
+	(*SetSpiderReq)(nil),              // 0: api.core.v1.spider.SetSpiderReq
+	(*SetSpiderRep)(nil),              // 1: api.core.v1.spider.SetSpiderRep
+	(*GetSpiderReq)(nil),              // 2: api.core.v1.spider.GetSpiderReq
+	(*GetSpiderRep)(nil),              // 3: api.core.v1.spider.GetSpiderRep
+	(*UpdateReq)(nil),                 // 4: api.core.v1.spider.UpdateReq
+	(*UpdateRes)(nil),                 // 5: api.core.v1.spider.UpdateRes
+	(*UpdateAllReq)(nil),              // 6: api.core.v1.spider.UpdateAllReq
+	(*UpdateAllRes)(nil),              // 7: api.core.v1.spider.UpdateAllRes
+	(*PurgeUserDataReq)(nil),          // 8: api.core.v1.spider.PurgeUserDataReq
+	(*PurgeUserDataRes)(nil),          // 9: api.core.v1.spider.PurgeUserDataRes
+	(*SubmitInventoryReq)(nil),        // 10: api.core.v1.spider.SubmitInventoryReq
+	(*SubmitInventoryRes)(nil),        // 11: api.core.v1.spider.SubmitInventoryRes
+	(*PurgeSubmitsAndRecrawlReq)(nil), // 12: api.core.v1.spider.PurgeSubmitsAndRecrawlReq
+	(*PurgeSubmitsAndRecrawlRes)(nil), // 13: api.core.v1.spider.PurgeSubmitsAndRecrawlRes
+	(*GetSpiderRep_Data)(nil),         // 14: api.core.v1.spider.GetSpiderRep.Data
 }
 var file_core_v1_spider_spider_proto_depIdxs = []int32{
-	10, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
+	14, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
 	0,  // 1: api.core.v1.spider.Spider.SetSpider:input_type -> api.core.v1.spider.SetSpiderReq
 	2,  // 2: api.core.v1.spider.Spider.GetSpider:input_type -> api.core.v1.spider.GetSpiderReq
 	4,  // 3: api.core.v1.spider.Spider.Update:input_type -> api.core.v1.spider.UpdateReq
 	6,  // 4: api.core.v1.spider.Spider.UpdateAll:input_type -> api.core.v1.spider.UpdateAllReq
 	8,  // 5: api.core.v1.spider.Spider.PurgeUserData:input_type -> api.core.v1.spider.PurgeUserDataReq
-	1,  // 6: api.core.v1.spider.Spider.SetSpider:output_type -> api.core.v1.spider.SetSpiderRep
-	3,  // 7: api.core.v1.spider.Spider.GetSpider:output_type -> api.core.v1.spider.GetSpiderRep
-	5,  // 8: api.core.v1.spider.Spider.Update:output_type -> api.core.v1.spider.UpdateRes
-	7,  // 9: api.core.v1.spider.Spider.UpdateAll:output_type -> api.core.v1.spider.UpdateAllRes
-	9,  // 10: api.core.v1.spider.Spider.PurgeUserData:output_type -> api.core.v1.spider.PurgeUserDataRes
-	6,  // [6:11] is the sub-list for method output_type
-	1,  // [1:6] is the sub-list for method input_type
+	10, // 6: api.core.v1.spider.Spider.SubmitInventory:input_type -> api.core.v1.spider.SubmitInventoryReq
+	12, // 7: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:input_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlReq
+	1,  // 8: api.core.v1.spider.Spider.SetSpider:output_type -> api.core.v1.spider.SetSpiderRep
+	3,  // 9: api.core.v1.spider.Spider.GetSpider:output_type -> api.core.v1.spider.GetSpiderRep
+	5,  // 10: api.core.v1.spider.Spider.Update:output_type -> api.core.v1.spider.UpdateRes
+	7,  // 11: api.core.v1.spider.Spider.UpdateAll:output_type -> api.core.v1.spider.UpdateAllRes
+	9,  // 12: api.core.v1.spider.Spider.PurgeUserData:output_type -> api.core.v1.spider.PurgeUserDataRes
+	11, // 13: api.core.v1.spider.Spider.SubmitInventory:output_type -> api.core.v1.spider.SubmitInventoryRes
+	13, // 14: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:output_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlRes
+	8,  // [8:15] is the sub-list for method output_type
+	1,  // [1:8] is the sub-list for method input_type
 	1,  // [1:1] is the sub-list for extension type_name
 	1,  // [1:1] is the sub-list for extension extendee
 	0,  // [0:1] is the sub-list for field type_name
@@ -660,7 +962,7 @@ func file_core_v1_spider_spider_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_spider_spider_proto_rawDesc), len(file_core_v1_spider_spider_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

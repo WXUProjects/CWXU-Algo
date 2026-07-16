@@ -847,6 +847,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.UserProfileRes'
+    /v1/core/spider/purge-submits-and-recrawl:
+        post:
+            tags:
+                - Spider
+            description: 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
+            operationId: Spider_PurgeSubmitsAndRecrawl
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.spider.PurgeSubmitsAndRecrawlReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.PurgeSubmitsAndRecrawlRes'
     /v1/core/spider/set:
         post:
             tags:
@@ -865,6 +884,19 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.spider.SetSpiderRep'
+    /v1/core/spider/submit-inventory:
+        get:
+            tags:
+                - Spider
+            description: 运维：提交库存（热表 / 账本真实行数，仅站管）
+            operationId: Spider_SubmitInventory
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.SubmitInventoryRes'
     /v1/core/spider/update:
         post:
             tags:
@@ -2683,6 +2715,29 @@ components:
                         $ref: '#/components/schemas/api.core.v1.problem.NamedCount'
                 totalAc:
                     type: string
+        api.core.v1.spider.PurgeSubmitsAndRecrawlReq:
+            type: object
+            properties:
+                confirm:
+                    type: string
+                    description: 必须为 PURGE_SUBMITS
+        api.core.v1.spider.PurgeSubmitsAndRecrawlRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                deletedSubmitLogs:
+                    type: string
+                deletedLedger:
+                    type: string
+                deletedDaily:
+                    type: string
+                deletedAc:
+                    type: string
+                enqueuedUsers:
+                    type: string
         api.core.v1.spider.SetSpiderRep:
             type: object
             properties:
@@ -2699,6 +2754,27 @@ components:
                 platform:
                     type: string
                 username:
+                    type: string
+        api.core.v1.spider.SubmitInventoryRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                submitLogsTotal:
+                    type: string
+                    description: submit_logs 总行数（含力扣合成）
+                submitLogsRealTotal:
+                    type: string
+                    description: 计入提交统计的行（排除 lc-ac / lc-prob）
+                countedSubmitIdsTotal:
+                    type: string
+                    description: counted_submit_ids 账本行数
+                oldestTime:
+                    type: string
+                    description: 热表时间范围（unix 秒；无数据为 0）
+                newestTime:
                     type: string
         api.core.v1.spider.UpdateAllReq:
             type: object
