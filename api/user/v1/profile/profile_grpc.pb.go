@@ -26,6 +26,7 @@ const (
 	Profile_MoveGroup_FullMethodName               = "/api.user.v1.Profile/MoveGroup"
 	Profile_SetEmailEnabled_FullMethodName         = "/api.user.v1.Profile/SetEmailEnabled"
 	Profile_SetProblemPipeline_FullMethodName      = "/api.user.v1.Profile/SetProblemPipeline"
+	Profile_SetSyncIntervals_FullMethodName        = "/api.user.v1.Profile/SetSyncIntervals"
 	Profile_GetUserIdsByGroup_FullMethodName       = "/api.user.v1.Profile/GetUserIdsByGroup"
 	Profile_GetUserIdsByOrg_FullMethodName         = "/api.user.v1.Profile/GetUserIdsByOrg"
 	Profile_GetNonPublicOrgUserIds_FullMethodName  = "/api.user.v1.Profile/GetNonPublicOrgUserIds"
@@ -50,6 +51,8 @@ type ProfileClient interface {
 	SetEmailEnabled(ctx context.Context, in *SetEmailEnabledReq, opts ...grpc.CallOption) (*SetEmailEnabledRes, error)
 	// 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
 	SetProblemPipeline(ctx context.Context, in *SetProblemPipelineReq, opts ...grpc.CallOption) (*SetProblemPipelineRes, error)
+	// 站点管理员：个人爬取间隔 / AI 总结间隔覆盖（优先级高于组织 MIN）
+	SetSyncIntervals(ctx context.Context, in *SetSyncIntervalsReq, opts ...grpc.CallOption) (*SetSyncIntervalsRes, error)
 	GetUserIdsByGroup(ctx context.Context, in *GetUserIdsByGroupReq, opts ...grpc.CallOption) (*GetUserIdsByGroupRes, error)
 	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(ctx context.Context, in *GetUserIdsByOrgReq, opts ...grpc.CallOption) (*GetUserIdsByOrgRes, error)
@@ -143,6 +146,16 @@ func (c *profileClient) SetProblemPipeline(ctx context.Context, in *SetProblemPi
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetProblemPipelineRes)
 	err := c.cc.Invoke(ctx, Profile_SetProblemPipeline_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *profileClient) SetSyncIntervals(ctx context.Context, in *SetSyncIntervalsReq, opts ...grpc.CallOption) (*SetSyncIntervalsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetSyncIntervalsRes)
+	err := c.cc.Invoke(ctx, Profile_SetSyncIntervals_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -261,6 +274,8 @@ type ProfileServer interface {
 	SetEmailEnabled(context.Context, *SetEmailEnabledReq) (*SetEmailEnabledRes, error)
 	// 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
 	SetProblemPipeline(context.Context, *SetProblemPipelineReq) (*SetProblemPipelineRes, error)
+	// 站点管理员：个人爬取间隔 / AI 总结间隔覆盖（优先级高于组织 MIN）
+	SetSyncIntervals(context.Context, *SetSyncIntervalsReq) (*SetSyncIntervalsRes, error)
 	GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error)
 	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error)
@@ -310,6 +325,9 @@ func (UnimplementedProfileServer) SetEmailEnabled(context.Context, *SetEmailEnab
 }
 func (UnimplementedProfileServer) SetProblemPipeline(context.Context, *SetProblemPipelineReq) (*SetProblemPipelineRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetProblemPipeline not implemented")
+}
+func (UnimplementedProfileServer) SetSyncIntervals(context.Context, *SetSyncIntervalsReq) (*SetSyncIntervalsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetSyncIntervals not implemented")
 }
 func (UnimplementedProfileServer) GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUserIdsByGroup not implemented")
@@ -484,6 +502,24 @@ func _Profile_SetProblemPipeline_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProfileServer).SetProblemPipeline(ctx, req.(*SetProblemPipelineReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Profile_SetSyncIntervals_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetSyncIntervalsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).SetSyncIntervals(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_SetSyncIntervals_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).SetSyncIntervals(ctx, req.(*SetSyncIntervalsReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -702,6 +738,10 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetProblemPipeline",
 			Handler:    _Profile_SetProblemPipeline_Handler,
+		},
+		{
+			MethodName: "SetSyncIntervals",
+			Handler:    _Profile_SetSyncIntervals_Handler,
 		},
 		{
 			MethodName: "GetUserIdsByGroup",

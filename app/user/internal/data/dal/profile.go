@@ -156,7 +156,9 @@ func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64) ([]mo
 	var list []model.User
 	err := d.db.WithContext(ctx).
 		Select("id", "username", "name", "group_id", "avatar", "role_id", "is_site_admin",
-			"email_enabled", "email_weekly_enabled").
+			"problem_fetch_enabled", "problem_ai_enabled",
+			"spider_interval_min_override", "ai_summary_interval_min_override",
+			"email_enabled", "email_weekly_enabled", "created_at").
 		Order("id").
 		Limit(int(pageSize)).Offset(int(pageNum-1) * int(pageSize)).
 		Find(&list).Error
@@ -490,6 +492,38 @@ func (d *ProfileDal) SetProblemPipeline(ctx context.Context, userID int64, kind 
 	})
 }
 
+// SetSyncIntervalOverrides 站点管理员设置/清除个人定时间隔覆盖。
+// spider/ai：nil=不改该项；指针 0 或负=清除覆盖；>0=强制分钟数。
+func (d *ProfileDal) SetSyncIntervalOverrides(ctx context.Context, userID int64, spider *int, ai *int) error {
+	if userID <= 0 {
+		return fmt.Errorf("invalid user id")
+	}
+	if spider == nil && ai == nil {
+		return nil
+	}
+	updates := map[string]interface{}{}
+	if spider != nil {
+		if *spider <= 0 {
+			updates["spider_interval_min_override"] = nil
+		} else {
+			updates["spider_interval_min_override"] = *spider
+		}
+	}
+	if ai != nil {
+		if *ai <= 0 {
+			updates["ai_summary_interval_min_override"] = nil
+		} else {
+			updates["ai_summary_interval_min_override"] = *ai
+		}
+	}
+	cacheKey := fmt.Sprintf("user:%d:profile", userID)
+	return data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
+		return d.db.WithContext(ctx).Model(&model.User{}).
+			Where("id = ?", userID).
+			Updates(updates).Error
+	})
+}
+
 // EffectiveProblemPipeline 计算列表展示用有效开关（覆盖优先，否则是否非公共域组织）
 func EffectiveProblemPipeline(override *bool, isNonPublicOrg bool) bool {
 	if override != nil {
@@ -592,15 +626,17 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		}
 	}
 
-	// 个人邮件偏好
+	// 个人邮件偏好 + 站管间隔覆盖（优先级最高）
 	type pref struct {
-		ID                 int64
-		EmailEnabled       bool
-		EmailWeeklyEnabled bool
+		ID                           int64
+		EmailEnabled                 bool
+		EmailWeeklyEnabled           bool
+		SpiderIntervalMinOverride    *int
+		AISummaryIntervalMinOverride *int
 	}
 	var prefs []pref
 	_ = d.db.WithContext(ctx).Model(&model.User{}).
-		Select("id, email_enabled, email_weekly_enabled").
+		Select("id, email_enabled, email_weekly_enabled, spider_interval_min_override, ai_summary_interval_min_override").
 		Where("id IN ?", userIDs).
 		Scan(&prefs).Error
 	prefMap := make(map[int64]pref, len(prefs))
@@ -613,10 +649,20 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		a := byUser[uid]
 		pr := prefMap[uid]
 		if a == nil {
+			sp, ai := 60, 180
+			// 无组织时仍尊重站管覆盖
+			if pr.SpiderIntervalMinOverride != nil && *pr.SpiderIntervalMinOverride > 0 {
+				sp = *pr.SpiderIntervalMinOverride
+			}
+			if pr.AISummaryIntervalMinOverride != nil && *pr.AISummaryIntervalMinOverride > 0 {
+				ai = *pr.AISummaryIntervalMinOverride
+			}
 			out = append(out, UserSyncPolicy{
-				UserID:             uid,
-				EmailEnabled:       pr.EmailEnabled,
-				EmailWeeklyEnabled: pr.EmailWeeklyEnabled,
+				UserID:               uid,
+				EmailEnabled:         pr.EmailEnabled,
+				EmailWeeklyEnabled:   pr.EmailWeeklyEnabled,
+				SpiderIntervalMin:    sp,
+				AISummaryIntervalMin: ai,
 			})
 			continue
 		}
@@ -627,6 +673,13 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		ai := 180
 		if a.aiMin > 0 {
 			ai = a.aiMin
+		}
+		// 站点管理员个人覆盖：优先级最高
+		if pr.SpiderIntervalMinOverride != nil && *pr.SpiderIntervalMinOverride > 0 {
+			sp = *pr.SpiderIntervalMinOverride
+		}
+		if pr.AISummaryIntervalMinOverride != nil && *pr.AISummaryIntervalMinOverride > 0 {
+			ai = *pr.AISummaryIntervalMinOverride
 		}
 		out = append(out, UserSyncPolicy{
 			UserID:               uid,
@@ -658,7 +711,10 @@ func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pag
 	var list []model.User
 	err := d.db.WithContext(ctx).
 		Table("users AS u").
-		Select("u.id, u.username, u.name, COALESCE(m.group_id, 0) AS group_id, u.avatar, u.role_id, u.is_site_admin, u.email_enabled, u.email_weekly_enabled").
+		Select(`u.id, u.username, u.name, COALESCE(m.group_id, 0) AS group_id, u.avatar, u.role_id, u.is_site_admin,
+			u.email_enabled, u.email_weekly_enabled,
+			u.problem_fetch_enabled, u.problem_ai_enabled,
+			u.spider_interval_min_override, u.ai_summary_interval_min_override, u.created_at`).
 		Joins("JOIN org_members AS m ON m.user_id = u.id AND m.org_id = ?", orgID).
 		Order("u.id").
 		Limit(int(pageSize)).Offset(int(pageNum-1) * int(pageSize)).

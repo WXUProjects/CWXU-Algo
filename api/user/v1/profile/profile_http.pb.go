@@ -34,6 +34,7 @@ const OperationProfileGetUserIdsByOrg = "/api.user.v1.Profile/GetUserIdsByOrg"
 const OperationProfileMoveGroup = "/api.user.v1.Profile/MoveGroup"
 const OperationProfileSetEmailEnabled = "/api.user.v1.Profile/SetEmailEnabled"
 const OperationProfileSetProblemPipeline = "/api.user.v1.Profile/SetProblemPipeline"
+const OperationProfileSetSyncIntervals = "/api.user.v1.Profile/SetSyncIntervals"
 const OperationProfileUpdate = "/api.user.v1.Profile/Update"
 
 type ProfileHTTPServer interface {
@@ -61,6 +62,8 @@ type ProfileHTTPServer interface {
 	SetEmailEnabled(context.Context, *SetEmailEnabledReq) (*SetEmailEnabledRes, error)
 	// SetProblemPipeline 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
 	SetProblemPipeline(context.Context, *SetProblemPipelineReq) (*SetProblemPipelineRes, error)
+	// SetSyncIntervals 站点管理员：个人爬取间隔 / AI 总结间隔覆盖（优先级高于组织 MIN）
+	SetSyncIntervals(context.Context, *SetSyncIntervalsReq) (*SetSyncIntervalsRes, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 }
 
@@ -73,6 +76,7 @@ func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r.POST("/v1/user/profile/move-group", _Profile_MoveGroup0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-email-enabled", _Profile_SetEmailEnabled0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-problem-pipeline", _Profile_SetProblemPipeline0_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/set-sync-intervals", _Profile_SetSyncIntervals0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-group", _Profile_GetUserIdsByGroup0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-org", _Profile_GetUserIdsByOrg0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/non-public-org-user-ids", _Profile_GetNonPublicOrgUserIds0_HTTP_Handler(srv))
@@ -225,6 +229,28 @@ func _Profile_SetProblemPipeline0_HTTP_Handler(srv ProfileHTTPServer) func(ctx h
 			return err
 		}
 		reply := out.(*SetProblemPipelineRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Profile_SetSyncIntervals0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in SetSyncIntervalsReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileSetSyncIntervals)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.SetSyncIntervals(ctx, req.(*SetSyncIntervalsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*SetSyncIntervalsRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -437,6 +463,8 @@ type ProfileHTTPClient interface {
 	SetEmailEnabled(ctx context.Context, req *SetEmailEnabledReq, opts ...http.CallOption) (rsp *SetEmailEnabledRes, err error)
 	// SetProblemPipeline 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
 	SetProblemPipeline(ctx context.Context, req *SetProblemPipelineReq, opts ...http.CallOption) (rsp *SetProblemPipelineRes, err error)
+	// SetSyncIntervals 站点管理员：个人爬取间隔 / AI 总结间隔覆盖（优先级高于组织 MIN）
+	SetSyncIntervals(ctx context.Context, req *SetSyncIntervalsReq, opts ...http.CallOption) (rsp *SetSyncIntervalsRes, err error)
 	Update(ctx context.Context, req *UpdateReq, opts ...http.CallOption) (rsp *UpdateRes, err error)
 }
 
@@ -644,6 +672,20 @@ func (c *ProfileHTTPClientImpl) SetProblemPipeline(ctx context.Context, in *SetP
 	pattern := "/v1/user/profile/set-problem-pipeline"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProfileSetProblemPipeline))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SetSyncIntervals 站点管理员：个人爬取间隔 / AI 总结间隔覆盖（优先级高于组织 MIN）
+func (c *ProfileHTTPClientImpl) SetSyncIntervals(ctx context.Context, in *SetSyncIntervalsReq, opts ...http.CallOption) (*SetSyncIntervalsRes, error) {
+	var out SetSyncIntervalsRes
+	pattern := "/v1/user/profile/set-sync-intervals"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProfileSetSyncIntervals))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

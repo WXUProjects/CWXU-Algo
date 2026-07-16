@@ -1482,6 +1482,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.SetProblemPipelineRes'
+    /v1/user/profile/set-sync-intervals:
+        post:
+            tags:
+                - Profile
+            description: 站点管理员：个人爬取间隔 / AI 总结间隔覆盖（优先级高于组织 MIN）
+            operationId: Profile_SetSyncIntervals
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.SetSyncIntervalsReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.SetSyncIntervalsRes'
     /v1/user/profile/sync-policies:
         post:
             tags:
@@ -3099,6 +3118,18 @@ components:
                 createdAt:
                     type: string
                     description: 注册时间（unix 秒）
+                spiderIntervalMin:
+                    type: integer
+                    description: 有效爬取 / AI 总结间隔（分钟；已应用站管个人覆盖，否则组织 MIN）
+                    format: int32
+                aiSummaryIntervalMin:
+                    type: integer
+                    format: int32
+                spiderIntervalOverridden:
+                    type: boolean
+                    description: 是否存在站点管理员个人覆盖（true=不走组织 MIN）
+                aiSummaryIntervalOverridden:
+                    type: boolean
         api.user.v1.GetListRes_OrgBrief:
             type: object
             properties:
@@ -3274,6 +3305,34 @@ components:
                     type: string
                     description: 'kind: fetch（题面爬取）| ai（题面 AI 分析）'
         api.user.v1.SetProblemPipelineRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+        api.user.v1.SetSyncIntervalsReq:
+            type: object
+            properties:
+                userId:
+                    type: string
+                spiderIntervalMin:
+                    type: integer
+                    format: int32
+                aiSummaryIntervalMin:
+                    type: integer
+                    format: int32
+                setSpider:
+                    type: boolean
+                setAi:
+                    type: boolean
+            description: |-
+                SetSyncIntervalsReq 站点管理员设置个人定时间隔覆盖
+                 spiderIntervalMin / aiSummaryIntervalMin：
+                   省略（setSpider/setAi=false）= 不改该项
+                   0 = 清除覆盖，回落组织 MIN
+                   >0 = 强制该分钟数（优先级最高）
+        api.user.v1.SetSyncIntervalsRes:
             type: object
             properties:
                 code:

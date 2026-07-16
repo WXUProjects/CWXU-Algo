@@ -34,4 +34,10 @@ type User struct {
 	ProblemFetchEnabled *bool `gorm:"comment:题面爬取覆盖 null=按组织"`
 	// ProblemAIEnabled 该用户近窗提交是否触发题面 AI 分析
 	ProblemAIEnabled *bool `gorm:"comment:题面AI覆盖 null=按组织"`
+
+	// —— 定时策略覆盖（站点管理员指定；null=回落组织 MIN；优先级最高）——
+	// SpiderIntervalMinOverride 爬取间隔（分钟）
+	SpiderIntervalMinOverride *int `gorm:"comment:爬取间隔覆盖分钟 null=组织MIN"`
+	// AISummaryIntervalMinOverride AI 总结间隔（分钟）
+	AISummaryIntervalMinOverride *int `gorm:"comment:AI总结间隔覆盖分钟 null=组织MIN"`
 }

@@ -47,6 +47,13 @@ service Profile {
       body: "*",
     };
   }
+  // 站点管理员：个人爬取间隔 / AI 总结间隔覆盖（优先级高于组织 MIN）
+  rpc SetSyncIntervals (SetSyncIntervalsReq) returns (SetSyncIntervalsRes) {
+    option (google.api.http) = {
+      post: "/v1/user/profile/set-sync-intervals",
+      body: "*",
+    };
+  }
   rpc GetUserIdsByGroup (GetUserIdsByGroupReq) returns (GetUserIdsByGroupRes) {
     option (google.api.http) = {
       get: "/v1/user/profile/ids-by-group"
@@ -179,6 +186,12 @@ message GetListRes {
     bool problemAiEnabled = 17;
     // 注册时间（unix 秒）
     int64 createdAt = 18;
+    // 有效爬取 / AI 总结间隔（分钟；已应用站管个人覆盖，否则组织 MIN）
+    int32 spiderIntervalMin = 19;
+    int32 aiSummaryIntervalMin = 20;
+    // 是否存在站点管理员个人覆盖（true=不走组织 MIN）
+    bool spiderIntervalOverridden = 21;
+    bool aiSummaryIntervalOverridden = 22;
   }
   repeated List list = 1;
   int64 total = 2;
@@ -230,6 +243,24 @@ message SetProblemPipelineReq {
 }
 
 message SetProblemPipelineRes {
+  int64 code = 1;
+  string message = 2;
+}
+
+// SetSyncIntervalsReq 站点管理员设置个人定时间隔覆盖
+// spiderIntervalMin / aiSummaryIntervalMin：
+//   省略（setSpider/setAi=false）= 不改该项
+//   0 = 清除覆盖，回落组织 MIN
+//   >0 = 强制该分钟数（优先级最高）
+message SetSyncIntervalsReq {
+  int64 userId = 1;
+  int32 spiderIntervalMin = 2;
+  int32 aiSummaryIntervalMin = 3;
+  bool setSpider = 4;
+  bool setAi = 5;
+}
+
+message SetSyncIntervalsRes {
   int64 code = 1;
   string message = 2;
 }

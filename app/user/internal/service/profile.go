@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -204,6 +205,14 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		}
 	}
 
+	// 有效定时间隔（含站管个人覆盖）
+	policyByUID := map[int64]dal.UserSyncPolicy{}
+	if policies, e := p.profileDal.GetSyncPolicies(ctx, ids); e == nil {
+		for _, pol := range policies {
+			policyByUID[pol.UserID] = pol
+		}
+	}
+
 	res := &profile.GetListRes{
 		List:  make([]*profile.GetListRes_List, 0),
 		Total: total,
@@ -234,22 +243,35 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		}
 		uid := int64(v.ID)
 		_, isNonPublic := nonPublicSet[uid]
+		pol := policyByUID[uid]
+		spMin := int32(pol.SpiderIntervalMin)
+		if spMin <= 0 {
+			spMin = 60
+		}
+		aiMin := int32(pol.AISummaryIntervalMin)
+		if aiMin <= 0 {
+			aiMin = 180
+		}
 		item := &profile.GetListRes_List{
-			UserId:                  uint64(v.ID),
-			Username:                v.Username,
-			Name:                    displayName,
-			Avatar:                  v.Avatar,
-			GroupId:                 v.GroupId,
-			RoleId:                  int32(v.RoleID),
-			LastSubmit:              t,
-			IsSiteAdmin:             v.IsSiteAdmin,
-			GroupName:               gName,
-			EmailEnabled:            v.EmailEnabled,
-			EmailWeeklyEnabled:      v.EmailWeeklyEnabled,
-			EmailAllowedByOrg:       dailyGrant[uid],
-			EmailWeeklyAllowedByOrg: weeklyGrant[uid],
-			ProblemFetchEnabled:     dal.EffectiveProblemPipeline(v.ProblemFetchEnabled, isNonPublic),
-			ProblemAiEnabled:        dal.EffectiveProblemPipeline(v.ProblemAIEnabled, isNonPublic),
+			UserId:                     uint64(v.ID),
+			Username:                   v.Username,
+			Name:                       displayName,
+			Avatar:                     v.Avatar,
+			GroupId:                    v.GroupId,
+			RoleId:                     int32(v.RoleID),
+			LastSubmit:                 t,
+			IsSiteAdmin:                v.IsSiteAdmin,
+			GroupName:                  gName,
+			EmailEnabled:               v.EmailEnabled,
+			EmailWeeklyEnabled:         v.EmailWeeklyEnabled,
+			EmailAllowedByOrg:          dailyGrant[uid],
+			EmailWeeklyAllowedByOrg:    weeklyGrant[uid],
+			ProblemFetchEnabled:        dal.EffectiveProblemPipeline(v.ProblemFetchEnabled, isNonPublic),
+			ProblemAiEnabled:           dal.EffectiveProblemPipeline(v.ProblemAIEnabled, isNonPublic),
+			SpiderIntervalMin:          spMin,
+			AiSummaryIntervalMin:       aiMin,
+			SpiderIntervalOverridden:   v.SpiderIntervalMinOverride != nil && *v.SpiderIntervalMinOverride > 0,
+			AiSummaryIntervalOverridden: v.AISummaryIntervalMinOverride != nil && *v.AISummaryIntervalMinOverride > 0,
 		}
 		if !v.CreatedAt.IsZero() {
 			item.CreatedAt = v.CreatedAt.Unix()
@@ -600,6 +622,49 @@ func (p *ProfileService) SetProblemPipeline(ctx context.Context, req *profile.Se
 		msg = "已更新题面 AI 开关"
 	}
 	return &profile.SetProblemPipelineRes{Code: 0, Message: msg}, nil
+}
+
+// SetSyncIntervals 站点管理员设置个人爬取 / AI 总结间隔（优先级高于组织）
+func (p *ProfileService) SetSyncIntervals(ctx context.Context, req *profile.SetSyncIntervalsReq) (*profile.SetSyncIntervalsRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "仅站点管理员可设置个人同步间隔")
+	}
+	if req.UserId <= 0 {
+		return nil, errors.BadRequest("参数错误", "用户ID无效")
+	}
+	if !req.SetSpider && !req.SetAi {
+		return nil, errors.BadRequest("参数错误", "请至少指定一项间隔")
+	}
+	// 合法范围：5 分钟～7 天（与组织配置同量级）
+	const minM, maxM = 5, 7 * 24 * 60
+	var spiderPtr, aiPtr *int
+	if req.SetSpider {
+		v := int(req.SpiderIntervalMin)
+		if v < 0 {
+			return nil, errors.BadRequest("参数错误", "爬取间隔无效")
+		}
+		if v > 0 && (v < minM || v > maxM) {
+			return nil, errors.BadRequest("参数错误", fmt.Sprintf("爬取间隔须为 0（清除）或 %d–%d 分钟", minM, maxM))
+		}
+		spiderPtr = &v
+	}
+	if req.SetAi {
+		v := int(req.AiSummaryIntervalMin)
+		if v < 0 {
+			return nil, errors.BadRequest("参数错误", "AI 总结间隔无效")
+		}
+		if v > 0 && (v < minM || v > maxM) {
+			return nil, errors.BadRequest("参数错误", fmt.Sprintf("AI 总结间隔须为 0（清除）或 %d–%d 分钟", minM, maxM))
+		}
+		aiPtr = &v
+	}
+	if _, err := p.profileDal.GetById(ctx, req.UserId); err != nil {
+		return nil, errors.BadRequest("参数错误", "用户不存在")
+	}
+	if err := p.profileDal.SetSyncIntervalOverrides(ctx, req.UserId, spiderPtr, aiPtr); err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	return &profile.SetSyncIntervalsRes{Code: 0, Message: "已更新个人同步间隔"}, nil
 }
 
 // GetByIds 批量获取用户展示名（当前组织 / 指定 org 的组织内名称）
