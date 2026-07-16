@@ -421,7 +421,7 @@ func (t *CronTask) Do() {
 	_, _ = c.AddFunc("*/5 * * * *", func() {
 		t.runCalendarNotify()
 	})
-	// 每日裁剪 6 个月外 submit_logs（预聚合/账本不动）
+	// 每日裁剪热窗外 submit_logs（默认近 4 个日历月；预聚合/账本不动）
 	_, _ = c.AddFunc("20 3 * * *", func() {
 		t.runSubmitLogPrune()
 	})
@@ -435,7 +435,7 @@ func (t *CronTask) Do() {
 		}
 		t.runCalendarCrawl()
 	}()
-	// 下次推上线：启动后异步跑 submit 6 个月清洗（幂等，与发版绑定）
+	// 启动后异步跑 submit 热表清洗（幂等；已 hot_only 则 skip，日常靠 prune 收紧）
 	go t.runSubmitRetentionMigrateOnce()
 	c.Start()
 	t.cron = c
@@ -443,7 +443,8 @@ func (t *CronTask) Do() {
 	stopCh := t.stopCh
 	t.mu.Unlock()
 
-	log.Infof("CronTask started: spider/summary every 5m; calendar crawl 12h + notify 5m; submit prune 03:20")
+	log.Infof("CronTask started: spider/summary every 5m; calendar crawl 12h + notify 5m; submit prune 03:20 (hot=%dm)",
+		model.SubmitLogRetentionMonths)
 
 	defer func() {
 		t.mu.Lock()
@@ -463,7 +464,7 @@ func (t *CronTask) Do() {
 	log.Infof("CronTask stopped")
 }
 
-// runSubmitRetentionMigrateOnce 回填写死层/账本并删除 6 个月外明细
+// runSubmitRetentionMigrateOnce 回填写死层/账本并删除热窗外明细（幂等；已完成则 skip）
 func (t *CronTask) runSubmitRetentionMigrateOnce() {
 	time.Sleep(15 * time.Second)
 	select {
@@ -486,7 +487,7 @@ func (t *CronTask) runSubmitRetentionMigrateOnce() {
 	}
 }
 
-// runSubmitLogPrune 热表保留近 6 个月
+// runSubmitLogPrune 热表只保留 SubmitLogRetentionMonths 个日历月内明细
 func (t *CronTask) runSubmitLogPrune() {
 	if !t.tryCronLock("submit_prune", 2*time.Hour) {
 		return
