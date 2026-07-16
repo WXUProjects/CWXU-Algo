@@ -169,11 +169,11 @@ func (t *CronTask) lookupEmail(userID int64) string {
 	}
 	defer conn.Close()
 	cli := profile.NewProfileClient(conn)
-	res, err := cli.GetById(ctx, &profile.GetByIdReq{UserId: userID})
+	res, err := cli.GetContactEmail(ctx, &profile.GetContactEmailReq{UserId: userID})
 	if err != nil || res == nil {
 		return ""
 	}
-	return res.GetEmail()
+	return strings.TrimSpace(res.GetEmail())
 }
 
 func buildCalendarMail(siteTitle string, c *model.ContestCalendar, advanceMin int) (subject, body string) {
@@ -201,7 +201,7 @@ func buildCalendarMail(siteTitle string, c *model.ContestCalendar, advanceMin in
 <tr><td style="padding:4px 12px 4px 0;color:#666">结束</td><td>%s（北京时间）</td></tr>
 </table>
 <p><a href="%s" style="display:inline-block;margin-top:12px;padding:10px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px">前往比赛页面</a></p>
-<p style="color:#888;font-size:13px;margin-top:24px">管理订阅：登录 %s → 比赛日历。若不再需要提醒，可在页面中取消订阅。</p>
+<p style="color:#888;font-size:13px;margin-top:24px">管理订阅：登录 %s → 比赛 → 比赛日历。若不再需要提醒，可在页面中取消订阅。</p>
 </body></html>`,
 		html.EscapeString(advLabel), plat, name, start, end, url, html.EscapeString(siteTitle))
 	return subject, body

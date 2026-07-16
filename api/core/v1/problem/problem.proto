@@ -29,6 +29,12 @@ service Problem {
       get: "/v1/core/problem/submissions"
     };
   }
+  // 关注用户对本题状态（不受组织域限制；需登录）
+  rpc FollowingStatus (FollowingStatusReq) returns (FollowingStatusRes) {
+    option (google.api.http) = {
+      get: "/v1/core/problem/following-status"
+    };
+  }
   rpc UserProfile (UserProfileReq) returns (UserProfileRes) {
     option (google.api.http) = {
       get: "/v1/core/problem/user-profile"
@@ -226,8 +232,10 @@ message ListSubmissionsReq {
   int64 page = 2;
   int64 page_size = 3;
   int64 user_id = 4;
-  // 仅显示关注用户的提交（需登录）
+  // 仅显示关注用户的提交（需登录；不受组织域限制）
   bool following_only = 5;
+  // 状态筛选：空=全部；AC=仅通过
+  string status = 6;
 }
 
 message ListSubmissionsRes {
@@ -235,6 +243,25 @@ message ListSubmissionsRes {
   string message = 2;
   repeated SubmissionInfo data = 3;
   int64 total = 4;
+}
+
+message FollowingStatusReq {
+  uint32 problem_id = 1;
+}
+
+message FollowingStatusItem {
+  int64 user_id = 1;
+  string username = 2;
+  string name = 3;
+  string avatar = 4;
+  // AC | TRIED | NONE
+  string status = 5;
+}
+
+message FollowingStatusRes {
+  int64 code = 1;
+  string message = 2;
+  repeated FollowingStatusItem data = 3;
 }
 
 message TagScore {

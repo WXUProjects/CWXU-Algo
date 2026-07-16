@@ -61,6 +61,10 @@ func NewWhiteListMatcher() selector.MatchFunc {
 			strings.Contains(operation, "privacy/status") {
 			return false
 		}
+		// 组织广场公开（仅名/logo/人数）
+		if strings.Contains(operation, "org/discover") {
+			return false
+		}
 		if _, ok := whiteList[operation]; ok {
 			return false
 		}

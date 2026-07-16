@@ -58,7 +58,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, ai
 	emergencyDal := dal.NewEmergencyDal(dataData)
 	emergencyService := service.NewEmergencyService(emergencyDal)
 	contestCalendarDal := dal.NewContestCalendarDal(dataData)
-	contestCalendarService := service.NewContestCalendarService(contestCalendarDal, register)
+	contestCalendarService := service.NewContestCalendarService(contestCalendarDal, register, dataData)
 	httpServer := server.NewHTTPServer(confServer, logger, dataData, submitLogService, spiderService, statisticService, contestLogService, bulletinService, problemService, emergencyService, contestCalendarService)
 	spiderUseCase := service2.NewSpiderUseCase(dataData, problemUseCase)
 	consumer := service2.NewConsumer(rabbitMQ, spiderUseCase, spiderTask)

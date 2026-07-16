@@ -22,6 +22,7 @@ const _ = http.SupportPackageIsVersion1
 const OperationProblemAdminUpdate = "/api.core.v1.problem.Problem/AdminUpdate"
 const OperationProblemBackfill = "/api.core.v1.problem.Problem/Backfill"
 const OperationProblemEmergencyStop = "/api.core.v1.problem.Problem/EmergencyStop"
+const OperationProblemFollowingStatus = "/api.core.v1.problem.Problem/FollowingStatus"
 const OperationProblemGet = "/api.core.v1.problem.Problem/Get"
 const OperationProblemList = "/api.core.v1.problem.Problem/List"
 const OperationProblemListEditRequests = "/api.core.v1.problem.Problem/ListEditRequests"
@@ -45,6 +46,8 @@ type ProblemHTTPServer interface {
 	Backfill(context.Context, *BackfillReq) (*BackfillRes, error)
 	// EmergencyStop 紧急停止：暂停 AI 并清空分析队列（兼容）
 	EmergencyStop(context.Context, *EmergencyStopReq) (*EmergencyStopRes, error)
+	// FollowingStatus 关注用户对本题状态（不受组织域限制；需登录）
+	FollowingStatus(context.Context, *FollowingStatusReq) (*FollowingStatusRes, error)
 	Get(context.Context, *GetProblemReq) (*GetProblemRes, error)
 	List(context.Context, *ListProblemReq) (*ListProblemRes, error)
 	// ListEditRequests 站点管理员：审核申请列表
@@ -80,6 +83,7 @@ func RegisterProblemHTTPServer(s *http.Server, srv ProblemHTTPServer) {
 	r.GET("/v1/core/problem/tags", _Problem_ListTags0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/get", _Problem_Get0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/submissions", _Problem_ListSubmissions0_HTTP_Handler(srv))
+	r.GET("/v1/core/problem/following-status", _Problem_FollowingStatus0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/user-profile", _Problem_UserProfile0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/progress", _Problem_Progress0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/backfill", _Problem_Backfill0_HTTP_Handler(srv))
@@ -169,6 +173,25 @@ func _Problem_ListSubmissions0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http
 			return err
 		}
 		reply := out.(*ListSubmissionsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problem_FollowingStatus0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in FollowingStatusReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemFollowingStatus)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.FollowingStatus(ctx, req.(*FollowingStatusReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*FollowingStatusRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -497,6 +520,8 @@ type ProblemHTTPClient interface {
 	Backfill(ctx context.Context, req *BackfillReq, opts ...http.CallOption) (rsp *BackfillRes, err error)
 	// EmergencyStop 紧急停止：暂停 AI 并清空分析队列（兼容）
 	EmergencyStop(ctx context.Context, req *EmergencyStopReq, opts ...http.CallOption) (rsp *EmergencyStopRes, err error)
+	// FollowingStatus 关注用户对本题状态（不受组织域限制；需登录）
+	FollowingStatus(ctx context.Context, req *FollowingStatusReq, opts ...http.CallOption) (rsp *FollowingStatusRes, err error)
 	Get(ctx context.Context, req *GetProblemReq, opts ...http.CallOption) (rsp *GetProblemRes, err error)
 	List(ctx context.Context, req *ListProblemReq, opts ...http.CallOption) (rsp *ListProblemRes, err error)
 	// ListEditRequests 站点管理员：审核申请列表
@@ -569,6 +594,20 @@ func (c *ProblemHTTPClientImpl) EmergencyStop(ctx context.Context, in *Emergency
 	opts = append(opts, http.Operation(OperationProblemEmergencyStop))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// FollowingStatus 关注用户对本题状态（不受组织域限制；需登录）
+func (c *ProblemHTTPClientImpl) FollowingStatus(ctx context.Context, in *FollowingStatusReq, opts ...http.CallOption) (*FollowingStatusRes, error) {
+	var out FollowingStatusRes
+	pattern := "/v1/core/problem/following-status"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProblemFollowingStatus))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {
 		return nil, err
 	}

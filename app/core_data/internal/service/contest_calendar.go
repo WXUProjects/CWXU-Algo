@@ -2,13 +2,17 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"html"
 	"strings"
 	"time"
 
 	"cwxu-algo/api/core/v1/contest_calendar"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
+	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
 
@@ -21,12 +25,13 @@ import (
 
 type ContestCalendarService struct {
 	contest_calendar.UnimplementedContestCalendarServer
-	dal *dal.ContestCalendarDal
-	reg *discovery.Register
+	dal  *dal.ContestCalendarDal
+	reg  *discovery.Register
+	data *data.Data
 }
 
-func NewContestCalendarService(calDal *dal.ContestCalendarDal, reg *discovery.Register) *ContestCalendarService {
-	return &ContestCalendarService{dal: calDal, reg: reg}
+func NewContestCalendarService(calDal *dal.ContestCalendarDal, reg *discovery.Register, d *data.Data) *ContestCalendarService {
+	return &ContestCalendarService{dal: calDal, reg: reg, data: d}
 }
 
 func (s *ContestCalendarService) toItem(m *model.ContestCalendar, subscribed bool) *contest_calendar.CalendarItem {
@@ -167,7 +172,7 @@ func (s *ContestCalendarService) UpsertSub(ctx context.Context, req *contest_cal
 		return &contest_calendar.UpsertSubRes{Code: 3, Message: "提前时间不在允许范围内"}, nil
 	}
 
-	// 校验邮箱
+	// 校验邮箱（服务间 GetContactEmail，不做隐私剥离）
 	email, err := s.lookupUserEmail(ctx, int64(user.UserID))
 	if err != nil {
 		log.Warnf("lookup email: %v", err)
@@ -187,6 +192,7 @@ func (s *ContestCalendarService) UpsertSub(ctx context.Context, req *contest_cal
 	// 前端总是显式传 enabled。若 false 则为关闭订阅。
 	// 首次创建时如果 enabled=false 也允许（等于预留关闭）。
 
+	var cal *model.ContestCalendar
 	if scope == model.CalScopePlatform {
 		plat := strings.ToLower(strings.TrimSpace(req.GetPlatform()))
 		if plat == "" {
@@ -199,9 +205,10 @@ func (s *ContestCalendarService) UpsertSub(ctx context.Context, req *contest_cal
 		if cid == 0 {
 			return &contest_calendar.UpsertSubRes{Code: 6, Message: "calendarId 不能为空"}, nil
 		}
-		cal, err := s.dal.GetByID(cid)
-		if err != nil {
-			if err == gorm.ErrRecordNotFound {
+		var getErr error
+		cal, getErr = s.dal.GetByID(cid)
+		if getErr != nil {
+			if getErr == gorm.ErrRecordNotFound {
 				return &contest_calendar.UpsertSubRes{Code: 7, Message: "比赛不存在"}, nil
 			}
 			return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
@@ -229,6 +236,12 @@ func (s *ContestCalendarService) UpsertSub(ctx context.Context, req *contest_cal
 	if saved == nil {
 		saved = sub
 	}
+
+	// 订阅开启成功：发送确认邮件（失败不影响订阅结果）
+	if req.GetEnabled() {
+		s.sendSubscribeConfirmMail(email, saved, cal)
+	}
+
 	return &contest_calendar.UpsertSubRes{
 		Code:    0,
 		Message: "OK",
@@ -267,12 +280,71 @@ func (s *ContestCalendarService) lookupUserEmail(ctx context.Context, userID int
 	}
 	defer conn.Close()
 	cli := profile.NewProfileClient(conn)
-	res, err := cli.GetById(ctx, &profile.GetByIdReq{UserId: userID})
+	res, err := cli.GetContactEmail(ctx, &profile.GetContactEmailReq{UserId: userID})
 	if err != nil {
 		return "", err
 	}
 	if res == nil {
 		return "", nil
 	}
-	return res.GetEmail(), nil
+	return strings.TrimSpace(res.GetEmail()), nil
+}
+
+func (s *ContestCalendarService) sendSubscribeConfirmMail(to string, sub *model.ContestCalendarSub, cal *model.ContestCalendar) {
+	if s.data == nil || strings.TrimSpace(to) == "" || sub == nil {
+		return
+	}
+	rt := sitesettings.Load(context.Background(), s.data.RDB, s.data.DB)
+	sender := rt.MailSender()
+	if sender == nil || !sender.Configured() {
+		log.Warnf("UpsertSub confirm mail: SMTP not configured, skip")
+		return
+	}
+	siteTitle := rt.SiteTitle
+	if siteTitle == "" {
+		siteTitle = "GoAlgo"
+	}
+	advLabel := formatAdvanceMinutes(sub.AdvanceMinutes)
+	plat := html.EscapeString(sub.Platform)
+	scopeLabel := "平台订阅"
+	detail := fmt.Sprintf("平台 <strong>%s</strong> 的全部即将开始比赛", plat)
+	if sub.Scope == model.CalScopeContest {
+		scopeLabel = "单场订阅"
+		name := sub.Platform
+		if cal != nil {
+			if cal.PlatformName != "" {
+				plat = html.EscapeString(cal.PlatformName)
+			}
+			name = cal.Name
+		}
+		detail = fmt.Sprintf("比赛 <strong>%s</strong>（%s）", html.EscapeString(name), plat)
+	}
+	subject := fmt.Sprintf("[%s] 比赛提醒订阅成功", siteTitle)
+	body := fmt.Sprintf(`<!DOCTYPE html><html><body style="font-family:sans-serif;line-height:1.6;color:#222">
+<p>你好，</p>
+<p>你已成功订阅比赛邮件提醒（%s）。</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:4px 12px 4px 0;color:#666">类型</td><td>%s</td></tr>
+<tr><td style="padding:4px 12px 4px 0;color:#666">内容</td><td>%s</td></tr>
+<tr><td style="padding:4px 12px 4px 0;color:#666">提前量</td><td>开赛前 <strong>%s</strong></td></tr>
+</table>
+<p style="color:#888;font-size:13px;margin-top:24px">管理订阅：登录 %s → 比赛 → 比赛日历。若不再需要提醒，可在页面中取消订阅。</p>
+</body></html>`,
+		html.EscapeString(scopeLabel), html.EscapeString(scopeLabel), detail, html.EscapeString(advLabel), html.EscapeString(siteTitle))
+	if err := sender.Send(to, subject, body); err != nil {
+		log.Warnf("UpsertSub confirm mail to=%s: %v", to, err)
+	}
+}
+
+func formatAdvanceMinutes(m int) string {
+	if m < 60 {
+		return fmt.Sprintf("%d 分钟", m)
+	}
+	if m%1440 == 0 {
+		return fmt.Sprintf("%d 天", m/1440)
+	}
+	if m%60 == 0 {
+		return fmt.Sprintf("%d 小时", m/60)
+	}
+	return fmt.Sprintf("%d 分钟", m)
 }

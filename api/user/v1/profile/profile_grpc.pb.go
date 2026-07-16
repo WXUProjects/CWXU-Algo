@@ -35,6 +35,7 @@ const (
 	Profile_GetByUsername_FullMethodName           = "/api.user.v1.Profile/GetByUsername"
 	Profile_GetFollowingIds_FullMethodName         = "/api.user.v1.Profile/GetFollowingIds"
 	Profile_FilterPublicFeedUserIds_FullMethodName = "/api.user.v1.Profile/FilterPublicFeedUserIds"
+	Profile_GetContactEmail_FullMethodName         = "/api.user.v1.Profile/GetContactEmail"
 )
 
 // ProfileClient is the client API for Profile service.
@@ -66,6 +67,8 @@ type ProfileClient interface {
 	GetFollowingIds(ctx context.Context, in *GetFollowingIdsReq, opts ...grpc.CallOption) (*GetFollowingIdsRes, error)
 	// 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
 	FilterPublicFeedUserIds(ctx context.Context, in *FilterPublicFeedUserIdsReq, opts ...grpc.CallOption) (*FilterPublicFeedUserIdsRes, error)
+	// 服务间：按 userId 取联系邮箱（不做隐私剥离，不拉 spider；无 HTTP）
+	GetContactEmail(ctx context.Context, in *GetContactEmailReq, opts ...grpc.CallOption) (*GetContactEmailRes, error)
 }
 
 type profileClient struct {
@@ -236,6 +239,16 @@ func (c *profileClient) FilterPublicFeedUserIds(ctx context.Context, in *FilterP
 	return out, nil
 }
 
+func (c *profileClient) GetContactEmail(ctx context.Context, in *GetContactEmailReq, opts ...grpc.CallOption) (*GetContactEmailRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetContactEmailRes)
+	err := c.cc.Invoke(ctx, Profile_GetContactEmail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProfileServer is the server API for Profile service.
 // All implementations must embed UnimplementedProfileServer
 // for forward compatibility.
@@ -265,6 +278,8 @@ type ProfileServer interface {
 	GetFollowingIds(context.Context, *GetFollowingIdsReq) (*GetFollowingIdsRes, error)
 	// 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
 	FilterPublicFeedUserIds(context.Context, *FilterPublicFeedUserIdsReq) (*FilterPublicFeedUserIdsRes, error)
+	// 服务间：按 userId 取联系邮箱（不做隐私剥离，不拉 spider；无 HTTP）
+	GetContactEmail(context.Context, *GetContactEmailReq) (*GetContactEmailRes, error)
 	mustEmbedUnimplementedProfileServer()
 }
 
@@ -322,6 +337,9 @@ func (UnimplementedProfileServer) GetFollowingIds(context.Context, *GetFollowing
 }
 func (UnimplementedProfileServer) FilterPublicFeedUserIds(context.Context, *FilterPublicFeedUserIdsReq) (*FilterPublicFeedUserIdsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method FilterPublicFeedUserIds not implemented")
+}
+func (UnimplementedProfileServer) GetContactEmail(context.Context, *GetContactEmailReq) (*GetContactEmailRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetContactEmail not implemented")
 }
 func (UnimplementedProfileServer) mustEmbedUnimplementedProfileServer() {}
 func (UnimplementedProfileServer) testEmbeddedByValue()                 {}
@@ -632,6 +650,24 @@ func _Profile_FilterPublicFeedUserIds_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Profile_GetContactEmail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetContactEmailReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).GetContactEmail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_GetContactEmail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).GetContactEmail(ctx, req.(*GetContactEmailReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Profile_ServiceDesc is the grpc.ServiceDesc for Profile service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -702,6 +738,10 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FilterPublicFeedUserIds",
 			Handler:    _Profile_FilterPublicFeedUserIds_Handler,
+		},
+		{
+			MethodName: "GetContactEmail",
+			Handler:    _Profile_GetContactEmail_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

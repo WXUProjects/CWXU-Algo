@@ -23,6 +23,7 @@ const (
 	Problem_ListTags_FullMethodName         = "/api.core.v1.problem.Problem/ListTags"
 	Problem_Get_FullMethodName              = "/api.core.v1.problem.Problem/Get"
 	Problem_ListSubmissions_FullMethodName  = "/api.core.v1.problem.Problem/ListSubmissions"
+	Problem_FollowingStatus_FullMethodName  = "/api.core.v1.problem.Problem/FollowingStatus"
 	Problem_UserProfile_FullMethodName      = "/api.core.v1.problem.Problem/UserProfile"
 	Problem_Progress_FullMethodName         = "/api.core.v1.problem.Problem/Progress"
 	Problem_Backfill_FullMethodName         = "/api.core.v1.problem.Problem/Backfill"
@@ -49,6 +50,8 @@ type ProblemClient interface {
 	ListTags(ctx context.Context, in *ListTagsReq, opts ...grpc.CallOption) (*ListTagsRes, error)
 	Get(ctx context.Context, in *GetProblemReq, opts ...grpc.CallOption) (*GetProblemRes, error)
 	ListSubmissions(ctx context.Context, in *ListSubmissionsReq, opts ...grpc.CallOption) (*ListSubmissionsRes, error)
+	// 关注用户对本题状态（不受组织域限制；需登录）
+	FollowingStatus(ctx context.Context, in *FollowingStatusReq, opts ...grpc.CallOption) (*FollowingStatusRes, error)
 	UserProfile(ctx context.Context, in *UserProfileReq, opts ...grpc.CallOption) (*UserProfileRes, error)
 	Progress(ctx context.Context, in *ProgressReq, opts ...grpc.CallOption) (*ProgressRes, error)
 	Backfill(ctx context.Context, in *BackfillReq, opts ...grpc.CallOption) (*BackfillRes, error)
@@ -120,6 +123,16 @@ func (c *problemClient) ListSubmissions(ctx context.Context, in *ListSubmissions
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListSubmissionsRes)
 	err := c.cc.Invoke(ctx, Problem_ListSubmissions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) FollowingStatus(ctx context.Context, in *FollowingStatusReq, opts ...grpc.CallOption) (*FollowingStatusRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FollowingStatusRes)
+	err := c.cc.Invoke(ctx, Problem_FollowingStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -285,6 +298,8 @@ type ProblemServer interface {
 	ListTags(context.Context, *ListTagsReq) (*ListTagsRes, error)
 	Get(context.Context, *GetProblemReq) (*GetProblemRes, error)
 	ListSubmissions(context.Context, *ListSubmissionsReq) (*ListSubmissionsRes, error)
+	// 关注用户对本题状态（不受组织域限制；需登录）
+	FollowingStatus(context.Context, *FollowingStatusReq) (*FollowingStatusRes, error)
 	UserProfile(context.Context, *UserProfileReq) (*UserProfileRes, error)
 	Progress(context.Context, *ProgressReq) (*ProgressRes, error)
 	Backfill(context.Context, *BackfillReq) (*BackfillRes, error)
@@ -333,6 +348,9 @@ func (UnimplementedProblemServer) Get(context.Context, *GetProblemReq) (*GetProb
 }
 func (UnimplementedProblemServer) ListSubmissions(context.Context, *ListSubmissionsReq) (*ListSubmissionsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListSubmissions not implemented")
+}
+func (UnimplementedProblemServer) FollowingStatus(context.Context, *FollowingStatusReq) (*FollowingStatusRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method FollowingStatus not implemented")
 }
 func (UnimplementedProblemServer) UserProfile(context.Context, *UserProfileReq) (*UserProfileRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method UserProfile not implemented")
@@ -468,6 +486,24 @@ func _Problem_ListSubmissions_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProblemServer).ListSubmissions(ctx, req.(*ListSubmissionsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_FollowingStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FollowingStatusReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).FollowingStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_FollowingStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).FollowingStatus(ctx, req.(*FollowingStatusReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -764,6 +800,10 @@ var Problem_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListSubmissions",
 			Handler:    _Problem_ListSubmissions_Handler,
+		},
+		{
+			MethodName: "FollowingStatus",
+			Handler:    _Problem_FollowingStatus_Handler,
 		},
 		{
 			MethodName: "UserProfile",

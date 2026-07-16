@@ -104,6 +104,8 @@ service Profile {
       body: "*",
     };
   }
+  // 服务间：按 userId 取联系邮箱（不做隐私剥离，不拉 spider；无 HTTP）
+  rpc GetContactEmail (GetContactEmailReq) returns (GetContactEmailRes);
 }
 
 message GetByIdReq {
@@ -266,6 +268,7 @@ message GetByIdsRes {
     int64 userId = 1;
     string name = 2;
     string avatar = 3;
+    string username = 4;
   }
   repeated UserProfile profiles = 1;
 }
@@ -319,4 +322,13 @@ message FilterPublicFeedUserIdsReq {
 
 message FilterPublicFeedUserIdsRes {
   repeated int64 userIds = 1;
+}
+
+// 服务间查联系邮箱
+message GetContactEmailReq {
+  int64 userId = 1;
+}
+
+message GetContactEmailRes {
+  string email = 1;
 }

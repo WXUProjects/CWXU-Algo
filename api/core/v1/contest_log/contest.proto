@@ -80,6 +80,8 @@ message GetContestRankingReq {
   optional int64 groupId = 4;   // 组id（不传返回全部，传具体值按组过滤，包括0）
   int64 limit = 2;              // 限制数量
   int64 offset = 3;             // 偏移量
+  // 仅关注用户；与当前组织/分组求交（仍受域限制）；需登录
+  bool following_only = 5;
 }
 
 // 排行榜项

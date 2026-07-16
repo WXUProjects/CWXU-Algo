@@ -304,6 +304,11 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: followingOnly
+                  in: query
+                  description: 仅关注用户；与当前组织/分组求交（仍受域限制）；需登录
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     description: OK
@@ -485,6 +490,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.EmergencyStopRes'
+    /v1/core/problem/following-status:
+        get:
+            tags:
+                - Problem
+            description: 关注用户对本题状态（不受组织域限制；需登录）
+            operationId: Problem_FollowingStatus
+            parameters:
+                - name: problemId
+                  in: query
+                  schema:
+                    type: integer
+                    format: uint32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.FollowingStatusRes'
     /v1/core/problem/get:
         get:
             tags:
@@ -733,9 +757,14 @@ paths:
                     type: string
                 - name: followingOnly
                   in: query
-                  description: 仅显示关注用户的提交（需登录）
+                  description: 仅显示关注用户的提交（需登录；不受组织域限制）
                   schema:
                     type: boolean
+                - name: status
+                  in: query
+                  description: 状态筛选：空=全部；AC=仅通过
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -2163,6 +2192,31 @@ components:
                 fetchAttempts:
                     type: integer
                     format: int32
+        api.core.v1.problem.FollowingStatusItem:
+            type: object
+            properties:
+                userId:
+                    type: string
+                username:
+                    type: string
+                name:
+                    type: string
+                avatar:
+                    type: string
+                status:
+                    type: string
+                    description: AC | TRIED | NONE
+        api.core.v1.problem.FollowingStatusRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.FollowingStatusItem'
         api.core.v1.problem.GetProblemRes:
             type: object
             properties:
@@ -2967,6 +3021,8 @@ components:
                 name:
                     type: string
                 avatar:
+                    type: string
+                username:
                     type: string
         api.user.v1.GetByNameRes:
             type: object

@@ -2,6 +2,11 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
 	"cwxu-algo/api/core/v1/problem"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
@@ -9,8 +14,6 @@ import (
 	"cwxu-algo/app/common/utils/auth"
 	biz "cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/internal/data/model"
-	"strings"
-	"time"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
@@ -238,7 +241,7 @@ func (s *ProblemService) ListSubmissions(ctx context.Context, req *problem.ListS
 			followingIDs = []int64{}
 		}
 	}
-	list, total, err := s.uc.ListSubmissions(uint(req.ProblemId), req.UserId, req.Page, req.PageSize, followingIDs)
+	list, total, err := s.uc.ListSubmissions(uint(req.ProblemId), req.UserId, req.Page, req.PageSize, followingIDs, req.Status)
 	if err != nil {
 		return nil, errors.InternalServer("query failed", "service unavailable")
 	}
@@ -275,6 +278,99 @@ func (s *ProblemService) ListSubmissions(ctx context.Context, req *problem.ListS
 		Data:    data,
 		Total:   total,
 	}, nil
+}
+
+func (s *ProblemService) FollowingStatus(ctx context.Context, req *problem.FollowingStatusReq) (*problem.FollowingStatusRes, error) {
+	viewer := auth.GetCurrentUserId(ctx)
+	if viewer == 0 {
+		return &problem.FollowingStatusRes{Code: 1, Message: "请先登录"}, nil
+	}
+	if req.ProblemId == 0 {
+		return &problem.FollowingStatusRes{Code: 1, Message: "缺少题目 id"}, nil
+	}
+	following := fetchFollowingIDs(ctx, s.reg, int64(viewer))
+	if len(following) == 0 {
+		return &problem.FollowingStatusRes{Code: 0, Message: "success", Data: nil}, nil
+	}
+	rows, err := s.uc.FollowingProblemStatus(uint(req.ProblemId), following)
+	if err != nil {
+		return nil, errors.InternalServer("query failed", "service unavailable")
+	}
+	// 批量用户资料（含 username）
+	profiles := s.fetchUserProfiles(ctx, following)
+	data := make([]*problem.FollowingStatusItem, 0, len(rows))
+	for _, r := range rows {
+		p := profiles[r.UserID]
+		name := p.Name
+		if name == "" {
+			name = p.Username
+		}
+		if name == "" {
+			name = fmt.Sprintf("用户%d", r.UserID)
+		}
+		data = append(data, &problem.FollowingStatusItem{
+			UserId:   r.UserID,
+			Username: p.Username,
+			Name:     name,
+			Avatar:   p.Avatar,
+			Status:   r.Status,
+		})
+	}
+	// 排序：AC → TRIED → NONE，同组按名
+	sort.SliceStable(data, func(i, j int) bool {
+		ri, rj := rankFollowStatus(data[i].Status), rankFollowStatus(data[j].Status)
+		if ri != rj {
+			return ri > rj
+		}
+		return data[i].Name < data[j].Name
+	})
+	return &problem.FollowingStatusRes{Code: 0, Message: "success", Data: data}, nil
+}
+
+func rankFollowStatus(s string) int {
+	switch strings.ToUpper(s) {
+	case "AC":
+		return 2
+	case "TRIED":
+		return 1
+	default:
+		return 0
+	}
+}
+
+type userProfileBrief struct {
+	Username string
+	Name     string
+	Avatar   string
+}
+
+func (s *ProblemService) fetchUserProfiles(ctx context.Context, userIDs []int64) map[int64]userProfileBrief {
+	out := map[int64]userProfileBrief{}
+	if len(userIDs) == 0 {
+		return out
+	}
+	conn, err := s.userRPC()
+	if err != nil {
+		return out
+	}
+	defer conn.Close()
+	client := profile.NewProfileClient(conn)
+	var orgID int64
+	if pd := auth.GetCurrentUser(ctx); pd != nil {
+		orgID = int64(pd.OrgID)
+	}
+	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIDs, OrgId: orgID})
+	if err != nil {
+		return out
+	}
+	for _, p := range res.GetProfiles() {
+		out[p.UserId] = userProfileBrief{
+			Username: p.Username,
+			Name:     p.Name,
+			Avatar:   p.Avatar,
+		}
+	}
+	return out
 }
 
 func (s *ProblemService) UserProfile(ctx context.Context, req *problem.UserProfileReq) (*problem.UserProfileRes, error) {

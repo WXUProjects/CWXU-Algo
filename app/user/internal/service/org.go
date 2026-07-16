@@ -66,6 +66,7 @@ func effectiveSeatLimit(limit int) int {
 
 // countOrgSeats 占用席位数。普通组织=成员总数；
 // 公共域仅统计「只属于公共域、未加入任何其它组织」的用户。
+// 均只统计 users 表仍存在的成员，避免孤儿 org_members 虚高。
 func countOrgSeats(db *gorm.DB, o *model.Org) int64 {
 	if o == nil || db == nil {
 		return 0
@@ -74,6 +75,7 @@ func countOrgSeats(db *gorm.DB, o *model.Org) int64 {
 		var n int64
 		_ = db.Raw(`
 			SELECT COUNT(*) FROM org_members m
+			JOIN users u ON u.id = m.user_id
 			WHERE m.org_id = ?
 			AND NOT EXISTS (
 				SELECT 1 FROM org_members m2
@@ -84,7 +86,10 @@ func countOrgSeats(db *gorm.DB, o *model.Org) int64 {
 		return n
 	}
 	var n int64
-	_ = db.Model(&model.OrgMember{}).Where("org_id = ?", o.ID).Count(&n)
+	_ = db.Table("org_members AS m").
+		Joins("JOIN users u ON u.id = m.user_id").
+		Where("m.org_id = ?", o.ID).
+		Count(&n).Error
 	return n
 }
 
@@ -289,6 +294,7 @@ func (s *OrgService) addOrgMemberAtomic(orgID, userID uint, role, displayName st
 func RegisterOrgRoutes(srv *khttp.Server, org *OrgService) {
 	r := srv.Route("/")
 	r.GET("/v1/user/org/list", org.handleList)
+	r.GET("/v1/user/org/discover", org.handleDiscover)
 	r.GET("/v1/user/org/get", org.handleGet)
 	r.POST("/v1/user/org/create", org.handleCreate)
 	r.POST("/v1/user/org/update", org.handleUpdate)
@@ -307,6 +313,72 @@ func RegisterOrgRoutes(srv *khttp.Server, org *OrgService) {
 	r.GET("/v1/user/org/join-requests", org.handleJoinRequests)
 	r.POST("/v1/user/org/join-requests/review", org.handleJoinReview)
 	r.POST("/v1/user/platform/set-site-admin", org.handleSetSiteAdmin)
+}
+
+// handleDiscover 组织广场：仅公开字段（名/logo/人数），无识别码与成员明细
+func (s *OrgService) handleDiscover(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	q := ctx.Request().URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+	kw := strings.TrimSpace(q.Get("q"))
+
+	dbq := s.db.Model(&model.Org{}).Where("status = ?", model.OrgStatusActive)
+	if kw != "" {
+		like := "%" + kw + "%"
+		dbq = dbq.Where("name ILIKE ? OR brand_title ILIKE ?", like, like)
+	}
+	var total int64
+	if err := dbq.Count(&total).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
+		return nil
+	}
+	var orgs []model.Org
+	if err := dbq.Order("is_system DESC, id ASC").
+		Offset((page - 1) * pageSize).Limit(pageSize).
+		Find(&orgs).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
+		return nil
+	}
+
+	memberOf := map[uint]bool{}
+	currentID := uint(0)
+	if pd != nil {
+		currentID = pd.OrgID
+		var mems []model.OrgMember
+		_ = s.db.Where("user_id = ?", pd.UserID).Find(&mems).Error
+		for _, m := range mems {
+			memberOf[m.OrgID] = true
+		}
+	}
+
+	list := make([]map[string]interface{}, 0, len(orgs))
+	for i := range orgs {
+		o := &orgs[i]
+		logo := o.BrandLogo
+		item := map[string]interface{}{
+			"id":          o.ID,
+			"name":        o.Name,
+			"brandLogo":   logo,
+			"memberCount": countOrgSeats(s.db, o),
+			"isSystem":    o.IsSystem,
+		}
+		if pd != nil {
+			item["isMember"] = memberOf[o.ID]
+			item["isCurrent"] = o.ID == currentID
+		}
+		list = append(list, item)
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "success", "list": list, "total": total,
+	})
+	return nil
 }
 
 func (s *OrgService) handleList(ctx khttp.Context) error {
@@ -1003,7 +1075,10 @@ func (s *OrgService) handleMemberIds(ctx khttp.Context) error {
 		return nil
 	}
 	var ids []int64
-	_ = s.db.Model(&model.OrgMember{}).Where("org_id = ?", orgID).Pluck("user_id", &ids)
+	_ = s.db.Table("org_members AS m").
+		Joins("JOIN users u ON u.id = m.user_id").
+		Where("m.org_id = ?", orgID).
+		Pluck("m.user_id", &ids)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "success", "userIds": ids, "orgId": orgID,
 	})

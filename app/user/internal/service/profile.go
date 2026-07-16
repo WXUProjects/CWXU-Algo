@@ -581,9 +581,10 @@ func (p *ProfileService) GetByIds(ctx context.Context, req *profile.GetByIdsReq)
 	list := make([]*profile.GetByIdsRes_UserProfile, 0, len(profiles))
 	for _, v := range profiles {
 		list = append(list, &profile.GetByIdsRes_UserProfile{
-			UserId: int64(v.ID),
-			Name:   v.Name,
-			Avatar: v.Avatar,
+			UserId:   int64(v.ID),
+			Name:     v.Name,
+			Avatar:   v.Avatar,
+			Username: v.Username,
 		})
 	}
 	return &profile.GetByIdsRes{Profiles: list}, nil
@@ -686,4 +687,16 @@ func (p *ProfileService) SetEmailEnabled(ctx context.Context, req *profile.SetEm
 		Code:    0,
 		Message: "设置成功",
 	}, nil
+}
+
+// GetContactEmail 服务间调用：直接返回用户联系邮箱，不做隐私剥离、不拉 spider
+func (p *ProfileService) GetContactEmail(ctx context.Context, req *profile.GetContactEmailReq) (*profile.GetContactEmailRes, error) {
+	if req.GetUserId() <= 0 {
+		return &profile.GetContactEmailRes{Email: ""}, nil
+	}
+	pf, err := p.profileDal.GetById(ctx, req.GetUserId())
+	if err != nil || pf == nil {
+		return &profile.GetContactEmailRes{Email: ""}, nil
+	}
+	return &profile.GetContactEmailRes{Email: strings.TrimSpace(pf.Email)}, nil
 }

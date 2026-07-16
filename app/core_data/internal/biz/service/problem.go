@@ -1047,7 +1047,7 @@ func (uc *ProblemUseCase) Get(id uint) (*model.Problem, error) {
 	return &p, nil
 }
 
-func (uc *ProblemUseCase) ListSubmissions(problemID uint, userID, page, pageSize int64, followingIDs []int64) ([]model.SubmitLog, int64, error) {
+func (uc *ProblemUseCase) ListSubmissions(problemID uint, userID, page, pageSize int64, followingIDs []int64, status string) ([]model.SubmitLog, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -1064,6 +1064,9 @@ func (uc *ProblemUseCase) ListSubmissions(problemID uint, userID, page, pageSize
 		}
 		q = q.Where("user_id IN ?", followingIDs)
 	}
+	if strings.EqualFold(strings.TrimSpace(status), "AC") {
+		q = q.Where(sqlACStatusCond("status"))
+	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -1071,6 +1074,57 @@ func (uc *ProblemUseCase) ListSubmissions(problemID uint, userID, page, pageSize
 	var list []model.SubmitLog
 	err := q.Order("time desc").Offset(int((page - 1) * pageSize)).Limit(int(pageSize)).Find(&list).Error
 	return list, total, err
+}
+
+// FollowingProblemStatus 关注用户对本题 AC/TRIED/NONE（上限 200）
+func (uc *ProblemUseCase) FollowingProblemStatus(problemID uint, followingIDs []int64) ([]struct {
+	UserID int64
+	Status string
+}, error) {
+	out := make([]struct {
+		UserID int64
+		Status string
+	}, 0)
+	if problemID == 0 || len(followingIDs) == 0 {
+		return out, nil
+	}
+	if len(followingIDs) > 200 {
+		followingIDs = followingIDs[:200]
+	}
+	// 默认全部 NONE
+	statusMap := make(map[int64]string, len(followingIDs))
+	for _, id := range followingIDs {
+		statusMap[id] = "NONE"
+	}
+	type row struct {
+		UserID int64
+		Status string
+	}
+	var rows []row
+	err := uc.data.DB.Model(&model.SubmitLog{}).
+		Select("user_id, status").
+		Where("problem_id = ? AND user_id IN ?", problemID, followingIDs).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		if r.UserID == 0 {
+			continue
+		}
+		ns := mapSubmitStatus(r.Status)
+		cur := statusMap[r.UserID]
+		if rankStatus(ns) > rankStatus(cur) {
+			statusMap[r.UserID] = ns
+		}
+	}
+	for _, id := range followingIDs {
+		out = append(out, struct {
+			UserID int64
+			Status string
+		}{UserID: id, Status: statusMap[id]})
+	}
+	return out, nil
 }
 
 // UserProfile 纯 SQL 聚合画像

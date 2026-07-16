@@ -603,9 +603,14 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 }
 
 // GetListByOrg 分页列出组织成员用户
+// total 与列表一致：仅统计仍存在于 users 表的成员（忽略孤儿 org_members）
 func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pageNum int64) ([]model.User, int64, error) {
 	var total int64
-	if err := d.db.WithContext(ctx).Model(&model.OrgMember{}).Where("org_id = ?", orgID).Count(&total).Error; err != nil {
+	if err := d.db.WithContext(ctx).
+		Table("org_members AS m").
+		Joins("JOIN users AS u ON u.id = m.user_id").
+		Where("m.org_id = ?", orgID).
+		Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var list []model.User

@@ -142,6 +142,36 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 		}
 	}
 
+	// 只看关注：与当前域/分组成员求交（仍受域限制）
+	if req.FollowingOnly {
+		viewer := auth.GetCurrentUserId(ctx)
+		if viewer == 0 {
+			return &contest_log.GetContestRankingRes{
+				Code:    0,
+				Message: "OK",
+				Contest: contestProto,
+				Data:    make([]*contest_log.RankingItem, 0),
+				Total:   0,
+			}, nil
+		}
+		following := fetchFollowingIDs(ctx, c.reg, int64(viewer))
+		if userIds == nil {
+			// unrestricted 全站站管路径：仅关注
+			userIds = following
+		} else {
+			userIds = intersectIDs(userIds, following)
+		}
+		if len(userIds) == 0 {
+			return &contest_log.GetContestRankingRes{
+				Code:    0,
+				Message: "OK",
+				Contest: contestProto,
+				Data:    make([]*contest_log.RankingItem, 0),
+				Total:   0,
+			}, nil
+		}
+	}
+
 	logs, total, err := c.sbDal.GetContestRanking(ctx, contest.ContestId, contest.Platform, req.Offset, req.Limit, userIds)
 	if err != nil {
 		return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")

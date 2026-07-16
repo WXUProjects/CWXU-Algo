@@ -95,6 +95,24 @@ func seedGoAlgoFramework(db *gorm.DB) {
 	_ = db.Model(&model.User{}).Where("role_id = ?", 1).Update("is_site_admin", true).Error
 	_ = db.Model(&model.User{}).Where("role_id IN ?", []int{2, 3}).Update("role_id", 0).Error
 
+	// 清理指向已删除用户的孤儿 membership / 申请（历史硬删用户未清关联时会出现）
+	if res := db.Exec(`
+		DELETE FROM org_members m
+		WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = m.user_id)
+	`); res.Error != nil {
+		log.Errorf("cleanup orphan org_members: %v", res.Error)
+	} else if res.RowsAffected > 0 {
+		log.Infof("cleaned orphan org_members: %d", res.RowsAffected)
+	}
+	if res := db.Exec(`
+		DELETE FROM org_join_requests r
+		WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = r.user_id)
+	`); res.Error != nil {
+		log.Errorf("cleanup orphan org_join_requests: %v", res.Error)
+	} else if res.RowsAffected > 0 {
+		log.Infof("cleaned orphan org_join_requests: %d", res.RowsAffected)
+	}
+
 	var users []model.User
 	if e := db.Find(&users).Error; e != nil {
 		log.Errorf("list users for org migrate: %v", e)
@@ -116,7 +134,9 @@ func seedGoAlgoFramework(db *gorm.DB) {
 				OrgDisplayName: display,
 				JoinedAt:       now,
 			}
-			_ = db.Create(&m).Error
+			if e := db.Create(&m).Error; e != nil {
+				log.Errorf("ensure public membership user_id=%d: %v", u.ID, e)
+			}
 		}
 		if u.CurrentOrgID == 0 {
 			_ = db.Model(&u).Update("current_org_id", public.ID).Error
