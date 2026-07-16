@@ -214,8 +214,11 @@ func (s SpiderService) SubmitInventory(ctx context.Context, _ *spider.SubmitInve
 	}, nil
 }
 
-// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管）
-// 删除 submit_logs / 账本 / 日汇总 / AC 预聚合；保留 platforms 与 contest_logs。
+// PurgeSubmitsAndRecrawl 运维：硬清训练数据并全量重爬（仅站管）。
+//
+// 保留：platforms（OJ 绑定）、problems/题库、bulletin/emergency、比赛日历赛程与订阅。
+// 硬删：submit_logs（真假全删）、账本、日汇总、AC 预聚合、contest_logs、提醒发送日志、
+// 以及相关 Redis 缓存。用户账号在 user 库，本接口不动。
 func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.PurgeSubmitsAndRecrawlReq) (*spider.PurgeSubmitsAndRecrawlRes, error) {
 	if !auth.VerifySiteAdmin(ctx) {
 		return nil, errors.Forbidden("权限不足", "仅站点管理员可执行此运维操作")
@@ -228,7 +231,6 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 	}
 	adminID := int64(auth.GetCurrentUserId(ctx))
 	const purgeLockKey = "ops:purge_submits"
-	// 全局锁防双点；结束后必须释放（成功/失败），重启服务也会在启动时清掉
 	if s.rdb != nil {
 		ok, err := s.rdb.SetNX(ctx, purgeLockKey, "1", 30*time.Minute).Result()
 		if err != nil {
@@ -243,45 +245,54 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 		}
 	}
 
-	deletedLogs, err := deleteAllInBatches(ctx, s.db, "submit_logs", 5000)
-	if err != nil {
-		log.Errorf("purge submit_logs: %v", err)
-		return nil, InternalError
-	}
-	var deletedLedger, deletedDaily, deletedAc int64
-	if s.db.Migrator().HasTable(&model.CountedSubmitID{}) {
-		res := s.db.WithContext(ctx).Where("1 = 1").Delete(&model.CountedSubmitID{})
-		if res.Error != nil {
-			return nil, InternalError
+	// 先统计行数再 TRUNCATE（硬删，最快且不留脏页）
+	countTable := func(name string) int64 {
+		if !s.db.Migrator().HasTable(name) {
+			return 0
 		}
-		deletedLedger = res.RowsAffected
+		var n int64
+		_ = s.db.WithContext(ctx).Table(name).Count(&n).Error
+		return n
 	}
-	if s.db.Migrator().HasTable(&model.DailyUserStat{}) {
-		res := s.db.WithContext(ctx).Where("1 = 1").Delete(&model.DailyUserStat{})
-		if res.Error != nil {
-			return nil, InternalError
-		}
-		deletedDaily = res.RowsAffected
-	}
-	if s.db.Migrator().HasTable(&model.UserACProblem{}) {
-		res := s.db.WithContext(ctx).Where("1 = 1").Delete(&model.UserACProblem{})
-		if res.Error != nil {
-			return nil, InternalError
-		}
-		deletedAc += res.RowsAffected
-	}
-	if s.db.Migrator().HasTable(&model.UserACProblemDay{}) {
-		res := s.db.WithContext(ctx).Where("1 = 1").Delete(&model.UserACProblemDay{})
-		if res.Error != nil {
-			return nil, InternalError
-		}
-		deletedAc += res.RowsAffected
-	}
+	deletedLogs := countTable("submit_logs")
+	deletedLedger := countTable("counted_submit_ids")
+	deletedDaily := countTable("daily_user_stats")
+	deletedAc := countTable("user_ac_problems") + countTable("user_ac_problem_days")
+	deletedContests := countTable("contest_logs")
 
-	// 全局统计版本失效 + 个人 ver 批量 bump 成本高，只 bump 全局
-	if s.rdb != nil {
-		_ = s.rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
-		_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
+	// 仅允许白名单表名，防注入
+	toTruncate := []string{
+		"submit_logs",
+		"counted_submit_ids",
+		"daily_user_stats",
+		"user_ac_problems",
+		"user_ac_problem_days",
+		"contest_logs",
+		"contest_calendar_notify_logs",
+	}
+	var existing []string
+	for _, t := range toTruncate {
+		if s.db.Migrator().HasTable(t) {
+			existing = append(existing, t)
+		}
+	}
+	if len(existing) > 0 {
+		// TRUNCATE 硬删 + 重置序列
+		sql := "TRUNCATE TABLE " + strings.Join(existing, ", ") + " RESTART IDENTITY"
+		if err := s.db.WithContext(ctx).Exec(sql).Error; err != nil {
+			log.Errorf("purge TRUNCATE failed: %v", err)
+			// 回退分批 DELETE
+			for _, t := range existing {
+				if _, err := deleteAllInBatches(ctx, s.db, t, 5000); err != nil {
+					log.Errorf("purge delete %s: %v", t, err)
+					return nil, InternalError
+				}
+			}
+		}
+	}
+	// 清洗标记：避免旧 retention 元数据干扰
+	if s.db.Migrator().HasTable("submit_retention_meta") {
+		_ = s.db.WithContext(ctx).Exec(`DELETE FROM submit_retention_meta`).Error
 	}
 
 	var userIds []int64
@@ -291,21 +302,75 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 		log.Errorf("purge recrawl list users: %v", err)
 		return nil, InternalError
 	}
-	// 全部入队全量重爬；并发由 spider consumer 控制
+
+	// Redis：全局 ver + 每用户训练相关缓存/爬虫锁
+	s.purgeTrainingCaches(ctx, userIds)
+
+	// 全部入队全量重爬
 	go s.spider.DoBatch(context.Background(), userIds, true, 0, 0)
 
-	log.Warnf("ops purge-submits admin=%d deleted_logs=%d ledger=%d daily=%d ac=%d enqueued=%d",
-		adminID, deletedLogs, deletedLedger, deletedDaily, deletedAc, len(userIds))
+	log.Warnf("ops purge-submits admin=%d logs=%d ledger=%d daily=%d ac=%d contests=%d enqueued=%d",
+		adminID, deletedLogs, deletedLedger, deletedDaily, deletedAc, deletedContests, len(userIds))
 
 	return &spider.PurgeSubmitsAndRecrawlRes{
 		Code:              0,
-		Message:           fmt.Sprintf("已清空提交相关数据，并为 %d 名已绑定用户触发全量重爬", len(userIds)),
+		Message: fmt.Sprintf(
+			"已硬清提交/统计/比赛记录等训练数据（保留 OJ 绑定与题库），并为 %d 名用户触发全量重爬",
+			len(userIds),
+		),
 		DeletedSubmitLogs: deletedLogs,
 		DeletedLedger:     deletedLedger,
 		DeletedDaily:      deletedDaily,
 		DeletedAc:         deletedAc,
 		EnqueuedUsers:     int64(len(userIds)),
 	}, nil
+}
+
+// purgeTrainingCaches 清训练相关 Redis，避免 purge 后脏缓存
+func (s SpiderService) purgeTrainingCaches(ctx context.Context, userIds []int64) {
+	if s.rdb == nil {
+		return
+	}
+	_ = s.rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
+	_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
+	// retention 完成标记
+	_ = s.rdb.Del(ctx,
+		"submit_retention:v1_done",
+		"submit_retention:v1_lock",
+	).Err()
+
+	plats := []string{"AtCoder", "Codeforces", "LuoGu", "NowCoder", "QOJ", "LeetCode", "CodeForces"}
+	const chunk = 200
+	for i := 0; i < len(userIds); i += chunk {
+		j := i + chunk
+		if j > len(userIds) {
+			j = len(userIds)
+		}
+		keys := make([]string, 0, (j-i)*12)
+		for _, uid := range userIds[i:j] {
+			keys = append(keys,
+				fmt.Sprintf("core:submit_log:user:%d", uid),
+				fmt.Sprintf("user:%d:lastSubmitTime", uid),
+				fmt.Sprintf("statistic:user:%d:ver", uid),
+				fmt.Sprintf("core:contest_log:user:%d:ver", uid),
+				fmt.Sprintf("spider:pending:%d", uid),
+				fmt.Sprintf("spider:inflight:%d", uid),
+			)
+			for _, p := range plats {
+				keys = append(keys,
+					fmt.Sprintf("spider:pending:%d:%s", uid, p),
+					fmt.Sprintf("spider:inflight:%d:%s", uid, p),
+					fmt.Sprintf("spider:writelock:%d:%s", uid, p),
+					fmt.Sprintf("spider:gen:%d:%s", uid, p),
+				)
+			}
+		}
+		if len(keys) > 0 {
+			if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
+				log.Warnf("purge redis del chunk: %v", err)
+			}
+		}
+	}
 }
 
 // ClearPurgeLock 启动时清除运维 purge 锁（进程挂掉时可能残留）
@@ -318,10 +383,18 @@ func ClearPurgeLock(rdb *redis.Client) {
 	}
 }
 
-// deleteAllInBatches 分批清空表（避免大表长锁）
+// deleteAllInBatches 分批清空表（TRUNCATE 失败时回退）
 func deleteAllInBatches(ctx context.Context, db *gorm.DB, table string, batch int) (int64, error) {
 	if db == nil || table == "" {
 		return 0, nil
+	}
+	// 白名单
+	switch table {
+	case "submit_logs", "counted_submit_ids", "daily_user_stats",
+		"user_ac_problems", "user_ac_problem_days", "contest_logs",
+		"contest_calendar_notify_logs":
+	default:
+		return 0, fmt.Errorf("refuse delete table %s", table)
 	}
 	if batch <= 0 {
 		batch = 5000
