@@ -140,6 +140,49 @@ func (t *SpiderTask) ClearInflight(userId int64, platform string) {
 	_ = t.rdb.Del(context.Background(), InflightKey(userId, platform)).Err()
 }
 
+// ResetDedup 清除 pending/inflight，强制允许再次入队。
+// 重绑 OJ 时调用：旧任务可能仍占着 pending/inflight，否则 DoPlatform 会被静默跳过，
+// 用户已删旧明细却再也等不到新全量同步。
+func (t *SpiderTask) ResetDedup(userId int64, platform string) {
+	if t.rdb == nil {
+		return
+	}
+	ctx := context.Background()
+	_ = t.rdb.Del(ctx, pendingKey(userId, platform), InflightKey(userId, platform)).Err()
+}
+
+// BumpGeneration 递增 user+platform 爬取代数。重绑后旧任务写入前应校验代数，避免把已删数据写回。
+func (t *SpiderTask) BumpGeneration(userId int64, platform string) int64 {
+	if t.rdb == nil || platform == "" {
+		return 0
+	}
+	n, err := t.rdb.Incr(context.Background(), GenerationKey(userId, platform)).Result()
+	if err != nil {
+		log.Warnf("SpiderTask: bump generation user=%d platform=%s: %v", userId, platform, err)
+		return 0
+	}
+	// 避免 key 永不过期膨胀；绑定活跃用户会持续刷新
+	_ = t.rdb.Expire(context.Background(), GenerationKey(userId, platform), 7*24*time.Hour).Err()
+	return n
+}
+
+// GenerationKey 爬取代数 Redis key
+func GenerationKey(userId int64, platform string) string {
+	return fmt.Sprintf("spider:gen:%d:%s", userId, platform)
+}
+
+// CurrentGeneration 读取当前代数（无 key 视为 0）
+func CurrentGeneration(rdb *redis.Client, userId int64, platform string) int64 {
+	if rdb == nil || platform == "" {
+		return 0
+	}
+	v, err := rdb.Get(context.Background(), GenerationKey(userId, platform)).Int64()
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
 // DoBatch 分批入队，避免 UpdateAll 瞬时打满队列（功能仍是「全部触发」）。
 // ctx 取消时提前结束（进程停机）。
 // 1w 日活 / 2c4g 默认：10 人一批、间隔 2 分钟，削峰保护单机。

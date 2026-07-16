@@ -3,6 +3,7 @@ package dal
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -13,17 +14,18 @@ import (
 )
 
 // ApplyUserACFromSubmits 对新插入的 AC 提交维护去重预聚合（写入时提前算）
-// - user_ac_problems：生涯每题首次 AC
-// - user_ac_problem_days：该自然日是否 AC 过该题（时段 DISTINCT 语义）
+// - user_ac_problems：生涯每题首次 AC（含 platform）
+// - user_ac_problem_days：该自然日是否 AC 过该题
 func ApplyUserACFromSubmits(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) error {
 	if db == nil || len(logs) == 0 {
 		return nil
 	}
 
 	type firstRec struct {
-		userID int64
-		key    string
-		at     time.Time
+		userID   int64
+		key      string
+		platform string
+		at       time.Time
 	}
 	firstMap := make(map[string]*firstRec, 32)
 	dayMap := make(map[string]model.UserACProblemDay, 32)
@@ -34,11 +36,12 @@ func ApplyUserACFromSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 			continue
 		}
 		key := model.ACProblemKeyFromLog(l)
+		plat := strings.TrimSpace(l.Platform)
 		day := time.Date(l.Time.Year(), l.Time.Month(), l.Time.Day(), 0, 0, 0, 0, l.Time.Location())
 
 		fk := fmt.Sprintf("%d\x00%s", l.UserID, key)
 		if prev, ok := firstMap[fk]; !ok || l.Time.Before(prev.at) {
-			firstMap[fk] = &firstRec{userID: l.UserID, key: key, at: l.Time}
+			firstMap[fk] = &firstRec{userID: l.UserID, key: key, platform: plat, at: l.Time}
 		}
 
 		dk := fmt.Sprintf("%d\x00%s\x00%s", l.UserID, day.Format("2006-01-02"), key)
@@ -46,6 +49,7 @@ func ApplyUserACFromSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 			UserID:     l.UserID,
 			Day:        day,
 			ProblemKey: key,
+			Platform:   plat,
 		}
 	}
 
@@ -53,6 +57,7 @@ func ApplyUserACFromSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 		row := model.UserACProblem{
 			UserID:     f.userID,
 			ProblemKey: f.key,
+			Platform:   f.platform,
 			FirstACAt:  f.at,
 		}
 		err := db.WithContext(ctx).
@@ -61,6 +66,10 @@ func ApplyUserACFromSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 				DoUpdates: clause.Assignments(map[string]interface{}{
 					"first_ac_at": gorm.Expr(
 						"CASE WHEN EXCLUDED.first_ac_at < user_ac_problems.first_ac_at THEN EXCLUDED.first_ac_at ELSE user_ac_problems.first_ac_at END",
+					),
+					// platform 仅在仍空时补上
+					"platform": gorm.Expr(
+						"CASE WHEN user_ac_problems.platform = '' OR user_ac_problems.platform IS NULL THEN EXCLUDED.platform ELSE user_ac_problems.platform END",
 					),
 				}),
 			}).
@@ -102,8 +111,6 @@ func PeriodAcDistinctFromPreagg(db *gorm.DB, userId int64, now time.Time) (Perio
 	yearDay := thisYearStart.Format("2006-01-02")
 	lastYearDay := lastYearStart.Format("2006-01-02")
 
-	// 窗内「是否 AC 过该题」：按日表 DISTINCT problem_key
-	// 今日：day=今天；本周/本月/本年：day∈[start,today]；上期：半开
 	var ac PeriodAcCount
 	err := db.Table("user_ac_problem_days").
 		Where("user_id = ?", userId).
@@ -125,17 +132,13 @@ func PeriodAcDistinctFromPreagg(db *gorm.DB, userId int64, now time.Time) (Perio
 			lastYearDay, yearDay,
 		).Scan(&ac).Error
 	if err != nil {
-		return PeriodAcCount{}, err
+		return ac, err
 	}
 
-	// 生涯去重题数：每题一行
-	var total int64
-	if err := db.Model(&model.UserACProblem{}).Where("user_id = ?", userId).Count(&total).Error; err != nil {
-		return PeriodAcCount{}, err
-	}
-	ac.Total = total
+	_ = db.Table("user_ac_problems").
+		Where("user_id = ?", userId).
+		Count(&ac.Total).Error
 
-	// TotalRaw：日汇总 AC 条数
 	var raw struct{ Total int64 }
 	_ = db.Table("daily_user_stats").
 		Select("COALESCE(SUM(ac_cnt),0) AS total").
@@ -143,6 +146,135 @@ func PeriodAcDistinctFromPreagg(db *gorm.DB, userId int64, now time.Time) (Perio
 		Scan(&raw).Error
 	ac.TotalRaw = raw.Total
 	return ac, nil
+}
+
+// RebuildUserPreaggFromSubmits 按该用户当前 submit_logs 全量重建预聚合（运维/修复用）。
+// 热表仅 6 个月后结果不完整；SetSpider 主路径已改为按平台剪枝，不再调用。
+// Deprecated: 明细不全时勿用于生产换绑。
+func RebuildUserPreaggFromSubmits(ctx context.Context, db *gorm.DB, userId int64) error {
+	if db == nil || userId <= 0 {
+		return nil
+	}
+	tx := db.WithContext(ctx)
+
+	if tx.Migrator().HasTable(&model.DailyUserStat{}) {
+		if err := tx.Where("user_id = ?", userId).Delete(&model.DailyUserStat{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			INSERT INTO daily_user_stats (user_id, day, platform, submit_cnt, ac_cnt)
+			SELECT
+				user_id,
+				date_trunc('day', time)::date AS day,
+				COALESCE(NULLIF(btrim(platform), ''), '?') AS platform,
+				COUNT(*) FILTER (
+					WHERE `+model.SQLExcludeLeetCodeNonSubmit+`
+				) AS submit_cnt,
+				COUNT(*) FILTER (WHERE is_ac = true) AS ac_cnt
+			FROM submit_logs
+			WHERE user_id = ?
+			GROUP BY user_id, date_trunc('day', time)::date, COALESCE(NULLIF(btrim(platform), ''), '?')
+			HAVING
+				COUNT(*) FILTER (WHERE `+model.SQLExcludeLeetCodeNonSubmit+`) > 0
+				OR COUNT(*) FILTER (WHERE is_ac = true) > 0
+		`, userId).Error; err != nil {
+			return err
+		}
+	}
+
+	if tx.Migrator().HasTable(&model.UserACProblem{}) {
+		if err := tx.Where("user_id = ?", userId).Delete(&model.UserACProblem{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			INSERT INTO user_ac_problems (user_id, problem_key, platform, first_ac_at)
+			SELECT user_id, problem_key, platform, MIN(time) AS first_ac_at
+			FROM (
+				SELECT
+					user_id,
+					time,
+					COALESCE(NULLIF(btrim(platform), ''), '?') AS platform,
+					COALESCE(
+						CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 'p:' || problem_id::text END,
+						CASE WHEN external_id IS NOT NULL AND btrim(external_id) <> '' THEN 'e:' || platform || ':' || external_id END,
+						'n:' || platform || ':' || COALESCE(problem, '')
+					) AS problem_key
+				FROM submit_logs
+				WHERE user_id = ? AND is_ac = true
+			) t
+			GROUP BY user_id, problem_key, platform
+		`, userId).Error; err != nil {
+			return err
+		}
+	}
+
+	if tx.Migrator().HasTable(&model.UserACProblemDay{}) {
+		if err := tx.Where("user_id = ?", userId).Delete(&model.UserACProblemDay{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			INSERT INTO user_ac_problem_days (user_id, day, problem_key, platform)
+			SELECT DISTINCT
+				user_id,
+				date_trunc('day', time)::date AS day,
+				COALESCE(
+					CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 'p:' || problem_id::text END,
+					CASE WHEN external_id IS NOT NULL AND btrim(external_id) <> '' THEN 'e:' || platform || ':' || external_id END,
+					'n:' || platform || ':' || COALESCE(problem, '')
+				) AS problem_key,
+				COALESCE(NULLIF(btrim(platform), ''), '?') AS platform
+			FROM submit_logs
+			WHERE user_id = ? AND is_ac = true
+		`, userId).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DeletePlatformUserAC 换绑：删某用户某平台 AC 预聚合
+func DeletePlatformUserAC(ctx context.Context, db *gorm.DB, userID int64, platform string) error {
+	if db == nil || userID <= 0 || platform == "" {
+		return nil
+	}
+	if db.Migrator().HasTable(&model.UserACProblem{}) {
+		if err := db.WithContext(ctx).
+			Where("user_id = ? AND platform = ?", userID, platform).
+			Delete(&model.UserACProblem{}).Error; err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasTable(&model.UserACProblemDay{}) {
+		if err := db.WithContext(ctx).
+			Where("user_id = ? AND platform = ?", userID, platform).
+			Delete(&model.UserACProblemDay{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DeleteUserPreagg 删除用户全部预聚合 + 账本（硬删账号时用）
+func DeleteUserPreagg(ctx context.Context, db *gorm.DB, userId int64) error {
+	if db == nil || userId <= 0 {
+		return nil
+	}
+	if db.Migrator().HasTable(&model.DailyUserStat{}) {
+		if err := db.WithContext(ctx).Where("user_id = ?", userId).Delete(&model.DailyUserStat{}).Error; err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasTable(&model.UserACProblem{}) {
+		if err := db.WithContext(ctx).Where("user_id = ?", userId).Delete(&model.UserACProblem{}).Error; err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasTable(&model.UserACProblemDay{}) {
+		if err := db.WithContext(ctx).Where("user_id = ?", userId).Delete(&model.UserACProblemDay{}).Error; err != nil {
+			return err
+		}
+	}
+	return DeleteUserCountedIDs(ctx, db, userId)
 }
 
 // BackfillUserACIfEmpty 空表时从 submit_logs 回填（启动幂等）
@@ -160,14 +292,14 @@ func BackfillUserACIfEmpty(db *gorm.DB) {
 	}
 	log.Infof("user_ac_problems empty, backfill from submit_logs…")
 
-	// 生涯：每用户每题首次 AC
 	res1 := db.Exec(`
-		INSERT INTO user_ac_problems (user_id, problem_key, first_ac_at)
-		SELECT user_id, problem_key, MIN(time) AS first_ac_at
+		INSERT INTO user_ac_problems (user_id, problem_key, platform, first_ac_at)
+		SELECT user_id, problem_key, platform, MIN(time) AS first_ac_at
 		FROM (
 			SELECT
 				user_id,
 				time,
+				COALESCE(NULLIF(btrim(platform), ''), '?') AS platform,
 				COALESCE(
 					CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 'p:' || problem_id::text END,
 					CASE WHEN external_id IS NOT NULL AND btrim(external_id) <> '' THEN 'e:' || platform || ':' || external_id END,
@@ -176,7 +308,7 @@ func BackfillUserACIfEmpty(db *gorm.DB) {
 			FROM submit_logs
 			WHERE is_ac = true
 		) t
-		GROUP BY user_id, problem_key
+		GROUP BY user_id, problem_key, platform
 		ON CONFLICT (user_id, problem_key) DO NOTHING
 	`)
 	if res1.Error != nil {
@@ -195,7 +327,7 @@ func BackfillUserACIfEmpty(db *gorm.DB) {
 	}
 	log.Infof("user_ac_problem_days empty, backfill from submit_logs…")
 	res2 := db.Exec(`
-		INSERT INTO user_ac_problem_days (user_id, day, problem_key)
+		INSERT INTO user_ac_problem_days (user_id, day, problem_key, platform)
 		SELECT DISTINCT
 			user_id,
 			date_trunc('day', time)::date AS day,
@@ -203,7 +335,8 @@ func BackfillUserACIfEmpty(db *gorm.DB) {
 				CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 'p:' || problem_id::text END,
 				CASE WHEN external_id IS NOT NULL AND btrim(external_id) <> '' THEN 'e:' || platform || ':' || external_id END,
 				'n:' || platform || ':' || COALESCE(problem, '')
-			) AS problem_key
+			) AS problem_key,
+			COALESCE(NULLIF(btrim(platform), ''), '?') AS platform
 		FROM submit_logs
 		WHERE is_ac = true
 		ON CONFLICT (user_id, day, problem_key) DO NOTHING

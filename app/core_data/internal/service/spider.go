@@ -10,6 +10,7 @@ import (
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/common/utils/ratelimit"
 	"cwxu-algo/app/core_data/internal/data"
+	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
 	spiderregistry "cwxu-algo/app/core_data/internal/spider"
 	"cwxu-algo/app/core_data/task"
@@ -133,15 +134,34 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 		if err := tx.Where("user_id = ? AND platform = ?", req.UserId, platformName).Delete(&model.ContestLog{}).Error; err != nil {
 			return err
 		}
+		// 按平台剪枝预聚合 + 账本（热表仅 6 个月，不可再从残缺明细 Rebuild）
+		if err := dal.DeletePlatformDailyStats(ctx, tx, req.UserId, platformName); err != nil {
+			return err
+		}
+		if err := dal.DeletePlatformUserAC(ctx, tx, req.UserId, platformName); err != nil {
+			return err
+		}
+		if err := dal.DeletePlatformCountedIDs(ctx, tx, req.UserId, platformName); err != nil {
+			return err
+		}
 		return tx.Create(&platform).Error
 	}); err != nil {
 		log.Errorf("SetSpider transaction failed: %v", err)
 		return nil, InternalError
 	}
-	if err := s.rdb.Del(ctx, fmt.Sprintf("core:submit_log:user:%d", req.UserId)).Err(); err != nil {
+	// 缓存与统计版本：立即让首页题量/热力读到重建后的数
+	if err := s.rdb.Del(ctx,
+		fmt.Sprintf("core:submit_log:user:%d", req.UserId),
+		fmt.Sprintf("user:%d:lastSubmitTime", req.UserId),
+	).Err(); err != nil {
 		log.Errorf("SetSpider: redis del failed: %v", err)
 	}
 	_ = s.rdb.Incr(ctx, fmt.Sprintf("core:contest_log:user:%d:ver", req.UserId)).Err()
+	_ = s.rdb.Incr(ctx, fmt.Sprintf("statistic:user:%d:ver", req.UserId)).Err()
+	// 递增代数：正在跑的旧全量任务写入前会发现代数过期并丢弃，避免把已删数据写回叠统计
+	s.spider.BumpGeneration(req.UserId, platformName)
+	// 强制允许本次入队（旧全量任务可能仍占 pending/inflight）
+	s.spider.ResetDedup(req.UserId, platformName)
 	// 只全量抓取刚绑定的这一平台，避免重绑 CF 时把其它 OJ 再扫一遍
 	s.spider.DoPlatform(req.UserId, platformName, true)
 	return &spider.SetSpiderRep{
@@ -168,12 +188,17 @@ func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserD
 		log.Errorf("PurgeUserData: contest_log user=%d: %v", uid, err)
 		return nil, InternalError
 	}
+	if err := dal.DeleteUserPreagg(ctx, s.db, uid); err != nil {
+		log.Errorf("PurgeUserData: preagg user=%d: %v", uid, err)
+		return nil, InternalError
+	}
 	// 缓存 / 爬虫 inflight
 	keys := []string{
 		fmt.Sprintf("core:submit_log:user:%d", uid),
 		fmt.Sprintf("spider:pending:%d", uid),
 		fmt.Sprintf("spider:inflight:%d", uid),
 		fmt.Sprintf("user:%d:profile", uid),
+		fmt.Sprintf("statistic:user:%d:ver", uid),
 	}
 	if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
 		log.Warnf("PurgeUserData: redis del user=%d: %v", uid, err)
@@ -183,6 +208,7 @@ func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserD
 		_ = s.rdb.Del(ctx,
 			fmt.Sprintf("spider:pending:%d:%s", uid, p),
 			fmt.Sprintf("spider:inflight:%d:%s", uid, p),
+			fmt.Sprintf("spider:writelock:%d:%s", uid, p),
 		).Err()
 	}
 	return &spider.PurgeUserDataRes{Code: 0, Message: "已清空该用户的训练与绑定数据"}, nil

@@ -12,10 +12,11 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// DailyDelta 某用户某日的增量
+// DailyDelta 某用户某平台某日的增量
 type DailyDelta struct {
 	UserID    int64
 	Day       time.Time // 截断到日 00:00 local
+	Platform  string
 	SubmitCnt int64
 	AcCnt     int64
 }
@@ -26,17 +27,19 @@ func AggregateSubmitDeltas(logs []model.SubmitLog) []DailyDelta {
 		return nil
 	}
 	type key struct {
-		uid int64
-		day string
+		uid  int64
+		day  string
+		plat string
 	}
 	m := make(map[key]*DailyDelta, len(logs)/4+1)
 	for i := range logs {
 		l := &logs[i]
 		day := time.Date(l.Time.Year(), l.Time.Month(), l.Time.Day(), 0, 0, 0, 0, l.Time.Location())
-		k := key{uid: l.UserID, day: day.Format("2006-01-02")}
+		plat := strings.TrimSpace(l.Platform)
+		k := key{uid: l.UserID, day: day.Format("2006-01-02"), plat: plat}
 		d, ok := m[k]
 		if !ok {
-			d = &DailyDelta{UserID: l.UserID, Day: day}
+			d = &DailyDelta{UserID: l.UserID, Day: day, Platform: plat}
 			m[k] = d
 		}
 		// 力扣合成 AC / 最近通过明细不计提交（避免与日历双计）
@@ -57,7 +60,7 @@ func AggregateSubmitDeltas(logs []model.SubmitLog) []DailyDelta {
 	return out
 }
 
-// ApplyDailyDeltas 原子累加日汇总
+// ApplyDailyDeltas 原子累加日汇总（按 user+day+platform）
 func ApplyDailyDeltas(ctx context.Context, db *gorm.DB, deltas []DailyDelta) error {
 	if len(deltas) == 0 || db == nil {
 		return nil
@@ -66,12 +69,13 @@ func ApplyDailyDeltas(ctx context.Context, db *gorm.DB, deltas []DailyDelta) err
 		row := model.DailyUserStat{
 			UserID:    d.UserID,
 			Day:       d.Day,
+			Platform:  d.Platform,
 			SubmitCnt: d.SubmitCnt,
 			AcCnt:     d.AcCnt,
 		}
 		err := db.WithContext(ctx).
 			Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "user_id"}, {Name: "day"}},
+				Columns: []clause.Column{{Name: "user_id"}, {Name: "day"}, {Name: "platform"}},
 				DoUpdates: clause.Assignments(map[string]interface{}{
 					"submit_cnt": gorm.Expr("daily_user_stats.submit_cnt + EXCLUDED.submit_cnt"),
 					"ac_cnt":     gorm.Expr("daily_user_stats.ac_cnt + EXCLUDED.ac_cnt"),
@@ -85,77 +89,68 @@ func ApplyDailyDeltas(ctx context.Context, db *gorm.DB, deltas []DailyDelta) err
 	return nil
 }
 
-// BackfillDailyUserStatsIfEmpty 表为空时从 submit_logs 全量聚合一次（启动幂等）
-func BackfillDailyUserStatsIfEmpty(db *gorm.DB) {
-	if db == nil || !db.Migrator().HasTable(&model.DailyUserStat{}) {
-		return
+// InsertCountedSubmitIDs 写入已计入账本（ON CONFLICT DO NOTHING）
+func InsertCountedSubmitIDs(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) error {
+	if db == nil || len(logs) == 0 {
+		return nil
 	}
-	var n int64
-	if err := db.Model(&model.DailyUserStat{}).Count(&n).Error; err != nil {
-		log.Warnf("daily_user_stats count failed: %v", err)
-		return
+	rows := make([]model.CountedSubmitID, 0, len(logs))
+	for i := range logs {
+		if logs[i].SubmitID == "" {
+			continue
+		}
+		rows = append(rows, model.CountedSubmitID{
+			SubmitID: logs[i].SubmitID,
+			UserID:   logs[i].UserID,
+			Platform: strings.TrimSpace(logs[i].Platform),
+		})
 	}
-	if n > 0 {
-		return
+	if len(rows) == 0 {
+		return nil
 	}
-	log.Infof("daily_user_stats empty, backfill from submit_logs…")
-	// 与热力图一致：date_trunc('day', time) 使用库 session 时区
-	res := db.Exec(`
-		INSERT INTO daily_user_stats (user_id, day, submit_cnt, ac_cnt)
-		SELECT
-			user_id,
-			date_trunc('day', time)::date AS day,
-			COUNT(*) FILTER (
-				WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `
-			) AS submit_cnt,
-			COUNT(*) FILTER (WHERE is_ac = true) AS ac_cnt
-		FROM submit_logs
-		GROUP BY user_id, date_trunc('day', time)::date
-		HAVING
-			COUNT(*) FILTER (WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `) > 0
-			OR COUNT(*) FILTER (WHERE is_ac = true) > 0
-		ON CONFLICT (user_id, day) DO NOTHING
-	`)
-	if res.Error != nil {
-		log.Warnf("daily_user_stats backfill failed: %v", res.Error)
-		return
+	const batch = 500
+	for i := 0; i < len(rows); i += batch {
+		j := i + batch
+		if j > len(rows) {
+			j = len(rows)
+		}
+		chunk := rows[i:j]
+		if err := db.WithContext(ctx).
+			Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "submit_id"}},
+				DoNothing: true,
+			}).
+			Create(&chunk).Error; err != nil {
+			return err
+		}
 	}
-	log.Infof("daily_user_stats backfill done rows=%d", res.RowsAffected)
+	return nil
 }
 
-// PruneLeetCodeProbDuplicates 清理某用户已入库的重复 lc-prob（同 external_id 只留最新一条）
-// 用于历史脏数据；新写入由 FilterNewSubmitLogs 拦截。
-func PruneLeetCodeProbDuplicates(ctx context.Context, db *gorm.DB, userID int64) (int64, error) {
-	if db == nil || userID == 0 {
-		return 0, nil
+// FilterHotSubmitLogs 仅保留热窗内明细（近 6 个月）
+func FilterHotSubmitLogs(logs []model.SubmitLog, now time.Time) []model.SubmitLog {
+	if len(logs) == 0 {
+		return nil
 	}
-	// 保留同 user+external_id 下 time 最大、id 最大的一条，删其余
-	res := db.WithContext(ctx).Exec(`
-		DELETE FROM submit_logs a
-		USING submit_logs b
-		WHERE a.user_id = ?
-		  AND a.platform = 'LeetCode'
-		  AND a.submit_id LIKE 'lc-prob-%'
-		  AND b.user_id = a.user_id
-		  AND b.platform = a.platform
-		  AND b.submit_id LIKE 'lc-prob-%'
-		  AND a.external_id IS NOT NULL AND a.external_id <> ''
-		  AND a.external_id = b.external_id
-		  AND (a.time < b.time OR (a.time = b.time AND a.id < b.id))
-	`, userID)
-	return res.RowsAffected, res.Error
+	cutoff := model.SubmitLogHotCutoff(now)
+	out := make([]model.SubmitLog, 0, len(logs))
+	for i := range logs {
+		if !logs[i].Time.Before(cutoff) {
+			out = append(out, logs[i])
+		}
+	}
+	return out
 }
 
-// FilterNewSubmitLogs 入库前去重：
+// FilterUncountedSubmits 入库前去重（账本为真相）：
 //  1) 本批内按 submit_id 去重
-//  2) 去掉库中已有 submit_id
-//  3) 力扣 lc-prob：同一用户同一 titleSlug（external_id）只保留一条（防近期动态重复）
-func FilterNewSubmitLogs(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) ([]model.SubmitLog, error) {
+//  2) 去掉 counted_submit_ids 已有
+//  3) 力扣 lc-prob：同一用户同一 titleSlug 热表已有则跳过
+func FilterUncountedSubmits(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) ([]model.SubmitLog, error) {
 	if len(logs) == 0 {
 		return nil, nil
 	}
 
-	// 1) 本批 submit_id 去重（保留先出现）
 	logs = dedupeSubmitLogsBySubmitID(logs)
 	if len(logs) == 0 {
 		return nil, nil
@@ -165,21 +160,33 @@ func FilterNewSubmitLogs(ctx context.Context, db *gorm.DB, logs []model.SubmitLo
 	for i := range logs {
 		ids[i] = logs[i].SubmitID
 	}
-	// 2) 库中已有 submit_id
 	const chunk = 500
 	exist := make(map[string]struct{}, len(ids)/2)
+	// 优先账本；热表兜底（迁移前/账本未写完）
 	for i := 0; i < len(ids); i += chunk {
 		j := i + chunk
 		if j > len(ids) {
 			j = len(ids)
 		}
-		var found []string
+		part := ids[i:j]
+		if db.Migrator().HasTable(&model.CountedSubmitID{}) {
+			var found []string
+			if err := db.WithContext(ctx).Model(&model.CountedSubmitID{}).
+				Where("submit_id IN ?", part).
+				Pluck("submit_id", &found).Error; err != nil {
+				return nil, err
+			}
+			for _, id := range found {
+				exist[id] = struct{}{}
+			}
+		}
+		var foundHot []string
 		if err := db.WithContext(ctx).Model(&model.SubmitLog{}).
-			Where("submit_id IN ?", ids[i:j]).
-			Pluck("submit_id", &found).Error; err != nil {
+			Where("submit_id IN ?", part).
+			Pluck("submit_id", &foundHot).Error; err != nil {
 			return nil, err
 		}
-		for _, id := range found {
+		for _, id := range foundHot {
 			exist[id] = struct{}{}
 		}
 	}
@@ -197,12 +204,76 @@ func FilterNewSubmitLogs(ctx context.Context, db *gorm.DB, logs []model.SubmitLo
 		return nil, nil
 	}
 
-	// 3) 力扣最近通过：同用户同题已入库则跳过（API 会对一题返回多次 AC / 换 submissionId）
 	out, err := filterLeetCodeProbAlreadyHaveSlug(ctx, db, out)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// FilterNewSubmitLogs 兼容旧名：等价 FilterUncountedSubmits
+func FilterNewSubmitLogs(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) ([]model.SubmitLog, error) {
+	return FilterUncountedSubmits(ctx, db, logs)
+}
+
+// BackfillDailyUserStatsIfEmpty 表为空时从 submit_logs 全量聚合一次（启动幂等）
+// 含 platform 维度；迁移完整流程见 RunSubmitRetentionMigrate。
+func BackfillDailyUserStatsIfEmpty(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasTable(&model.DailyUserStat{}) {
+		return
+	}
+	var n int64
+	if err := db.Model(&model.DailyUserStat{}).Count(&n).Error; err != nil {
+		log.Warnf("daily_user_stats count failed: %v", err)
+		return
+	}
+	if n > 0 {
+		return
+	}
+	log.Infof("daily_user_stats empty, backfill from submit_logs…")
+	res := db.Exec(`
+		INSERT INTO daily_user_stats (user_id, day, platform, submit_cnt, ac_cnt)
+		SELECT
+			user_id,
+			date_trunc('day', time)::date AS day,
+			COALESCE(NULLIF(btrim(platform), ''), '?') AS platform,
+			COUNT(*) FILTER (
+				WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `
+			) AS submit_cnt,
+			COUNT(*) FILTER (WHERE is_ac = true) AS ac_cnt
+		FROM submit_logs
+		GROUP BY user_id, date_trunc('day', time)::date, COALESCE(NULLIF(btrim(platform), ''), '?')
+		HAVING
+			COUNT(*) FILTER (WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `) > 0
+			OR COUNT(*) FILTER (WHERE is_ac = true) > 0
+		ON CONFLICT (user_id, day, platform) DO NOTHING
+	`)
+	if res.Error != nil {
+		log.Warnf("daily_user_stats backfill failed: %v", res.Error)
+		return
+	}
+	log.Infof("daily_user_stats backfill done rows=%d", res.RowsAffected)
+}
+
+// PruneLeetCodeProbDuplicates 清理某用户已入库的重复 lc-prob（同 external_id 只留最新一条）
+func PruneLeetCodeProbDuplicates(ctx context.Context, db *gorm.DB, userID int64) (int64, error) {
+	if db == nil || userID == 0 {
+		return 0, nil
+	}
+	res := db.WithContext(ctx).Exec(`
+		DELETE FROM submit_logs a
+		USING submit_logs b
+		WHERE a.user_id = ?
+		  AND a.platform = 'LeetCode'
+		  AND a.submit_id LIKE 'lc-prob-%'
+		  AND b.user_id = a.user_id
+		  AND b.platform = a.platform
+		  AND b.submit_id LIKE 'lc-prob-%'
+		  AND a.external_id IS NOT NULL AND a.external_id <> ''
+		  AND a.external_id = b.external_id
+		  AND (a.time < b.time OR (a.time = b.time AND a.id < b.id))
+	`, userID)
+	return res.RowsAffected, res.Error
 }
 
 // dedupeSubmitLogsBySubmitID 本批内按 submit_id 去重，保留首次出现
@@ -232,7 +303,6 @@ func filterLeetCodeProbAlreadyHaveSlug(ctx context.Context, db *gorm.DB, logs []
 		uid int64
 		ext string
 	}
-	// 收集本批 lc-prob 的 (user, external_id)
 	need := make(map[ukey]struct{})
 	userSet := make(map[int64]struct{})
 	for i := range logs {
@@ -242,7 +312,6 @@ func filterLeetCodeProbAlreadyHaveSlug(ctx context.Context, db *gorm.DB, logs []
 		}
 		ext := strings.TrimSpace(l.ExternalID)
 		if ext == "" {
-			// 尝试从 problem 首 token 取 slug
 			if f := strings.Fields(l.Problem); len(f) > 0 {
 				ext = f[0]
 			}
@@ -250,7 +319,6 @@ func filterLeetCodeProbAlreadyHaveSlug(ctx context.Context, db *gorm.DB, logs []
 		if ext == "" {
 			continue
 		}
-		// 规范化 external_id 写回，便于后续绑定
 		if l.ExternalID == "" {
 			l.ExternalID = ext
 		}
@@ -292,7 +360,30 @@ func filterLeetCodeProbAlreadyHaveSlug(ctx context.Context, db *gorm.DB, logs []
 	for _, r := range rows {
 		have[ukey{uid: r.UserID, ext: r.ExternalID}] = struct{}{}
 	}
-	// 本批内同用户同 slug 也只留一条（保留先出现，通常更新）
+	// 账本时代：同题已在 user_ac_problems（e:LeetCode:slug）也视为已有
+	if db.Migrator().HasTable(&model.UserACProblem{}) {
+		keys := make([]string, 0, len(need))
+		for k := range need {
+			keys = append(keys, "e:LeetCode:"+k.ext)
+		}
+		type acRow struct {
+			UserID     int64  `gorm:"column:user_id"`
+			ProblemKey string `gorm:"column:problem_key"`
+		}
+		var acRows []acRow
+		if err := db.WithContext(ctx).Model(&model.UserACProblem{}).
+			Select("user_id, problem_key").
+			Where("user_id IN ? AND problem_key IN ?", uids, keys).
+			Find(&acRows).Error; err == nil {
+			for _, r := range acRows {
+				ext := strings.TrimPrefix(r.ProblemKey, "e:LeetCode:")
+				if ext != r.ProblemKey {
+					have[ukey{uid: r.UserID, ext: ext}] = struct{}{}
+				}
+			}
+		}
+	}
+
 	batchSeen := make(map[ukey]struct{}, len(need))
 	out := make([]model.SubmitLog, 0, len(logs))
 	for i := range logs {
@@ -318,4 +409,75 @@ func filterLeetCodeProbAlreadyHaveSlug(ctx context.Context, db *gorm.DB, logs []
 		out = append(out, *l)
 	}
 	return out, nil
+}
+
+// DeletePlatformDailyStats 换绑：删某用户某平台日汇总
+func DeletePlatformDailyStats(ctx context.Context, db *gorm.DB, userID int64, platform string) error {
+	if db == nil || userID <= 0 || platform == "" {
+		return nil
+	}
+	if !db.Migrator().HasTable(&model.DailyUserStat{}) {
+		return nil
+	}
+	return db.WithContext(ctx).
+		Where("user_id = ? AND platform = ?", userID, platform).
+		Delete(&model.DailyUserStat{}).Error
+}
+
+// DeletePlatformCountedIDs 换绑：删某用户某平台账本
+func DeletePlatformCountedIDs(ctx context.Context, db *gorm.DB, userID int64, platform string) error {
+	if db == nil || userID <= 0 || platform == "" {
+		return nil
+	}
+	if !db.Migrator().HasTable(&model.CountedSubmitID{}) {
+		return nil
+	}
+	return db.WithContext(ctx).
+		Where("user_id = ? AND platform = ?", userID, platform).
+		Delete(&model.CountedSubmitID{}).Error
+}
+
+// DeleteUserCountedIDs 硬删用户账本
+func DeleteUserCountedIDs(ctx context.Context, db *gorm.DB, userID int64) error {
+	if db == nil || userID <= 0 {
+		return nil
+	}
+	if !db.Migrator().HasTable(&model.CountedSubmitID{}) {
+		return nil
+	}
+	return db.WithContext(ctx).Where("user_id = ?", userID).Delete(&model.CountedSubmitID{}).Error
+}
+
+// PruneColdSubmitLogs 分批删除热窗外明细；返回累计删除行数
+func PruneColdSubmitLogs(ctx context.Context, db *gorm.DB, now time.Time, batchSize int) (int64, error) {
+	if db == nil {
+		return 0, nil
+	}
+	if batchSize <= 0 {
+		batchSize = 5000
+	}
+	cutoff := model.SubmitLogHotCutoff(now)
+	var total int64
+	for {
+		res := db.WithContext(ctx).Exec(`
+			DELETE FROM submit_logs
+			WHERE ctid IN (
+				SELECT ctid FROM submit_logs
+				WHERE time < ?
+				LIMIT ?
+			)
+		`, cutoff, batchSize)
+		if res.Error != nil {
+			return total, res.Error
+		}
+		total += res.RowsAffected
+		if res.RowsAffected == 0 {
+			break
+		}
+		// 大批量时让出连接
+		if res.RowsAffected < int64(batchSize) {
+			break
+		}
+	}
+	return total, nil
 }

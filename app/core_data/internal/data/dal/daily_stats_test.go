@@ -17,14 +17,43 @@ func TestAggregateSubmitDeltas(t *testing.T) {
 		{UserID: 1, Time: day, Platform: "LeetCode", SubmitID: "lc-cal-1-20260716-0", IsAC: false},
 	}
 	d := AggregateSubmitDeltas(logs)
-	if len(d) != 1 {
-		t.Fatalf("want 1 delta got %d", len(d))
+	if len(d) != 2 {
+		t.Fatalf("want 2 deltas (CF+LeetCode) got %d", len(d))
 	}
-	if d[0].SubmitCnt != 3 { // CF×2 + lc-cal；排除 lc-ac / lc-prob
-		t.Fatalf("submit_cnt=%d want 3", d[0].SubmitCnt)
+	byPlat := map[string]DailyDelta{}
+	for _, x := range d {
+		byPlat[x.Platform] = x
 	}
-	if d[0].AcCnt != 3 { // CF AC + lc-ac + lc-prob
-		t.Fatalf("ac_cnt=%d want 3", d[0].AcCnt)
+	cf, ok := byPlat["CF"]
+	if !ok {
+		t.Fatal("missing CF delta")
+	}
+	if cf.SubmitCnt != 2 || cf.AcCnt != 1 {
+		t.Fatalf("CF submit=%d ac=%d want 2/1", cf.SubmitCnt, cf.AcCnt)
+	}
+	lc, ok := byPlat["LeetCode"]
+	if !ok {
+		t.Fatal("missing LeetCode delta")
+	}
+	if lc.SubmitCnt != 1 { // 仅 lc-cal；排除 lc-ac / lc-prob
+		t.Fatalf("LC submit_cnt=%d want 1", lc.SubmitCnt)
+	}
+	if lc.AcCnt != 2 { // lc-ac + lc-prob
+		t.Fatalf("LC ac_cnt=%d want 2", lc.AcCnt)
+	}
+}
+
+func TestFilterHotSubmitLogs(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.Local)
+	old := now.AddDate(0, -7, 0)
+	hot := now.AddDate(0, -1, 0)
+	logs := []model.SubmitLog{
+		{SubmitID: "old", Time: old},
+		{SubmitID: "hot", Time: hot},
+	}
+	out := FilterHotSubmitLogs(logs, now)
+	if len(out) != 1 || out[0].SubmitID != "hot" {
+		t.Fatalf("got %+v", out)
 	}
 }
 

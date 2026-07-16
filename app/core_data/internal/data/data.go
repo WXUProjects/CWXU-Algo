@@ -48,6 +48,8 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 // migrateModels 合并
 func migrateModels(db *gorm.DB) {
 	reconcilePlatformDuplicates(db)
+	// 旧 daily_user_stats 无 platform：先改名，再 AutoMigrate 建新表
+	prepareDailyUserStatsPlatform(db)
 	err := db.AutoMigrate(
 		&model.SubmitLog{},
 		&model.Platform{},
@@ -59,6 +61,7 @@ func migrateModels(db *gorm.DB) {
 		&model.DailyUserStat{},
 		&model.UserACProblem{},
 		&model.UserACProblemDay{},
+		&model.CountedSubmitID{},
 		&model.ContestCalendar{},
 		&model.ContestCalendarSub{},
 		&model.ContestCalendarNotifyLog{},
@@ -66,15 +69,34 @@ func migrateModels(db *gorm.DB) {
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
 	}
+	// 丢弃旧无 platform 日汇总（清洗任务会从 submit_logs 全量重建）
+	_ = db.Exec(`DROP TABLE IF EXISTS daily_user_stats_pre_platform`).Error
 	ensureSubmitLogPerf(db)
-	// 日汇总：空表时从明细回填（1w 日活热力/时段读路径依赖）
-	// 放在 ensure 之后，保证 is_ac 已回填
+	// 空表兜底回填（清洗任务会覆盖重建；新环境无历史时有用）
 	backfillDailyUserStatsIfEmpty(db)
-	// 个人 AC 去重预聚合（P7）
 	backfillUserACIfEmpty(db)
 }
 
-// backfillDailyUserStatsIfEmpty 避免 data→dal 循环依赖，逻辑与 dal.BackfillDailyUserStatsIfEmpty 一致
+// prepareDailyUserStatsPlatform 旧 PK (user_id,day) → 新 PK (user_id,day,platform)
+func prepareDailyUserStatsPlatform(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasTable("daily_user_stats") {
+		return
+	}
+	var n int64
+	_ = db.Raw(`
+		SELECT COUNT(*) FROM information_schema.columns
+		WHERE table_name = 'daily_user_stats' AND column_name = 'platform'
+	`).Scan(&n).Error
+	if n > 0 {
+		return
+	}
+	log.Infof("database: renaming daily_user_stats → daily_user_stats_pre_platform (add platform PK)")
+	if err := db.Exec(`ALTER TABLE daily_user_stats RENAME TO daily_user_stats_pre_platform`).Error; err != nil {
+		log.Warnf("database: rename daily_user_stats failed: %v", err)
+	}
+}
+
+// backfillDailyUserStatsIfEmpty 空表时从 submit_logs 全量聚合（含 platform）
 func backfillDailyUserStatsIfEmpty(db *gorm.DB) {
 	if db == nil || !db.Migrator().HasTable(&model.DailyUserStat{}) {
 		return
@@ -89,20 +111,21 @@ func backfillDailyUserStatsIfEmpty(db *gorm.DB) {
 	}
 	log.Infof("daily_user_stats empty, backfill from submit_logs…")
 	res := db.Exec(`
-		INSERT INTO daily_user_stats (user_id, day, submit_cnt, ac_cnt)
+		INSERT INTO daily_user_stats (user_id, day, platform, submit_cnt, ac_cnt)
 		SELECT
 			user_id,
 			date_trunc('day', time)::date AS day,
+			COALESCE(NULLIF(btrim(platform), ''), '?') AS platform,
 			COUNT(*) FILTER (
 				WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `
 			) AS submit_cnt,
 			COUNT(*) FILTER (WHERE is_ac = true) AS ac_cnt
 		FROM submit_logs
-		GROUP BY user_id, date_trunc('day', time)::date
+		GROUP BY user_id, date_trunc('day', time)::date, COALESCE(NULLIF(btrim(platform), ''), '?')
 		HAVING
 			COUNT(*) FILTER (WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `) > 0
 			OR COUNT(*) FILTER (WHERE is_ac = true) > 0
-		ON CONFLICT (user_id, day) DO NOTHING
+		ON CONFLICT (user_id, day, platform) DO NOTHING
 	`)
 	if res.Error != nil {
 		log.Warnf("daily_user_stats backfill failed: %v", res.Error)
@@ -111,7 +134,7 @@ func backfillDailyUserStatsIfEmpty(db *gorm.DB) {
 	log.Infof("daily_user_stats backfill done rows=%d", res.RowsAffected)
 }
 
-// backfillUserACIfEmpty 生涯/按日 AC 去重表空则从明细回填（避免 data→dal 循环）
+// backfillUserACIfEmpty 生涯/按日 AC 去重表空则从明细回填
 func backfillUserACIfEmpty(db *gorm.DB) {
 	if db == nil || !db.Migrator().HasTable(&model.UserACProblem{}) {
 		return
@@ -124,12 +147,13 @@ func backfillUserACIfEmpty(db *gorm.DB) {
 	if n == 0 {
 		log.Infof("user_ac_problems empty, backfill from submit_logs…")
 		res := db.Exec(`
-			INSERT INTO user_ac_problems (user_id, problem_key, first_ac_at)
-			SELECT user_id, problem_key, MIN(time) AS first_ac_at
+			INSERT INTO user_ac_problems (user_id, problem_key, platform, first_ac_at)
+			SELECT user_id, problem_key, platform, MIN(time) AS first_ac_at
 			FROM (
 				SELECT
 					user_id,
 					time,
+					COALESCE(NULLIF(btrim(platform), ''), '?') AS platform,
 					COALESCE(
 						CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 'p:' || problem_id::text END,
 						CASE WHEN external_id IS NOT NULL AND btrim(external_id) <> '' THEN 'e:' || platform || ':' || external_id END,
@@ -138,7 +162,7 @@ func backfillUserACIfEmpty(db *gorm.DB) {
 				FROM submit_logs
 				WHERE is_ac = true
 			) t
-			GROUP BY user_id, problem_key
+			GROUP BY user_id, problem_key, platform
 			ON CONFLICT (user_id, problem_key) DO NOTHING
 		`)
 		if res.Error != nil {
@@ -160,7 +184,7 @@ func backfillUserACIfEmpty(db *gorm.DB) {
 	}
 	log.Infof("user_ac_problem_days empty, backfill from submit_logs…")
 	res := db.Exec(`
-		INSERT INTO user_ac_problem_days (user_id, day, problem_key)
+		INSERT INTO user_ac_problem_days (user_id, day, problem_key, platform)
 		SELECT DISTINCT
 			user_id,
 			date_trunc('day', time)::date AS day,
@@ -168,7 +192,8 @@ func backfillUserACIfEmpty(db *gorm.DB) {
 				CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 'p:' || problem_id::text END,
 				CASE WHEN external_id IS NOT NULL AND btrim(external_id) <> '' THEN 'e:' || platform || ':' || external_id END,
 				'n:' || platform || ':' || COALESCE(problem, '')
-			) AS problem_key
+			) AS problem_key,
+			COALESCE(NULLIF(btrim(platform), ''), '?') AS platform
 		FROM submit_logs
 		WHERE is_ac = true
 		ON CONFLICT (user_id, day, problem_key) DO NOTHING
@@ -199,25 +224,21 @@ func ensureSubmitLogPerf(db *gorm.DB) {
 		log.Infof("submit_logs is_ac backfill rows=%d", res.RowsAffected)
 	}
 
-	// 复合/部分索引：统计读路径（热力/时段/排行）
-	// IF NOT EXISTS 幂等；失败只打日志不 panic，避免索引名冲突拖垮启动
 	indexSQLs := []string{
-		// 个人 AC 时段 / 排行：user_id + is_ac + time
 		`CREATE INDEX IF NOT EXISTS idx_submit_user_isac_time ON submit_logs (user_id, is_ac, time DESC)`,
-		// 全站/组织 AC 热力：时间窗 + is_ac
 		`CREATE INDEX IF NOT EXISTS idx_submit_isac_time ON submit_logs (time DESC) WHERE is_ac = true`,
-		// 提交热力（排除力扣合成 AC / 最近通过明细）
 		`CREATE INDEX IF NOT EXISTS idx_submit_user_time_nonsynthetic ON submit_logs (user_id, time DESC)
 			WHERE ` + model.SQLExcludeLeetCodeNonSubmit,
-		// 组织提交热力时间窗
 		`CREATE INDEX IF NOT EXISTS idx_submit_time_nonsynthetic ON submit_logs (time DESC)
 			WHERE ` + model.SQLExcludeLeetCodeNonSubmit,
-		// 日汇总：按日聚合组织热力
 		`CREATE INDEX IF NOT EXISTS idx_daily_stats_day ON daily_user_stats (day)`,
 		`CREATE INDEX IF NOT EXISTS idx_daily_stats_day_user ON daily_user_stats (day, user_id)`,
-		// 个人 AC 去重预聚合
+		`CREATE INDEX IF NOT EXISTS idx_daily_stats_user_plat ON daily_user_stats (user_id, platform)`,
 		`CREATE INDEX IF NOT EXISTS idx_uac_day_user ON user_ac_problem_days (user_id, day)`,
 		`CREATE INDEX IF NOT EXISTS idx_uac_user_first ON user_ac_problems (user_id, first_ac_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_uac_user_plat ON user_ac_problems (user_id, platform)`,
+		`CREATE INDEX IF NOT EXISTS idx_uac_day_plat ON user_ac_problem_days (user_id, platform)`,
+		`CREATE INDEX IF NOT EXISTS idx_counted_user_plat ON counted_submit_ids (user_id, platform)`,
 	}
 	for _, sql := range indexSQLs {
 		if err := db.Exec(sql).Error; err != nil {

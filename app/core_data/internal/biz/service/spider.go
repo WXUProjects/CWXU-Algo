@@ -11,8 +11,10 @@ import (
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
 	"cwxu-algo/app/core_data/internal/spidermetrics"
+	"cwxu-algo/app/core_data/task"
 
 	"github.com/go-kratos/kratos/v2/log"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -95,6 +97,13 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 	if !ok {
 		return 0, fmt.Errorf("平台未实现 SubmitLogFetcher")
 	}
+
+	// 拉取前记录代数；重绑会 BumpGeneration，写入前再比对，丢弃过期全量结果
+	var genAtStart int64
+	if uc.data != nil && uc.data.RDB != nil {
+		genAtStart = task.CurrentGeneration(uc.data.RDB, userId, plat.Platform)
+	}
+
 	tmp, err := sbFetch.FetchSubmitLog(userId, plat.Username, needAll)
 	if err != nil {
 		return 0, err
@@ -108,6 +117,22 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 
 	// 只插入真正的新行，才能准确累加 daily_user_stats（OnConflict DoNothing 无法区分）
 	ctx := context.Background()
+
+	// 同用户同平台串行写入：FilterNew + Insert + ApplyDaily 必须原子视角，
+	// 否则两次全量爬虫并发时都会把整批当成「新行」叠 daily/user_ac（重绑连点常见）。
+	unlock, locked := uc.tryPlatformWriteLock(ctx, userId, plat.Platform)
+	if !locked {
+		return 0, fmt.Errorf("平台写入锁占用 user=%d platform=%s", userId, plat.Platform)
+	}
+	defer unlock()
+
+	if uc.data != nil && uc.data.RDB != nil {
+		if cur := task.CurrentGeneration(uc.data.RDB, userId, plat.Platform); cur != genAtStart {
+			log.Infof("Spider: drop stale fetch user=%d platform=%s gen %d→%d", userId, plat.Platform, genAtStart, cur)
+			return 0, nil
+		}
+	}
+
 	// 力扣：先清历史重复最近通过，再过滤待插入（同题只留一条）
 	if plat.Platform == spider.LeetCode {
 		if n, perr := dal.PruneLeetCodeProbDuplicates(ctx, uc.data.DB, userId); perr != nil {
@@ -116,7 +141,8 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 			log.Infof("Spider: pruned %d duplicate leetcode recent-AC rows user=%d", n, userId)
 		}
 	}
-	neu, err := dal.FilterNewSubmitLogs(ctx, uc.data.DB, tmp)
+	// 账本去重：已计入预聚合的 submit_id 不再累加（热表可已删）
+	neu, err := dal.FilterUncountedSubmits(ctx, uc.data.DB, tmp)
 	if err != nil {
 		return 0, err
 	}
@@ -124,28 +150,67 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 		return 0, nil
 	}
 
-	res := uc.data.DB.
-		Clauses(clause.OnConflict{
+	// 先预聚合+账本，再只把近 6 个月写入热表
+	now := time.Now()
+	err = uc.data.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := dal.ApplyDailyDeltas(ctx, tx, dal.AggregateSubmitDeltas(neu)); err != nil {
+			return err
+		}
+		if err := dal.ApplyUserACFromSubmits(ctx, tx, neu); err != nil {
+			return err
+		}
+		if err := dal.InsertCountedSubmitIDs(ctx, tx, neu); err != nil {
+			return err
+		}
+		hot := dal.FilterHotSubmitLogs(neu, now)
+		if len(hot) == 0 {
+			return nil
+		}
+		return tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "submit_id"}},
 			DoNothing: true,
-		}).
-		CreateInBatches(&neu, submitInsertBatchSize)
-	if res.Error != nil {
-		return 0, res.Error
+		}).CreateInBatches(&hot, submitInsertBatchSize).Error
+	})
+	if err != nil {
+		return 0, err
 	}
-	// 日汇总增量（热力/提交时段读路径）
-	if err := dal.ApplyDailyDeltas(ctx, uc.data.DB, dal.AggregateSubmitDeltas(neu)); err != nil {
-		log.Warnf("Spider: apply daily stats failed user=%d: %v", userId, err)
-	}
-	// 个人 AC 去重预聚合（写入时提前算）
-	if err := dal.ApplyUserACFromSubmits(ctx, uc.data.DB, neu); err != nil {
-		log.Warnf("Spider: apply user AC preagg failed user=%d: %v", userId, err)
-	}
-	if res.RowsAffected > 0 {
-		spidermetrics.IncRows(res.RowsAffected)
-	}
-	// 以过滤后新行数为准（DoNothing 边界下更稳）
+	spidermetrics.IncRows(int64(len(neu)))
 	return int64(len(neu)), nil
+}
+
+// tryPlatformWriteLock 获取 user+platform 写入锁；短轮询等待，避免重绑后新任务与旧任务交接时直接失败。
+// 返回 (unlock, ok)
+func (uc *SpiderUseCase) tryPlatformWriteLock(ctx context.Context, userId int64, platform string) (func(), bool) {
+	if uc.data == nil || uc.data.RDB == nil {
+		return func() {}, true
+	}
+	key := fmt.Sprintf("spider:writelock:%d:%s", userId, platform)
+	const (
+		waitStep = 2 * time.Second
+		waitMax  = 60 * time.Second
+	)
+	deadline := time.Now().Add(waitMax)
+	for {
+		// 与 loadDataTimeout 同量级，防止进程崩溃后死锁
+		ok, err := uc.data.RDB.SetNX(ctx, key, "1", loadDataTimeout).Result()
+		if err != nil {
+			log.Warnf("Spider: writelock redis error (allow): %v", err)
+			return func() {}, true
+		}
+		if ok {
+			return func() {
+				_ = uc.data.RDB.Del(context.Background(), key).Err()
+			}, true
+		}
+		if time.Now().After(deadline) {
+			return func() {}, false
+		}
+		select {
+		case <-ctx.Done():
+			return func() {}, false
+		case <-time.After(waitStep):
+		}
+	}
 }
 
 // fetchAndSaveContest 拉取并写入比赛记录；返回是否有写入尝试（Save 无法可靠区分 RowsAffected，有数据即视为可能变更）

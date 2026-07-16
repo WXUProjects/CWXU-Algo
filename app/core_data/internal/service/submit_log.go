@@ -44,14 +44,10 @@ func (s SubmitLogService) userRPC() (*grpc2.ClientConn, error) {
 }
 
 func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetSubmitLogReq) (*submit_log.GetSubmitLogRes, error) {
-	// 多取一些，过滤掉力扣合成记录后仍尽量凑满 limit
+	// 多取一些，过滤掉力扣合成记录后仍尽量凑满 limit；不足则继续向更早时间翻页
 	limit := req.Limit
 	if limit <= 0 {
 		limit = 10
-	}
-	fetchLimit := limit * 3
-	if fetchLimit < 30 {
-		fetchLimit = 30
 	}
 	var memberIDs []int64
 	queryUserID := req.UserId
@@ -81,33 +77,53 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 		}
 		memberIDs = ids
 	}
-	d, err := s.sbDal.GetByUserIdScoped(ctx, queryUserID, req.Cursor, fetchLimit, memberIDs)
-	if err != nil {
-		return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
-	}
+
 	r := make([]*submit_log.SubmitLog, 0, limit)
-	for _, v := range d {
-		// 力扣：合成日历/补齐/生涯 AC 不进动态；最近通过 lc-prob-* 进提交历史与动态（无代码）
-		if model.IsLeetCodeSyntheticSubmit(v.Platform, v.SubmitID) {
-			continue
+	cursor := req.Cursor
+	// 最多多轮回源，避免合成记录占比高时只吐半页导致前端误判「没有更多」
+	const maxRounds = 6
+	for round := 0; round < maxRounds && int64(len(r)) < limit; round++ {
+		need := limit - int64(len(r))
+		fetchLimit := need * 3
+		if fetchLimit < 30 {
+			fetchLimit = 30
 		}
-		var problemID uint32
-		if v.ProblemID != nil {
-			problemID = uint32(*v.ProblemID)
+		d, err := s.sbDal.GetByUserIdScoped(ctx, queryUserID, cursor, fetchLimit, memberIDs)
+		if err != nil {
+			return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
 		}
-		r = append(r, &submit_log.SubmitLog{
-			Id:        uint32(v.ID),
-			UserId:    v.UserID,
-			Platform:  v.Platform,
-			SubmitId:  v.SubmitID,
-			Contest:   v.Contest,
-			Problem:   v.Problem,
-			Lang:      v.Lang,
-			Status:    v.Status,
-			Time:      v.Time.Unix(),
-			ProblemId: problemID,
-		})
-		if int64(len(r)) >= limit {
+		if len(d) == 0 {
+			break
+		}
+		for _, v := range d {
+			// 力扣：合成日历/补齐/生涯 AC 不进动态；最近通过 lc-prob-* 进提交历史与动态（无代码）
+			if model.IsLeetCodeSyntheticSubmit(v.Platform, v.SubmitID) {
+				continue
+			}
+			var problemID uint32
+			if v.ProblemID != nil {
+				problemID = uint32(*v.ProblemID)
+			}
+			r = append(r, &submit_log.SubmitLog{
+				Id:        uint32(v.ID),
+				UserId:    v.UserID,
+				Platform:  v.Platform,
+				SubmitId:  v.SubmitID,
+				Contest:   v.Contest,
+				Problem:   v.Problem,
+				Lang:      v.Lang,
+				Status:    v.Status,
+				Time:      v.Time.Unix(),
+				ProblemId: problemID,
+			})
+			if int64(len(r)) >= limit {
+				break
+			}
+		}
+		// 游标推进到本批最旧一条（含被过滤的），继续向更早翻
+		cursor = d[len(d)-1].Time.Unix()
+		if int64(len(d)) < fetchLimit {
+			// DB 已耗尽
 			break
 		}
 	}

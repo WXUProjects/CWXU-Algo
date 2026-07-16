@@ -1140,21 +1140,19 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	Count int64
 }, totalAC int64, err error) {
 
-	// AC 判定必须用 s.status：JOIN problems 后裸 status 会与 p.status 歧义，SQL 失败被吞掉导致雷达/平台全空
-	acCond := sqlACStatusCond("s.status")
-
+	// 画像读 user_ac_problems（生涯写死层），不依赖仅保留 6 个月的 submit_logs
 	type tagRow struct {
 		Tag   string
 		Count int64
 	}
 	var tags []tagRow
-	// jsonb_array_elements_text；仅 COMPLETED 有 AI 标签
+	// problem_key = p:{id} 时才能 join 题库标签
 	err = uc.data.DB.Raw(`
 		SELECT tag, COUNT(DISTINCT p.id) AS count
-		FROM submit_logs s
-		JOIN problems p ON p.id = s.problem_id
+		FROM user_ac_problems u
+		JOIN problems p ON u.problem_key = 'p:' || p.id::text
 		CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(p.tags::jsonb, '[]'::jsonb)) AS tag
-		WHERE s.user_id = ? AND `+acCond+` AND p.status = ?
+		WHERE u.user_id = ? AND p.status = ?
 		  AND p.tags IS NOT NULL AND p.tags::text NOT IN ('', '[]', 'null')
 		GROUP BY tag
 		ORDER BY count DESC
@@ -1190,11 +1188,11 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	}
 	var plats []nc
 	if e := uc.data.DB.Raw(`
-		SELECT p.platform AS name, COUNT(DISTINCT p.id) AS count
-		FROM submit_logs s
-		JOIN problems p ON p.id = s.problem_id
-		WHERE s.user_id = ? AND `+acCond+`
-		GROUP BY p.platform
+		SELECT COALESCE(NULLIF(btrim(u.platform), ''), p.platform) AS name, COUNT(DISTINCT p.id) AS count
+		FROM user_ac_problems u
+		JOIN problems p ON u.problem_key = 'p:' || p.id::text
+		WHERE u.user_id = ?
+		GROUP BY 1
 	`, userID).Scan(&plats).Error; e != nil {
 		log.Errorf("platforms sql user=%d: %v", userID, e)
 	}
@@ -1208,9 +1206,9 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	var diffs []nc
 	if e := uc.data.DB.Raw(`
 		SELECT p.difficulty AS name, COUNT(DISTINCT p.id) AS count
-		FROM submit_logs s
-		JOIN problems p ON p.id = s.problem_id
-		WHERE s.user_id = ? AND `+acCond+`
+		FROM user_ac_problems u
+		JOIN problems p ON u.problem_key = 'p:' || p.id::text
+		WHERE u.user_id = ?
 		  AND p.difficulty IS NOT NULL AND BTRIM(p.difficulty) <> ''
 		  AND UPPER(BTRIM(p.difficulty)) NOT IN ('UNKNOWN','NULL','NONE')
 		GROUP BY p.difficulty
@@ -1224,9 +1222,9 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 		}{d.Name, d.Count})
 	}
 
+	// 生涯 AC 去重题数：预聚合全量；有 problem_id 绑定的另计
 	_ = uc.data.DB.Raw(`
-		SELECT COUNT(DISTINCT s.problem_id) FROM submit_logs s
-		WHERE s.user_id = ? AND s.problem_id IS NOT NULL AND s.problem_id <> 0 AND `+acCond+`
+		SELECT COUNT(*) FROM user_ac_problems WHERE user_id = ?
 	`, userID).Scan(&totalAC).Error
 
 	return

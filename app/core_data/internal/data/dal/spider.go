@@ -78,7 +78,10 @@ func (s *SpiderDal) GetByUserIdScoped(ctx context.Context, userId int64, lastTim
 	if err != nil {
 		return dbFunc()
 	}
-	if len(ids) == 0 {
+	// 空缓存 → 回源。
+	// 条数不足 limit 也回源：小 limit（如资料页 10）会先写入残缺 ZSET，
+	// 发现页再要 50 时若直接返回会导致「只有一页、无法加载更多」。
+	if len(ids) == 0 || int64(len(ids)) < limit {
 		return dbFunc()
 	}
 	// 到 Redis 的 Global 查这些ID
@@ -95,7 +98,7 @@ func (s *SpiderDal) GetByUserIdScoped(ctx context.Context, userId int64, lastTim
 		return dbFunc()
 	}
 	// 命中，解析缓存
-	sbLog = make([]model.SubmitLog, 0)
+	sbLog = make([]model.SubmitLog, 0, len(rVal))
 	for _, v := range rVal {
 		var l model.SubmitLog
 		s, ok := v.(string)

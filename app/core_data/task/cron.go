@@ -9,6 +9,7 @@ import (
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/core_data/internal/data"
+	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -316,11 +317,53 @@ func (t *CronTask) Do() {
 	_, _ = t.cron.AddFunc("*/5 * * * *", func() {
 		t.runCalendarNotify()
 	})
+	// 每日裁剪 6 个月外 submit_logs（预聚合/账本不动）
+	_, _ = t.cron.AddFunc("20 3 * * *", func() {
+		t.runSubmitLogPrune()
+	})
 	// 启动后异步跑一次爬取，避免空库等到下一个 12h 点
 	go func() {
 		time.Sleep(8 * time.Second)
 		t.runCalendarCrawl()
 	}()
+	// 下次推上线：启动后异步跑 submit 6 个月清洗（幂等，与发版绑定）
+	go t.runSubmitRetentionMigrateOnce()
 	t.cron.Start()
-	log.Infof("CronTask started: spider/summary every 5m; calendar crawl 12h + notify 5m")
+	log.Infof("CronTask started: spider/summary every 5m; calendar crawl 12h + notify 5m; submit prune 03:20")
+}
+
+// runSubmitRetentionMigrateOnce 回填写死层/账本并删除 6 个月外明细
+func (t *CronTask) runSubmitRetentionMigrateOnce() {
+	time.Sleep(15 * time.Second)
+	if t.db == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer cancel()
+	res, err := dal.RunSubmitRetentionMigrate(ctx, t.db, t.rdb, false)
+	if err != nil {
+		log.Errorf("submit_retention migrate failed: %v", err)
+		return
+	}
+	if res != nil && res.Skipped {
+		log.Infof("submit_retention migrate skipped (already done)")
+	}
+}
+
+// runSubmitLogPrune 热表保留近 6 个月
+func (t *CronTask) runSubmitLogPrune() {
+	if !t.tryCronLock("submit_prune", 2*time.Hour) {
+		return
+	}
+	if t.db == nil {
+		return
+	}
+	n, err := dal.PruneColdSubmitLogs(context.Background(), t.db, time.Now(), 5000)
+	if err != nil {
+		log.Errorf("CronTask submit_prune failed: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Infof("CronTask submit_prune deleted=%d", n)
+	}
 }
