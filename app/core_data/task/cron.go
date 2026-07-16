@@ -20,6 +20,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// 与 profile SetSyncIntervals / 组织间隔配置一致
+const (
+	defaultSpiderIntervalMin = 60
+	defaultAIIntervalMin     = 180
+	minSyncIntervalMin       = 5
+	maxSyncIntervalMin       = 7 * 24 * 60 // 10080
+)
+
 // UserSyncPolicy 与 user 服务 GetSyncPolicies 对齐
 type UserSyncPolicy struct {
 	UserID               int64
@@ -42,7 +50,8 @@ type CronTask struct {
 	reg     *discovery.Register
 	cron    *cron.Cron
 	stopCh  chan struct{}
-	mu      sync.RWMutex
+	mu      sync.Mutex
+	running bool
 }
 
 func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, reg *discovery.Register) *CronTask {
@@ -61,7 +70,13 @@ func (t *CronTask) Stop() {
 	defer t.mu.Unlock()
 
 	if t.cron != nil {
-		t.cron.Stop()
+		// Stop 返回 context，等待正在跑的 job 结束
+		ctx := t.cron.Stop()
+		select {
+		case <-ctx.Done():
+		case <-time.After(30 * time.Second):
+			log.Warnf("CronTask: cron.Stop wait timeout")
+		}
 		t.cron = nil
 	}
 	select {
@@ -69,6 +84,21 @@ func (t *CronTask) Stop() {
 	default:
 		close(t.stopCh)
 	}
+	t.running = false
+}
+
+// clampInterval 防御脏数据：<=0 用默认，否则夹到 [5, 10080]
+func clampInterval(v, def int) int {
+	if v <= 0 {
+		return def
+	}
+	if v < minSyncIntervalMin {
+		return minSyncIntervalMin
+	}
+	if v > maxSyncIntervalMin {
+		return maxSyncIntervalMin
+	}
+	return v
 }
 
 // getBoundUserIds 仅返回 platform 表中已绑定 OJ 的用户（去重）
@@ -98,8 +128,8 @@ func (t *CronTask) fetchPolicies(userIds []int64) map[int64]UserSyncPolicy {
 			EnableAIWeeklyEmail:  false,
 			EmailEnabled:         false,
 			EmailWeeklyEnabled:   false,
-			SpiderIntervalMin:    60,
-			AISummaryIntervalMin: 180,
+			SpiderIntervalMin:    defaultSpiderIntervalMin,
+			AISummaryIntervalMin: defaultAIIntervalMin,
 		}
 	}
 	if t.reg == nil {
@@ -132,14 +162,6 @@ func (t *CronTask) fetchPolicies(userIds []int64) map[int64]UserSyncPolicy {
 			continue
 		}
 		for _, p := range res.GetPolicies() {
-			sp := int(p.GetSpiderIntervalMin())
-			if sp <= 0 {
-				sp = 60
-			}
-			ai := int(p.GetAiSummaryIntervalMin())
-			if ai <= 0 {
-				ai = 180
-			}
 			out[p.GetUserId()] = UserSyncPolicy{
 				UserID:               p.GetUserId(),
 				EnableSpider:         p.GetEnableSpider(),
@@ -149,8 +171,8 @@ func (t *CronTask) fetchPolicies(userIds []int64) map[int64]UserSyncPolicy {
 				IsOrgStaff:           p.GetIsOrgStaff(),
 				EmailEnabled:         p.GetEmailEnabled(),
 				EmailWeeklyEnabled:   p.GetEmailWeeklyEnabled(),
-				SpiderIntervalMin:    sp,
-				AISummaryIntervalMin: ai,
+				SpiderIntervalMin:    clampInterval(int(p.GetSpiderIntervalMin()), defaultSpiderIntervalMin),
+				AISummaryIntervalMin: clampInterval(int(p.GetAiSummaryIntervalMin()), defaultAIIntervalMin),
 			}
 		}
 	}
@@ -189,9 +211,7 @@ func (t *CronTask) tryCronLock(kind string, ttl time.Duration) bool {
 // tryClaim 原子占用本用户本周期：interval 内只入队一次（多实例安全）
 // Redis 故障时跳过，避免 stampede。
 func (t *CronTask) tryClaim(kind string, userId int64, intervalMin int) bool {
-	if intervalMin <= 0 {
-		intervalMin = 60
-	}
+	intervalMin = clampInterval(intervalMin, defaultSpiderIntervalMin)
 	if t.rdb == nil {
 		return true
 	}
@@ -204,6 +224,16 @@ func (t *CronTask) tryClaim(kind string, userId int64, intervalMin int) bool {
 	return ok
 }
 
+// releaseClaim 入队失败时释放周期占用，下个 tick 可重试
+func (t *CronTask) releaseClaim(kind string, userId int64) {
+	if t.rdb == nil {
+		return
+	}
+	if err := t.rdb.Del(context.Background(), lastKey(kind, userId)).Err(); err != nil {
+		log.Warnf("CronTask: release claim %s user=%d: %v", kind, userId, err)
+	}
+}
+
 func (t *CronTask) runSpiderTick() {
 	if !t.tryCronLock("spider", 4*time.Minute) {
 		return
@@ -211,8 +241,8 @@ func (t *CronTask) runSpiderTick() {
 	userIds := t.getBoundUserIds()
 	policies := t.fetchPolicies(userIds)
 	// 去重：bound 用户列表已 DISTINCT；策略 map 按 user 一条
-	enqueued := 0
-	skipped := 0
+	var publishedUsers, dedupUsers, failedUsers, skipped, disabled int
+	var publishedJobs int
 	seen := make(map[int64]struct{}, len(userIds))
 	for _, uid := range userIds {
 		if _, ok := seen[uid]; ok {
@@ -221,17 +251,29 @@ func (t *CronTask) runSpiderTick() {
 		seen[uid] = struct{}{}
 		p := policies[uid]
 		if !p.EnableSpider {
-			skipped++
+			disabled++
 			continue
 		}
 		if !t.tryClaim("spider", uid, p.SpiderIntervalMin) {
 			skipped++
 			continue
 		}
-		t.spider.Do(uid, false)
-		enqueued++
+		res := t.spider.Do(uid, false)
+		if !res.KeepClaim() {
+			t.releaseClaim("spider", uid)
+			failedUsers++
+			continue
+		}
+		publishedJobs += res.Published
+		if res.Published > 0 {
+			publishedUsers++
+		} else {
+			// 全 dedup：任务已在途，claim 保留
+			dedupUsers++
+		}
 	}
-	log.Infof("CronTask spider: bound=%d unique=%d enqueued=%d skipped=%d", len(userIds), len(seen), enqueued, skipped)
+	log.Infof("CronTask spider: bound=%d unique=%d published_users=%d published_jobs=%d dedup_users=%d failed_release=%d interval_skip=%d disabled=%d",
+		len(userIds), len(seen), publishedUsers, publishedJobs, dedupUsers, failedUsers, skipped, disabled)
 }
 
 func (t *CronTask) runRecentSummaryTick() {
@@ -240,8 +282,7 @@ func (t *CronTask) runRecentSummaryTick() {
 	}
 	userIds := t.getBoundUserIds()
 	policies := t.fetchPolicies(userIds)
-	enqueued := 0
-	skipped := 0
+	var published, dedup, failed, skipped, disabled int
 	seen := make(map[int64]struct{}, len(userIds))
 	for _, uid := range userIds {
 		if _, ok := seen[uid]; ok {
@@ -250,17 +291,27 @@ func (t *CronTask) runRecentSummaryTick() {
 		seen[uid] = struct{}{}
 		p := policies[uid]
 		if !p.EnableAISummary {
-			skipped++
+			disabled++
 			continue
 		}
 		if !t.tryClaim("summary_recent", uid, p.AISummaryIntervalMin) {
 			skipped++
 			continue
 		}
-		t.summary.Do(uid, "PersonalRecent")
-		enqueued++
+		res := t.summary.Do(uid, "PersonalRecent")
+		if !res.KeepClaim() {
+			t.releaseClaim("summary_recent", uid)
+			failed++
+			continue
+		}
+		if res.Published {
+			published++
+		} else {
+			dedup++
+		}
 	}
-	log.Infof("CronTask summary PersonalRecent: bound=%d unique=%d enqueued=%d skipped=%d", len(userIds), len(seen), enqueued, skipped)
+	log.Infof("CronTask summary PersonalRecent: bound=%d unique=%d published=%d dedup=%d failed_release=%d interval_skip=%d disabled=%d",
+		len(userIds), len(seen), published, dedup, failed, skipped, disabled)
 }
 
 func (t *CronTask) runDailySummaryTick() {
@@ -281,60 +332,107 @@ func (t *CronTask) runDailySummaryTick() {
 		p := policies[uid]
 		// 日报：组织授权 + 个人开
 		if p.EnableAIEmail && p.EmailEnabled {
-			t.summary.Do(uid, "PersonalLastDay")
-			enqueued++
+			if t.summary.Do(uid, "PersonalLastDay").Published {
+				enqueued++
+			}
 		}
 		// 周报：周一 + 组织 staff 授权 + 个人周报开
 		if isMonday && p.EnableAIWeeklyEmail && p.EmailWeeklyEnabled {
-			t.summary.Do(uid, "WeeklyStaff")
-			weekly++
+			if t.summary.Do(uid, "WeeklyStaff").Published {
+				weekly++
+			}
 		}
 	}
 	log.Infof("CronTask mail: bound=%d unique=%d daily=%d weekly=%d monday=%v",
 		len(userIds), len(seen), enqueued, weekly, isMonday)
 }
 
+// Do 启动 cron 并阻塞到 Stop，供 runForever 使用（只应有一个存活实例）。
+// panic 后 defer 会停掉 cron，runForever 可安全重启。
 func (t *CronTask) Do() {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-
+	if t.running {
+		// 已有实例在跑：挂起等待 stop，避免 runForever 每 5s 再 Start 泄漏
+		stopCh := t.stopCh
+		t.mu.Unlock()
+		<-stopCh
+		return
+	}
+	// Stop 后 stopCh 已关闭：重建以便本轮阻塞与下次 Stop
+	select {
+	case <-t.stopCh:
+		t.stopCh = make(chan struct{})
+	default:
+	}
 	loc, _ := time.LoadLocation("Asia/Shanghai")
-	t.cron = cron.New(cron.WithLocation(loc))
+	c := cron.New(cron.WithLocation(loc))
 	// 每 5 分钟扫一次：按用户有效间隔（多组织 MIN）判断是否到期，每人最多入队一次
-	_, _ = t.cron.AddFunc("*/5 * * * *", func() {
+	_, _ = c.AddFunc("*/5 * * * *", func() {
 		t.runSpiderTick()
 	})
-	_, _ = t.cron.AddFunc("30 7 * * *", func() {
+	_, _ = c.AddFunc("30 7 * * *", func() {
 		t.runDailySummaryTick()
 	})
-	_, _ = t.cron.AddFunc("*/5 * * * *", func() {
+	_, _ = c.AddFunc("*/5 * * * *", func() {
 		t.runRecentSummaryTick()
 	})
 	// 比赛日历：每 12 小时爬取 cpolar + 力扣；每 5 分钟检查邮件提醒
-	_, _ = t.cron.AddFunc("0 */12 * * *", func() {
+	_, _ = c.AddFunc("0 */12 * * *", func() {
 		t.runCalendarCrawl()
 	})
-	_, _ = t.cron.AddFunc("*/5 * * * *", func() {
+	_, _ = c.AddFunc("*/5 * * * *", func() {
 		t.runCalendarNotify()
 	})
 	// 每日裁剪 6 个月外 submit_logs（预聚合/账本不动）
-	_, _ = t.cron.AddFunc("20 3 * * *", func() {
+	_, _ = c.AddFunc("20 3 * * *", func() {
 		t.runSubmitLogPrune()
 	})
 	// 启动后异步跑一次爬取，避免空库等到下一个 12h 点
 	go func() {
 		time.Sleep(8 * time.Second)
+		select {
+		case <-t.stopCh:
+			return
+		default:
+		}
 		t.runCalendarCrawl()
 	}()
 	// 下次推上线：启动后异步跑 submit 6 个月清洗（幂等，与发版绑定）
 	go t.runSubmitRetentionMigrateOnce()
-	t.cron.Start()
+	c.Start()
+	t.cron = c
+	t.running = true
+	stopCh := t.stopCh
+	t.mu.Unlock()
+
 	log.Infof("CronTask started: spider/summary every 5m; calendar crawl 12h + notify 5m; submit prune 03:20")
+
+	defer func() {
+		t.mu.Lock()
+		if t.cron != nil {
+			ctx := t.cron.Stop()
+			select {
+			case <-ctx.Done():
+			case <-time.After(30 * time.Second):
+			}
+			t.cron = nil
+		}
+		t.running = false
+		t.mu.Unlock()
+	}()
+
+	<-stopCh
+	log.Infof("CronTask stopped")
 }
 
 // runSubmitRetentionMigrateOnce 回填写死层/账本并删除 6 个月外明细
 func (t *CronTask) runSubmitRetentionMigrateOnce() {
 	time.Sleep(15 * time.Second)
+	select {
+	case <-t.stopCh:
+		return
+	default:
+	}
 	if t.db == nil {
 		return
 	}

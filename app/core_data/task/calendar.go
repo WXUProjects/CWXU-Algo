@@ -86,10 +86,11 @@ func (t *CronTask) runCalendarNotify() {
 		}
 	}
 
-	rt := sitesettings.Load(context.Background(), t.rdb, t.db)
+	// site_configs 在 user 库；只读 Redis，勿传 core_data DB
+	rt := sitesettings.Load(context.Background(), t.rdb, nil)
 	sender := rt.MailSender()
 	if sender == nil || !sender.Configured() {
-		log.Warnf("CronTask calendar notify: SMTP not configured, skip send")
+		log.Warnf("CronTask calendar notify: SMTP empty (Redis miss or not published by user service), skip send")
 		return
 	}
 

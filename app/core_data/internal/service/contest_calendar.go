@@ -305,14 +305,21 @@ func (s *ContestCalendarService) sendSubscribeConfirmMail(
 	doSend bool,
 	_ bool, // rateLimited: 已禁用限流
 ) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorf("UpsertSub confirm mail panic: %v", r)
+		}
+	}()
 	if !doSend || s.data == nil || strings.TrimSpace(to) == "" || sub == nil {
 		return
 	}
 
-	rt := sitesettings.Load(context.Background(), s.data.RDB, s.data.DB)
+	// site_configs 在 user 库；core_data 只读 Redis（user 启动/定时/管理端 Publish）。
+	// 切勿传 s.data.DB，否则 miss 时会误读 core 库并可能污染 Redis。
+	rt := sitesettings.Load(context.Background(), s.data.RDB, nil)
 	sender := rt.MailSender()
 	if sender == nil || !sender.Configured() {
-		log.Warnf("UpsertSub confirm mail: SMTP not configured, skip to=%s", to)
+		log.Warnf("UpsertSub confirm mail: SMTP empty (Redis miss or not published by user service), skip to=%s user=%d", to, sub.UserID)
 		return
 	}
 	siteTitle := rt.SiteTitle

@@ -28,28 +28,43 @@ func summaryPendingKey(userId int64, typ string) string {
 	return fmt.Sprintf("summary:pending:%s:%d", typ, userId)
 }
 
-func (t *SummaryTask) Do(userId int64, typ string) {
+// SummaryEnqueueResult 总结入队结果
+type SummaryEnqueueResult struct {
+	Published bool
+	Deduped   bool
+	Failed    bool
+}
+
+// KeepClaim 成功入队或已在途时保留周期 claim
+func (r SummaryEnqueueResult) KeepClaim() bool {
+	return r.Published || r.Deduped
+}
+
+// Do 入队 AI 总结任务。返回是否 published / dedup / failed。
+func (t *SummaryTask) Do(userId int64, typ string) SummaryEnqueueResult {
 	if t.mq == nil {
 		log.Errorf("SummaryTask: mq not ready")
-		return
+		return SummaryEnqueueResult{Failed: true}
 	}
 	if t.rdb != nil {
 		ctx := context.Background()
 		ok, err := t.rdb.SetNX(ctx, summaryPendingKey(userId, typ), "1", summaryPendingTTL).Result()
 		if err == nil && !ok {
 			log.Debugf("SummaryTask: dedup skip user=%d type=%s", userId, typ)
-			return
+			return SummaryEnqueueResult{Deduped: true}
 		}
 	}
 	if _, err := t.mq.QueueDeclare("summary", true, false, false, false, nil); err != nil {
 		log.Errorf("SummaryTask: QueueDeclare failed: %v", err)
-		return
+		t.clearPending(userId, typ)
+		return SummaryEnqueueResult{Failed: true}
 	}
 	e := event.SummaryEvent{UserId: userId, Type: typ}
 	body, err := json.Marshal(e)
 	if err != nil {
 		log.Errorf("SummaryTask: json.Marshal failed: %v", err)
-		return
+		t.clearPending(userId, typ)
+		return SummaryEnqueueResult{Failed: true}
 	}
 	if err := t.mq.Publish("", "summary", false, false, amqp.Publishing{
 		ContentType:  "application/json",
@@ -57,5 +72,15 @@ func (t *SummaryTask) Do(userId int64, typ string) {
 		DeliveryMode: amqp.Persistent,
 	}); err != nil {
 		log.Errorf("SummaryTask: Publish failed: %v", err)
+		t.clearPending(userId, typ)
+		return SummaryEnqueueResult{Failed: true}
 	}
+	return SummaryEnqueueResult{Published: true}
+}
+
+func (t *SummaryTask) clearPending(userId int64, typ string) {
+	if t.rdb == nil {
+		return
+	}
+	_ = t.rdb.Del(context.Background(), summaryPendingKey(userId, typ)).Err()
 }

@@ -61,16 +61,35 @@ func InflightKey(userId int64, platform string) string {
 	return fmt.Sprintf("spider:inflight:%d:%s", userId, platform)
 }
 
+// EnqueueResult 单次入队结果（供 cron claim 是否保留判断）
+type EnqueueResult struct {
+	Published int // MQ 成功条数
+	Deduped   int // pending/inflight 跳过
+	Failed    int // 声明/发布失败
+	Platforms int // 尝试的平台数
+}
+
+// KeepClaim 有成功入队或已在途任务时保留周期 claim，避免空窗或重复轰炸
+func (r EnqueueResult) KeepClaim() bool {
+	return r.Published > 0 || r.Deduped > 0
+}
+
 // Do 为该用户每个已绑定平台各入队一条消息（一条消息 = 一个平台请求）。
-func (t *SpiderTask) Do(userId int64, needAll bool) {
+func (t *SpiderTask) Do(userId int64, needAll bool) EnqueueResult {
 	plats := t.listUserPlatforms(userId)
 	if len(plats) == 0 {
 		log.Debugf("SpiderTask: Do skip user=%d (no platform binding)", userId)
-		return
+		return EnqueueResult{}
 	}
+	var res EnqueueResult
 	for _, p := range plats {
-		t.DoPlatform(userId, p, needAll)
+		r := t.DoPlatform(userId, p, needAll)
+		res.Published += r.Published
+		res.Deduped += r.Deduped
+		res.Failed += r.Failed
+		res.Platforms += r.Platforms
 	}
+	return res
 }
 
 // listUserPlatforms 查用户已绑定 OJ 平台名
@@ -90,14 +109,13 @@ func (t *SpiderTask) listUserPlatforms(userId int64) []string {
 
 // DoPlatform 入队单平台爬虫任务（platform 必须非空；空则按 Do 展开）。
 // 去重：inflight 存在则跳过；pending 用 SetNX 原子占坑（多实例/并发安全）。
-func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) {
+func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) EnqueueResult {
 	if platform == "" {
-		t.Do(userId, needAll)
-		return
+		return t.Do(userId, needAll)
 	}
 	if t.mq == nil {
 		log.Errorf("SpiderTask: mq not ready")
-		return
+		return EnqueueResult{Platforms: 1, Failed: 1}
 	}
 	pk := pendingKey(userId, platform)
 	if t.rdb != nil {
@@ -106,7 +124,7 @@ func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) {
 		if n, err := t.rdb.Exists(ctx, InflightKey(userId, platform)).Result(); err == nil && n > 0 {
 			spidermetrics.IncDedupSkipped()
 			log.Debugf("SpiderTask: dedup skip inflight user=%d platform=%q needAll=%v", userId, platform, needAll)
-			return
+			return EnqueueResult{Platforms: 1, Deduped: 1}
 		}
 		// 原子占 pending；Exists+Set 有竞态，多副本会各塞一条
 		ok, err := t.rdb.SetNX(ctx, pk, "1", pendingTTL).Result()
@@ -115,20 +133,20 @@ func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) {
 		} else if !ok {
 			spidermetrics.IncDedupSkipped()
 			log.Debugf("SpiderTask: dedup skip pending user=%d platform=%q needAll=%v", userId, platform, needAll)
-			return
+			return EnqueueResult{Platforms: 1, Deduped: 1}
 		}
 	}
 	if err := t.ensureSpiderQueue(); err != nil {
 		log.Errorf("SpiderTask: QueueDeclare failed: %v", err)
 		t.clearPending(userId, platform)
-		return
+		return EnqueueResult{Platforms: 1, Failed: 1}
 	}
 	e := event.SpiderEvent{UserId: userId, NeedAll: needAll, Platform: platform}
 	body, err := json.Marshal(e)
 	if err != nil {
 		log.Errorf("SpiderTask: json.Marshal failed: %v", err)
 		t.clearPending(userId, platform)
-		return
+		return EnqueueResult{Platforms: 1, Failed: 1}
 	}
 	if err := t.mq.Publish("", "spider", false, false, amqp.Publishing{
 		ContentType:  "application/json",
@@ -139,9 +157,10 @@ func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) {
 		// 连接可能已重置，下次重新 declare
 		t.queueReady.Store(false)
 		t.clearPending(userId, platform)
-		return
+		return EnqueueResult{Platforms: 1, Failed: 1}
 	}
 	spidermetrics.IncEnqueued()
+	return EnqueueResult{Platforms: 1, Published: 1}
 }
 
 func (t *SpiderTask) clearPending(userId int64, platform string) {
@@ -238,6 +257,7 @@ func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool,
 		if err := q.Find(&binds).Error; err != nil {
 			log.Errorf("SpiderTask: DoBatch list platforms: %v", err)
 			// 回退 per-user
+			n := 0
 			for i, uid := range userIds {
 				select {
 				case <-ctx.Done():
@@ -245,12 +265,13 @@ func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool,
 					return
 				default:
 				}
-				t.Do(uid, needAll)
+				n += t.Do(uid, needAll).Published
 			}
+			log.Infof("SpiderTask: DoBatch (fallback) published=%d users=%d needAll=%v", n, len(userIds), needAll)
 			return
 		}
 	}
-	n := 0
+	published := 0
 	for i, b := range binds {
 		select {
 		case <-ctx.Done():
@@ -261,8 +282,7 @@ func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool,
 		if b.Platform == "" {
 			continue
 		}
-		t.DoPlatform(b.UserID, b.Platform, needAll)
-		n++
+		published += t.DoPlatform(b.UserID, b.Platform, needAll).Published
 	}
-	log.Infof("SpiderTask: DoBatch enqueued %d platform jobs for %d users needAll=%v", n, len(userIds), needAll)
+	log.Infof("SpiderTask: DoBatch published=%d platform jobs for %d users needAll=%v", published, len(userIds), needAll)
 }

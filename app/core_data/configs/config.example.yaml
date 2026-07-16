@@ -17,8 +17,9 @@ data:
   redis:
     addr: 192.168.1.7:6379
     password: cwxu
-    read_timeout: 0.2s
-    write_timeout: 0.2s
+    # 过短会导致 sitesettings.Load 偶发超时，SMTP 读不到、日历确认信静默跳过
+    read_timeout: 2s
+    write_timeout: 2s
 
 # 业务配置请在站点设置 /admin/site 配置；以下仅作兜底（Redis 无数据时）
 ai_analyze:

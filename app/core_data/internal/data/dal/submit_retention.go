@@ -14,14 +14,20 @@ import (
 
 const (
 	// SubmitRetentionMigrateVersion 线上清洗版本号（改逻辑时 bump）
-	SubmitRetentionMigrateVersion = "v1"
+	// v2：禁止在「热表已无冷明细」时用 submit_logs 重建预聚合/账本（会毁掉冷统计并导致全量双计）
+	SubmitRetentionMigrateVersion = "v2"
 	submitRetentionDoneKey        = "submit_retention:" + SubmitRetentionMigrateVersion + "_done"
 	submitRetentionLockKey        = "submit_retention:" + SubmitRetentionMigrateVersion + "_lock"
+	// 历史 v1 完成标记：已剪过冷则绝不能再 destructive 重建
+	submitRetentionV1DoneKey = "submit_retention:v1_done"
+	// 稳定「热表-only 模式」标记：剪冷后预聚合/账本为真相；Purge 后也打此标，避免重启再重建
+	submitRetentionHotOnlyKey = "submit_retention:hot_only"
 )
 
 // SubmitRetentionResult 清洗结果
 type SubmitRetentionResult struct {
 	Skipped      bool
+	Rebuilt      bool // 是否从 submit_logs 重建了预聚合（仅冷明细仍在时）
 	DailyRows    int64
 	ACRows       int64
 	ACDayRows    int64
@@ -30,7 +36,29 @@ type SubmitRetentionResult struct {
 	Duration     time.Duration
 }
 
-// RunSubmitRetentionMigrate 幂等：回填写死层/账本 + 删除 6 个月外 submit_logs。
+// retentionShouldRebuildPreagg 仅当热表仍含冷明细时，才允许从 submit_logs 全量重建写死层。
+// 冷已剪掉后 submit_logs 不是生涯真相，重建会抹掉 daily/user_ac/ledger 中的冷统计。
+func retentionShouldRebuildPreagg(coldCount int64) bool {
+	return coldCount > 0
+}
+
+// retentionAllowMarkDoneWithoutRebuild 无冷行时是否可安全 mark done（不重建）。
+// hot>0 且 ledger=0：账本残缺，禁止 quiet 用热表重建，交给 Purge+全量重爬。
+// 两边都空（新库/刚 Purge）：允许 mark，写路径会重新灌数。
+func retentionAllowMarkDoneWithoutRebuild(hotN, ledgerN int64) error {
+	if hotN > 0 && ledgerN == 0 {
+		return fmt.Errorf(
+			"refuse rebuild from hot-only submit_logs: hot=%d ledger=0 (use PurgeSubmitsAndRecrawl)",
+			hotN,
+		)
+	}
+	return nil
+}
+
+// RunSubmitRetentionMigrate 幂等清洗：
+//   - 热表仍有冷行：从全量 submit_logs 重建预聚合+账本，再删冷明细
+//   - 热表已无冷行：禁止 DELETE 预聚合/账本；仅校验后 mark done（或 prune no-op）
+//
 // dryRun=true 时只统计将删除行数，不写库不删。
 // rdb 可为 nil（则仅用 DB 侧探测；多实例时建议传 Redis 锁）。
 func RunSubmitRetentionMigrate(ctx context.Context, db *gorm.DB, rdb *redis.Client, dryRun bool) (*SubmitRetentionResult, error) {
@@ -51,40 +79,111 @@ func RunSubmitRetentionMigrate(ctx context.Context, db *gorm.DB, rdb *redis.Clie
 		} else {
 			defer func() { _ = rdb.Del(context.Background(), submitRetentionLockKey).Err() }()
 		}
-		if v, err := rdb.Get(ctx, submitRetentionDoneKey).Result(); err == nil && v == "1" {
+		if retentionRedisDone(ctx, rdb) {
 			res.Skipped = true
-			log.Infof("submit_retention: already done (%s), skip", SubmitRetentionMigrateVersion)
+			log.Infof("submit_retention: already done (redis), skip")
 			return res, nil
 		}
 	}
 
-	// 已完成标记也可落在 DB（无 Redis 时）
+	// 已完成 / 热表-only 模式：禁止 destructive 重建
 	if !dryRun && hasRetentionMetaDone(db) {
 		res.Skipped = true
-		log.Infof("submit_retention: meta done, skip")
+		log.Infof("submit_retention: meta done/hot_only, skip")
 		return res, nil
 	}
 
 	log.Infof("submit_retention migrate start version=%s dryRun=%v", SubmitRetentionMigrateVersion, dryRun)
 
+	cutoff := model.SubmitLogHotCutoff(time.Now())
+	var coldCount int64
+	_ = db.WithContext(ctx).Model(&model.SubmitLog{}).Where("time < ?", cutoff).Count(&coldCount).Error
+
 	if dryRun {
-		cutoff := model.SubmitLogHotCutoff(time.Now())
-		var n int64
-		_ = db.WithContext(ctx).Model(&model.SubmitLog{}).Where("time < ?", cutoff).Count(&n).Error
-		res.DeletedLogs = n
+		res.DeletedLogs = coldCount
 		res.Duration = time.Since(start)
-		log.Infof("submit_retention dry-run: cold submit_logs=%d cutoff=%s", n, cutoff.Format(time.RFC3339))
+		log.Infof("submit_retention dry-run: cold submit_logs=%d cutoff=%s rebuild=%v",
+			coldCount, cutoff.Format(time.RFC3339), retentionShouldRebuildPreagg(coldCount))
 		return res, nil
 	}
 
-	// 1) 确保 schema（platform 列 / 账本表）— 调用方应已 AutoMigrate
+	// 1) 确保 schema（platform 列 / 账本表）
 	if err := ensureDailyPlatformSchema(db); err != nil {
 		return nil, fmt.Errorf("ensure daily schema: %w", err)
 	}
+	if !db.Migrator().HasTable(&model.CountedSubmitID{}) {
+		return nil, fmt.Errorf("counted_submit_ids table missing")
+	}
 
-	// 2) 从全量 submit_logs 重建日汇总（带 platform）
+	// 2) 已无冷行：绝不从热表重建写死层
+	if !retentionShouldRebuildPreagg(coldCount) {
+		var hotN, ledgerN int64
+		_ = db.WithContext(ctx).Model(&model.SubmitLog{}).Count(&hotN).Error
+		_ = db.WithContext(ctx).Model(&model.CountedSubmitID{}).Count(&ledgerN).Error
+		if err := retentionAllowMarkDoneWithoutRebuild(hotN, ledgerN); err != nil {
+			log.Errorf("submit_retention: %v", err)
+			return nil, err
+		}
+		// 仍跑一遍 prune（应无删除）
+		deleted, err := PruneColdSubmitLogs(ctx, db, time.Now(), 5000)
+		if err != nil {
+			return nil, fmt.Errorf("prune cold logs: %w", err)
+		}
+		res.DeletedLogs = deleted
+		res.LedgerRows = ledgerN
+		markRetentionHotOnly(db)
+		markRetentionDone(db)
+		if rdb != nil {
+			_ = rdb.Set(ctx, submitRetentionDoneKey, "1", 0).Err()
+			_ = rdb.Set(ctx, submitRetentionHotOnlyKey, "1", 0).Err()
+		}
+		res.Duration = time.Since(start)
+		log.Infof("submit_retention migrate done version=%s mode=hot_only_no_rebuild hot=%d ledger=%d deleted=%d took=%s",
+			SubmitRetentionMigrateVersion, hotN, ledgerN, res.DeletedLogs, res.Duration)
+		return res, nil
+	}
+
+	// 3) 仍有冷明细：submit_logs 仍是生涯真相，允许一次性重建
+	res.Rebuilt = true
+	if err := rebuildPreaggFromSubmitLogs(ctx, db, res); err != nil {
+		return nil, err
+	}
+
+	// 4) 校验：账本行数应接近 submit_logs
+	var submitN, ledgerN int64
+	_ = db.WithContext(ctx).Model(&model.SubmitLog{}).Count(&submitN).Error
+	_ = db.WithContext(ctx).Model(&model.CountedSubmitID{}).Count(&ledgerN).Error
+	if submitN > 0 && ledgerN == 0 {
+		return nil, fmt.Errorf("ledger empty after backfill (submit_logs=%d)", submitN)
+	}
+	log.Infof("submit_retention: validate submit_logs=%d ledger=%d", submitN, ledgerN)
+
+	// 5) 删除冷明细（仅在回填成功后）
+	deleted, err := PruneColdSubmitLogs(ctx, db, time.Now(), 5000)
+	if err != nil {
+		return nil, fmt.Errorf("prune cold logs: %w", err)
+	}
+	res.DeletedLogs = deleted
+	log.Infof("submit_retention: deleted cold submit_logs=%d", deleted)
+
+	// 6) 标记完成 + 热表-only 模式（之后禁止再用热表重建）
+	markRetentionHotOnly(db)
+	markRetentionDone(db)
+	if rdb != nil {
+		_ = rdb.Set(ctx, submitRetentionDoneKey, "1", 0).Err()
+		_ = rdb.Set(ctx, submitRetentionHotOnlyKey, "1", 0).Err()
+	}
+
+	res.Duration = time.Since(start)
+	log.Infof("submit_retention migrate done version=%s rebuilt=true daily=%d ac=%d acDay=%d ledger=%d deleted=%d took=%s",
+		SubmitRetentionMigrateVersion, res.DailyRows, res.ACRows, res.ACDayRows, res.LedgerRows, res.DeletedLogs, res.Duration)
+	return res, nil
+}
+
+// rebuildPreaggFromSubmitLogs 从当前 submit_logs 全量覆盖写死层（仅冷明细仍在时调用）
+func rebuildPreaggFromSubmitLogs(ctx context.Context, db *gorm.DB, res *SubmitRetentionResult) error {
 	if err := db.WithContext(ctx).Exec(`DELETE FROM daily_user_stats`).Error; err != nil {
-		return nil, fmt.Errorf("truncate daily: %w", err)
+		return fmt.Errorf("truncate daily: %w", err)
 	}
 	r1 := db.WithContext(ctx).Exec(`
 		INSERT INTO daily_user_stats (user_id, day, platform, submit_cnt, ac_cnt)
@@ -101,12 +200,11 @@ func RunSubmitRetentionMigrate(ctx context.Context, db *gorm.DB, rdb *redis.Clie
 			OR COUNT(*) FILTER (WHERE is_ac = true) > 0
 	`)
 	if r1.Error != nil {
-		return nil, fmt.Errorf("rebuild daily: %w", r1.Error)
+		return fmt.Errorf("rebuild daily: %w", r1.Error)
 	}
 	res.DailyRows = r1.RowsAffected
 	log.Infof("submit_retention: daily_user_stats rows=%d", res.DailyRows)
 
-	// 3) 重建 user_ac_*
 	if db.Migrator().HasTable(&model.UserACProblem{}) {
 		_ = db.WithContext(ctx).Exec(`DELETE FROM user_ac_problems`).Error
 		r2 := db.WithContext(ctx).Exec(`
@@ -128,7 +226,7 @@ func RunSubmitRetentionMigrate(ctx context.Context, db *gorm.DB, rdb *redis.Clie
 			GROUP BY user_id, problem_key, platform
 		`)
 		if r2.Error != nil {
-			return nil, fmt.Errorf("rebuild user_ac_problems: %w", r2.Error)
+			return fmt.Errorf("rebuild user_ac_problems: %w", r2.Error)
 		}
 		res.ACRows = r2.RowsAffected
 		log.Infof("submit_retention: user_ac_problems rows=%d", res.ACRows)
@@ -150,16 +248,12 @@ func RunSubmitRetentionMigrate(ctx context.Context, db *gorm.DB, rdb *redis.Clie
 			WHERE is_ac = true
 		`)
 		if r3.Error != nil {
-			return nil, fmt.Errorf("rebuild user_ac_problem_days: %w", r3.Error)
+			return fmt.Errorf("rebuild user_ac_problem_days: %w", r3.Error)
 		}
 		res.ACDayRows = r3.RowsAffected
 		log.Infof("submit_retention: user_ac_problem_days rows=%d", res.ACDayRows)
 	}
 
-	// 4) 账本全量
-	if !db.Migrator().HasTable(&model.CountedSubmitID{}) {
-		return nil, fmt.Errorf("counted_submit_ids table missing")
-	}
 	_ = db.WithContext(ctx).Exec(`DELETE FROM counted_submit_ids`).Error
 	r4 := db.WithContext(ctx).Exec(`
 		INSERT INTO counted_submit_ids (submit_id, user_id, platform, created_at)
@@ -169,38 +263,11 @@ func RunSubmitRetentionMigrate(ctx context.Context, db *gorm.DB, rdb *redis.Clie
 		ON CONFLICT (submit_id) DO NOTHING
 	`)
 	if r4.Error != nil {
-		return nil, fmt.Errorf("rebuild ledger: %w", r4.Error)
+		return fmt.Errorf("rebuild ledger: %w", r4.Error)
 	}
 	res.LedgerRows = r4.RowsAffected
 	log.Infof("submit_retention: counted_submit_ids rows=%d", res.LedgerRows)
-
-	// 5) 校验：账本行数应接近 submit_logs
-	var submitN, ledgerN int64
-	_ = db.WithContext(ctx).Model(&model.SubmitLog{}).Count(&submitN).Error
-	_ = db.WithContext(ctx).Model(&model.CountedSubmitID{}).Count(&ledgerN).Error
-	if submitN > 0 && ledgerN == 0 {
-		return nil, fmt.Errorf("ledger empty after backfill (submit_logs=%d)", submitN)
-	}
-	log.Infof("submit_retention: validate submit_logs=%d ledger=%d", submitN, ledgerN)
-
-	// 6) 删除冷明细（仅在回填成功后）
-	deleted, err := PruneColdSubmitLogs(ctx, db, time.Now(), 5000)
-	if err != nil {
-		return nil, fmt.Errorf("prune cold logs: %w", err)
-	}
-	res.DeletedLogs = deleted
-	log.Infof("submit_retention: deleted cold submit_logs=%d", deleted)
-
-	// 7) 标记完成
-	markRetentionDone(db)
-	if rdb != nil {
-		_ = rdb.Set(ctx, submitRetentionDoneKey, "1", 0).Err()
-	}
-
-	res.Duration = time.Since(start)
-	log.Infof("submit_retention migrate done version=%s daily=%d ac=%d acDay=%d ledger=%d deleted=%d took=%s",
-		SubmitRetentionMigrateVersion, res.DailyRows, res.ACRows, res.ACDayRows, res.LedgerRows, res.DeletedLogs, res.Duration)
-	return res, nil
+	return nil
 }
 
 func ensureDailyPlatformSchema(db *gorm.DB) error {
@@ -242,29 +309,83 @@ func columnExists(db *gorm.DB, table, col string) bool {
 	return err == nil && n > 0
 }
 
-func hasRetentionMetaDone(db *gorm.DB) bool {
-	// 用简单 key-value：若存在 counted 且热表已无冷数据，且有标记表
-	// 使用 schema_migrations 风格：临时用 counted 表注释不够，建轻量表
-	if !db.Migrator().HasTable("submit_retention_meta") {
-		_ = db.Exec(`CREATE TABLE IF NOT EXISTS submit_retention_meta (
-			key text PRIMARY KEY,
-			value text NOT NULL,
-			updated_at timestamptz DEFAULT NOW()
-		)`).Error
-	}
-	var v string
-	err := db.Raw(`SELECT value FROM submit_retention_meta WHERE key = ?`, submitRetentionDoneKey).Scan(&v).Error
-	return err == nil && v == "1"
-}
-
-func markRetentionDone(db *gorm.DB) {
+func ensureRetentionMetaTable(db *gorm.DB) {
 	_ = db.Exec(`CREATE TABLE IF NOT EXISTS submit_retention_meta (
 		key text PRIMARY KEY,
 		value text NOT NULL,
 		updated_at timestamptz DEFAULT NOW()
 	)`).Error
+}
+
+func retentionMetaValue(db *gorm.DB, key string) string {
+	ensureRetentionMetaTable(db)
+	var v string
+	err := db.Raw(`SELECT value FROM submit_retention_meta WHERE key = ?`, key).Scan(&v).Error
+	if err != nil {
+		return ""
+	}
+	return v
+}
+
+func setRetentionMeta(db *gorm.DB, key, value string) {
+	ensureRetentionMetaTable(db)
 	_ = db.Exec(`
-		INSERT INTO submit_retention_meta (key, value, updated_at) VALUES (?, '1', NOW())
-		ON CONFLICT (key) DO UPDATE SET value = '1', updated_at = NOW()
-	`, submitRetentionDoneKey).Error
+		INSERT INTO submit_retention_meta (key, value, updated_at) VALUES (?, ?, NOW())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+	`, key, value).Error
+}
+
+func retentionRedisDone(ctx context.Context, rdb *redis.Client) bool {
+	if rdb == nil {
+		return false
+	}
+	for _, k := range []string{submitRetentionDoneKey, submitRetentionV1DoneKey, submitRetentionHotOnlyKey} {
+		if v, err := rdb.Get(ctx, k).Result(); err == nil && v == "1" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRetentionMetaDone(db *gorm.DB) bool {
+	// v2 done / v1 done / hot_only 任一成立则不再 destructive migrate
+	for _, k := range []string{submitRetentionDoneKey, submitRetentionV1DoneKey, submitRetentionHotOnlyKey} {
+		if retentionMetaValue(db, k) == "1" {
+			return true
+		}
+	}
+	return false
+}
+
+func markRetentionDone(db *gorm.DB) {
+	setRetentionMeta(db, submitRetentionDoneKey, "1")
+}
+
+func markRetentionHotOnly(db *gorm.DB) {
+	setRetentionMeta(db, submitRetentionHotOnlyKey, "1")
+}
+
+// MarkRetentionAfterPurge Purge 清空训练数据后调用：
+// 标记 hot_only + done，避免服务重启时 migrate 用空/热表错误重建；
+// 全量重爬写路径会重新灌 daily/user_ac/ledger。
+func MarkRetentionAfterPurge(db *gorm.DB, rdb *redis.Client) {
+	if db != nil {
+		// 清掉旧锁标记，但立刻写入 hot_only/done，禁止 destructive 重建
+		ensureRetentionMetaTable(db)
+		_ = db.Exec(`DELETE FROM submit_retention_meta WHERE key LIKE 'submit_retention:%_lock'`).Error
+		markRetentionHotOnly(db)
+		markRetentionDone(db)
+		// 兼容：也写 v1 done，防止旧二进制再跑 v1 重建
+		setRetentionMeta(db, submitRetentionV1DoneKey, "1")
+	}
+	if rdb != nil {
+		ctx := context.Background()
+		_ = rdb.Del(ctx,
+			"submit_retention:v1_lock",
+			submitRetentionLockKey,
+		).Err()
+		_ = rdb.Set(ctx, submitRetentionDoneKey, "1", 0).Err()
+		_ = rdb.Set(ctx, submitRetentionV1DoneKey, "1", 0).Err()
+		_ = rdb.Set(ctx, submitRetentionHotOnlyKey, "1", 0).Err()
+	}
 }

@@ -10,13 +10,16 @@ import (
 	"cwxu-algo/app/common/mail"
 	secretutil "cwxu-algo/app/common/utils/secret"
 
+	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 const (
 	RedisKey = "site:runtime_config:v1"
-	RedisTTL = 5 * time.Minute
+	// RedisTTL 跨服务共享 SMTP/AI 配置缓存。user 服务定时刷新 + 管理员更新即时覆盖。
+	// 过短会导致 core_data/agent 在 user 未回填时读不到 SMTP，邮件静默跳过。
+	RedisTTL = 24 * time.Hour
 )
 
 // Runtime 跨服务共享的运行时配置（可 JSON 缓存到 Redis）
@@ -101,7 +104,14 @@ func LoadFromDB(db *gorm.DB) (*Runtime, error) {
 	return row.ToRuntime(), nil
 }
 
-// PublishRedis 写入 Redis 缓存
+// HasSMTP 是否具备可用的 SMTP host（密码等由 MailSender 再校验）
+func (rt *Runtime) HasSMTP() bool {
+	return rt != nil && strings.TrimSpace(rt.SMTPHost) != ""
+}
+
+// PublishRedis 写入 Redis 缓存（user 服务启动 / 管理员更新 / 定时刷新的显式发布）。
+// 空配置也会写入，以便管理员清空 SMTP 后立即生效。
+// 注意：core_data/agent 的 Load 自动回填路径不得对「空 Runtime」调用本函数（见 Load）。
 func PublishRedis(ctx context.Context, rdb *redis.Client, rt *Runtime) error {
 	if rdb == nil || rt == nil {
 		return nil
@@ -111,6 +121,23 @@ func PublishRedis(ctx context.Context, rdb *redis.Client, rt *Runtime) error {
 		return err
 	}
 	return rdb.Set(ctx, RedisKey, b, RedisTTL).Err()
+}
+
+// worthCaching 空 Runtime 不得回写 Redis（agent/core_data 误用错误库时会制造毒缓存）
+func (rt *Runtime) worthCaching() bool {
+	if rt == nil {
+		return false
+	}
+	if strings.TrimSpace(rt.SMTPHost) != "" {
+		return true
+	}
+	if strings.TrimSpace(rt.AiAnalyzeEndpoint) != "" {
+		return true
+	}
+	if strings.TrimSpace(rt.AgentModel) != "" || strings.TrimSpace(rt.AgentSecret) != "" {
+		return true
+	}
+	return false
 }
 
 // LoadFromRedis
@@ -126,29 +153,45 @@ func LoadFromRedis(ctx context.Context, rdb *redis.Client) (*Runtime, error) {
 	if err := json.Unmarshal(b, &rt); err != nil {
 		return nil, err
 	}
+	// 历史毒缓存（空 SMTP 且无其它业务字段）：当 miss，迫使走 DB / 等待 user 回填
+	if !rt.worthCaching() {
+		return nil, redis.Nil
+	}
 	return &rt, nil
 }
 
-// Load 优先 Redis，失败再读 DB 并回填
+// Load 优先 Redis，失败再读 DB；仅当 DB 配置有意义时才回填 Redis。
+// 注意：core_data / agent 的 DB 没有 site_configs，应传 db=nil，只读 Redis。
 func Load(ctx context.Context, rdb *redis.Client, db *gorm.DB) *Runtime {
 	if rt, err := LoadFromRedis(ctx, rdb); err == nil && rt != nil {
 		return rt
+	}
+	if db == nil {
+		return &Runtime{SiteTitle: "GoAlgo"}
 	}
 	rt, err := LoadFromDB(db)
 	if err != nil || rt == nil {
 		return &Runtime{SiteTitle: "GoAlgo"}
 	}
-	_ = PublishRedis(ctx, rdb, rt)
+	if rt.worthCaching() {
+		if err := PublishRedis(ctx, rdb, rt); err != nil {
+			log.Warnf("sitesettings: PublishRedis after LoadFromDB: %v", err)
+		}
+	}
 	return rt
 }
 
-// LoadPreferDB 以 DB 为准（user 服务内）
+// LoadPreferDB 以 DB 为准（user 服务内）；有效配置才写 Redis
 func LoadPreferDB(ctx context.Context, db *gorm.DB, rdb *redis.Client) *Runtime {
 	rt, err := LoadFromDB(db)
 	if err != nil || rt == nil {
 		return &Runtime{SiteTitle: "GoAlgo"}
 	}
-	_ = PublishRedis(ctx, rdb, rt)
+	if rt.worthCaching() {
+		if err := PublishRedis(ctx, rdb, rt); err != nil {
+			log.Warnf("sitesettings: PublishRedis after LoadPreferDB: %v", err)
+		}
+	}
 	return rt
 }
 

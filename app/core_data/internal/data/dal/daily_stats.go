@@ -144,8 +144,11 @@ func FilterHotSubmitLogs(logs []model.SubmitLog, now time.Time) []model.SubmitLo
 
 // FilterUncountedSubmits 入库前去重（账本为真相）：
 //  1) 本批内按 submit_id 去重
-//  2) 去掉 counted_submit_ids 已有
-//  3) 力扣 lc-prob：同一用户同一 titleSlug 热表已有则跳过
+//  2) 去掉 counted_submit_ids 已有（冷明细剪掉后仍靠账本防双计）
+//  3) 热表 submit_logs 兜底（账本未写完/迁移前）
+//  4) 力扣 lc-prob：同一用户同一 titleSlug 已有则跳过
+//
+// 注意：daily_user_stats 是累加语义；若账本残缺，全量爬会把冷历史再次 ApplyDaily。
 func FilterUncountedSubmits(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) ([]model.SubmitLog, error) {
 	if len(logs) == 0 {
 		return nil, nil
@@ -162,14 +165,15 @@ func FilterUncountedSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 	}
 	const chunk = 500
 	exist := make(map[string]struct{}, len(ids)/2)
-	// 优先账本；热表兜底（迁移前/账本未写完）
+	hasLedger := db.Migrator().HasTable(&model.CountedSubmitID{})
+	// 账本为唯一真相；热表仅兜底（冷提交不在热表）
 	for i := 0; i < len(ids); i += chunk {
 		j := i + chunk
 		if j > len(ids) {
 			j = len(ids)
 		}
 		part := ids[i:j]
-		if db.Migrator().HasTable(&model.CountedSubmitID{}) {
+		if hasLedger {
 			var found []string
 			if err := db.WithContext(ctx).Model(&model.CountedSubmitID{}).
 				Where("submit_id IN ?", part).
@@ -180,6 +184,7 @@ func FilterUncountedSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 				exist[id] = struct{}{}
 			}
 		}
+		// 热表兜底：防止账本短暂落后时热窗口双计
 		var foundHot []string
 		if err := db.WithContext(ctx).Model(&model.SubmitLog{}).
 			Where("submit_id IN ?", part).

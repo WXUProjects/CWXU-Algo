@@ -532,6 +532,26 @@ func EffectiveProblemPipeline(override *bool, isNonPublicOrg bool) bool {
 	return isNonPublicOrg
 }
 
+// 同步间隔合法范围（分钟）：与 profile SetSyncIntervals / 组织配置一致
+const (
+	syncIntervalMinM = 5
+	syncIntervalMaxM = 7 * 24 * 60 // 10080
+)
+
+// clampSyncInterval 脏数据防御：<=0 用默认，否则夹到 [5, 10080]
+func clampSyncInterval(v, def int) int {
+	if v <= 0 {
+		return def
+	}
+	if v < syncIntervalMinM {
+		return syncIntervalMinM
+	}
+	if v > syncIntervalMaxM {
+		return syncIntervalMaxM
+	}
+	return v
+}
+
 // UserSyncPolicy 一人多组织聚合后的定时策略
 type UserSyncPolicy struct {
 	UserID               int64
@@ -600,20 +620,14 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		}
 		if r.EnableSpider {
 			a.spiderOn = true
-			iv := r.SpiderIntervalMin
-			if iv <= 0 {
-				iv = 60
-			}
+			iv := clampSyncInterval(r.SpiderIntervalMin, 60)
 			if a.spiderMin == 0 || iv < a.spiderMin {
 				a.spiderMin = iv
 			}
 		}
 		if r.EnableAISummary {
 			a.aiOn = true
-			iv := r.AISummaryIntervalMin
-			if iv <= 0 {
-				iv = 180
-			}
+			iv := clampSyncInterval(r.AISummaryIntervalMin, 180)
 			if a.aiMin == 0 || iv < a.aiMin {
 				a.aiMin = iv
 			}
@@ -652,10 +666,10 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 			sp, ai := 60, 180
 			// 无组织时仍尊重站管覆盖
 			if pr.SpiderIntervalMinOverride != nil && *pr.SpiderIntervalMinOverride > 0 {
-				sp = *pr.SpiderIntervalMinOverride
+				sp = clampSyncInterval(*pr.SpiderIntervalMinOverride, 60)
 			}
 			if pr.AISummaryIntervalMinOverride != nil && *pr.AISummaryIntervalMinOverride > 0 {
-				ai = *pr.AISummaryIntervalMinOverride
+				ai = clampSyncInterval(*pr.AISummaryIntervalMinOverride, 180)
 			}
 			out = append(out, UserSyncPolicy{
 				UserID:               uid,
@@ -676,10 +690,10 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		}
 		// 站点管理员个人覆盖：优先级最高
 		if pr.SpiderIntervalMinOverride != nil && *pr.SpiderIntervalMinOverride > 0 {
-			sp = *pr.SpiderIntervalMinOverride
+			sp = clampSyncInterval(*pr.SpiderIntervalMinOverride, 60)
 		}
 		if pr.AISummaryIntervalMinOverride != nil && *pr.AISummaryIntervalMinOverride > 0 {
-			ai = *pr.AISummaryIntervalMinOverride
+			ai = clampSyncInterval(*pr.AISummaryIntervalMinOverride, 180)
 		}
 		out = append(out, UserSyncPolicy{
 			UserID:               uid,

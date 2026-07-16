@@ -141,13 +141,18 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 			log.Infof("Spider: pruned %d duplicate leetcode recent-AC rows user=%d", n, userId)
 		}
 	}
-	// 账本去重：已计入预聚合的 submit_id 不再累加（热表可已删）
+	// 账本去重：已计入预聚合的 submit_id 不再累加（热表可已删；冷只在账本）
 	neu, err := dal.FilterUncountedSubmits(ctx, uc.data.DB, tmp)
 	if err != nil {
 		return 0, err
 	}
 	if len(neu) == 0 {
 		return 0, nil
+	}
+	// 异常大批量：多为账本残缺后全量把冷历史当新行（冷数据双计）
+	if len(neu) >= 2000 {
+		log.Warnf("Spider: large uncounted batch user=%d platform=%s fetched=%d uncounted=%d needAll=%v (check counted_submit_ids)",
+			userId, plat.Platform, len(tmp), len(neu), needAll)
 	}
 
 	// 先预聚合+账本，再只把近 6 个月写入热表

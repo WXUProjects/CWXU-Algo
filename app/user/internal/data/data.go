@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"time"
 
 	"cwxu-algo/app/common/conf"
 	gorm2 "cwxu-algo/app/common/data/gorm"
@@ -18,6 +19,10 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+// siteSettingsRefreshInterval 定期把 site_configs 刷进 Redis，供 core_data/agent 读 SMTP。
+// 与 sitesettings.RedisTTL 配合：即使缓存被误清/毒缓存被剔除，也会在数分钟内恢复。
+const siteSettingsRefreshInterval = 3 * time.Minute
 
 // ProviderSet is data providers.
 var ProviderSet = wire.NewSet(NewData)
@@ -40,7 +45,9 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 	}
 	migrateModels(data.DB)
 	PublishSiteSettings(data)
+	stopRefresh := startSiteSettingsRefresh(data)
 	cleanup := func() {
+		stopRefresh()
 		log.Info("closing the data resources")
 		sql, _ := data.DB.DB()
 		sql.Close()
@@ -151,6 +158,27 @@ func PublishSiteSettings(d *Data) {
 	if err := sitesettings.PublishRedis(context.Background(), d.RDB, rt); err != nil {
 		log.Warnf("publish site settings: %v", err)
 	}
+}
+
+// startSiteSettingsRefresh 后台定时回填 Redis；返回 stop 在 Data cleanup 时调用。
+func startSiteSettingsRefresh(d *Data) func() {
+	if d == nil || d.DB == nil || d.RDB == nil {
+		return func() {}
+	}
+	stopCh := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(siteSettingsRefreshInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCh:
+				return
+			case <-ticker.C:
+				PublishSiteSettings(d)
+			}
+		}
+	}()
+	return func() { close(stopCh) }
 }
 
 // seedPlanQuotas 幂等写入默认套餐配额模板

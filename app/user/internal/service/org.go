@@ -735,11 +735,27 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 				updates["status"] = *req.Status
 			}
 		}
-		if req.SpiderIntervalMin != nil && *req.SpiderIntervalMin > 0 {
-			updates["spider_interval_min"] = *req.SpiderIntervalMin
+		// 间隔：5 分钟～7 天（与个人覆盖 / cron claim 一致）
+		const minM, maxM = 5, 7 * 24 * 60
+		if req.SpiderIntervalMin != nil {
+			v := *req.SpiderIntervalMin
+			if v < minM || v > maxM {
+				writeJSON(ctx.Response(), 400, map[string]interface{}{
+					"code": 1, "message": fmt.Sprintf("爬取间隔须为 %d–%d 分钟", minM, maxM),
+				})
+				return nil
+			}
+			updates["spider_interval_min"] = v
 		}
-		if req.AISummaryIntervalMin != nil && *req.AISummaryIntervalMin > 0 {
-			updates["ai_summary_interval_min"] = *req.AISummaryIntervalMin
+		if req.AISummaryIntervalMin != nil {
+			v := *req.AISummaryIntervalMin
+			if v < minM || v > maxM {
+				writeJSON(ctx.Response(), 400, map[string]interface{}{
+					"code": 1, "message": fmt.Sprintf("AI 总结间隔须为 %d–%d 分钟", minM, maxM),
+				})
+				return nil
+			}
+			updates["ai_summary_interval_min"] = v
 		}
 		if req.AIEmailSchedule != nil && strings.TrimSpace(*req.AIEmailSchedule) != "" {
 			updates["ai_email_schedule"] = strings.TrimSpace(*req.AIEmailSchedule)
