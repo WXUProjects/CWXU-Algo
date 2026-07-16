@@ -24,7 +24,7 @@ const (
 
 // Org 组织/校队（含系统「公共域」）
 type Org struct {
-	ID        uint      `gorm:"primaryKey"`
+	ID        uint `gorm:"primaryKey"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	Name      string     `gorm:"size:128;not null;comment:组织名称"`
@@ -57,9 +57,9 @@ type Org struct {
 
 // OrgMember 用户与组织关系
 type OrgMember struct {
-	ID        uint      `gorm:"primaryKey"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID             uint `gorm:"primaryKey"`
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 	OrgID          uint      `gorm:"uniqueIndex:idx_org_user;not null;comment:组织ID"`
 	UserID         uint      `gorm:"uniqueIndex:idx_org_user;index;not null;comment:用户ID"`
 	Role           string    `gorm:"size:16;default:member;comment:member|coach|captain|org_admin"`
@@ -85,11 +85,11 @@ func IsOrgStaffRole(role string) bool {
 
 // OrgJoinRequest 团队识别码加入申请（join_mode=review）
 type OrgJoinRequest struct {
-	ID        uint      `gorm:"primaryKey"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	OrgID          uint   `gorm:"index;not null"`
-	UserID         uint   `gorm:"index;not null"`
+	ID             uint `gorm:"primaryKey"`
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	OrgID          uint   `gorm:"uniqueIndex:idx_org_join_user;not null"`
+	UserID         uint   `gorm:"uniqueIndex:idx_org_join_user;not null"`
 	Status         string `gorm:"size:16;default:pending;comment:pending|approved|rejected"`
 	CodeUsed       string `gorm:"size:32"`
 	OrgDisplayName string `gorm:"size:64;comment:申请时填写的组织内名称"`
@@ -98,9 +98,9 @@ type OrgJoinRequest struct {
 
 // PlanQuota 套餐配额模板
 type PlanQuota struct {
-	ID        uint      `gorm:"primaryKey"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID                uint `gorm:"primaryKey"`
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 	Plan              string `gorm:"size:32;uniqueIndex;not null"`
 	SeatLimit         int    `gorm:"default:20"`
 	DailySyncPerUser  int    `gorm:"default:24"`

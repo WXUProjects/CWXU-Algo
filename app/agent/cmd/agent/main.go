@@ -5,6 +5,7 @@ import (
 	"cwxu-algo/app/agent/internal/biz/service"
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/security"
 	"flag"
 	"os"
 	"time"
@@ -111,6 +112,9 @@ func main() {
 
 	var bc conf.Bootstrap
 	if err := c.Scan(&bc); err != nil {
+		panic(err)
+	}
+	if err := security.Configure(bc.Server); err != nil {
 		panic(err)
 	}
 

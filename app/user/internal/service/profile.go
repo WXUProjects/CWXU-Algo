@@ -57,18 +57,17 @@ func (p *ProfileService) MoveGroup(ctx context.Context, req *profile.MoveGroupRe
 	if !auth.VerifyStaff(ctx) {
 		return nil, errors.Forbidden("权限不足", "需要教练、队长、团队管理员或站点管理员权限")
 	}
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.OrgID == 0 {
+		return nil, errors.Forbidden("权限不足", "请先选择目标组织")
+	}
+	if !p.profileDal.IsMemberOfOrg(ctx, int64(req.UserId), pd.OrgID) {
+		return nil, errors.Forbidden("权限不足", "该用户不属于当前组织")
+	}
 	gid := req.GroupId
 	// groupId=0 表示归入当前组织默认分组（不再使用「未分组」）
 	if gid <= 0 {
-		orgID := uint(0)
-		if pd := auth.GetCurrentUser(ctx); pd != nil {
-			orgID = pd.OrgID
-		}
-		if orgID == 0 {
-			if id, e := p.profileDal.PublicOrgID(ctx); e == nil {
-				orgID = id
-			}
-		}
+		orgID := pd.OrgID
 		if orgID > 0 {
 			// 通过 groupDal 路径不便，直接写默认：由 seed/list 保证存在
 			// 使用 profileDal 的 db 查默认分组
@@ -76,8 +75,10 @@ func (p *ProfileService) MoveGroup(ctx context.Context, req *profile.MoveGroupRe
 				gid = int64(def)
 			}
 		}
+	} else if !p.profileDal.GroupBelongsToOrg(ctx, gid, pd.OrgID) {
+		return nil, errors.Forbidden("权限不足", "目标分组不属于当前组织")
 	}
-	err := p.profileDal.MoveGroup(ctx, req.UserId, gid)
+	err := p.profileDal.MoveGroup(ctx, req.UserId, gid, pd.OrgID)
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
@@ -293,16 +294,14 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 			Username: v.Username,
 		})
 	}
-	dailyGrant := p.profileDal.UserHasOrgDailyEmailGrant(ctx, req.UserId)
-	weeklyGrant := p.profileDal.UserHasOrgWeeklyEmailGrant(ctx, req.UserId)
-	// 无组织授权时对外展示为关（并尽量写回，避免脏状态）
-	emailOn := pf.EmailEnabled && dailyGrant
-	weeklyOn := pf.EmailWeeklyEnabled && weeklyGrant
-	if pf.EmailEnabled && !dailyGrant {
-		_ = p.profileDal.SetEmailEnabled(ctx, req.UserId, false)
-	}
-	if pf.EmailWeeklyEnabled && !weeklyGrant {
-		_ = p.profileDal.SetEmailWeeklyEnabled(ctx, req.UserId, false)
+	canViewPrivate := auth.VerifySelfOrAbove(ctx, uint(req.UserId))
+	dailyGrant, weeklyGrant := false, false
+	emailOn, weeklyOn := false, false
+	if canViewPrivate {
+		dailyGrant = p.profileDal.UserHasOrgDailyEmailGrant(ctx, req.UserId)
+		weeklyGrant = p.profileDal.UserHasOrgWeeklyEmailGrant(ctx, req.UserId)
+		emailOn = pf.EmailEnabled && dailyGrant
+		weeklyOn = pf.EmailWeeklyEnabled && weeklyGrant
 	}
 	// 当前组织视图：展示组织内名称（空则 username）
 	displayName := strings.TrimSpace(pf.Name)
@@ -317,20 +316,25 @@ func (p *ProfileService) GetById(ctx context.Context, req *profile.GetByIdReq) (
 	} else if displayName == "" {
 		displayName = pf.Username
 	}
-	return &profile.GetByIdRes{
-		UserId:                 uint64(pf.ID),
-		Username:               pf.Username,
-		Name:                   displayName,
-		Email:                  pf.Email,
-		Avatar:                 pf.Avatar,
-		GroupId:                pf.GroupId,
-		Spiders:                spiders,
-		EmailEnabled:           emailOn,
-		EmailWeeklyEnabled:     weeklyOn,
-		EmailAllowedByOrg:      dailyGrant,
+	reply := &profile.GetByIdRes{
+		UserId:                  uint64(pf.ID),
+		Username:                pf.Username,
+		Name:                    displayName,
+		Avatar:                  pf.Avatar,
+		Spiders:                 spiders,
+		EmailEnabled:            emailOn,
+		EmailWeeklyEnabled:      weeklyOn,
+		EmailAllowedByOrg:       dailyGrant,
 		EmailWeeklyAllowedByOrg: weeklyGrant,
-		RoleId:                 int32(pf.RoleID),
-	}, nil
+	}
+	if canViewPrivate {
+		reply.Email = pf.Email
+		if pd := auth.GetCurrentUser(ctx); pd != nil {
+			reply.GroupId = p.profileDal.GroupIDForOrg(ctx, req.UserId, pd.OrgID)
+		}
+		reply.RoleId = int32(pf.RoleID)
+	}
+	return reply, nil
 }
 
 func NewProfileService(profileDal *dal.ProfileDal, reg *discovery.Register, profileUseCase *biz.ProfileUseCase) *ProfileService {

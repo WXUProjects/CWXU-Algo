@@ -4,6 +4,7 @@ import (
 	"context"
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/core_data/internal/data"
+	"os"
 	"testing"
 	"time"
 
@@ -11,14 +12,19 @@ import (
 )
 
 func TestSpiderDal(t *testing.T) {
+	databaseSource := os.Getenv("CWXU_TEST_DATABASE_SOURCE")
+	redisAddr := os.Getenv("CWXU_TEST_REDIS_ADDR")
+	if databaseSource == "" || redisAddr == "" {
+		t.Skip("set CWXU_TEST_DATABASE_SOURCE and CWXU_TEST_REDIS_ADDR to run this integration test")
+	}
 	c := conf.Data{
 		Database: &conf.Data_Database{
 			Driver: "postgres",
-			Source: "host=192.168.1.7 user=cwxu password=cwxu dbname=algo_core_data port=5432 sslmode=disable TimeZone=Asia/Shanghai",
+			Source: databaseSource,
 		},
 		Redis: &conf.Data_Redis{
-			Addr:         "192.168.1.7:6379",
-			Password:     "cwxu",
+			Addr:         redisAddr,
+			Password:     os.Getenv("CWXU_TEST_REDIS_PASSWORD"),
 			ReadTimeout:  &durationpb.Duration{Nanos: int32(2 * time.Second)},
 			WriteTimeout: &durationpb.Duration{Nanos: int32(2 * time.Second)},
 		},

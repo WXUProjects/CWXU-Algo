@@ -149,7 +149,7 @@ func splitCSV(s string) []string {
 func (s *ProblemService) ListTags(ctx context.Context, req *problem.ListTagsReq) (*problem.ListTagsRes, error) {
 	rows, err := s.uc.ListTags(int(req.Limit))
 	if err != nil {
-		return nil, errors.InternalServer("list tags failed", err.Error())
+		return nil, errors.InternalServer("list tags failed", "service unavailable")
 	}
 	data := make([]*problem.TagCount, 0, len(rows))
 	for _, r := range rows {
@@ -171,7 +171,7 @@ func (s *ProblemService) List(ctx context.Context, req *problem.ListProblemReq) 
 		Difficulty: req.Difficulty,
 	})
 	if err != nil {
-		return nil, errors.InternalServer("list failed", err.Error())
+		return nil, errors.InternalServer("list failed", "service unavailable")
 	}
 	data := make([]*problem.ProblemInfo, 0, len(list))
 	for i := range list {
@@ -217,7 +217,7 @@ func (s *ProblemService) Get(ctx context.Context, req *problem.GetProblemReq) (*
 func (s *ProblemService) ListSubmissions(ctx context.Context, req *problem.ListSubmissionsReq) (*problem.ListSubmissionsRes, error) {
 	list, total, err := s.uc.ListSubmissions(uint(req.ProblemId), req.UserId, req.Page, req.PageSize)
 	if err != nil {
-		return nil, errors.InternalServer("query failed", err.Error())
+		return nil, errors.InternalServer("query failed", "service unavailable")
 	}
 	ids := make([]int64, 0, len(list))
 	seen := map[int64]bool{}
@@ -260,7 +260,7 @@ func (s *ProblemService) UserProfile(ctx context.Context, req *problem.UserProfi
 	}
 	radar, plats, diffs, totalAC, err := s.uc.UserProfile(req.UserId)
 	if err != nil {
-		return nil, errors.InternalServer("profile failed", err.Error())
+		return nil, errors.InternalServer("profile failed", "service unavailable")
 	}
 	r := make([]*problem.TagScore, 0, len(radar))
 	for _, v := range radar {
@@ -275,12 +275,12 @@ func (s *ProblemService) UserProfile(ctx context.Context, req *problem.UserProfi
 		d = append(d, &problem.NamedCount{Name: v.Name, Count: v.Count})
 	}
 	return &problem.UserProfileRes{
-		Code:          0,
-		Message:       "success",
-		Radar:         r,
-		Platforms:     p,
-		Difficulties:  d,
-		TotalAc:       totalAC,
+		Code:         0,
+		Message:      "success",
+		Radar:        r,
+		Platforms:    p,
+		Difficulties: d,
+		TotalAc:      totalAC,
 	}, nil
 }
 
@@ -377,7 +377,7 @@ func (s *ProblemService) Backfill(ctx context.Context, req *problem.BackfillReq)
 	// 回填不清空队列、不强制恢复 pause；仅补近 6 月提交入队
 	scanned, bound, created, enqueued, enqFetch, enqAnalyze, err := s.uc.Backfill(int(req.Limit))
 	if err != nil {
-		return nil, errors.InternalServer("backfill failed", err.Error())
+		return nil, errors.InternalServer("backfill failed", "service unavailable")
 	}
 	return &problem.BackfillRes{
 		Code:            0,
@@ -397,7 +397,7 @@ func (s *ProblemService) ResetQueues(ctx context.Context, req *problem.ResetQueu
 	}
 	pf, pa, ef, ea, err := s.uc.ResetQueues()
 	if err != nil {
-		return nil, errors.InternalServer("reset queues failed", err.Error())
+		return nil, errors.InternalServer("reset queues failed", "service unavailable")
 	}
 	return &problem.ResetQueuesRes{
 		Code:            0,
@@ -415,7 +415,7 @@ func (s *ProblemService) EmergencyStop(ctx context.Context, req *problem.Emergen
 	}
 	pf, pa, err := s.uc.EmergencyStop()
 	if err != nil {
-		return nil, errors.InternalServer("emergency stop failed", err.Error())
+		return nil, errors.InternalServer("emergency stop failed", "service unavailable")
 	}
 	return &problem.EmergencyStopRes{
 		Code:          0,
@@ -435,7 +435,7 @@ func (s *ProblemService) ResetAll(ctx context.Context, req *problem.ResetAllReq)
 	}
 	reset, enqueued, pf, pa, err := s.uc.ResetAll(requeue)
 	if err != nil {
-		return nil, errors.InternalServer("reset failed", err.Error())
+		return nil, errors.InternalServer("reset failed", "service unavailable")
 	}
 	return &problem.ResetAllRes{
 		Code:          0,
@@ -469,7 +469,7 @@ func (s *ProblemService) RetryFailed(ctx context.Context, req *problem.RetryFail
 	}
 	scanned, enqueued, blacklisted, err := s.uc.RetryFailed(limit)
 	if err != nil {
-		return nil, errors.InternalServer("retry failed", err.Error())
+		return nil, errors.InternalServer("retry failed", "service unavailable")
 	}
 	return &problem.RetryFailedRes{
 		Code:        0,
@@ -494,7 +494,7 @@ func (s *ProblemService) ToggleAnalyze(ctx context.Context, req *problem.ToggleP
 	if pause {
 		n, err := s.uc.PauseAnalyze()
 		if err != nil {
-			return nil, errors.InternalServer("pause analyze failed", err.Error())
+			return nil, errors.InternalServer("pause analyze failed", "service unavailable")
 		}
 		return &problem.TogglePipelineRes{Code: 0, Message: "AI 分析已暂停（队列保留）", Paused: true, Purged: int64(n)}, nil
 	}
@@ -515,7 +515,7 @@ func (s *ProblemService) ToggleFetch(ctx context.Context, req *problem.TogglePip
 	if pause {
 		n, err := s.uc.PauseFetch()
 		if err != nil {
-			return nil, errors.InternalServer("pause fetch failed", err.Error())
+			return nil, errors.InternalServer("pause fetch failed", "service unavailable")
 		}
 		return &problem.TogglePipelineRes{Code: 0, Message: "题面爬取已暂停（队列保留）", Paused: true, Purged: int64(n)}, nil
 	}

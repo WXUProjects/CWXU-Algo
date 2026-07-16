@@ -65,7 +65,7 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 	}
 	d, err := s.sbDal.GetByUserIdScoped(ctx, req.UserId, req.Cursor, fetchLimit, memberIDs)
 	if err != nil {
-		return nil, errors.InternalServer("内部服务器错误", err.Error())
+		return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
 	}
 	r := make([]*submit_log.SubmitLog, 0, limit)
 	for _, v := range d {

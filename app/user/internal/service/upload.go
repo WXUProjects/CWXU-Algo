@@ -1,10 +1,15 @@
 package service
 
 import (
+	"bytes"
 	"crypto/rand"
 	"cwxu-algo/app/common/utils/auth"
 	"encoding/hex"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"mime"
 	"net/http"
@@ -22,7 +27,7 @@ const (
 	staticRoutePrefix = "/v1/user/static"
 )
 
-var imageExts = []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico", ".bin"}
+var imageExts = []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".ico"}
 
 func UploadDir() string {
 	if d := os.Getenv("CWXU_UPLOAD_DIR"); d != "" {
@@ -44,19 +49,19 @@ func randomName() string {
 func extFromContentType(ct, filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
 	switch ext {
-	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico":
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".ico":
 		return ext
 	}
 	if exts, _ := mime.ExtensionsByType(ct); len(exts) > 0 {
 		return strings.ToLower(exts[0])
 	}
-	return ".bin"
+	return ""
 }
 
 func allowedImage(ct string) bool {
 	ct = strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
 	switch ct {
-	case "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml",
+	case "image/jpeg", "image/png", "image/gif", "image/webp",
 		"image/x-icon", "image/vnd.microsoft.icon":
 		return true
 	default:
@@ -74,12 +79,25 @@ func contentTypeFromExt(ext string) string {
 		return "image/gif"
 	case ".webp":
 		return "image/webp"
-	case ".svg":
-		return "image/svg+xml"
 	case ".ico":
 		return "image/x-icon"
 	default:
 		return ""
+	}
+}
+
+func validImageData(data []byte, ct string) bool {
+	ct = strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
+	switch ct {
+	case "image/jpeg", "image/png", "image/gif":
+		_, _, err := image.DecodeConfig(bytes.NewReader(data))
+		return err == nil
+	case "image/webp":
+		return len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP"
+	case "image/x-icon", "image/vnd.microsoft.icon":
+		return len(data) >= 6 && data[0] == 0 && data[1] == 0 && data[2] == 1 && data[3] == 0
+	default:
+		return false
 	}
 }
 
@@ -146,7 +164,7 @@ func serveUploadFile(w http.ResponseWriter, r *http.Request, prefix string) {
 	}
 
 	abs, ext, err := resolveUploadFile(rel)
-	if err != nil {
+	if err != nil || !isImageExt(ext) {
 		http.NotFound(w, r)
 		return
 	}
@@ -184,7 +202,8 @@ func serveUploadFile(w http.ResponseWriter, r *http.Request, prefix string) {
 	}
 
 	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Cache-Control", "public, max-age=604800")
+	w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(w, r, filepath.Base(abs), st.ModTime(), f)
 }
@@ -227,13 +246,10 @@ func RegisterUploadRoutes(srv *khttp.Server) {
 				"code": 1, "message": "文件过大，最大 3MB",
 			})
 		}
-		ct := hdr.Header.Get("Content-Type")
-		if ct == "" || ct == "application/octet-stream" {
-			ct = http.DetectContentType(data)
-		}
-		if !allowedImage(ct) {
+		ct := http.DetectContentType(data)
+		if !allowedImage(ct) || !validImageData(data, ct) {
 			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
-				"code": 1, "message": "仅支持图片: jpg/png/gif/webp/svg/ico",
+				"code": 1, "message": "仅支持有效的 jpg/png/gif/webp/ico 图片",
 			})
 		}
 
@@ -243,8 +259,23 @@ func RegisterUploadRoutes(srv *khttp.Server) {
 		default:
 			purpose = "misc"
 		}
+		if purpose == "site" && !auth.VerifySiteAdmin(ctx) {
+			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
+				"code": 1, "message": "仅站点管理员可上传站点素材",
+			})
+		}
+		if purpose == "bulletin" && !auth.VerifyStaff(ctx) {
+			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
+				"code": 1, "message": "需要组织管理权限",
+			})
+		}
 
 		ext := extFromContentType(ct, hdr.Filename)
+		if ext == "" {
+			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+				"code": 1, "message": "无法识别图片格式",
+			})
+		}
 		diskName := randomName() + ext
 		relDir := filepath.Join(purpose, fmt.Sprintf("%d", pd.UserID))
 		absDir := filepath.Join(UploadDir(), relDir)

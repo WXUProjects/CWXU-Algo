@@ -19,6 +19,7 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type OrgService struct {
@@ -176,7 +177,6 @@ func (s *OrgService) ensureOrgMember(orgID, userID uint, role string, groupID *u
 			"role":             role,
 			"group_id":         groupID,
 			"org_display_name": displayName,
-			"joined_at":        now,
 		}).Error
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -239,6 +239,50 @@ func (s *OrgService) ensureDefaultGroupID(orgID uint) uint {
 		return 0
 	}
 	return g.ID
+}
+
+// addOrgMemberAtomic serializes membership creation per organization so the
+// seat limit cannot be exceeded by concurrent join/add/review requests.
+func (s *OrgService) addOrgMemberAtomic(orgID, userID uint, role, displayName string) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var o model.Org
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&o, orgID).Error; err != nil {
+			return err
+		}
+		if o.Status != model.OrgStatusActive {
+			return errors.New("该组织当前已暂停")
+		}
+		var existing int64
+		if err := tx.Model(&model.OrgMember{}).Where("org_id = ? AND user_id = ?", orgID, userID).Count(&existing).Error; err != nil {
+			return err
+		}
+		if existing > 0 {
+			return nil
+		}
+		if msg := seatFullMessage(tx, &o); msg != "" {
+			return errors.New(msg)
+		}
+		var group model.Group
+		err := tx.Where("org_id = ? AND name IN ?", orgID, []string{model.DefaultGroupName, "未分组"}).
+			Order("id ASC").First(&group).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			name := model.DefaultGroupName
+			group = model.Group{Name: &name, Describe: model.DefaultGroupDesc, OrgID: orgID}
+			if err = tx.Create(&group).Error; err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+		if !model.ValidOrgRole(role) {
+			role = model.OrgRoleMember
+		}
+		groupID := group.ID
+		return tx.Create(&model.OrgMember{
+			OrgID: orgID, UserID: userID, Role: role, GroupID: &groupID,
+			OrgDisplayName: strings.TrimSpace(displayName), JoinedAt: time.Now(),
+		}).Error
+	})
 }
 
 // RegisterOrgRoutes HTTP 路由（与 upload 同模式）
@@ -404,34 +448,40 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 		AISummaryIntervalMin: 180,
 		AIEmailSchedule:      "30 7 * * *",
 	}
-	if err := s.db.Create(&o).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "创建失败: " + err.Error()})
-		return nil
-	}
-	// 新建组织自带「默认分组」
-	defID := s.ensureDefaultGroupID(o.ID)
 	adminUID := req.AdminUserID
 	if adminUID == 0 {
 		adminUID = pd.UserID
 	}
-	// 确保目标用户存在且加入组织为管理员，并挂到默认分组（不改 users.group_id：分组以当前组织为准）
-	if _, err := s.loadUser(adminUID); err == nil {
-		var gid *uint
-		if defID > 0 {
-			gid = &defID
+	adminUser, err := s.loadUser(adminUID)
+	if err != nil {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "指定的组织管理员不存在"})
+		return nil
+	}
+	displayName := strings.TrimSpace(adminUser.Name)
+	if displayName == "" {
+		displayName = adminUser.Username
+	}
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&o).Error; err != nil {
+			return err
 		}
-		displayName := ""
-		if au, e := s.loadUser(adminUID); e == nil {
-			displayName = strings.TrimSpace(au.Name)
-			if displayName == "" {
-				displayName = au.Username
-			}
+		groupName := model.DefaultGroupName
+		group := model.Group{Name: &groupName, Describe: model.DefaultGroupDesc, OrgID: o.ID}
+		if err := tx.Create(&group).Error; err != nil {
+			return err
 		}
-		if err := s.ensureOrgMember(o.ID, adminUID, model.OrgRoleOrgAdmin, gid, displayName); err != nil {
-			log.Errorf("org create admin member: %v", err)
+		groupID := group.ID
+		if err := tx.Create(&model.OrgMember{
+			OrgID: o.ID, UserID: adminUID, Role: model.OrgRoleOrgAdmin,
+			GroupID: &groupID, OrgDisplayName: displayName, JoinedAt: time.Now(),
+		}).Error; err != nil {
+			return err
 		}
-		// 拉入/任命为首任组织管理员时，设为该用户默认组织
-		s.setDefaultOrg(adminUID, o.ID)
+		return tx.Model(&model.User{}).Where("id = ?", adminUID).Update("current_org_id", o.ID).Error
+	}); err != nil {
+		log.Errorf("org create transaction: %v", err)
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "创建失败，请稍后重试"})
+		return nil
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "创建成功", "data": s.orgToMapWithSeats(&o, true),
@@ -514,7 +564,8 @@ func (s *OrgService) handleDelete(ctx khttp.Context) error {
 		return nil
 	})
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "删除失败: " + err.Error()})
+		log.Errorf("org delete: %v", err)
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "删除失败，请稍后重试"})
 		return nil
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除组织"})
@@ -528,21 +579,21 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 		return nil
 	}
 	var req struct {
-		ID                   uint   `json:"id"`
-		Name                 string `json:"name"`
-		Status               string `json:"status"`
-		BrandTitle           string `json:"brandTitle"`
-		BrandLogo            string `json:"brandLogo"`
-		BrandFavicon         string `json:"brandFavicon"`
-		JoinMode             string `json:"joinMode"`
-		EnableAISummary      *bool  `json:"enableAiSummary"`
-		EnableAIEmail        *bool  `json:"enableAiEmail"`
-		EnableAIWeeklyEmail  *bool  `json:"enableAiWeeklyEmail"`
-		EnableSpider         *bool  `json:"enableSpider"`
-		SpiderIntervalMin    *int   `json:"spiderIntervalMin"`
-		AISummaryIntervalMin *int   `json:"aiSummaryIntervalMin"`
-		AIEmailSchedule      string `json:"aiEmailSchedule"`
-		SeatLimit            *int   `json:"seatLimit"`
+		ID                   uint    `json:"id"`
+		Name                 *string `json:"name"`
+		Status               *string `json:"status"`
+		BrandTitle           *string `json:"brandTitle"`
+		BrandLogo            *string `json:"brandLogo"`
+		BrandFavicon         *string `json:"brandFavicon"`
+		JoinMode             *string `json:"joinMode"`
+		EnableAISummary      *bool   `json:"enableAiSummary"`
+		EnableAIEmail        *bool   `json:"enableAiEmail"`
+		EnableAIWeeklyEmail  *bool   `json:"enableAiWeeklyEmail"`
+		EnableSpider         *bool   `json:"enableSpider"`
+		SpiderIntervalMin    *int    `json:"spiderIntervalMin"`
+		AISummaryIntervalMin *int    `json:"aiSummaryIntervalMin"`
+		AIEmailSchedule      *string `json:"aiEmailSchedule"`
+		SeatLimit            *int    `json:"seatLimit"`
 	}
 	if err := readJSON(ctx.Request(), &req); err != nil || req.ID == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
@@ -561,13 +612,19 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 	}
 
 	updates := map[string]interface{}{}
-	// 品牌：组织管理员可写（空串表示清空 logo）
-	updates["brand_title"] = strings.TrimSpace(req.BrandTitle)
-	updates["brand_logo"] = strings.TrimSpace(req.BrandLogo)
-	updates["brand_favicon"] = strings.TrimSpace(req.BrandFavicon)
+	// 品牌字段使用 PATCH 语义；显式传空串才表示清空。
+	if req.BrandTitle != nil {
+		updates["brand_title"] = strings.TrimSpace(*req.BrandTitle)
+	}
+	if req.BrandLogo != nil {
+		updates["brand_logo"] = strings.TrimSpace(*req.BrandLogo)
+	}
+	if req.BrandFavicon != nil {
+		updates["brand_favicon"] = strings.TrimSpace(*req.BrandFavicon)
+	}
 
-	if req.JoinMode == model.OrgJoinAuto || req.JoinMode == model.OrgJoinReview {
-		updates["join_mode"] = req.JoinMode
+	if req.JoinMode != nil && (*req.JoinMode == model.OrgJoinAuto || *req.JoinMode == model.OrgJoinReview) {
+		updates["join_mode"] = *req.JoinMode
 	}
 	if req.EnableAISummary != nil {
 		updates["enable_ai_summary"] = *req.EnableAISummary
@@ -583,17 +640,17 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 	}
 
 	// 名称：公共域仅站点管理员可改
-	if strings.TrimSpace(req.Name) != "" {
+	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
 		if !o.IsSystem || siteAdmin {
-			updates["name"] = strings.TrimSpace(req.Name)
+			updates["name"] = strings.TrimSpace(*req.Name)
 		}
 	}
 
 	// 间隔 / 状态 / 用户数上限：仅站点管理员
 	if siteAdmin {
-		if req.Status == model.OrgStatusActive || req.Status == model.OrgStatusSuspended {
+		if req.Status != nil && (*req.Status == model.OrgStatusActive || *req.Status == model.OrgStatusSuspended) {
 			if !o.IsSystem {
-				updates["status"] = req.Status
+				updates["status"] = *req.Status
 			}
 		}
 		if req.SpiderIntervalMin != nil && *req.SpiderIntervalMin > 0 {
@@ -602,8 +659,8 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 		if req.AISummaryIntervalMin != nil && *req.AISummaryIntervalMin > 0 {
 			updates["ai_summary_interval_min"] = *req.AISummaryIntervalMin
 		}
-		if strings.TrimSpace(req.AIEmailSchedule) != "" {
-			updates["ai_email_schedule"] = strings.TrimSpace(req.AIEmailSchedule)
+		if req.AIEmailSchedule != nil && strings.TrimSpace(*req.AIEmailSchedule) != "" {
+			updates["ai_email_schedule"] = strings.TrimSpace(*req.AIEmailSchedule)
 		}
 		if req.SeatLimit != nil {
 			if *req.SeatLimit < 1 {
@@ -615,7 +672,8 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 	}
 
 	if err := s.db.Model(&o).Updates(updates).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
+		log.Errorf("org update: %v", err)
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败，请稍后重试"})
 		return nil
 	}
 	// 组织关闭日报授权后：无其它组织授权的用户强制关闭个人日报
@@ -684,6 +742,11 @@ func (s *OrgService) handleSwitch(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "你不是该组织成员"})
 		return nil
 	}
+	var targetOrg model.Org
+	if err := s.db.Select("id", "status").First(&targetOrg, req.OrgID).Error; err != nil || targetOrg.Status != model.OrgStatusActive {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "该组织当前已暂停"})
+		return nil
+	}
 	u, err := s.loadUser(pd.UserID)
 	if err != nil {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "用户不存在"})
@@ -696,6 +759,7 @@ func (s *OrgService) handleSwitch(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "签发 token 失败"})
 		return nil
 	}
+	setSessionCookie(ctx, token)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "已切换组织", "jwtToken": token, "orgId": req.OrgID,
 	})
@@ -739,36 +803,38 @@ func (s *OrgService) handleJoin(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "你已在该组织中", "data": s.orgToMapWithSeats(&o, false)})
 		return nil
 	}
-	if msg := seatFullMessage(s.db, &o); msg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
-		return nil
-	}
 	if o.JoinMode == model.OrgJoinReview {
 		var existing model.OrgJoinRequest
-		err := s.db.Where("org_id = ? AND user_id = ? AND status = ?", o.ID, pd.UserID, model.JoinReqPending).First(&existing).Error
+		err := s.db.Where("org_id = ? AND user_id = ?", o.ID, pd.UserID).First(&existing).Error
 		if err == nil {
+			if existing.Status != model.JoinReqPending {
+				if updateErr := s.db.Model(&existing).Updates(map[string]interface{}{
+					"status": model.JoinReqPending, "code_used": code,
+					"org_display_name": displayName, "reviewed_by": nil,
+				}).Error; updateErr != nil {
+					writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "提交申请失败，请稍后重试"})
+					return nil
+				}
+			}
 			writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "申请已提交，等待团队管理员审批"})
 			return nil
 		}
-		_ = s.db.Create(&model.OrgJoinRequest{
+		if err := s.db.Create(&model.OrgJoinRequest{
 			OrgID:          o.ID,
 			UserID:         pd.UserID,
 			Status:         model.JoinReqPending,
 			CodeUsed:       code,
 			OrgDisplayName: displayName,
-		}).Error
+		}).Error; err != nil {
+			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "提交申请失败，请稍后重试"})
+			return nil
+		}
 		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "申请已提交，等待团队管理员审批"})
 		return nil
 	}
-	defID := s.ensureDefaultGroupID(o.ID)
-	var gid *uint
-	if defID > 0 {
-		gid = &defID
-		_ = s.db.Model(&model.User{}).Where("id = ?", pd.UserID).Update("group_id", defID).Error
-	}
-	if err := s.ensureOrgMember(o.ID, pd.UserID, model.OrgRoleMember, gid, displayName); err != nil {
+	if err := s.addOrgMemberAtomic(o.ID, pd.UserID, model.OrgRoleMember, displayName); err != nil {
 		log.Errorf("org join ensure member: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加入失败，请稍后重试"})
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": err.Error()})
 		return nil
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "加入成功", "data": s.orgToMapWithSeats(&o, false)})
@@ -797,8 +863,18 @@ func (s *OrgService) handleLeave(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "公共域不可退出"})
 		return nil
 	}
+	var membership model.OrgMember
+	if s.db.Where("org_id = ? AND user_id = ?", req.OrgID, pd.UserID).First(&membership).Error == nil && membership.Role == model.OrgRoleOrgAdmin {
+		var admins int64
+		s.db.Model(&model.OrgMember{}).Where("org_id = ? AND role = ?", req.OrgID, model.OrgRoleOrgAdmin).Count(&admins)
+		if admins <= 1 {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请先任命另一位组织管理员再退出"})
+			return nil
+		}
+	}
 	if err := s.db.Where("org_id = ? AND user_id = ?", req.OrgID, pd.UserID).Delete(&model.OrgMember{}).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
+		log.Errorf("org leave: %v", err)
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "退出失败，请稍后重试"})
 		return nil
 	}
 	// 若当前组织是离开的组织，切回公共域
@@ -814,6 +890,7 @@ func (s *OrgService) handleLeave(ctx khttp.Context) error {
 	}
 	resp := map[string]interface{}{"code": 0, "message": "已退出组织"}
 	if token != "" {
+		setSessionCookie(ctx, token)
 		resp["jwtToken"] = token
 	}
 	writeJSON(ctx.Response(), 200, resp)
@@ -918,10 +995,12 @@ func (s *OrgService) handleMemberIds(ctx khttp.Context) error {
 		orgID = pd.OrgID
 	}
 	if orgID == 0 {
-		var pub model.Org
-		if s.db.Where("slug = ?", model.PublicOrgSlug).First(&pub).Error == nil {
-			orgID = pub.ID
-		}
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少组织 id"})
+		return nil
+	}
+	if pd == nil || (!auth.VerifySiteAdmin(ctx) && !s.isMemberDB(pd.UserID, orgID)) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
+		return nil
 	}
 	var ids []int64
 	_ = s.db.Model(&model.OrgMember{}).Where("org_id = ?", orgID).Pluck("user_id", &ids)
@@ -983,10 +1062,6 @@ func (s *OrgService) handleAddMember(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
 		return nil
 	}
-	if msg := seatFullMessage(s.db, &addOrg); msg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
-		return nil
-	}
 	displayName := strings.TrimSpace(req.OrgDisplayName)
 	if displayName == "" {
 		// 管理员未填：用目标用户全局昵称作占位，用户可再改
@@ -998,15 +1073,9 @@ func (s *OrgService) handleAddMember(ctx khttp.Context) error {
 			}
 		}
 	}
-	defID := s.ensureDefaultGroupID(req.OrgID)
-	var gid *uint
-	if defID > 0 {
-		gid = &defID
-		_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("group_id", defID).Error
-	}
-	if err := s.ensureOrgMember(req.OrgID, uid, role, gid, displayName); err != nil {
+	if err := s.addOrgMemberAtomic(req.OrgID, uid, role, displayName); err != nil {
 		log.Errorf("org add member: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加入失败，请稍后重试"})
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": err.Error()})
 		return nil
 	}
 	// 管理员拉入 → 设为默认组织（下次打开自动进入；用户之后 switch 即记忆）
@@ -1055,7 +1124,8 @@ func (s *OrgService) handleSetDisplayName(ctx khttp.Context) error {
 	if err := s.db.Model(&model.OrgMember{}).
 		Where("org_id = ? AND user_id = ?", req.OrgID, uid).
 		Update("org_display_name", displayName).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
+		log.Errorf("org member display name: %v", err)
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败，请稍后重试"})
 		return nil
 	}
 	// 公共域称呼 ≡ 全局昵称 users.name
@@ -1087,6 +1157,17 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "角色无效（member|coach|captain|org_admin）"})
 		return nil
 	}
+	if req.Role != model.OrgRoleOrgAdmin {
+		var current model.OrgMember
+		if s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).First(&current).Error == nil && current.Role == model.OrgRoleOrgAdmin {
+			var admins int64
+			s.db.Model(&model.OrgMember{}).Where("org_id = ? AND role = ?", req.OrgID, model.OrgRoleOrgAdmin).Count(&admins)
+			if admins <= 1 {
+				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "不能降权最后一位组织管理员"})
+				return nil
+			}
+		}
+	}
 	// 站点管理员可任命任意组织；组织管理员可任命本组织
 	if !auth.VerifySiteAdmin(ctx) && !s.isOrgAdminDB(pd.UserID, req.OrgID) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
@@ -1100,10 +1181,6 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 			writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
 			return nil
 		}
-		if msg := seatFullMessage(s.db, &roleOrg); msg != "" {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
-			return nil
-		}
 		displayName := ""
 		var u model.User
 		if s.db.Select("name", "username").First(&u, req.UserID).Error == nil {
@@ -1112,14 +1189,9 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 				displayName = u.Username
 			}
 		}
-		defID := s.ensureDefaultGroupID(req.OrgID)
-		var gid *uint
-		if defID > 0 {
-			gid = &defID
-		}
-		if err := s.ensureOrgMember(req.OrgID, req.UserID, req.Role, gid, displayName); err != nil {
+		if err := s.addOrgMemberAtomic(req.OrgID, req.UserID, req.Role, displayName); err != nil {
 			log.Errorf("org set role ensure member: %v", err)
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加入失败，请稍后重试"})
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": err.Error()})
 			return nil
 		}
 		// 任命时顺带拉入 → 设为默认组织
@@ -1158,7 +1230,20 @@ func (s *OrgService) handleRemoveMember(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
-	_ = s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).Delete(&model.OrgMember{}).Error
+	var target model.OrgMember
+	if s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).First(&target).Error == nil && target.Role == model.OrgRoleOrgAdmin {
+		var admins int64
+		s.db.Model(&model.OrgMember{}).Where("org_id = ? AND role = ?", req.OrgID, model.OrgRoleOrgAdmin).Count(&admins)
+		if admins <= 1 {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "不能移除最后一位组织管理员"})
+			return nil
+		}
+	}
+	if err := s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).Delete(&model.OrgMember{}).Error; err != nil {
+		log.Errorf("org remove member: %v", err)
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "移除失败，请稍后重试"})
+		return nil
+	}
 	// 若被移出的是其默认组织，回落公共域
 	s.fallbackDefaultOrgIf(req.UserID, req.OrgID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已移除成员"})
@@ -1212,7 +1297,8 @@ func (s *OrgService) handleInviteRotate(ctx khttp.Context) error {
 	}
 	code := newInviteCode()
 	if err := s.db.Model(&model.Org{}).Where("id = ?", orgID).Update("invite_code", code).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
+		log.Errorf("org rotate invite: %v", err)
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "更新失败，请稍后重试"})
 		return nil
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更换团队识别码", "inviteCode": code})
@@ -1246,9 +1332,9 @@ func (s *OrgService) handleJoinRequests(ctx khttp.Context) error {
 		}
 		list = append(list, map[string]interface{}{
 			"id": r.ID, "userId": r.UserID, "username": u.Username,
-			"name":            display,
+			"name":           display,
 			"orgDisplayName": r.OrgDisplayName,
-			"status":          r.Status, "createdAt": r.CreatedAt.Unix(),
+			"status":         r.Status, "createdAt": r.CreatedAt.Unix(),
 		})
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "list": list})
@@ -1262,7 +1348,7 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 		return nil
 	}
 	var req struct {
-		ID     uint `json:"id"`
+		ID      uint `json:"id"`
 		Approve bool `json:"approve"`
 	}
 	if err := readJSON(ctx.Request(), &req); err != nil || req.ID == 0 {
@@ -1286,16 +1372,6 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 				writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
 				return nil
 			}
-			if msg := seatFullMessage(s.db, &reviewOrg); msg != "" {
-				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
-				return nil
-			}
-			defID := s.ensureDefaultGroupID(jr.OrgID)
-			var gid *uint
-			if defID > 0 {
-				gid = &defID
-				_ = s.db.Model(&model.User{}).Where("id = ?", jr.UserID).Update("group_id", defID).Error
-			}
 			displayName := strings.TrimSpace(jr.OrgDisplayName)
 			if displayName == "" {
 				var u model.User
@@ -1307,9 +1383,9 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 				}
 			}
 			// 先写入/恢复成员，成功后再标记申请通过，避免“已通过却未入组”
-			if err := s.ensureOrgMember(jr.OrgID, jr.UserID, model.OrgRoleMember, gid, displayName); err != nil {
+			if err := s.addOrgMemberAtomic(jr.OrgID, jr.UserID, model.OrgRoleMember, displayName); err != nil {
 				log.Errorf("org join review ensure member: %v", err)
-				writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加入失败，请稍后重试"})
+				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": err.Error()})
 				return nil
 			}
 			s.setDefaultOrg(jr.UserID, jr.OrgID)
@@ -1358,7 +1434,8 @@ func (s *OrgService) handleSetSiteAdmin(ctx khttp.Context) error {
 		"is_site_admin": req.IsSiteAdmin,
 		"role_id":       roleID,
 	}).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": err.Error()})
+		log.Errorf("set site admin: %v", err)
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "更新失败，请稍后重试"})
 		return nil
 	}
 	log.Infof("set site admin user=%d is=%v", req.UserID, req.IsSiteAdmin)

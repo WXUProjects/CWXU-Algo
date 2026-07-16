@@ -25,6 +25,7 @@ type RabbitMQ struct {
 	reconnectMu sync.Mutex // 串行重连，避免并发 Dial 打爆 MQ
 	pubMu       sync.Mutex // 串行发布 / declare / purge
 	pubCh       *amqp.Channel
+	pubConfirm  <-chan amqp.Confirmation
 	closed      atomic.Bool
 }
 
@@ -40,6 +41,7 @@ func NewRabbitMQ(data *conf.Server) (*RabbitMQ, func(), error) {
 			_ = mq.pubCh.Close()
 			mq.pubCh = nil
 		}
+		mq.pubConfirm = nil
 		if mq.Conn != nil {
 			_ = mq.Conn.Close()
 			mq.Conn = nil
@@ -58,6 +60,11 @@ func (r *RabbitMQ) dial() (*amqp.Connection, *amqp.Channel, error) {
 	}
 	pubCh, err := conn.Channel()
 	if err != nil {
+		_ = conn.Close()
+		return nil, nil, err
+	}
+	if err := pubCh.Confirm(false); err != nil {
+		_ = pubCh.Close()
 		_ = conn.Close()
 		return nil, nil, err
 	}
@@ -91,6 +98,7 @@ func (r *RabbitMQ) reconnect() error {
 	r.mu.Lock()
 	oldConn, oldPub := r.Conn, r.pubCh
 	r.Conn, r.pubCh = conn, pubCh
+	r.pubConfirm = pubCh.NotifyPublish(make(chan amqp.Confirmation, 1))
 	r.mu.Unlock()
 
 	if oldPub != nil {
@@ -123,6 +131,7 @@ func (r *RabbitMQ) watchConn(conn *amqp.Connection, closeCh chan *amqp.Error) {
 		if r.pubCh != nil {
 			_ = r.pubCh.Close()
 			r.pubCh = nil
+			r.pubConfirm = nil
 		}
 		r.Conn = nil
 	}
@@ -179,6 +188,7 @@ func (r *RabbitMQ) invalidate(conn *amqp.Connection) {
 	if r.pubCh != nil {
 		_ = r.pubCh.Close()
 		r.pubCh = nil
+		r.pubConfirm = nil
 	}
 	if r.Conn != nil {
 		_ = r.Conn.Close()
@@ -235,7 +245,12 @@ func (r *RabbitMQ) ensurePubCh() error {
 	if err != nil {
 		return err
 	}
+	if err := ch.Confirm(false); err != nil {
+		_ = ch.Close()
+		return err
+	}
 	r.pubCh = ch
+	r.pubConfirm = ch.NotifyPublish(make(chan amqp.Confirmation, 1))
 	return nil
 }
 
@@ -245,6 +260,7 @@ func (r *RabbitMQ) dropPubCh() {
 	if r.pubCh != nil {
 		_ = r.pubCh.Close()
 		r.pubCh = nil
+		r.pubConfirm = nil
 	}
 }
 
@@ -262,11 +278,23 @@ func (r *RabbitMQ) Publish(exchange, key string, mandatory, immediate bool, msg 
 		}
 		r.mu.Lock()
 		ch := r.pubCh
+		confirm := r.pubConfirm
 		r.mu.Unlock()
-		if ch == nil {
+		if ch == nil || confirm == nil {
 			return fmt.Errorf("mq not ready")
 		}
-		return ch.Publish(exchange, key, mandatory, immediate, msg)
+		if err := ch.Publish(exchange, key, mandatory, immediate, msg); err != nil {
+			return err
+		}
+		select {
+		case confirmation, ok := <-confirm:
+			if !ok || !confirmation.Ack {
+				return fmt.Errorf("mq publisher confirm rejected")
+			}
+			return nil
+		case <-time.After(5 * time.Second):
+			return fmt.Errorf("mq publisher confirm timeout")
+		}
 	}
 
 	if err := try(); err != nil {

@@ -216,10 +216,10 @@ func (d *ProfileDal) GetOrgBriefsByUserIDs(ctx context.Context, userIDs []uint) 
 		return out, nil
 	}
 	type row struct {
-		UserID  uint
-		OrgID   uint
-		Name    string
-		Role    string
+		UserID   uint
+		OrgID    uint
+		Name     string
+		Role     string
 		IsSystem bool
 	}
 	var rows []row
@@ -243,15 +243,28 @@ func (d *ProfileDal) GetOrgBriefsByUserIDs(ctx context.Context, userIDs []uint) 
 	return out, nil
 }
 
-func (d *ProfileDal) MoveGroup(ctx context.Context, userId uint64, groupId int64) error {
-	result := d.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", userId).Update("group_id", groupId)
+func (d *ProfileDal) MoveGroup(ctx context.Context, userID uint64, groupID int64, orgID uint) error {
+	result := d.db.WithContext(ctx).Model(&model.OrgMember{}).
+		Where("user_id = ? AND org_id = ?", userID, orgID).
+		Update("group_id", groupID)
 	if result.Error != nil {
 		return fmt.Errorf("移动用户组失败: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("用户不存在")
+		return fmt.Errorf("用户不属于当前组织")
 	}
 	return nil
+}
+
+// GroupBelongsToOrg verifies the tenant boundary before assigning a member.
+func (d *ProfileDal) GroupBelongsToOrg(ctx context.Context, groupID int64, orgID uint) bool {
+	if groupID <= 0 || orgID == 0 {
+		return false
+	}
+	var n int64
+	_ = d.db.WithContext(ctx).Model(&model.Group{}).
+		Where("id = ? AND org_id = ?", groupID, orgID).Count(&n).Error
+	return n == 1
 }
 
 // SetEmailEnabled 设置用户日报邮件开关
@@ -496,17 +509,16 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 // GetListByOrg 分页列出组织成员用户
 func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pageNum int64) ([]model.User, int64, error) {
 	var total int64
-	sub := d.db.WithContext(ctx).Model(&model.OrgMember{}).Select("user_id").Where("org_id = ?", orgID)
-	if err := d.db.WithContext(ctx).Model(&model.User{}).Where("id IN (?)", sub).Count(&total).Error; err != nil {
+	if err := d.db.WithContext(ctx).Model(&model.OrgMember{}).Where("org_id = ?", orgID).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var list []model.User
 	err := d.db.WithContext(ctx).
-		Select("id", "username", "name", "group_id", "avatar", "role_id", "is_site_admin",
-			"email_enabled", "email_weekly_enabled").
-		Where("id IN (?)", sub).
-		Order("id").
-		Limit(int(pageSize)).Offset(int(pageNum-1)*int(pageSize)).
+		Table("users AS u").
+		Select("u.id, u.username, u.name, COALESCE(m.group_id, 0) AS group_id, u.avatar, u.role_id, u.is_site_admin, u.email_enabled, u.email_weekly_enabled").
+		Joins("JOIN org_members AS m ON m.user_id = u.id AND m.org_id = ?", orgID).
+		Order("u.id").
+		Limit(int(pageSize)).Offset(int(pageNum-1) * int(pageSize)).
 		Find(&list).Error
 	return list, total, err
 }
@@ -558,10 +570,23 @@ func (d *ProfileDal) BatchEmailGrants(ctx context.Context, userIDs []int64) (dai
 // GetUserIdsByGroup 根据组ID获取用户ID列表
 func (d *ProfileDal) GetUserIdsByGroup(ctx context.Context, groupId int64) ([]int64, error) {
 	var ids []int64
-	err := d.db.Model(&model.User{}).
+	err := d.db.WithContext(ctx).Model(&model.OrgMember{}).
 		Where("group_id = ?", groupId).
-		Pluck("id", &ids).Error
+		Pluck("user_id", &ids).Error
 	return ids, err
+}
+
+func (d *ProfileDal) GroupIDForOrg(ctx context.Context, userID int64, orgID uint) int64 {
+	if userID <= 0 || orgID == 0 {
+		return 0
+	}
+	var row struct{ GroupID *uint }
+	if err := d.db.WithContext(ctx).Model(&model.OrgMember{}).
+		Select("group_id").Where("user_id = ? AND org_id = ?", userID, orgID).
+		Scan(&row).Error; err != nil || row.GroupID == nil {
+		return 0
+	}
+	return int64(*row.GroupID)
 }
 
 // UserProfile 用户简要信息（供批量查询用）

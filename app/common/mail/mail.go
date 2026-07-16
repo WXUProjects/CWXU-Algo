@@ -56,7 +56,10 @@ func (s *Sender) Send(to, subject, body string) error {
 	m.SetBody("text/html", body)
 
 	d := gomail.NewDialer(s.host, s.port, s.username, s.password)
-	d.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+	d.TLSConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		ServerName: s.host,
+	}
 
 	if err := d.DialAndSend(m); err != nil {
 		return fmt.Errorf("发送邮件失败: %w", err)

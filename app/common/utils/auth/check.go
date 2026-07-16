@@ -53,6 +53,8 @@ func parsePayload(ctx context.Context) *JwtPayload {
 		},
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
 		jwt.WithExpirationRequired(),
+		jwt.WithIssuer("goalgo"),
+		jwt.WithAudience("goalgo-web"),
 	)
 	if err != nil || !token.Valid || pd.UserID == 0 {
 		return nil

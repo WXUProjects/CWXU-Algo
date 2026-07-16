@@ -12,15 +12,15 @@ import (
 // 与原先进程内 rate.Limiter(Every(interval), 1) 语义一致，且多实例共享。
 func Allow(ctx context.Context, rdb *redis.Client, key string, interval time.Duration) (bool, error) {
 	if rdb == nil {
-		return true, nil
+		return false, fmt.Errorf("redis unavailable")
 	}
 	if interval <= 0 {
 		return true, nil
 	}
 	ok, err := rdb.SetNX(ctx, key, "1", interval).Result()
 	if err != nil {
-		// Redis 故障时放行，避免拖垮业务（与可观测日志配合）
-		return true, err
+		// Expensive operations fail closed so a Redis outage cannot remove abuse protection.
+		return false, err
 	}
 	return ok, nil
 }

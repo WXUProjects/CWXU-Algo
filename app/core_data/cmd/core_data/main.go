@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/security"
 	"cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/task"
 	"flag"
@@ -123,6 +124,9 @@ func main() {
 
 	var bc conf.Bootstrap
 	if err := c.Scan(&bc); err != nil {
+		panic(err)
+	}
+	if err := security.Configure(bc.Server); err != nil {
 		panic(err)
 	}
 

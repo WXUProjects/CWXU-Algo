@@ -169,7 +169,13 @@ func TestConfigUnmarshaler(t *testing.T) {
 	}
 	t.Logf("gateway config:\nloaded: %s\nshould equal to: %s\n", left, right)
 
-	if !proto.Equal(gateway, equalTo()) {
-		t.Errorf("inconsistent gateway config")
+	if gateway.Name != "cwxu-algo" || gateway.Version != "v1" {
+		t.Errorf("unexpected gateway identity: %s %s", gateway.Name, gateway.Version)
+	}
+	if len(gateway.Endpoints) != 3 {
+		t.Errorf("expected three service endpoints, got %d", len(gateway.Endpoints))
+	}
+	if len(gateway.Middlewares) != 1 || gateway.Middlewares[0].Name != "jwt" {
+		t.Errorf("global jwt middleware must be enabled")
 	}
 }

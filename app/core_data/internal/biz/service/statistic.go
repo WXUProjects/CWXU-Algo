@@ -34,16 +34,16 @@ func NewStatisticUseCase(dal *dal.StatisticDal, rdb *redis.Client, reg *discover
 }
 
 // resolveMembers 当前组织成员；siteWide=true 且站管时返回 nil（全站不限制）
-func (uc *StatisticUseCase) resolveMembers(ctx context.Context, siteWide bool) (memberIDs []int64) {
+func (uc *StatisticUseCase) resolveMembers(ctx context.Context, siteWide bool) (memberIDs []int64, orgID uint) {
 	if siteWide && auth.VerifySiteAdmin(ctx) {
-		return nil
+		return nil, 0
 	}
-	ids, _, _, err := fetchOrgMemberIDs(ctx, uc.reg, 0)
+	ids, resolvedOrgID, _, err := fetchOrgMemberIDs(ctx, uc.reg, 0)
 	if err != nil {
 		log.Warnf("statistic org members: %v", err)
-		return []int64{}
+		return []int64{}, resolvedOrgID
 	}
-	return ids
+	return ids, resolvedOrgID
 }
 
 // userId 约定：个人>0；0=组织热力；-1=组织时段；-2=全站时段/热力（仅站管）
@@ -65,22 +65,19 @@ func (uc *StatisticUseCase) Heatmap(ctx context.Context, req *statistic.HeatmapR
 		if siteWide && !auth.VerifySiteAdmin(ctx) {
 			return nil, errors.Forbidden("权限不足", "仅站点管理员可查看全站统计")
 		}
-		memberIDs = uc.resolveMembers(ctx, siteWide)
+		var resolvedOrgID uint
+		memberIDs, resolvedOrgID = uc.resolveMembers(ctx, siteWide)
 		queryUserId = 0 // 聚合查询
 		if siteWide {
 			cacheSuffix = ":site"
-		} else if pd := auth.GetCurrentUser(ctx); pd != nil {
-			cacheSuffix = fmt.Sprintf(":org%d", pd.OrgID)
 		} else {
-			cacheSuffix = fmt.Sprintf(":m%d", len(memberIDs))
+			cacheSuffix = fmt.Sprintf(":org%d", resolvedOrgID)
 		}
 	}
 
 	ver := "0"
-	if queryUserId == 0 {
-		if v, err := uc.rdb.Get(ctx, "statistic:heatmap:global:ver").Result(); err == nil && v != "" {
-			ver = v
-		}
+	if v, err := uc.rdb.Get(ctx, "statistic:heatmap:global:ver").Result(); err == nil && v != "" {
+		ver = v
 	}
 	cacheKey := fmt.Sprintf("statistic:heatmap:%d:%s:%s:%t:v%s%s", req.UserId, req.StartDate, req.EndDate, req.IsAc, ver, cacheSuffix)
 	result, _, err := data2.GetCacheDal[[]dal.DailyCount](ctx, uc.rdb, cacheKey, func(data *[]dal.DailyCount) error {
@@ -127,7 +124,7 @@ func (uc *StatisticUseCase) Rank(ctx context.Context, req *statistic.RankReq) (*
 		groupId = -1
 	}
 
-	memberIDs := uc.resolveMembers(ctx, false)
+	memberIDs, _ := uc.resolveMembers(ctx, false)
 	items, total, err := uc.dal.GetRankByRangeScoped(ctx, start, endExclusive, scoreType, groupId, req.Page, req.PageSize, memberIDs)
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
@@ -174,14 +171,13 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 		if siteWide && !auth.VerifySiteAdmin(ctx) {
 			return nil, errors.Forbidden("权限不足", "仅站点管理员可查看全站统计")
 		}
-		memberIDs = uc.resolveMembers(ctx, siteWide)
+		var resolvedOrgID uint
+		memberIDs, resolvedOrgID = uc.resolveMembers(ctx, siteWide)
 		queryUserId = -1
 		if siteWide {
 			cacheKey = fmt.Sprintf("statistic:period:s%s:site:v%s", periodCacheSchema, ver)
-		} else if pd := auth.GetCurrentUser(ctx); pd != nil {
-			cacheKey = fmt.Sprintf("statistic:period:s%s:org:%d:v%s", periodCacheSchema, pd.OrgID, ver)
 		} else {
-			cacheKey = fmt.Sprintf("statistic:period:s%s:org:m%d:v%s", periodCacheSchema, len(memberIDs), ver)
+			cacheKey = fmt.Sprintf("statistic:period:s%s:org:%d:v%s", periodCacheSchema, resolvedOrgID, ver)
 		}
 	}
 

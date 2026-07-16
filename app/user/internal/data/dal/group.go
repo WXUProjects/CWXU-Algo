@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/go-kratos/kratos/v2/log"
 	"gorm.io/gorm"
 )
 
@@ -82,14 +81,11 @@ func (d *GroupDal) Delete(ctx context.Context, id int64) error {
 	if err != nil {
 		return fmt.Errorf("准备默认分组失败: %w", err)
 	}
-	if err := d.db.WithContext(ctx).Model(&model.User{}).
+	if err := d.db.WithContext(ctx).Model(&model.OrgMember{}).
 		Where("group_id = ?", id).
 		Update("group_id", defaultID).Error; err != nil {
-		return fmt.Errorf("迁移用户到默认分组失败: %w", err)
+		return fmt.Errorf("迁移成员到默认分组失败: %w", err)
 	}
-	_ = d.db.WithContext(ctx).Model(&model.OrgMember{}).
-		Where("group_id = ?", id).
-		Update("group_id", defaultID).Error
 
 	result := d.db.WithContext(ctx).Delete(&model.Group{}, id)
 	if result.Error != nil {
@@ -138,19 +134,22 @@ func (d *GroupDal) OrgDisplayNames(ctx context.Context, orgID uint, userIDs []ui
 
 func (d *GroupDal) GetWithUsers(ctx context.Context, id int64) (*model.Group, []model.User, error) {
 	var group model.Group
-	err := d.db.WithContext(ctx).Preload("Users").First(&group, id).Error
+	err := d.db.WithContext(ctx).First(&group, id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil, fmt.Errorf("组不存在")
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("查询组失败: %w", err)
 	}
-	if id == 0 {
-		_ = d.db.WithContext(ctx).Model(&model.User{}).Where("group_id = ?", id).Find(&group.Users)
-		return &group, group.Users, nil
+	var users []model.User
+	if err := d.db.WithContext(ctx).Table("users AS u").
+		Select("u.id, u.username, u.name, u.avatar, COALESCE(m.group_id, 0) AS group_id").
+		Joins("JOIN org_members AS m ON m.user_id = u.id").
+		Where("m.org_id = ? AND m.group_id = ?", group.OrgID, id).
+		Order("u.id").Find(&users).Error; err != nil {
+		return nil, nil, fmt.Errorf("查询组成员失败: %w", err)
 	}
-	log.Info("group: %v", group)
-	return &group, group.Users, nil
+	return &group, users, nil
 }
 
 func (d *GroupDal) List(ctx context.Context, page, size int64, orgID uint) ([]model.Group, int64, error) {

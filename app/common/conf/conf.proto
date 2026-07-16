@@ -28,6 +28,8 @@ message Server {
   GRPC grpc = 2;
   string reg_dsn = 3;
   string amqp_dsn = 4;
+  string jwt_secret = 5;
+  string config_encryption_key = 6;
 }
 
 message Data {

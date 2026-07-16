@@ -51,7 +51,7 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 	}
 	logs, total, err := c.sbDal.GetContestListScoped(ctx, req.UserId, req.Offset, req.Limit, req.Platform, memberIDs)
 	if err != nil {
-		return nil, errors.InternalServer("内部服务器错误", err.Error())
+		return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
 	}
 
 	items := make([]*contest_log.ContestLog, 0, len(logs))
@@ -144,7 +144,7 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 
 	logs, total, err := c.sbDal.GetContestRanking(ctx, contest.ContestId, contest.Platform, req.Offset, req.Limit, userIds)
 	if err != nil {
-		return nil, errors.InternalServer("内部服务器错误", err.Error())
+		return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
 	}
 
 	// 批量获取用户信息，一次 RPC 替代原来的 N 次 GetById
@@ -214,7 +214,7 @@ func (c ContestLogService) fetchUserNames(ctx context.Context, client profile.Pr
 func (c ContestLogService) GetUserContestHistory(ctx context.Context, req *contest_log.GetUserContestHistoryReq) (*contest_log.GetUserContestHistoryRes, error) {
 	logs, err := c.sbDal.GetContestByUserId(ctx, req.UserId, req.Cursor, req.Limit, req.Platform)
 	if err != nil {
-		return nil, errors.InternalServer("内部服务器错误", err.Error())
+		return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
 	}
 
 	items := make([]*contest_log.ContestLog, 0, len(logs))

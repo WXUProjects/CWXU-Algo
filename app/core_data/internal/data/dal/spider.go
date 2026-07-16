@@ -7,10 +7,8 @@ import (
 	"cwxu-algo/app/core_data/internal/data/model"
 	"fmt"
 	"slices"
-	"strconv"
 	"time"
 
-	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -69,22 +67,18 @@ func (s *SpiderDal) GetByUserIdScoped(ctx context.Context, userId int64, lastTim
 	var sbLog []model.SubmitLog
 	ids, err := res.Result()
 	t := time.Unix(lastTimeUnix, 0)
-	q := s.db.Order("time DESC").Where("user_id = ? AND time < ?", userId, t)
+	q := s.db.WithContext(ctx).Order("time DESC").Where("user_id = ? AND time < ?", userId, t)
 	dbFunc := func() ([]model.SubmitLog, error) {
 		err := q.Limit(int(limit)).Find(&sbLog).Error
-		go func() {
-			ctx2, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			s.SetCache(ctx2, sbLog, userId)
-		}()
+		if err == nil {
+			s.SetCache(ctx, sbLog, userId)
+		}
 		return sbLog, err
 	}
 	if err != nil {
 		return dbFunc()
 	}
-	// 防止缓存忽悠人
-	err = q.Limit(1).Find(&sbLog).Error
-	if err != nil || len(ids) < int(limit) || len(sbLog) == 0 || strconv.Itoa(int(sbLog[0].ID)) != ids[0] {
+	if len(ids) == 0 {
 		return dbFunc()
 	}
 	// 到 Redis 的 Global 查这些ID
@@ -108,31 +102,32 @@ func (s *SpiderDal) GetByUserIdScoped(ctx context.Context, userId int64, lastTim
 		if !ok {
 			return dbFunc()
 		}
-		_ = utils.GobDecoder([]byte(s), &l)
+		if err := utils.GobDecoder([]byte(s), &l); err != nil {
+			return dbFunc()
+		}
 
 		sbLog = append(sbLog, l)
 	}
-	log.Info(sbLog)
 	return sbLog, nil
 }
 
 // SetCache 缓存提交记录
 func (s *SpiderDal) SetCache(ctx context.Context, log []model.SubmitLog, userId int64) {
 	pipe := s.rdb.Pipeline()
+	userKey := fmt.Sprintf("core:submit_log:user:%d", userId)
 	// 根据 userId 构建 Zset
 	for _, v := range log {
-		cacheKey := fmt.Sprintf("core:submit_log:user:%d", userId)
-		_ = pipe.ZAdd(ctx, cacheKey, redis.Z{
+		_ = pipe.ZAdd(ctx, userKey, redis.Z{
 			Score:  float64(v.Time.Unix()),
 			Member: v.ID,
 		})
 		// 构建缓存key
-		cacheKey = fmt.Sprintf("core:submit_log:detail:%d", v.ID)
-		_ = pipe.Expire(ctx, cacheKey, 24*time.Hour)
+		cacheKey := fmt.Sprintf("core:submit_log:detail:%d", v.ID)
 		// 缓存提交记录
 		vByte, _ := utils.GobEncoder(v)
 		_ = pipe.Set(ctx, cacheKey, vByte, 12*time.Hour)
 	}
+	_ = pipe.Expire(ctx, userKey, 12*time.Hour)
 	_, _ = pipe.Exec(ctx)
 }
 
@@ -142,9 +137,13 @@ func (s *SpiderDal) GetContestByUserId(ctx context.Context, userId int64, cursor
 		cursor = 33325619029
 	}
 
-	cacheKey := fmt.Sprintf("core:contest_log:user:%d", userId)
+	ver := "0"
+	if v, err := s.rdb.Get(ctx, fmt.Sprintf("core:contest_log:user:%d:ver", userId)).Result(); err == nil {
+		ver = v
+	}
+	cacheKey := fmt.Sprintf("core:contest_log:user:%d:v%s", userId, ver)
 	if platform != "" {
-		cacheKey = fmt.Sprintf("core:contest_log:user:%d:%s", userId, platform)
+		cacheKey = fmt.Sprintf("core:contest_log:user:%d:%s:v%s", userId, platform, ver)
 	}
 
 	res := s.rdb.ZRevRangeByScore(ctx, cacheKey, &redis.ZRangeBy{
@@ -156,7 +155,7 @@ func (s *SpiderDal) GetContestByUserId(ctx context.Context, userId int64, cursor
 	ids, err := res.Result()
 	t := time.Unix(cursor, 0)
 
-	q := s.db.Order("time DESC")
+	q := s.db.WithContext(ctx).Order("time DESC")
 	if userId != -1 {
 		q = q.Where("user_id = ? AND time < ?", userId, t)
 	} else {
@@ -168,11 +167,9 @@ func (s *SpiderDal) GetContestByUserId(ctx context.Context, userId int64, cursor
 
 	dbFunc := func() ([]model.ContestLog, error) {
 		err := q.Limit(int(limit)).Find(&contestLogs).Error
-		go func() {
-			ctx2, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			s.SetContestCache(ctx2, contestLogs, userId, platform)
-		}()
+		if err == nil {
+			s.SetContestCache(ctx, contestLogs, userId, platform)
+		}
 		return contestLogs, err
 	}
 
@@ -180,8 +177,7 @@ func (s *SpiderDal) GetContestByUserId(ctx context.Context, userId int64, cursor
 		return dbFunc()
 	}
 
-	err = q.Limit(1).Find(&contestLogs).Error
-	if err != nil || len(ids) < int(limit) || (len(contestLogs) > 0 && strconv.Itoa(int(contestLogs[0].ID)) != ids[0]) {
+	if len(ids) == 0 {
 		return dbFunc()
 	}
 
@@ -203,7 +199,9 @@ func (s *SpiderDal) GetContestByUserId(ctx context.Context, userId int64, cursor
 		if !ok {
 			return dbFunc()
 		}
-		_ = utils.GobDecoder([]byte(s), &l)
+		if err := utils.GobDecoder([]byte(s), &l); err != nil {
+			return dbFunc()
+		}
 		contestLogs = append(contestLogs, l)
 	}
 	return contestLogs, nil
@@ -215,96 +213,49 @@ func (s *SpiderDal) GetContestList(ctx context.Context, userId int64, offset int
 }
 
 // GetContestListScoped userId=-1 时 memberIDs 限制组织成员
-func (s *SpiderDal) GetContestListScoped(_ context.Context, userId int64, offset int64, limit int64, platform string, memberIDs []int64) ([]model.ContestLog, int64, error) {
-	// 先构建基础条件
-	baseQuery := s.db.Model(&model.ContestLog{})
-	if userId != -1 {
-		baseQuery = baseQuery.Where("user_id = ?", userId)
-	} else if memberIDs != nil {
-		if len(memberIDs) == 0 {
-			return []model.ContestLog{}, 0, nil
-		}
-		baseQuery = baseQuery.Where("user_id IN ?", memberIDs)
+func (s *SpiderDal) GetContestListScoped(ctx context.Context, userId int64, offset int64, limit int64, platform string, memberIDs []int64) ([]model.ContestLog, int64, error) {
+	if memberIDs != nil && len(memberIDs) == 0 && userId == -1 {
+		return []model.ContestLog{}, 0, nil
 	}
-	if platform != "" {
-		baseQuery = baseQuery.Where("platform = ?", platform)
+	buildQuery := func() *gorm.DB {
+		q := s.db.WithContext(ctx).Model(&model.ContestLog{})
+		if userId != -1 {
+			q = q.Where("user_id = ?", userId)
+		} else if memberIDs != nil {
+			q = q.Where("user_id IN ?", memberIDs)
+		}
+		if platform != "" {
+			q = q.Where("platform = ?", platform)
+		}
+		return q
 	}
 
 	// 1. 计算去重后的总数
 	var total int64
-	countQuery := baseQuery.Select("COUNT(DISTINCT contest_id)")
+	countQuery := buildQuery().Select("COUNT(DISTINCT contest_id)")
 	if err := countQuery.Scan(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// 2. 使用窗口函数获取每个 contest_id 最新的记录
-	// 先获取去重且分页后的 contest_id 列表
-	type ContestIdWithTime struct {
-		ContestId string
-		MaxTime   time.Time
-	}
-	var contestIdItems []ContestIdWithTime
-
-	// 构建子查询：按 contest_id 分组，取最新的 time，然后分页
-	paginateQuery := baseQuery.
-		Select("contest_id, MAX(time) as max_time").
-		Group("contest_id").
-		Order("max_time DESC").
-		Offset(int(offset)).
-		Limit(int(limit))
-
-	if err := paginateQuery.Scan(&contestIdItems).Error; err != nil {
-		return nil, 0, err
-	}
-
-	if len(contestIdItems) == 0 {
-		return []model.ContestLog{}, total, nil
-	}
-
-	// 3. 根据 contest_id 列表获取完整记录
-	contestIds := make([]string, len(contestIdItems))
-	for i, item := range contestIdItems {
-		contestIds[i] = item.ContestId
-	}
-
 	var contestLogs []model.ContestLog
-	finalQuery := s.db.Model(&model.ContestLog{}).
-		Where("contest_id IN ?", contestIds)
-	if userId != -1 {
-		finalQuery = finalQuery.Where("user_id = ?", userId)
-	} else if memberIDs != nil && len(memberIDs) > 0 {
-		finalQuery = finalQuery.Where("user_id IN ?", memberIDs)
-	}
-	if platform != "" {
-		finalQuery = finalQuery.Where("platform = ?", platform)
-	}
-
-	if err := finalQuery.Find(&contestLogs).Error; err != nil {
+	ranked := buildQuery().Select("contest_logs.*, ROW_NUMBER() OVER (PARTITION BY contest_id ORDER BY time DESC, id DESC) AS row_num")
+	if err := s.db.WithContext(ctx).Table("(?) AS ranked", ranked).
+		Where("row_num = 1").Order("time DESC, id DESC").
+		Offset(int(offset)).Limit(int(limit)).Scan(&contestLogs).Error; err != nil {
 		return nil, 0, err
 	}
-
-	// 4. 按照分页查询的顺序重新排列结果
-	logMap := make(map[string]model.ContestLog)
-	for _, item := range contestLogs {
-		logMap[item.ContestId] = item
-	}
-
-	result := make([]model.ContestLog, 0, len(contestIdItems))
-	for _, item := range contestIdItems {
-		if contestLog, ok := logMap[item.ContestId]; ok {
-			result = append(result, contestLog)
-		}
-	}
-
-	return result, total, nil
+	return contestLogs, total, nil
 }
 
 // GetContestRanking 获取比赛排行榜
-func (s *SpiderDal) GetContestRanking(_ context.Context, contestId string, platform string, offset int64, limit int64, userIds []int64) ([]model.ContestLog, int64, error) {
+func (s *SpiderDal) GetContestRanking(ctx context.Context, contestId string, platform string, offset int64, limit int64, userIds []int64) ([]model.ContestLog, int64, error) {
 	var contestLogs []model.ContestLog
 	var total int64
 
-	q := s.db.Model(&model.ContestLog{}).Where("contest_id = ? and platform = ?", contestId, platform)
+	if userIds != nil && len(userIds) == 0 {
+		return []model.ContestLog{}, 0, nil
+	}
+	q := s.db.WithContext(ctx).Model(&model.ContestLog{}).Where("contest_id = ? and platform = ?", contestId, platform)
 
 	if len(userIds) > 0 {
 		q = q.Where("user_id IN ?", userIds)
@@ -325,9 +276,13 @@ func (s *SpiderDal) GetContestRanking(_ context.Context, contestId string, platf
 func (s *SpiderDal) SetContestCache(ctx context.Context, logs []model.ContestLog, userId int64, platform string) {
 	pipe := s.rdb.Pipeline()
 
-	cacheKey := fmt.Sprintf("core:contest_log:user:%d", userId)
+	ver := "0"
+	if v, err := s.rdb.Get(ctx, fmt.Sprintf("core:contest_log:user:%d:ver", userId)).Result(); err == nil {
+		ver = v
+	}
+	cacheKey := fmt.Sprintf("core:contest_log:user:%d:v%s", userId, ver)
 	if platform != "" {
-		cacheKey = fmt.Sprintf("core:contest_log:user:%d:%s", userId, platform)
+		cacheKey = fmt.Sprintf("core:contest_log:user:%d:%s:v%s", userId, platform, ver)
 	}
 
 	for _, v := range logs {
@@ -336,9 +291,9 @@ func (s *SpiderDal) SetContestCache(ctx context.Context, logs []model.ContestLog
 			Member: v.ID,
 		})
 		detailKey := fmt.Sprintf("core:contest_log:detail:%d", v.ID)
-		_ = pipe.Expire(ctx, detailKey, 24*time.Hour)
 		vByte, _ := utils.GobEncoder(v)
 		_ = pipe.Set(ctx, detailKey, vByte, 12*time.Hour)
 	}
+	_ = pipe.Expire(ctx, cacheKey, 12*time.Hour)
 	_, _ = pipe.Exec(ctx)
 }

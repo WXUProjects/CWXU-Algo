@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -15,24 +18,34 @@ import (
 	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
+	"cwxu-algo/app/common/utils/clientip"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
-	codeTTL          = 10 * time.Minute
-	codeCooldown      = 60 * time.Second
-	purposeRegister  = "register"
-	purposeReset     = "reset"
-	codeKeyPrefix    = "auth:code:"
-	cooldownPrefix   = "auth:code:cd:"
+	codeTTL            = 10 * time.Minute
+	codeCooldown       = 60 * time.Second
+	purposeRegister    = "register"
+	purposeReset       = "reset"
+	codeKeyPrefix      = "auth:code:"
+	cooldownPrefix     = "auth:code:cd:"
+	codeAttemptPrefix  = "auth:code:attempt:"
+	loginAttemptPrefix = "auth:login:attempt:"
+	maxCodeAttempts    = 5
+	maxLoginAttempts   = 8
+	maxAccountAttempts = 30
 )
 
 var emailRe = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
+var clientPasswordRe = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
+var usernameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{3,64}$`)
 
 type AuthService struct {
 	pb.UnimplementedAuthServer
@@ -65,18 +78,35 @@ func (s *AuthService) siteTitle(ctx context.Context) string {
 func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes, error) {
 	res := &pb.LoginRes{}
 	account := strings.TrimSpace(req.Username)
-	if account == "" || req.Password == "" {
+	if account == "" || !clientPasswordRe.MatchString(req.Password) {
 		res.Success = false
 		res.Message = "请输入账号和密码"
+		return res, nil
+	}
+
+	accountDigest := sha256.Sum256([]byte(strings.ToLower(account)))
+	digest := hex.EncodeToString(accountDigest[:])
+	accountAttemptKey := loginAttemptPrefix + "account:" + digest
+	pairAttemptKey := loginAttemptPrefix + "pair:" + digest + ":" + clientip.FromContext(ctx)
+	allowed, limitErr := s.allowLoginAttempt(ctx, pairAttemptKey, maxLoginAttempts)
+	if limitErr == nil && allowed {
+		allowed, limitErr = s.allowLoginAttempt(ctx, accountAttemptKey, maxAccountAttempts)
+	}
+	if limitErr != nil {
+		res.Message = "登录服务暂不可用，请稍后重试"
+		return res, nil
+	}
+	if !allowed {
+		res.Message = "尝试次数过多，请 15 分钟后再试"
 		return res, nil
 	}
 
 	u := &model.User{}
 	var r *gorm.DB
 	if strings.Contains(account, "@") {
-		r = s.db.Where("LOWER(email) = ? AND password = ?", strings.ToLower(account), req.Password).First(&u)
+		r = s.db.Where("LOWER(email) = ?", strings.ToLower(account)).First(&u)
 	} else {
-		r = s.db.Where("username = ? AND password = ?", account, req.Password).First(&u)
+		r = s.db.Where("username = ?", account).First(&u)
 	}
 	if errors.Is(r.Error, gorm.ErrRecordNotFound) {
 		res.Success = false
@@ -88,15 +118,29 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 		res.Message = "登录失败，请稍后重试"
 		return res, nil
 	}
+	if !passwordMatches(u.Password, req.Password) {
+		res.Message = "用户名或密码错误"
+		return res, nil
+	}
+	// Legacy rows stored the replayable client SHA256 directly. Upgrade in place
+	// after a successful login without forcing a password reset.
+	if clientPasswordRe.MatchString(u.Password) {
+		if hashed, hashErr := hashClientPassword(req.Password); hashErr == nil {
+			_ = s.db.Model(u).Update("password", hashed).Error
+		}
+	}
+	_ = s.rdb.Del(ctx, pairAttemptKey, accountAttemptKey).Err()
 	token, err := IssueJWT(s.db, u)
 	if err != nil {
 		res.Success = false
-		res.Message = "身份校验成功，但是jwt生成失败了." + err.Error()
+		log.Errorf("issue login jwt: %v", err)
+		res.Message = "登录暂时不可用，请稍后重试"
 		return res, nil
 	}
 	res.Success = true
 	res.Message = "登录成功"
 	res.JwtToken = token
+	setSessionCookie(ctx, token)
 	return res, nil
 }
 
@@ -111,6 +155,21 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 	if username == "" || req.Password == "" || name == "" || email == "" {
 		res.Success = false
 		res.Message = "请填写所有必填项"
+		return res, nil
+	}
+	if !usernameRe.MatchString(username) {
+		res.Success = false
+		res.Message = "用户名需为 3–64 位字母、数字、下划线或短横线"
+		return res, nil
+	}
+	if len([]rune(name)) > 64 || len(email) > 320 {
+		res.Success = false
+		res.Message = "姓名或邮箱过长"
+		return res, nil
+	}
+	if !clientPasswordRe.MatchString(req.Password) {
+		res.Success = false
+		res.Message = "密码格式无效"
 		return res, nil
 	}
 	if !emailRe.MatchString(email) {
@@ -129,90 +188,58 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 		return res, nil
 	}
 
-	var count int64
-	if countErr := s.db.Model(&model.User{}).Where("username = ?", username).Count(&count).Error; countErr != nil {
+	hashedPassword, hashErr := hashClientPassword(req.Password)
+	if hashErr != nil {
 		res.Success = false
 		res.Message = "注册失败，请稍后重试"
 		return res, nil
 	}
-	if count >= 1 {
-		res.Success = false
-		res.Message = "用户名已经存在"
-		return
-	}
-	if countErr := s.db.Model(&model.User{}).Where("LOWER(email) = ?", email).Count(&count).Error; countErr != nil {
-		res.Success = false
-		res.Message = "注册失败，请稍后重试"
-		return res, nil
-	}
-	if count >= 1 {
-		res.Success = false
-		res.Message = "该邮箱已被注册"
-		return
-	}
-
-	var public model.Org
-	if e := s.db.Where("slug = ?", model.PublicOrgSlug).First(&public).Error; e != nil {
-		res.Success = false
-		res.Message = "系统未就绪，请稍后重试"
-		return
-	}
-	// 公共域仅统计「只属于公共域」的用户；注册占用公共域席位
-	if msg := seatFullMessage(s.db, &public); msg != "" {
-		res.Success = false
-		res.Message = msg
-		return
-	}
-
-	// 公共域默认分组
-	var defG model.Group
-	defGID := uint(0)
-	if e := s.db.Where("org_id = ? AND name IN ?", public.ID, []string{model.DefaultGroupName, "未分组"}).
-		Order("id ASC").First(&defG).Error; e == nil {
-		defGID = defG.ID
-		if defG.Name != nil && *defG.Name == "未分组" {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var public model.Org
+		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("slug = ?", model.PublicOrgSlug).First(&public).Error; e != nil {
+			return e
+		}
+		if msg := seatFullMessage(tx, &public); msg != "" {
+			return fmt.Errorf("seat:%s", msg)
+		}
+		var defG model.Group
+		if e := tx.Where("org_id = ? AND name IN ?", public.ID, []string{model.DefaultGroupName, "未分组"}).
+			Order("id ASC").First(&defG).Error; e != nil {
+			if !errors.Is(e, gorm.ErrRecordNotFound) {
+				return e
+			}
 			n := model.DefaultGroupName
-			_ = s.db.Model(&defG).Updates(map[string]interface{}{"name": n, "describe": model.DefaultGroupDesc}).Error
+			defG = model.Group{Name: &n, Describe: model.DefaultGroupDesc, OrgID: public.ID}
+			if e = tx.Create(&defG).Error; e != nil {
+				return e
+			}
 		}
-	} else {
-		n := model.DefaultGroupName
-		defG = model.Group{Name: &n, Describe: model.DefaultGroupDesc, OrgID: public.ID}
-		if s.db.Create(&defG).Error == nil {
-			defGID = defG.ID
+		newUser := &model.User{
+			Username: username, Password: hashedPassword, Name: name, Email: email,
+			GroupId: int64(defG.ID), RoleID: 0, CurrentOrgID: public.ID,
 		}
-	}
-
-	newUser := &model.User{
-		Username:           username,
-		Password:           req.Password,
-		Name:               name,
-		Email:              email,
-		GroupId:            int64(defGID),
-		RoleID:             0,
-		IsSiteAdmin:        false,
-		CurrentOrgID:       public.ID,
-		EmailEnabled:       false,
-		EmailWeeklyEnabled: false,
-	}
-	if r := s.db.Create(&newUser); r.Error != nil {
+		if e := tx.Create(newUser).Error; e != nil {
+			return e
+		}
+		groupID := defG.ID
+		return tx.Create(&model.OrgMember{
+			OrgID: public.ID, UserID: newUser.ID, Role: model.OrgRoleMember,
+			GroupID: &groupID, OrgDisplayName: name, JoinedAt: time.Now(),
+		}).Error
+	})
+	if err != nil {
 		res.Success = false
-		res.Message = r.Error.Error()
-		return
+		if strings.HasPrefix(err.Error(), "seat:") {
+			res.Message = strings.TrimPrefix(err.Error(), "seat:")
+		} else if isUniqueViolation(err) {
+			res.Message = "用户名或邮箱已被注册"
+		} else {
+			log.Errorf("register transaction failed: %v", err)
+			res.Message = "注册失败，请稍后重试"
+		}
+		return res, nil
 	}
-	var memGid *uint
-	if defGID > 0 {
-		memGid = &defGID
-	}
-	_ = s.db.Create(&model.OrgMember{
-		OrgID:          public.ID,
-		UserID:         newUser.ID,
-		Role:           model.OrgRoleMember,
-		GroupID:        memGid,
-		OrgDisplayName: name,
-		JoinedAt:       time.Now(),
-	}).Error
 
-	s.consumeCode(ctx, purposeRegister, email)
 	return
 }
 
@@ -303,7 +330,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, req *pb.ChangePassword
 	}
 	oldPwd := strings.TrimSpace(req.OldPassword)
 	newPwd := strings.TrimSpace(req.NewPassword)
-	if oldPwd == "" || newPwd == "" {
+	if !clientPasswordRe.MatchString(oldPwd) || !clientPasswordRe.MatchString(newPwd) {
 		res.Success = false
 		res.Message = "请填写当前密码和新密码"
 		return res, nil
@@ -319,12 +346,13 @@ func (s *AuthService) ChangePassword(ctx context.Context, req *pb.ChangePassword
 		res.Message = "用户不存在"
 		return res, nil
 	}
-	if u.Password != oldPwd {
+	if !passwordMatches(u.Password, oldPwd) {
 		res.Success = false
 		res.Message = "当前密码不正确"
 		return res, nil
 	}
-	if err := s.db.Model(&u).Update("password", newPwd).Error; err != nil {
+	hashed, err := hashClientPassword(newPwd)
+	if err != nil || s.db.Model(&u).Update("password", hashed).Error != nil {
 		res.Success = false
 		res.Message = "修改失败，请稍后重试"
 		return res, nil
@@ -344,7 +372,7 @@ func (s *AuthService) ResetPassword(ctx context.Context, req *pb.ResetPasswordRe
 		res.Message = "请输入有效邮箱"
 		return res, nil
 	}
-	if code == "" || req.Password == "" {
+	if code == "" || !clientPasswordRe.MatchString(req.Password) {
 		res.Success = false
 		res.Message = "请填写验证码和新密码"
 		return res, nil
@@ -366,12 +394,12 @@ func (s *AuthService) ResetPassword(ctx context.Context, req *pb.ResetPasswordRe
 		res.Message = "重置失败，请稍后重试"
 		return res, nil
 	}
-	if err := s.db.Model(&u).Update("password", req.Password).Error; err != nil {
+	hashed, err := hashClientPassword(req.Password)
+	if err != nil || s.db.Model(&u).Update("password", hashed).Error != nil {
 		res.Success = false
 		res.Message = "重置失败，请稍后重试"
 		return res, nil
 	}
-	s.consumeCode(ctx, purposeReset, email)
 	res.Success = true
 	res.Message = "密码已重置，请使用新密码登录"
 	return res, nil
@@ -395,12 +423,14 @@ func (s *AuthService) Refresh(ctx context.Context, _ *pb.RefreshReq) (*pb.LoginR
 	token, err := IssueJWT(s.db, &u)
 	if err != nil {
 		res.Success = false
-		res.Message = "jwt 生成失败: " + err.Error()
+		log.Errorf("issue refresh jwt: %v", err)
+		res.Message = "刷新登录状态失败，请稍后重试"
 		return res, nil
 	}
 	res.Success = true
 	res.Message = "已刷新"
 	res.JwtToken = token
+	setSessionCookie(ctx, token)
 	return res, nil
 }
 
@@ -409,18 +439,64 @@ func (s *AuthService) verifyCode(ctx context.Context, purpose, email, code strin
 		return false
 	}
 	key := codeKeyPrefix + purpose + ":" + email
-	stored, err := s.rdb.Get(ctx, key).Result()
-	if err != nil {
-		return false
-	}
-	return stored == code
+	attemptKey := codeAttemptPrefix + purpose + ":" + email
+	const verifyAndConsume = `
+local attempts = redis.call('INCR', KEYS[2])
+if attempts == 1 then redis.call('PEXPIRE', KEYS[2], ARGV[3]) end
+if attempts > tonumber(ARGV[2]) then
+  redis.call('DEL', KEYS[1])
+  return 0
+end
+local stored = redis.call('GET', KEYS[1])
+if not stored or stored ~= ARGV[1] then return 0 end
+redis.call('DEL', KEYS[1], KEYS[2])
+return 1`
+	result, err := s.rdb.Eval(ctx, verifyAndConsume, []string{key, attemptKey},
+		code, maxCodeAttempts, codeTTL.Milliseconds()).Int()
+	return err == nil && result == 1
 }
 
-func (s *AuthService) consumeCode(ctx context.Context, purpose, email string) {
+func (s *AuthService) allowLoginAttempt(ctx context.Context, key string, maximum int64) (bool, error) {
 	if s.rdb == nil {
-		return
+		return false, fmt.Errorf("redis unavailable")
 	}
-	_ = s.rdb.Del(ctx, codeKeyPrefix+purpose+":"+email).Err()
+	n, err := s.rdb.Incr(ctx, key).Result()
+	if err != nil {
+		return false, err
+	}
+	if n == 1 {
+		if err := s.rdb.Expire(ctx, key, 15*time.Minute).Err(); err != nil {
+			return false, err
+		}
+	}
+	return n <= maximum, nil
+}
+
+func hashClientPassword(clientHash string) (string, error) {
+	if !clientPasswordRe.MatchString(clientHash) {
+		return "", fmt.Errorf("invalid client password hash")
+	}
+	b, err := bcrypt.GenerateFromPassword([]byte(strings.ToLower(clientHash)), bcrypt.DefaultCost)
+	return string(b), err
+}
+
+func passwordMatches(stored, supplied string) bool {
+	if !clientPasswordRe.MatchString(supplied) {
+		return false
+	}
+	supplied = strings.ToLower(supplied)
+	if clientPasswordRe.MatchString(stored) {
+		return subtle.ConstantTimeCompare([]byte(strings.ToLower(stored)), []byte(supplied)) == 1
+	}
+	return bcrypt.CompareHashAndPassword([]byte(stored), []byte(supplied)) == nil
+}
+
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "duplicate key") || strings.Contains(s, "unique constraint")
 }
 
 func genDigits(n int) (string, error) {

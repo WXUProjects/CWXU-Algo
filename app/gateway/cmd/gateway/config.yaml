@@ -3,6 +3,10 @@ name: cwxu-algo
 version: v1
 middlewares:
   - name: jwt
+    options:
+      '@type': type.googleapis.com/gateway.middleware.jwt.v1.JWT
+      # 与 user/core_data/agent 的 server.jwt_secret 保持一致，至少 32 字符。
+      secret: ""
 endpoints:
   - path: /v1/user/*
     timeout: 5s

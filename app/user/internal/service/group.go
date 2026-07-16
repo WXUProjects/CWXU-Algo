@@ -53,7 +53,7 @@ func (g *GroupService) Create(ctx context.Context, request *group.CreateRequest)
 	}
 	id, err := g.groupUseCase.Create(ctx, request.Name, request.Describe, orgID)
 	if err != nil {
-		return nil, errors.InternalServer("创建失败", err.Error())
+		return nil, errors.InternalServer("创建失败", "服务暂时不可用")
 	}
 	return &group.CreateReply{
 		Id:      id,
@@ -73,15 +73,21 @@ func (g *GroupService) Delete(ctx context.Context, request *group.DeleteRequest)
 	}
 	err := g.groupUseCase.Delete(ctx, request.Id)
 	if err != nil {
-		return nil, errors.InternalServer("删除失败", err.Error())
+		return nil, errors.InternalServer("删除失败", "服务暂时不可用")
 	}
 	return &group.DeleteReply{Success: true}, nil
 }
 
 func (g *GroupService) Get(ctx context.Context, request *group.GetRequest) (*group.GetReply, error) {
+	if !auth.VerifyStaff(ctx) {
+		return nil, errors.Forbidden("权限不足", "需要当前组织管理权限")
+	}
+	if err := g.assertGroupInCurrentOrg(ctx, request.Id); err != nil {
+		return nil, err
+	}
 	groupModel, users, err := g.groupUseCase.GetWithUsers(ctx, request.Id)
 	if err != nil {
-		return nil, errors.InternalServer("查询失败", err.Error())
+		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
 
 	name := ""
@@ -143,6 +149,9 @@ func (g *GroupService) Get(ctx context.Context, request *group.GetRequest) (*gro
 }
 
 func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*group.ListReply, error) {
+	if !auth.VerifyStaff(ctx) {
+		return nil, errors.Forbidden("权限不足", "需要当前组织管理权限")
+	}
 	page := request.Page
 	if page < 1 {
 		page = 1
@@ -155,13 +164,16 @@ func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*g
 	if pd := auth.GetCurrentUser(ctx); pd != nil {
 		orgID = pd.OrgID
 	}
+	if orgID == 0 {
+		return nil, errors.Forbidden("权限不足", "请先选择组织")
+	}
 	// 当前组织无分组时自动补「默认分组」
 	if orgID > 0 {
 		_, _ = g.groupDal.EnsureDefaultGroup(ctx, orgID)
 	}
 	list, total, err := g.groupUseCase.List(ctx, page, size, orgID)
 	if err != nil {
-		return nil, errors.InternalServer("查询失败", err.Error())
+		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
 	reply := &group.ListReply{List: make([]*group.GetReply, 0, len(list)), Total: total}
 	for _, gr := range list {
@@ -207,15 +219,12 @@ func (g *GroupService) Update(ctx context.Context, request *group.UpdateRequest)
 	}
 	err := g.groupUseCase.Update(ctx, request.Id, request.Name, request.Describe)
 	if err != nil {
-		return nil, errors.InternalServer("更新失败", err.Error())
+		return nil, errors.InternalServer("更新失败", "服务暂时不可用")
 	}
 	return &group.UpdateReply{Success: true}, nil
 }
 
 func (g *GroupService) assertGroupInCurrentOrg(ctx context.Context, groupID int64) error {
-	if auth.VerifySiteAdmin(ctx) {
-		return nil
-	}
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.OrgID == 0 {
 		return errors.Forbidden("权限不足", "请先选择组织")

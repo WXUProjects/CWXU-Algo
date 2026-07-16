@@ -8,6 +8,7 @@ import (
 
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/mail"
+	secretutil "cwxu-algo/app/common/utils/secret"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -63,18 +64,25 @@ func (r *Row) ToRuntime() *Runtime {
 	if title == "" {
 		title = "GoAlgo"
 	}
+	decrypt := func(value string) string {
+		plain, err := secretutil.Decrypt(value)
+		if err != nil {
+			return ""
+		}
+		return plain
+	}
 	return &Runtime{
 		SiteTitle:         title,
 		SMTPHost:          strings.TrimSpace(r.SMTPHost),
 		SMTPPort:          port,
 		SMTPUsername:      strings.TrimSpace(r.SMTPUsername),
-		SMTPPassword:      r.SMTPPassword,
+		SMTPPassword:      decrypt(r.SMTPPassword),
 		SMTPFrom:          strings.TrimSpace(r.SMTPFrom),
 		AgentModel:        strings.TrimSpace(r.AgentModel),
-		AgentSecret:       r.AgentSecret,
+		AgentSecret:       decrypt(r.AgentSecret),
 		AiAnalyzeEndpoint: strings.TrimSpace(r.AiAnalyzeEndpoint),
 		AiAnalyzeModel:    strings.TrimSpace(r.AiAnalyzeModel),
-		AiAnalyzeSecret:   r.AiAnalyzeSecret,
+		AiAnalyzeSecret:   decrypt(r.AiAnalyzeSecret),
 	}
 }
 

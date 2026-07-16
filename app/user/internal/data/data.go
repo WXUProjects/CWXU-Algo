@@ -40,8 +40,6 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 
 // migrateModels 合并
 func migrateModels(db *gorm.DB) {
-	// 先清软删残留并去掉 deleted_at，再 AutoMigrate（模型已无软删除）
-	purgeSoftDelete(db)
 	err := db.AutoMigrate(
 		&model.User{},
 		&model.Group{},
@@ -58,29 +56,6 @@ func migrateModels(db *gorm.DB) {
 	}
 	seedPlanQuotas(db)
 	seedGoAlgoFramework(db)
-}
-
-// purgeSoftDelete 硬删除历史软删行并 drop deleted_at 列（幂等）
-func purgeSoftDelete(db *gorm.DB) {
-	tables := []string{
-		"org_members",
-		"org_join_requests",
-		"pastes",
-		"groups",
-		"orgs",
-		"users",
-		"plan_quotas",
-	}
-	for _, t := range tables {
-		if !db.Migrator().HasTable(t) {
-			continue
-		}
-		if !db.Migrator().HasColumn(t, "deleted_at") {
-			continue
-		}
-		_ = db.Exec("DELETE FROM " + t + " WHERE deleted_at IS NOT NULL").Error
-		_ = db.Migrator().DropColumn(t, "deleted_at")
-	}
 }
 
 // PublishSiteSettings 将站点业务配置写入 Redis，供 agent/core_data 热读

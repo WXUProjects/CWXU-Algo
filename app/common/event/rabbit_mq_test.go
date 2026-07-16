@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/streadway/amqp"
@@ -9,18 +10,31 @@ import (
 
 // TestNewRabbitMQ 发布者 Publisher
 func TestNewRabbitMQ(t *testing.T) {
-	conn, err := amqp.Dial("amqp://cwxu-algo:cwxu-algo@192.168.1.7:5672/algo")
-	if err != nil {
-		t.Error(err)
+	dsn := os.Getenv("CWXU_TEST_AMQP_DSN")
+	if dsn == "" {
+		t.Skip("set CWXU_TEST_AMQP_DSN to run the RabbitMQ integration test")
 	}
-	ch, _ := conn.Channel()
+	conn, err := amqp.Dial(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	ch, err := conn.Channel()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer ch.Close()
-	q, _ := ch.QueueDeclare("spider", true, false, false, false, nil)
+	q, err := ch.QueueDeclare("spider", true, false, false, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	e := SpiderEvent{UserId: 1, NeedAll: true}
 	body, _ := json.Marshal(e)
-	_ = ch.Publish("", q.Name, false, false, amqp.Publishing{
+	if err := ch.Publish("", q.Name, false, false, amqp.Publishing{
 		ContentType: "application/json",
 		Body:        body,
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 }

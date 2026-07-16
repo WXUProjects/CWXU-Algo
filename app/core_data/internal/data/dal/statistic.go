@@ -40,7 +40,7 @@ func (d *StatisticDal) HeatmapQueryScoped(ctx context.Context, startDate, endDat
 		Table("submit_logs").
 		Select("id, time")
 	if isAc {
-		sub = sub.Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
+		sub = sub.Where("UPPER(BTRIM(status)) IN ?", []string{"AC", "OK", "ACCEPTED", "正确", "答案正确"})
 	} else {
 		// 力扣合成 AC 只用于做题数，不进入提交热力图（真实提交由 lc-cal 记录承担）
 		sub = sub.Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
@@ -116,6 +116,9 @@ func (d *StatisticDal) GetPeriodCount(userId int64) (PeriodSubmitCount, PeriodAc
 
 // GetPeriodCountScoped userId=-1 时 memberIDs 限制组织
 func (d *StatisticDal) GetPeriodCountScoped(userId int64, memberIDs []int64) (PeriodSubmitCount, PeriodAcCount, error) {
+	if userId == -1 && memberIDs != nil && len(memberIDs) == 0 {
+		return PeriodSubmitCount{}, PeriodAcCount{}, nil
+	}
 	now := time.Now()
 
 	// 日期范围计算
@@ -127,44 +130,64 @@ func (d *StatisticDal) GetPeriodCountScoped(userId int64, memberIDs []int64) (Pe
 	thisYearStart := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
 	lastYearStart := thisYearStart.AddDate(-1, 0, 0)
 
-	// 提交次数统计
-	submit := PeriodSubmitCount{
-		Today:     d.countQueryScoped(userId, todayStart, now, memberIDs),
-		ThisWeek:  d.countQueryScoped(userId, thisWeekStart, now, memberIDs),
-		LastWeek:  d.countQueryScoped(userId, lastWeekStart, thisWeekStart, memberIDs),
-		ThisMonth: d.countQueryScoped(userId, thisMonthStart, now, memberIDs),
-		LastMonth: d.countQueryScoped(userId, lastMonthStart, thisMonthStart, memberIDs),
-		ThisYear:  d.countQueryScoped(userId, thisYearStart, now, memberIDs),
-		LastYear:  d.countQueryScoped(userId, lastYearStart, thisYearStart, memberIDs),
-		Total:     d.countQueryTotalScoped(userId, memberIDs),
+	applyScope := func(q *gorm.DB) *gorm.DB {
+		if userId != -1 {
+			return q.Where("user_id = ?", userId)
+		}
+		if memberIDs != nil {
+			return q.Where("user_id IN ?", memberIDs)
+		}
+		return q
 	}
+
+	periodSelect := `
+		COUNT(*) FILTER (WHERE time >= ? AND time < ?) AS today,
+		COUNT(*) FILTER (WHERE time >= ? AND time < ?) AS this_week,
+		COUNT(*) FILTER (WHERE time >= ? AND time < ?) AS last_week,
+		COUNT(*) FILTER (WHERE time >= ? AND time < ?) AS this_month,
+		COUNT(*) FILTER (WHERE time >= ? AND time < ?) AS last_month,
+		COUNT(*) FILTER (WHERE time >= ? AND time < ?) AS this_year,
+		COUNT(*) FILTER (WHERE time >= ? AND time < ?) AS last_year,
+		COUNT(*) AS total`
+	periodArgs := []interface{}{
+		todayStart, now, thisWeekStart, now, lastWeekStart, thisWeekStart,
+		thisMonthStart, now, lastMonthStart, thisMonthStart,
+		thisYearStart, now, lastYearStart, thisYearStart,
+	}
+
+	var submit PeriodSubmitCount
+	submitQuery := applyScope(d.db.Table("submit_logs")).
+		Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
+	if err := submitQuery.Select(periodSelect, periodArgs...).Scan(&submit).Error; err != nil {
+		return PeriodSubmitCount{}, PeriodAcCount{}, err
+	}
+
+	acceptedStatuses := []string{"AC", "OK", "ACCEPTED", "正确", "答案正确"}
+	acBase := applyScope(d.db.Table("submit_logs")).Where("UPPER(BTRIM(status)) IN ?", acceptedStatuses)
 
 	// 组织/全站：只数 AC 条数，快且简单；个人：时段+Total 去重题数，TotalRaw 为 AC 次数
 	if userId == -1 {
-		ac := PeriodAcCount{
-			Today:     d.countAcRawQueryScoped(userId, todayStart, now, memberIDs),
-			ThisWeek:  d.countAcRawQueryScoped(userId, thisWeekStart, now, memberIDs),
-			LastWeek:  d.countAcRawQueryScoped(userId, lastWeekStart, thisWeekStart, memberIDs),
-			ThisMonth: d.countAcRawQueryScoped(userId, thisMonthStart, now, memberIDs),
-			LastMonth: d.countAcRawQueryScoped(userId, lastMonthStart, thisMonthStart, memberIDs),
-			ThisYear:  d.countAcRawQueryScoped(userId, thisYearStart, now, memberIDs),
-			LastYear:  d.countAcRawQueryScoped(userId, lastYearStart, thisYearStart, memberIDs),
-			Total:     d.countAcRawTotalScoped(userId, memberIDs),
+		var ac PeriodAcCount
+		if err := acBase.Select(periodSelect, periodArgs...).Scan(&ac).Error; err != nil {
+			return PeriodSubmitCount{}, PeriodAcCount{}, err
 		}
 		ac.TotalRaw = ac.Total
 		return submit, ac, nil
 	}
 
-	ac := PeriodAcCount{
-		Today:     d.countAcDistinctQueryScoped(userId, todayStart, now, memberIDs),
-		ThisWeek:  d.countAcDistinctQueryScoped(userId, thisWeekStart, now, memberIDs),
-		LastWeek:  d.countAcDistinctQueryScoped(userId, lastWeekStart, thisWeekStart, memberIDs),
-		ThisMonth: d.countAcDistinctQueryScoped(userId, thisMonthStart, now, memberIDs),
-		LastMonth: d.countAcDistinctQueryScoped(userId, lastMonthStart, thisMonthStart, memberIDs),
-		ThisYear:  d.countAcDistinctQueryScoped(userId, thisYearStart, now, memberIDs),
-		LastYear:  d.countAcDistinctQueryScoped(userId, lastYearStart, thisYearStart, memberIDs),
-		Total:     d.countAcDistinctTotalScoped(userId, memberIDs),
-		TotalRaw:  d.countAcRawTotalScoped(userId, memberIDs),
+	distinctSelect := `
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS today,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS this_week,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS last_week,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS this_month,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS last_month,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS this_year,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS last_year,
+		COUNT(DISTINCT ` + acProblemKeySQL + `) AS total,
+		COUNT(*) AS total_raw`
+	var ac PeriodAcCount
+	if err := acBase.Select(distinctSelect, periodArgs...).Scan(&ac).Error; err != nil {
+		return PeriodSubmitCount{}, PeriodAcCount{}, err
 	}
 	return submit, ac, nil
 }
@@ -231,7 +254,7 @@ func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endT
 			q = q.Where("user_id IN ?", memberIDs)
 		}
 		if scoreType == "ac" {
-			q = q.Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
+			q = q.Where("UPPER(BTRIM(status)) IN ?", []string{"AC", "OK", "ACCEPTED", "正确", "答案正确"})
 		} else {
 			q = q.Where("NOT (platform = ? AND submit_id LIKE ?)", "LeetCode", "lc-ac-%")
 		}
@@ -355,8 +378,8 @@ func (d *StatisticDal) countAcDistinct(userId int64, memberIDs []int64, start, e
 		key = `(user_id::text || '|' || ` + acProblemKeySQL + `)`
 	}
 	query := d.db.Table("submit_logs").
-		Select("COUNT(DISTINCT " + key + ")").
-		Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
+		Select("COUNT(DISTINCT "+key+")").
+		Where("UPPER(BTRIM(status)) IN ?", []string{"AC", "OK", "ACCEPTED", "正确", "答案正确"})
 	if useRange {
 		query = query.Where("time >= ? AND time < ?", start, end)
 	}
@@ -378,7 +401,7 @@ func (d *StatisticDal) countAcRawQueryScoped(userId int64, start, end time.Time,
 	}
 	var count int64
 	query := d.db.Table("submit_logs").
-		Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%").
+		Where("UPPER(BTRIM(status)) IN ?", []string{"AC", "OK", "ACCEPTED", "正确", "答案正确"}).
 		Where("time >= ? AND time < ?", start, end)
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
@@ -398,7 +421,7 @@ func (d *StatisticDal) countAcRawTotalScoped(userId int64, memberIDs []int64) in
 	}
 	var count int64
 	query := d.db.Table("submit_logs").
-		Where("status ILIKE ? OR status ILIKE ? OR status ILIKE ?", "%AC%", "%正确%", "%OK%")
+		Where("UPPER(BTRIM(status)) IN ?", []string{"AC", "OK", "ACCEPTED", "正确", "答案正确"})
 	if userId != -1 {
 		query = query.Where("user_id = ?", userId)
 	} else if memberIDs != nil {

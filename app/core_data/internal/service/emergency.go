@@ -58,7 +58,7 @@ func (s *EmergencyService) Create(ctx context.Context, req *emergency.CreateEmer
 		AuthorName: user.Name,
 	}
 	if err := s.dal.Create(m); err != nil {
-		return nil, errors.InternalServer("创建失败", err.Error())
+		return nil, errors.InternalServer("创建失败", "服务暂时不可用")
 	}
 	return &emergency.CreateEmergencyRes{
 		Code:    0,
@@ -76,7 +76,7 @@ func (s *EmergencyService) Update(ctx context.Context, req *emergency.UpdateEmer
 		if err == gorm.ErrRecordNotFound {
 			return &emergency.UpdateEmergencyRes{Code: 2, Message: "通知不存在"}, nil
 		}
-		return nil, errors.InternalServer("查询失败", err.Error())
+		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
 	_ = existing
 
@@ -92,11 +92,11 @@ func (s *EmergencyService) Update(ctx context.Context, req *emergency.UpdateEmer
 	}
 
 	if err := s.dal.Update(req.Id, updates); err != nil {
-		return nil, errors.InternalServer("更新失败", err.Error())
+		return nil, errors.InternalServer("更新失败", "服务暂时不可用")
 	}
 	updated, err := s.dal.GetById(req.Id)
 	if err != nil {
-		return nil, errors.InternalServer("查询失败", err.Error())
+		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
 	return &emergency.UpdateEmergencyRes{
 		Code:    0,
@@ -113,10 +113,10 @@ func (s *EmergencyService) Delete(ctx context.Context, req *emergency.DeleteEmer
 		if err == gorm.ErrRecordNotFound {
 			return &emergency.DeleteEmergencyRes{Code: 2, Message: "通知不存在"}, nil
 		}
-		return nil, errors.InternalServer("查询失败", err.Error())
+		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
 	if err := s.dal.Delete(req.Id); err != nil {
-		return nil, errors.InternalServer("删除失败", err.Error())
+		return nil, errors.InternalServer("删除失败", "服务暂时不可用")
 	}
 	return &emergency.DeleteEmergencyRes{Code: 0, Message: "success"}, nil
 }
@@ -138,7 +138,7 @@ func (s *EmergencyService) List(ctx context.Context, req *emergency.ListEmergenc
 	}
 	list, total, err := s.dal.List(page, pageSize)
 	if err != nil {
-		return nil, errors.InternalServer("查询失败", err.Error())
+		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
 	data := make([]*emergency.EmergencyInfo, 0, len(list))
 	for i := range list {
@@ -157,7 +157,7 @@ func (s *EmergencyService) List(ctx context.Context, req *emergency.ListEmergenc
 func (s *EmergencyService) Active(ctx context.Context, _ *emergency.ActiveEmergencyReq) (*emergency.ActiveEmergencyRes, error) {
 	list, err := s.dal.ListActive()
 	if err != nil {
-		return nil, errors.InternalServer("查询失败", err.Error())
+		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
 	data := make([]*emergency.EmergencyInfo, 0, len(list))
 	for i := range list {

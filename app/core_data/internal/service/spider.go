@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"cwxu-algo/api/core/v1/spider"
@@ -10,6 +11,7 @@ import (
 	"cwxu-algo/app/common/utils/ratelimit"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
+	spiderregistry "cwxu-algo/app/core_data/internal/spider"
 	"cwxu-algo/app/core_data/task"
 
 	"github.com/go-kratos/kratos/v2/errors"
@@ -108,30 +110,43 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 	if !s.allow(ctx, ratelimit.SpiderSetKey(req.UserId), 30*time.Second) {
 		return nil, RateLimitError
 	}
+	platformName := strings.TrimSpace(req.Platform)
+	username := strings.TrimSpace(req.Username)
+	if _, ok := spiderregistry.Get(platformName); !ok {
+		return nil, errors.BadRequest("参数错误", "不支持该 OJ 平台")
+	}
+	if username == "" || len([]rune(username)) > 128 {
+		return nil, errors.BadRequest("参数错误", "OJ 用户名不能为空且最多 128 个字符")
+	}
 	platform := model.Platform{
 		UserID:   req.UserId,
-		Platform: req.Platform,
-		Username: req.Username,
+		Platform: platformName,
+		Username: username,
 	}
-	if err := s.db.Where("user_id = ? AND platform = ?", req.UserId, req.Platform).Delete(&model.Platform{}).Error; err != nil {
-		log.Errorf("SetSpider: delete platform failed: %v", err)
-	}
-	if err := s.db.Where("user_id = ? AND platform = ?", req.UserId, req.Platform).Delete(&model.SubmitLog{}).Error; err != nil {
-		log.Errorf("SetSpider: delete submit_log failed: %v", err)
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ? AND platform = ?", req.UserId, platformName).Delete(&model.Platform{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ? AND platform = ?", req.UserId, platformName).Delete(&model.SubmitLog{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ? AND platform = ?", req.UserId, platformName).Delete(&model.ContestLog{}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&platform).Error
+	}); err != nil {
+		log.Errorf("SetSpider transaction failed: %v", err)
+		return nil, InternalError
 	}
 	if err := s.rdb.Del(ctx, fmt.Sprintf("core:submit_log:user:%d", req.UserId)).Err(); err != nil {
 		log.Errorf("SetSpider: redis del failed: %v", err)
 	}
-	err := s.db.Save(&platform).Error
-	if err != nil {
-		log.Errorf("SetSpider: save platform failed: %v", err)
-		return nil, InternalError
-	}
+	_ = s.rdb.Incr(ctx, fmt.Sprintf("core:contest_log:user:%d:ver", req.UserId)).Err()
 	// 只全量抓取刚绑定的这一平台，避免重绑 CF 时把其它 OJ 再扫一遍
-	s.spider.DoPlatform(req.UserId, req.Platform, true)
+	s.spider.DoPlatform(req.UserId, platformName, true)
 	return &spider.SetSpiderRep{
 		Code:    0,
-		Message: fmt.Sprintf("绑定成功，正在同步 %s 的全量数据，请稍候", req.Platform),
+		Message: fmt.Sprintf("绑定成功，正在同步 %s 的全量数据，请稍候", platformName),
 	}, nil
 }
 

@@ -51,19 +51,22 @@ func IssueJWT(db *gorm.DB, u *model.User) (string, error) {
 		roleIdsJSON = []byte("[1]")
 	}
 
-	// 30 天有效；前端在有效期内访问会调用 refresh 重签，实现滑动续期
-	expire := time.Now().Add(30 * 24 * time.Hour)
+	// 短期访问令牌；前端活跃时通过 refresh 从数据库重签，以同步权限变更。
+	now := time.Now()
+	expire := now.Add(2 * time.Hour)
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"userId":      u.ID,
 		"username":    u.Username,
 		"name":        u.Name,
-		"email":       u.Email,
 		"roleId":      roleID,
 		"roleIds":     string(roleIdsJSON),
 		"isSiteAdmin": u.IsSiteAdmin,
 		"orgId":       orgID,
 		"orgRole":     orgRole,
 		"exp":         expire.Unix(),
-		"nbf":         time.Now().Unix(),
+		"nbf":         now.Unix(),
+		"iat":         now.Unix(),
+		"iss":         "goalgo",
+		"aud":         "goalgo-web",
 	}).SignedString([]byte(_const.JWTSecret()))
 }

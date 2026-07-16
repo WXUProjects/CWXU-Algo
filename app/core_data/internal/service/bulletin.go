@@ -91,7 +91,7 @@ func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBullet
 		OrgID:      orgID,
 	}
 	if err := s.bulletinDal.Create(m); err != nil {
-		return nil, errors.InternalServer("创建失败", err.Error())
+		return nil, errors.InternalServer("创建失败", "服务暂时不可用")
 	}
 
 	return &bulletin.CreateBulletinRes{
@@ -109,7 +109,7 @@ func (s *BulletinService) Update(ctx context.Context, req *bulletin.UpdateBullet
 		if err == gorm.ErrRecordNotFound {
 			return &bulletin.UpdateBulletinRes{Code: 2, Message: "公告不存在"}, nil
 		}
-		return nil, errors.InternalServer("查询失败", err.Error())
+		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
 	if !canManageBulletin(ctx, user, existing) {
 		return &bulletin.UpdateBulletinRes{
@@ -136,13 +136,13 @@ func (s *BulletinService) Update(ctx context.Context, req *bulletin.UpdateBullet
 	}
 
 	if err := s.bulletinDal.Update(req.Id, updates); err != nil {
-		return nil, errors.InternalServer("更新失败", err.Error())
+		return nil, errors.InternalServer("更新失败", "服务暂时不可用")
 	}
 
 	// 重新查询获取最新数据
 	updated, err := s.bulletinDal.GetById(req.Id)
 	if err != nil {
-		return nil, errors.InternalServer("查询失败", err.Error())
+		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
 
 	return &bulletin.UpdateBulletinRes{
@@ -160,14 +160,14 @@ func (s *BulletinService) Delete(ctx context.Context, req *bulletin.DeleteBullet
 		if err == gorm.ErrRecordNotFound {
 			return &bulletin.DeleteBulletinRes{Code: 2, Message: "公告不存在"}, nil
 		}
-		return nil, errors.InternalServer("查询失败", err.Error())
+		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
 	if !canManageBulletin(ctx, user, existing) {
 		return &bulletin.DeleteBulletinRes{Code: 1, Message: "权限不足"}, nil
 	}
 
 	if err := s.bulletinDal.Delete(req.Id); err != nil {
-		return nil, errors.InternalServer("删除失败", err.Error())
+		return nil, errors.InternalServer("删除失败", "服务暂时不可用")
 	}
 
 	return &bulletin.DeleteBulletinRes{
@@ -186,7 +186,7 @@ func (s *BulletinService) Get(ctx context.Context, req *bulletin.GetBulletinReq)
 				Message: "公告不存在",
 			}, nil
 		}
-		return nil, errors.InternalServer("查询失败", err.Error())
+		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
 
 	return &bulletin.GetBulletinRes{
@@ -216,7 +216,7 @@ func (s *BulletinService) List(ctx context.Context, req *bulletin.ListBulletinRe
 	}
 	bulletins, total, err := s.bulletinDal.List(page, pageSize, orgID)
 	if err != nil {
-		return nil, errors.InternalServer("查询失败", err.Error())
+		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
 
 	data := make([]*bulletin.BulletinInfo, 0, len(bulletins))

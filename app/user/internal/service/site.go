@@ -9,10 +9,11 @@ import (
 	"cwxu-algo/api/user/v1/site"
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/mail"
-	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/opsmetrics"
+	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/common/utils/clientip"
+	secretutil "cwxu-algo/app/common/utils/secret"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 
@@ -34,6 +35,7 @@ func (s *SiteService) ensureRow(ctx context.Context) (*model.SiteConfig, error) 
 	var row model.SiteConfig
 	err := s.data.DB.WithContext(ctx).First(&row, 1).Error
 	if err == nil {
+		s.protectStoredSecrets(ctx, &row)
 		if s.backfillFromYaml(ctx, &row) {
 			s.publish(ctx, &row)
 		}
@@ -52,7 +54,9 @@ func (s *SiteService) ensureRow(ctx context.Context) (*model.SiteConfig, error) 
 			row.SMTPPort = 465
 		}
 		row.SMTPUsername = s.yamlSMTP.Username
-		row.SMTPPassword = s.yamlSMTP.Password
+		if encrypted, encryptErr := secretutil.Encrypt(s.yamlSMTP.Password); encryptErr == nil {
+			row.SMTPPassword = encrypted
+		}
 		row.SMTPFrom = s.yamlSMTP.From
 	}
 	if e := s.data.DB.WithContext(ctx).Create(&row).Error; e != nil {
@@ -79,11 +83,16 @@ func (s *SiteService) backfillFromYaml(ctx context.Context, row *model.SiteConfi
 	if port <= 0 {
 		port = 465
 	}
+	encryptedPassword, err := secretutil.Encrypt(s.yamlSMTP.Password)
+	if err != nil {
+		log.Errorf("encrypt smtp configuration: %v", err)
+		return false
+	}
 	updates := map[string]interface{}{
 		"smtp_host":     s.yamlSMTP.Host,
 		"smtp_port":     port,
 		"smtp_username": s.yamlSMTP.Username,
-		"smtp_password": s.yamlSMTP.Password,
+		"smtp_password": encryptedPassword,
 		"smtp_from":     s.yamlSMTP.From,
 	}
 	if e := s.data.DB.WithContext(ctx).Model(&model.SiteConfig{}).Where("id = ?", 1).Updates(updates).Error; e != nil {
@@ -92,9 +101,39 @@ func (s *SiteService) backfillFromYaml(ctx context.Context, row *model.SiteConfi
 	row.SMTPHost = s.yamlSMTP.Host
 	row.SMTPPort = port
 	row.SMTPUsername = s.yamlSMTP.Username
-	row.SMTPPassword = s.yamlSMTP.Password
+	row.SMTPPassword = encryptedPassword
 	row.SMTPFrom = s.yamlSMTP.From
 	return true
+}
+
+// protectStoredSecrets performs a rolling, idempotent migration from legacy
+// plaintext values once the deployment encryption key is available.
+func (s *SiteService) protectStoredSecrets(ctx context.Context, row *model.SiteConfig) {
+	if row == nil || !secretutil.Configured() {
+		return
+	}
+	values := map[string]*string{
+		"smtp_password":     &row.SMTPPassword,
+		"agent_secret":      &row.AgentSecret,
+		"ai_analyze_secret": &row.AiAnalyzeSecret,
+	}
+	updates := make(map[string]interface{})
+	for column, value := range values {
+		encrypted, err := secretutil.Encrypt(*value)
+		if err != nil {
+			log.Errorf("encrypt stored site secret %s: %v", column, err)
+			continue
+		}
+		if encrypted != *value {
+			*value = encrypted
+			updates[column] = encrypted
+		}
+	}
+	if len(updates) > 0 {
+		if err := s.data.DB.WithContext(ctx).Model(&model.SiteConfig{}).Where("id = ?", row.ID).Updates(updates).Error; err != nil {
+			log.Errorf("persist encrypted site secrets: %v", err)
+		}
+	}
 }
 
 func (s *SiteService) publish(ctx context.Context, row *model.SiteConfig) {
@@ -116,18 +155,26 @@ func rowToRuntime(row *model.SiteConfig) *sitesettings.Runtime {
 	if title == "" {
 		title = "GoAlgo"
 	}
+	decrypt := func(value string) string {
+		plain, err := secretutil.Decrypt(value)
+		if err != nil {
+			log.Errorf("decrypt site secret: %v", err)
+			return ""
+		}
+		return plain
+	}
 	return &sitesettings.Runtime{
 		SiteTitle:         title,
 		SMTPHost:          strings.TrimSpace(row.SMTPHost),
 		SMTPPort:          port,
 		SMTPUsername:      strings.TrimSpace(row.SMTPUsername),
-		SMTPPassword:      row.SMTPPassword,
+		SMTPPassword:      decrypt(row.SMTPPassword),
 		SMTPFrom:          strings.TrimSpace(row.SMTPFrom),
 		AgentModel:        strings.TrimSpace(row.AgentModel),
-		AgentSecret:       row.AgentSecret,
+		AgentSecret:       decrypt(row.AgentSecret),
 		AiAnalyzeEndpoint: strings.TrimSpace(row.AiAnalyzeEndpoint),
 		AiAnalyzeModel:    strings.TrimSpace(row.AiAnalyzeModel),
-		AiAnalyzeSecret:   row.AiAnalyzeSecret,
+		AiAnalyzeSecret:   decrypt(row.AiAnalyzeSecret),
 	}
 }
 
@@ -138,7 +185,7 @@ func (s *SiteService) effectiveRuntime(row *model.SiteConfig) *sitesettings.Runt
 func (s *SiteService) GetConfig(ctx context.Context, _ *site.GetConfigReq) (*site.GetConfigRes, error) {
 	row, err := s.ensureRow(ctx)
 	if err != nil {
-		return nil, errors.InternalServer("site config", err.Error())
+		return nil, errors.InternalServer("site config", "服务暂时不可用")
 	}
 	return &site.GetConfigRes{
 		Code:      0,
@@ -156,7 +203,7 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 	}
 	row, err := s.ensureRow(ctx)
 	if err != nil {
-		return nil, errors.InternalServer("site config", err.Error())
+		return nil, errors.InternalServer("site config", "服务暂时不可用")
 	}
 	rt := s.effectiveRuntime(row)
 	return &site.GetAdminConfigRes{
@@ -188,7 +235,7 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 	}
 	row, err := s.ensureRow(ctx)
 	if err != nil {
-		return nil, errors.InternalServer("site config", err.Error())
+		return nil, errors.InternalServer("site config", "服务暂时不可用")
 	}
 
 	// 管理端表单整页保存：非密钥字段直接覆盖
@@ -220,17 +267,32 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 	if req.ClearSmtpPassword {
 		updates["smtp_password"] = ""
 	} else if isRealSecret(req.SmtpPassword) {
-		updates["smtp_password"] = req.SmtpPassword
+		encrypted, encryptErr := secretutil.Encrypt(req.SmtpPassword)
+		if encryptErr != nil {
+			log.Errorf("encrypt smtp password: %v", encryptErr)
+			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
+		}
+		updates["smtp_password"] = encrypted
 	}
 	if req.ClearAgentSecret {
 		updates["agent_secret"] = ""
 	} else if isRealSecret(req.AgentSecret) {
-		updates["agent_secret"] = req.AgentSecret
+		encrypted, encryptErr := secretutil.Encrypt(req.AgentSecret)
+		if encryptErr != nil {
+			log.Errorf("encrypt agent secret: %v", encryptErr)
+			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
+		}
+		updates["agent_secret"] = encrypted
 	}
 	if req.ClearAiAnalyzeSecret {
 		updates["ai_analyze_secret"] = ""
 	} else if isRealSecret(req.AiAnalyzeSecret) {
-		updates["ai_analyze_secret"] = req.AiAnalyzeSecret
+		encrypted, encryptErr := secretutil.Encrypt(req.AiAnalyzeSecret)
+		if encryptErr != nil {
+			log.Errorf("encrypt ai secret: %v", encryptErr)
+			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
+		}
+		updates["ai_analyze_secret"] = encrypted
 	}
 
 	if e := s.data.DB.WithContext(ctx).Model(&model.SiteConfig{}).Where("id = ?", 1).Updates(updates).Error; e != nil {
@@ -273,7 +335,7 @@ func (s *SiteService) TestEmail(ctx context.Context, req *site.TestEmailReq) (*s
 
 	row, err := s.ensureRow(ctx)
 	if err != nil {
-		return nil, errors.InternalServer("site config", err.Error())
+		return nil, errors.InternalServer("site config", "服务暂时不可用")
 	}
 	rt := s.effectiveRuntime(row)
 
@@ -422,26 +484,26 @@ func (s *SiteService) GetAccessStats(ctx context.Context, req *site.GetAccessSta
 		"独立IP取自 CF-Connecting-IP / X-Real-IP / XFF；API 请求量与并发峰值为网关/服务侧精确日计数；" +
 		"爬虫数据量为当日新写入提交记录条数。"
 	return &site.GetAccessStatsRes{
-		Code:                 0,
-		Message:              "success",
-		Today:                toPB(today),
-		Yesterday:            toPB(yesterday),
-		Series:               pbSeries,
-		ClientIpAvailable:    ipOK,
-		TotalPv:              totalPV,
-		TotalDauSum:          totalDAU,
-		TopPaths:             pbPaths,
-		Categories:           pbCats,
-		Ips:                  pbIPs,
-		MetricNote:           note,
-		RegisteredUsers:      registered,
-		Mau:                  mau,
-		ApiRequestsToday:     ops.APIRequestsToday,
-		ApiPeakConcurrent:    ops.APIPeakToday,
-		ApiInflight:          ops.APIInflight,
-		SpiderEnqueuedToday:  ops.SpiderEnqueued,
-		SpiderOkToday:        ops.SpiderOK,
-		SpiderFailToday:      ops.SpiderFail,
-		SpiderRowsToday:      ops.SpiderRows,
+		Code:                0,
+		Message:             "success",
+		Today:               toPB(today),
+		Yesterday:           toPB(yesterday),
+		Series:              pbSeries,
+		ClientIpAvailable:   ipOK,
+		TotalPv:             totalPV,
+		TotalDauSum:         totalDAU,
+		TopPaths:            pbPaths,
+		Categories:          pbCats,
+		Ips:                 pbIPs,
+		MetricNote:          note,
+		RegisteredUsers:     registered,
+		Mau:                 mau,
+		ApiRequestsToday:    ops.APIRequestsToday,
+		ApiPeakConcurrent:   ops.APIPeakToday,
+		ApiInflight:         ops.APIInflight,
+		SpiderEnqueuedToday: ops.SpiderEnqueued,
+		SpiderOkToday:       ops.SpiderOK,
+		SpiderFailToday:     ops.SpiderFail,
+		SpiderRowsToday:     ops.SpiderRows,
 	}, nil
 }

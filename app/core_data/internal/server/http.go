@@ -12,7 +12,9 @@ import (
 	"cwxu-algo/app/common/conf"
 	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/common/opsmetrics"
+	authutil "cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/common/utils/health"
+	"cwxu-algo/app/common/utils/safeerrors"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/service"
 
@@ -56,7 +58,9 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
+			safeerrors.Middleware(),
 			opsmetrics.Middleware(d.RDB, "core"),
+			authutil.CookieBearer(),
 			selector.Server(jwt.Server(func(token *jwt2.Token) (interface{}, error) {
 				if token.Method != jwt2.SigningMethodHS256 {
 					return nil, jwt2.ErrSignatureInvalid

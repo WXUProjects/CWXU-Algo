@@ -10,7 +10,9 @@ import (
 	"cwxu-algo/app/common/conf"
 	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/common/opsmetrics"
+	authutil "cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/common/utils/health"
+	"cwxu-algo/app/common/utils/safeerrors"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/service"
 	"strings"
@@ -25,26 +27,19 @@ import (
 
 func NewWhiteListMatcher() selector.MatchFunc {
 	whiteList := map[string]string{
-		"/api.user.v1.Auth/Login":                     "",
-		"/api.user.v1.Auth/Register":                  "",
-		"/api.user.v1.Auth/SendCode":                  "",
-		"/api.user.v1.Auth/ResetPassword":             "",
-		"/api.user.v1.Profile/GetById":                "",
-		"/api.user.v1.Profile/GetByName":              "",
-		"/api.user.v1.Profile/GetList":                "",
-		"/api.user.v1.Profile/GetUserIdsByGroup":      "",
-		"/api.user.v1.Profile/GetUserIdsByOrg":        "",
-		"/api.user.v1.Profile/GetNonPublicOrgUserIds": "",
-		"/api.user.v1.Profile/GetByIds":               "",
-		"/api.user.v1.Profile/GetSyncPolicies":        "",
-		"/api.user.v1.role.Role/List":                 "",
-		"/api.user.group.Group/Get":                   "",
-		"/api.user.group.Group/List":                  "",
-		"/api.user.v1.site.Site/GetConfig":            "",
-		"/api.user.v1.site.Site/VisitPing":            "",
+		"/api.user.v1.Auth/Login":          "",
+		"/api.user.v1.Auth/Register":       "",
+		"/api.user.v1.Auth/SendCode":       "",
+		"/api.user.v1.Auth/ResetPassword":  "",
+		"/api.user.v1.Profile/GetById":     "",
+		"/api.user.v1.role.Role/List":      "",
+		"/api.user.v1.site.Site/GetConfig": "",
+		"/api.user.v1.site.Site/VisitPing": "",
 	}
 	return func(ctx context.Context, operation string) bool {
-		log.Info(operation)
+		if strings.Contains(operation, "auth/logout") {
+			return false
+		}
 		// 静态资源公开
 		if strings.Contains(operation, "static") {
 			return false
@@ -77,7 +72,9 @@ func NewHTTPServer(
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
+			safeerrors.Middleware(),
 			opsmetrics.Middleware(d.RDB, "user"),
+			authutil.CookieBearer(),
 			selector.Server(jwt.Server(func(token *jwt2.Token) (interface{}, error) {
 				if token.Method != jwt2.SigningMethodHS256 {
 					return nil, jwt2.ErrSignatureInvalid
@@ -98,6 +95,7 @@ func NewHTTPServer(
 	srv := http.NewServer(opts...)
 	health.Register(srv, health.Checker{DB: d.DB, RDB: d.RDB})
 	auth.RegisterAuthHTTPServer(srv, authService)
+	service.RegisterAuthSessionRoutes(srv)
 	profile.RegisterProfileHTTPServer(srv, profileService)
 	group.RegisterGroupHTTPServer(srv, groupService)
 	role.RegisterRoleHTTPServer(srv, roleService)

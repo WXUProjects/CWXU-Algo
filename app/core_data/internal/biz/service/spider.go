@@ -182,28 +182,5 @@ func (uc *SpiderUseCase) invalidateCache(userId int64) {
 	// 旧无版本 key 也会被 SCAN 清掉，避免脏缓存卡 48h 导致「组织统计像个人」。
 	_ = rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
 	_ = rdb.Incr(ctx, "statistic:period:global:ver").Err()
-
-	patterns := []string{
-		fmt.Sprintf("statistic:heatmap:%d:*:*:*", userId),
-		"statistic:period:*",
-		fmt.Sprintf("core:contest_log:user:%d:*", userId),
-	}
-
-	for _, pattern := range patterns {
-		var cursor uint64
-		for {
-			keys, next, err := rdb.Scan(ctx, cursor, pattern, 100).Result()
-			if err != nil {
-				log.Errorf("scan pattern %s failed: %v", pattern, err)
-				break
-			}
-			if len(keys) > 0 {
-				_ = rdb.Unlink(ctx, keys...).Err()
-			}
-			cursor = next
-			if cursor == 0 {
-				break
-			}
-		}
-	}
+	_ = rdb.Incr(ctx, fmt.Sprintf("core:contest_log:user:%d:ver", userId)).Err()
 }
