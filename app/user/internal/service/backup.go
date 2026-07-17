@@ -22,7 +22,9 @@ import (
 
 const (
 	maxBackupUploadBytes = 2 << 30 // 2 GiB
-	backupJobRetention   = 7 * 24 * time.Hour
+	// 导出/导入任务结束后保留 10 分钟（含 zip），超时自动删库记录与磁盘文件
+	backupJobRetention   = 10 * time.Minute
+	backupCleanupEvery   = 1 * time.Minute
 	maxListedJobs        = 30
 )
 
@@ -32,7 +34,7 @@ func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 		return
 	}
 	_ = os.MkdirAll(backup.BackupDir(), 0o755)
-	go cleanupExpiredBackups(d)
+	go startBackupCleanupLoop(d)
 
 	r := srv.Route("/")
 
@@ -325,6 +327,7 @@ func failJob(d *data.Data, id uint, msg string) {
 		"finished_at":  now,
 		"progress":     0,
 	})
+	scheduleBackupJobExpiry(d, id)
 }
 
 func updateJobProgress(d *data.Data, id uint, pct int, msg string) {
@@ -401,12 +404,13 @@ func runExportJob(d *data.Data, id uint) {
 	_ = d.DB.Model(&model.BackupJob{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"status":      model.BackupStatusDone,
 		"progress":    100,
-		"message":     "导出完成，可下载",
+		"message":     "导出完成，请在 10 分钟内下载",
 		"file_path":   rel,
 		"file_size":   size,
 		"finished_at": fin,
 	})
 	log.Infof("backup export done job=%d size=%d", id, size)
+	scheduleBackupJobExpiry(d, id)
 }
 
 func runImportJob(d *data.Data, id uint) {
@@ -470,21 +474,77 @@ func runImportJob(d *data.Data, id uint) {
 		"finished_at": fin,
 	})
 	log.Infof("backup import done job=%d", id)
+	scheduleBackupJobExpiry(d, id)
+}
+
+// scheduleBackupJobExpiry 任务结束后延迟删除 zip 与任务记录。
+func scheduleBackupJobExpiry(d *data.Data, id uint) {
+	if d == nil || id == 0 {
+		return
+	}
+	time.AfterFunc(backupJobRetention, func() {
+		purgeBackupJob(d, id)
+	})
+}
+
+func startBackupCleanupLoop(d *data.Data) {
+	// 启动立即扫一遍（覆盖进程重启期间已到期的任务），再按分钟轮询兜底
+	cleanupExpiredBackups(d)
+	ticker := time.NewTicker(backupCleanupEvery)
+	defer ticker.Stop()
+	for range ticker.C {
+		cleanupExpiredBackups(d)
+	}
 }
 
 func cleanupExpiredBackups(d *data.Data) {
-	// best-effort; run once at start then periodically would be nicer — once is enough for v1
+	if d == nil || d.DB == nil {
+		return
+	}
 	cutoff := time.Now().Add(-backupJobRetention)
 	var old []model.BackupJob
-	if err := d.DB.Where("created_at < ? AND status IN ?", cutoff,
-		[]string{model.BackupStatusDone, model.BackupStatusFailed}).
-		Find(&old).Error; err != nil {
+	// 以结束时间为准；无 finished_at 的失败/历史任务用 updated_at
+	if err := d.DB.Where(
+		`status IN ? AND (
+			(finished_at IS NOT NULL AND finished_at < ?) OR
+			(finished_at IS NULL AND updated_at < ?)
+		)`,
+		[]string{model.BackupStatusDone, model.BackupStatusFailed},
+		cutoff, cutoff,
+	).Find(&old).Error; err != nil {
 		return
 	}
 	for _, j := range old {
-		if j.FilePath != "" {
-			_ = os.Remove(filepath.Join(backup.BackupDir(), filepath.FromSlash(j.FilePath)))
-		}
-		_ = d.DB.Delete(&model.BackupJob{}, j.ID).Error
+		purgeBackupJob(d, j.ID)
 	}
+}
+
+func purgeBackupJob(d *data.Data, id uint) {
+	if d == nil || d.DB == nil || id == 0 {
+		return
+	}
+	var j model.BackupJob
+	if err := d.DB.First(&j, id).Error; err != nil {
+		return
+	}
+	// 仍在进行中的任务不删
+	if j.Status == model.BackupStatusPending || j.Status == model.BackupStatusRunning {
+		return
+	}
+	// 若尚未到期则跳过（AfterFunc 与轮询竞态时以 finished_at 为准）
+	ref := j.UpdatedAt
+	if j.FinishedAt != nil {
+		ref = *j.FinishedAt
+	}
+	if time.Since(ref) < backupJobRetention {
+		return
+	}
+	if j.FilePath != "" {
+		_ = os.Remove(filepath.Join(backup.BackupDir(), filepath.FromSlash(j.FilePath)))
+	}
+	if err := d.DB.Delete(&model.BackupJob{}, j.ID).Error; err != nil {
+		log.Warnf("backup purge job=%d: %v", id, err)
+		return
+	}
+	log.Infof("backup purged job=%d kind=%s", id, j.Kind)
 }
