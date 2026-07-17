@@ -424,6 +424,41 @@ func (nc NewNowCoder) FetchContestLog(userId int64, username string, needAll boo
 func (nc NewNowCoder) Name() string {
 	return spider.NowCoder
 }
+
+// FetchRating 从牛客竞赛主页 HTML 解析 Rating 数字（未参赛显示「暂无」）
+func (nc NewNowCoder) FetchRating(username string) (int, bool, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return 0, false, fmt.Errorf("nowcoder uid 为空")
+	}
+	url := fmt.Sprintf("https://ac.nowcoder.com/acm/contest/profile/%s", username)
+	doc, err := getSubLogResp(url)
+	if err != nil {
+		return 0, false, err
+	}
+	var ratingText string
+	doc.Find(".my-state-item").Each(func(_ int, s *goquery.Selection) {
+		if ratingText != "" {
+			return
+		}
+		label := strings.TrimSpace(s.Find("span").First().Text())
+		if label != "Rating" {
+			return
+		}
+		ratingText = strings.TrimSpace(s.Find(".state-num").First().Text())
+	})
+	if ratingText == "" || ratingText == "暂无" || ratingText == "-" {
+		return 0, false, nil
+	}
+	// 可能带小数（如 727.0）
+	ratingText = strings.TrimSpace(strings.Split(ratingText, ".")[0])
+	r, err := strconv.Atoi(ratingText)
+	if err != nil {
+		return 0, false, nil
+	}
+	return r, true, nil
+}
+
 func init() {
 	spider.Register(NewNowCoder{})
 }

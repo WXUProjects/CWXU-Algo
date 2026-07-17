@@ -2,6 +2,7 @@ package server
 
 import (
 	"cwxu-algo/api/agent/v1/summary"
+	bizservice "cwxu-algo/app/agent/internal/biz/service"
 	"cwxu-algo/app/agent/internal/data"
 	"cwxu-algo/app/agent/internal/service"
 	"cwxu-algo/app/common/conf"
@@ -19,7 +20,7 @@ import (
 )
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, summaryService *service.SummaryService) *http.Server {
+func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, summaryService *service.SummaryService, summaryUC *bizservice.SummaryUseCase) *http.Server {
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
@@ -46,5 +47,6 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, summaryServi
 	srv := http.NewServer(opts...)
 	health.Register(srv, health.Checker{RDB: d.RDB})
 	summary.RegisterSummaryHTTPServer(srv, summaryService)
+	service.RegisterTrainingReportDownload(srv, summaryUC)
 	return srv
 }

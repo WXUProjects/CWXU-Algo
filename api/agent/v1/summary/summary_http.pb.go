@@ -20,14 +20,26 @@ var _ = binding.EncodeURL
 const _ = http.SupportPackageIsVersion1
 
 const OperationSummaryGetRecentSummary = "/api.agent.v1.summary.Summary/GetRecentSummary"
+const OperationSummaryGetTrainingReportJob = "/api.agent.v1.summary.Summary/GetTrainingReportJob"
+const OperationSummaryListTrainingReportJobs = "/api.agent.v1.summary.Summary/ListTrainingReportJobs"
+const OperationSummaryStartTrainingReport = "/api.agent.v1.summary.Summary/StartTrainingReport"
 
 type SummaryHTTPServer interface {
 	GetRecentSummary(context.Context, *GetSummaryRequest) (*GetSummaryReply, error)
+	// GetTrainingReportJob GetTrainingReportJob 查询任务状态
+	GetTrainingReportJob(context.Context, *GetTrainingReportJobRequest) (*GetTrainingReportJobReply, error)
+	// ListTrainingReportJobs ListTrainingReportJobs 当前组织最近任务
+	ListTrainingReportJobs(context.Context, *ListTrainingReportJobsRequest) (*ListTrainingReportJobsReply, error)
+	// StartTrainingReport StartTrainingReport 组织训练报告（异步）
+	StartTrainingReport(context.Context, *StartTrainingReportRequest) (*StartTrainingReportReply, error)
 }
 
 func RegisterSummaryHTTPServer(s *http.Server, srv SummaryHTTPServer) {
 	r := s.Route("/")
 	r.GET("/v1/agent/summary/recent", _Summary_GetRecentSummary0_HTTP_Handler(srv))
+	r.POST("/v1/agent/training-report/start", _Summary_StartTrainingReport0_HTTP_Handler(srv))
+	r.GET("/v1/agent/training-report/job", _Summary_GetTrainingReportJob0_HTTP_Handler(srv))
+	r.GET("/v1/agent/training-report/jobs", _Summary_ListTrainingReportJobs0_HTTP_Handler(srv))
 }
 
 func _Summary_GetRecentSummary0_HTTP_Handler(srv SummaryHTTPServer) func(ctx http.Context) error {
@@ -49,8 +61,74 @@ func _Summary_GetRecentSummary0_HTTP_Handler(srv SummaryHTTPServer) func(ctx htt
 	}
 }
 
+func _Summary_StartTrainingReport0_HTTP_Handler(srv SummaryHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in StartTrainingReportRequest
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSummaryStartTrainingReport)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.StartTrainingReport(ctx, req.(*StartTrainingReportRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*StartTrainingReportReply)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Summary_GetTrainingReportJob0_HTTP_Handler(srv SummaryHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetTrainingReportJobRequest
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSummaryGetTrainingReportJob)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetTrainingReportJob(ctx, req.(*GetTrainingReportJobRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetTrainingReportJobReply)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Summary_ListTrainingReportJobs0_HTTP_Handler(srv SummaryHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ListTrainingReportJobsRequest
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSummaryListTrainingReportJobs)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ListTrainingReportJobs(ctx, req.(*ListTrainingReportJobsRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ListTrainingReportJobsReply)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SummaryHTTPClient interface {
 	GetRecentSummary(ctx context.Context, req *GetSummaryRequest, opts ...http.CallOption) (rsp *GetSummaryReply, err error)
+	// GetTrainingReportJob GetTrainingReportJob 查询任务状态
+	GetTrainingReportJob(ctx context.Context, req *GetTrainingReportJobRequest, opts ...http.CallOption) (rsp *GetTrainingReportJobReply, err error)
+	// ListTrainingReportJobs ListTrainingReportJobs 当前组织最近任务
+	ListTrainingReportJobs(ctx context.Context, req *ListTrainingReportJobsRequest, opts ...http.CallOption) (rsp *ListTrainingReportJobsReply, err error)
+	// StartTrainingReport StartTrainingReport 组织训练报告（异步）
+	StartTrainingReport(ctx context.Context, req *StartTrainingReportRequest, opts ...http.CallOption) (rsp *StartTrainingReportReply, err error)
 }
 
 type SummaryHTTPClientImpl struct {
@@ -68,6 +146,48 @@ func (c *SummaryHTTPClientImpl) GetRecentSummary(ctx context.Context, in *GetSum
 	opts = append(opts, http.Operation(OperationSummaryGetRecentSummary))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetTrainingReportJob GetTrainingReportJob 查询任务状态
+func (c *SummaryHTTPClientImpl) GetTrainingReportJob(ctx context.Context, in *GetTrainingReportJobRequest, opts ...http.CallOption) (*GetTrainingReportJobReply, error) {
+	var out GetTrainingReportJobReply
+	pattern := "/v1/agent/training-report/job"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationSummaryGetTrainingReportJob))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListTrainingReportJobs ListTrainingReportJobs 当前组织最近任务
+func (c *SummaryHTTPClientImpl) ListTrainingReportJobs(ctx context.Context, in *ListTrainingReportJobsRequest, opts ...http.CallOption) (*ListTrainingReportJobsReply, error) {
+	var out ListTrainingReportJobsReply
+	pattern := "/v1/agent/training-report/jobs"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationSummaryListTrainingReportJobs))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// StartTrainingReport StartTrainingReport 组织训练报告（异步）
+func (c *SummaryHTTPClientImpl) StartTrainingReport(ctx context.Context, in *StartTrainingReportRequest, opts ...http.CallOption) (*StartTrainingReportReply, error) {
+	var out StartTrainingReportReply
+	pattern := "/v1/agent/training-report/start"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationSummaryStartTrainingReport))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {
 		return nil, err
 	}

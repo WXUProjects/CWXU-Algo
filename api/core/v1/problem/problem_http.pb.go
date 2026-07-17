@@ -85,7 +85,7 @@ func RegisterProblemHTTPServer(s *http.Server, srv ProblemHTTPServer) {
 	r.GET("/v1/core/problem/list", _Problem_List0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/tags", _Problem_ListTags0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/hot", _Problem_Hot0_HTTP_Handler(srv))
-	r.GET("/v1/core/problem/get", _Problem_Get0_HTTP_Handler(srv))
+	r.GET("/v1/core/problem/get", _Problem_Get1_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/submissions", _Problem_ListSubmissions0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/following-status", _Problem_FollowingStatus0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/user-profile", _Problem_UserProfile0_HTTP_Handler(srv))
@@ -162,7 +162,7 @@ func _Problem_Hot0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) er
 	}
 }
 
-func _Problem_Get0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+func _Problem_Get1_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in GetProblemReq
 		if err := ctx.BindQuery(&in); err != nil {

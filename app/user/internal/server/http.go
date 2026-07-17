@@ -52,6 +52,18 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		if strings.Contains(operation, "paste/get") {
 			return false
 		}
+		// 博客公开读（写仍需登录；JWT 可选，有则识别作者）
+		if strings.Contains(operation, "blog/by-username") ||
+			strings.Contains(operation, "blog/article/get") ||
+			strings.Contains(operation, "blog/article/unlock") ||
+			strings.Contains(operation, "blog/recommend") ||
+			strings.Contains(operation, "blog/plaza") ||
+			strings.Contains(operation, "blog/authors") ||
+			strings.Contains(operation, "blog/categories") ||
+			strings.Contains(operation, "blog/comment/list") ||
+			strings.Contains(operation, "blog/theme/status") {
+			return false
+		}
 		// 社交：搜索/列表/计数/身份展示公开（关注操作仍需登录；JWT 可选，有则按当前域解析）
 		if strings.Contains(operation, "social/search") ||
 			strings.Contains(operation, "social/following") ||
@@ -86,6 +98,7 @@ func NewHTTPServer(
 	pasteService *service.PasteService,
 	socialService *service.SocialService,
 	notificationService *service.NotificationService,
+	blogService *service.BlogService,
 	logger log.Logger,
 
 ) *http.Server {
@@ -125,6 +138,7 @@ func NewHTTPServer(
 	service.RegisterPasteRoutes(srv, pasteService)
 	service.RegisterSocialRoutes(srv, socialService)
 	service.RegisterNotificationRoutes(srv, notificationService)
+	service.RegisterBlogRoutes(srv, blogService)
 	service.RegisterBackupRoutes(srv, d)
 	return srv
 }

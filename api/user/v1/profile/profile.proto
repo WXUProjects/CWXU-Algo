@@ -79,6 +79,12 @@ service Profile {
       get: "/v1/user/profile/ids-by-org"
     };
   }
+  // 用户可收周报/训练报告的 staff 组织 id 列表（内部/agent）
+  rpc GetStaffOrgIds (GetStaffOrgIdsReq) returns (GetStaffOrgIdsRes) {
+    option (google.api.http) = {
+      get: "/v1/user/profile/staff-org-ids"
+    };
+  }
   // 题面流水线资格用户（供 core 闸门；内部调用）
   // 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
   rpc GetNonPublicOrgUserIds (GetNonPublicOrgUserIdsReq) returns (GetNonPublicOrgUserIdsRes) {
@@ -149,6 +155,9 @@ message GetByIdRes {
   message Spiders {
     string platform = 1;
     string username = 2;
+    // 平台当前 rating（整数）；hasRating=false 时忽略
+    int32 rating = 3;
+    bool hasRating = 4;
   }
   repeated Spiders spiders = 7;
   // 最近一次 OJ 数据同步成功时间（unix 秒；0=尚无记录）
@@ -173,7 +182,7 @@ message GetListReq {
   int64 pageNum = 2;
   // scope: org=当前组织成员；site=全站（仅站点管理员）；空=兼容旧逻辑（站管全站/否则组织）
   string scope = 3;
-  // 模糊搜索：用户名 / 昵称；org 范围另含组织内名称（org_display_name）
+  // 模糊搜索：用户名 / 昵称（公共域 org_display_name ≡ users.name）；org 范围另含当前组织内名称
   string keyword = 4;
   // true=仅不活跃（已暂停同步）用户；与 dormant 判定一致（阈值 + 豁免）
   bool dormantOnly = 5;
@@ -328,6 +337,14 @@ message GetUserIdsByOrgReq {
 message GetUserIdsByOrgRes {
   repeated int64 userIds = 1;
   int64 orgId = 2;
+}
+
+message GetStaffOrgIdsReq {
+  int64 userId = 1;
+}
+
+message GetStaffOrgIdsRes {
+  repeated int64 orgIds = 1;
 }
 
 message GetNonPublicOrgUserIdsReq {}

@@ -23,6 +23,65 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.agent.v1.summary.GetSummaryReply'
+    /v1/agent/training-report/job:
+        get:
+            tags:
+                - Summary
+            description: GetTrainingReportJob 查询任务状态
+            operationId: Summary_GetTrainingReportJob
+            parameters:
+                - name: jobId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.agent.v1.summary.GetTrainingReportJobReply'
+    /v1/agent/training-report/jobs:
+        get:
+            tags:
+                - Summary
+            description: ListTrainingReportJobs 当前组织最近任务
+            operationId: Summary_ListTrainingReportJobs
+            parameters:
+                - name: orgId
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.agent.v1.summary.ListTrainingReportJobsReply'
+    /v1/agent/training-report/start:
+        post:
+            tags:
+                - Summary
+            description: StartTrainingReport 组织训练报告（异步）
+            operationId: Summary_StartTrainingReport
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.agent.v1.summary.StartTrainingReportRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.agent.v1.summary.StartTrainingReportReply'
     /v1/core/bulletin/create:
         post:
             tags:
@@ -898,6 +957,207 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.UserProfileRes'
+    /v1/core/problemset/add:
+        post:
+            tags:
+                - Problemset
+            operationId: Problemset_Add
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problemset.AddReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problemset.AddRes'
+    /v1/core/problemset/by-problem:
+        get:
+            tags:
+                - Problemset
+            operationId: Problemset_ByProblem
+            parameters:
+                - name: problemId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problemset.ByProblemRes'
+    /v1/core/problemset/create:
+        post:
+            tags:
+                - Problemset
+            operationId: Problemset_Create
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problemset.CreateReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problemset.CreateRes'
+    /v1/core/problemset/delete:
+        post:
+            tags:
+                - Problemset
+            operationId: Problemset_Delete
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problemset.DeleteReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problemset.DeleteRes'
+    /v1/core/problemset/get:
+        get:
+            tags:
+                - Problemset
+            operationId: Problemset_Get
+            parameters:
+                - name: id
+                  in: query
+                  schema:
+                    type: string
+                - name: unlockToken
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problemset.GetRes'
+    /v1/core/problemset/like:
+        post:
+            tags:
+                - Problemset
+            operationId: Problemset_Like
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problemset.LikeReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problemset.LikeRes'
+    /v1/core/problemset/mine:
+        get:
+            tags:
+                - Problemset
+            operationId: Problemset_Mine
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problemset.MineRes'
+    /v1/core/problemset/remove:
+        post:
+            tags:
+                - Problemset
+            operationId: Problemset_Remove
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problemset.RemoveReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problemset.RemoveRes'
+    /v1/core/problemset/square:
+        get:
+            tags:
+                - Problemset
+            operationId: Problemset_Square
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: string
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: string
+                - name: keyword
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problemset.SquareRes'
+    /v1/core/problemset/unlock:
+        post:
+            tags:
+                - Problemset
+            operationId: Problemset_Unlock
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problemset.UnlockReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problemset.UnlockRes'
+    /v1/core/problemset/update:
+        post:
+            tags:
+                - Problemset
+            operationId: Problemset_Update
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problemset.UpdateReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problemset.UpdateRes'
     /v1/core/spider/purge-submits-and-recrawl:
         post:
             tags:
@@ -1509,7 +1769,7 @@ paths:
                     type: string
                 - name: keyword
                   in: query
-                  description: 模糊搜索：用户名 / 昵称；org 范围另含组织内名称（org_display_name）
+                  description: 模糊搜索：用户名 / 昵称（公共域 org_display_name ≡ users.name）；org 范围另含当前组织内名称
                   schema:
                     type: string
                 - name: dormantOnly
@@ -1632,6 +1892,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.SetSyncIntervalsRes'
+    /v1/user/profile/staff-org-ids:
+        get:
+            tags:
+                - Profile
+            description: 用户可收周报/训练报告的 staff 组织 id 列表（内部/agent）
+            operationId: Profile_GetStaffOrgIds
+            parameters:
+                - name: userId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.GetStaffOrgIdsRes'
     /v1/user/profile/sync-policies:
         post:
             tags:
@@ -1825,6 +2103,88 @@ components:
                 msg:
                     type: string
                 resp:
+                    type: string
+        api.agent.v1.summary.GetTrainingReportJobReply:
+            type: object
+            properties:
+                code:
+                    type: string
+                msg:
+                    type: string
+                job:
+                    $ref: '#/components/schemas/api.agent.v1.summary.TrainingReportJob'
+        api.agent.v1.summary.ListTrainingReportJobsReply:
+            type: object
+            properties:
+                code:
+                    type: string
+                msg:
+                    type: string
+                jobs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.agent.v1.summary.TrainingReportJob'
+        api.agent.v1.summary.StartTrainingReportReply:
+            type: object
+            properties:
+                code:
+                    type: string
+                msg:
+                    type: string
+                jobId:
+                    type: string
+        api.agent.v1.summary.StartTrainingReportRequest:
+            type: object
+            properties:
+                startDate:
+                    type: string
+                    description: 分析起始日期 YYYY-MM-DD（含）
+                endDate:
+                    type: string
+                    description: 分析结束日期 YYYY-MM-DD（含）
+                groupId:
+                    type: string
+                    description: 可选：组 ID，0 或不传表示整组织
+                useAi:
+                    type: boolean
+                    description: 是否启用 AI 分析
+                orgId:
+                    type: string
+                    description: 可选：组织 ID，默认取 JWT 当前组织
+        api.agent.v1.summary.TrainingReportJob:
+            type: object
+            properties:
+                jobId:
+                    type: string
+                status:
+                    type: string
+                progress:
+                    type: string
+                message:
+                    type: string
+                startDate:
+                    type: string
+                endDate:
+                    type: string
+                groupId:
+                    type: string
+                useAi:
+                    type: boolean
+                orgId:
+                    type: string
+                createdBy:
+                    type: string
+                createdAt:
+                    type: string
+                finishedAt:
+                    type: string
+                expiresAt:
+                    type: string
+                downloadable:
+                    type: boolean
+                errorDetail:
+                    type: string
+                fileName:
                     type: string
         api.core.v1.bulletin.BulletinInfo:
             type: object
@@ -2881,6 +3241,246 @@ components:
                         $ref: '#/components/schemas/api.core.v1.problem.NamedCount'
                 totalAc:
                     type: string
+        api.core.v1.problemset.AddReq:
+            type: object
+            properties:
+                problemsetId:
+                    type: string
+                problemId:
+                    type: string
+                url:
+                    type: string
+        api.core.v1.problemset.AddRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                problemId:
+                    type: string
+                fetchTriggered:
+                    type: boolean
+        api.core.v1.problemset.ByProblemRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problemset.ProblemsetInfo'
+        api.core.v1.problemset.CreateReq:
+            type: object
+            properties:
+                title:
+                    type: string
+                description:
+                    type: string
+                visibility:
+                    type: string
+                password:
+                    type: string
+        api.core.v1.problemset.CreateRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/api.core.v1.problemset.ProblemsetInfo'
+        api.core.v1.problemset.DeleteReq:
+            type: object
+            properties:
+                id:
+                    type: string
+        api.core.v1.problemset.DeleteRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+        api.core.v1.problemset.GetRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                code:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/api.core.v1.problemset.ProblemsetInfo'
+        api.core.v1.problemset.LikeReq:
+            type: object
+            properties:
+                id:
+                    type: string
+        api.core.v1.problemset.LikeRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                liked:
+                    type: boolean
+                likeCount:
+                    type: integer
+                    format: int32
+        api.core.v1.problemset.MineRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problemset.ProblemsetInfo'
+        api.core.v1.problemset.ProblemsetInfo:
+            type: object
+            properties:
+                id:
+                    type: string
+                ownerId:
+                    type: string
+                ownerName:
+                    type: string
+                title:
+                    type: string
+                description:
+                    type: string
+                kind:
+                    type: string
+                visibility:
+                    type: string
+                likeCount:
+                    type: integer
+                    format: int32
+                itemCount:
+                    type: integer
+                    format: int32
+                liked:
+                    type: boolean
+                isOwner:
+                    type: boolean
+                isSystem:
+                    type: boolean
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problemset.ProblemsetItem'
+                locked:
+                    type: boolean
+        api.core.v1.problemset.ProblemsetItem:
+            type: object
+            properties:
+                id:
+                    type: string
+                problemId:
+                    type: string
+                sortOrder:
+                    type: integer
+                    format: int32
+                createdAt:
+                    type: string
+                title:
+                    type: string
+                platform:
+                    type: string
+                externalId:
+                    type: string
+                url:
+                    type: string
+                difficulty:
+                    type: string
+                status:
+                    type: string
+                userStatus:
+                    type: string
+        api.core.v1.problemset.RemoveReq:
+            type: object
+            properties:
+                problemsetId:
+                    type: string
+                problemId:
+                    type: string
+        api.core.v1.problemset.RemoveRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+        api.core.v1.problemset.SquareRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problemset.ProblemsetInfo'
+                total:
+                    type: string
+                page:
+                    type: string
+                pageSize:
+                    type: string
+        api.core.v1.problemset.UnlockReq:
+            type: object
+            properties:
+                id:
+                    type: string
+                password:
+                    type: string
+        api.core.v1.problemset.UnlockRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                unlockToken:
+                    type: string
+                expiresIn:
+                    type: string
+        api.core.v1.problemset.UpdateReq:
+            type: object
+            properties:
+                id:
+                    type: string
+                title:
+                    type: string
+                description:
+                    type: string
+                visibility:
+                    type: string
+                password:
+                    type: string
+                clearPassword:
+                    type: boolean
+        api.core.v1.problemset.UpdateRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/api.core.v1.problemset.ProblemsetInfo'
         api.core.v1.spider.PurgeSubmitsAndRecrawlReq:
             type: object
             properties:
@@ -3280,6 +3880,12 @@ components:
                     type: string
                 username:
                     type: string
+                rating:
+                    type: integer
+                    description: 平台当前 rating（整数）；hasRating=false 时忽略
+                    format: int32
+                hasRating:
+                    type: boolean
         api.user.v1.GetByIdsReq:
             type: object
             properties:
@@ -3431,6 +4037,13 @@ components:
                     items:
                         type: string
                     description: 近窗提交可触发题面 AI 的用户
+        api.user.v1.GetStaffOrgIdsRes:
+            type: object
+            properties:
+                orgIds:
+                    type: array
+                    items:
+                        type: string
         api.user.v1.GetSyncPoliciesReq:
             type: object
             properties:
@@ -4033,6 +4646,14 @@ tags:
       description: 紧急通知：全站强制弹窗，仅站点管理员可管理
     - name: Group
     - name: Problem
+    - name: Problemset
+      description: |-
+        题单服务（收藏 / 待做 / 自定义 + 广场）
+         实现位于 core_data/internal/service/problemset.go（与 community 相同，手写 HTTP 路由）。
+         路径前缀：/v1/core/problemset/*
+
+         系统题单 kind=favorites|todo；自定义 kind=custom。
+         可见性 visibility=private|password|public（仅 public 进广场 / 题目页挂出）。
     - name: Profile
     - name: Role
       description: 角色服务：查看角色列表、设置用户角色

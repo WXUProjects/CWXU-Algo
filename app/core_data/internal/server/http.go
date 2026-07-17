@@ -52,6 +52,13 @@ func NewWhiteListMatcher() selector.MatchFunc {
 	return func(ctx context.Context, operation string) bool {
 		//log.Info(operation)
 		// 评论/题解列表与资料近期、发现流公开读；写操作仍需登录
+		// 题单：广场 / 公有详情 / 按题关联 可匿名；其余需登录
+		if strings.Contains(operation, "problemset/square") ||
+			strings.Contains(operation, "problemset/get") ||
+			strings.Contains(operation, "problemset/by-problem") ||
+			strings.Contains(operation, "problemset/unlock") {
+			return false
+		}
 		if strings.Contains(operation, "problem/comment/list") ||
 			strings.Contains(operation, "problem/solution/list") ||
 			strings.Contains(operation, "problem/solution/get") ||
@@ -68,7 +75,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 }
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService, contestLogService *service.ContestLogService, bulletinService *service.BulletinService, problemService *service.ProblemService, emergencyService *service.EmergencyService, contestCalendarService *service.ContestCalendarService, communityService *service.CommunityService) *http.Server {
+func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService, contestLogService *service.ContestLogService, bulletinService *service.BulletinService, problemService *service.ProblemService, emergencyService *service.EmergencyService, contestCalendarService *service.ContestCalendarService, communityService *service.CommunityService, problemsetService *service.ProblemsetService) *http.Server {
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
@@ -103,5 +110,6 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 	emergency.RegisterEmergencyHTTPServer(srv, emergencyService)
 	contest_calendar.RegisterContestCalendarHTTPServer(srv, contestCalendarService)
 	service.RegisterCommunityRoutes(srv, communityService)
+	service.RegisterProblemsetRoutes(srv, problemsetService)
 	return srv
 }

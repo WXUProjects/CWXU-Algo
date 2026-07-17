@@ -49,6 +49,8 @@ type ProblemUserSolution struct {
 	ContentMD string `gorm:"type:text;not null;comment:Markdown 正文"`
 	// LikeCount 冗余点赞数
 	LikeCount int `gorm:"not null;default:0;comment:点赞数"`
+	// BlogArticleID 同步到个人博客后的文章 id（algo_user.blog_articles）；0=未同步
+	BlogArticleID uint `gorm:"not null;default:0;index;comment:博客文章id"`
 }
 
 func (ProblemUserSolution) TableName() string {

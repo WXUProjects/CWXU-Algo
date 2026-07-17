@@ -3,6 +3,7 @@ package mail
 import (
 	"crypto/tls"
 	"fmt"
+	"io"
 
 	"cwxu-algo/app/common/conf"
 
@@ -37,8 +38,25 @@ func (s *Sender) Configured() bool {
 	return s != nil && s.host != ""
 }
 
+// Attachment 邮件附件
+type Attachment struct {
+	// Filename 展示文件名
+	Filename string
+	// Path 本地文件路径（优先）；与 Content 二选一
+	Path string
+	// Content 内存内容
+	Content []byte
+	// ContentType 如 application/pdf；空则由 gomail 推断
+	ContentType string
+}
+
 // Send 发送 HTML 邮件
 func (s *Sender) Send(to, subject, body string) error {
+	return s.SendWithAttachments(to, subject, body, nil)
+}
+
+// SendWithAttachments 发送 HTML 邮件并附带附件
+func (s *Sender) SendWithAttachments(to, subject, body string, attachments []Attachment) error {
 	if s == nil || s.host == "" {
 		return fmt.Errorf("SMTP服务器未配置")
 	}
@@ -54,6 +72,36 @@ func (s *Sender) Send(to, subject, body string) error {
 	m.SetHeader("To", to)
 	m.SetHeader("Subject", subject)
 	m.SetBody("text/html", body)
+
+	for _, a := range attachments {
+		name := a.Filename
+		if name == "" {
+			name = "attachment"
+		}
+		if a.Path != "" {
+			if a.ContentType != "" {
+				m.Attach(a.Path, gomail.Rename(name), gomail.SetHeader(map[string][]string{
+					"Content-Type": {a.ContentType},
+				}))
+			} else {
+				m.Attach(a.Path, gomail.Rename(name))
+			}
+			continue
+		}
+		if len(a.Content) == 0 {
+			continue
+		}
+		settings := []gomail.FileSetting{gomail.Rename(name)}
+		if a.ContentType != "" {
+			settings = append(settings, gomail.SetHeader(map[string][]string{
+				"Content-Type": {a.ContentType},
+			}))
+		}
+		m.Attach(name, append(settings, gomail.SetCopyFunc(func(w io.Writer) error {
+			_, err := w.Write(a.Content)
+			return err
+		}))...)
+	}
 
 	d := gomail.NewDialer(s.host, s.port, s.username, s.password)
 	d.TLSConfig = &tls.Config{

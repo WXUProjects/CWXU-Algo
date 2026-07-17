@@ -245,6 +245,41 @@ func (uc *SpiderUseCase) fetchAndSaveContest(userId int64, plat model.Platform, 
 	return true, err
 }
 
+// fetchAndSaveRating 抓取并写回 platforms.rating（失败只打日志，不阻断提交/比赛同步）
+func (uc *SpiderUseCase) fetchAndSaveRating(plat model.Platform) {
+	p, ok := spider.Get(plat.Platform)
+	if !ok {
+		return
+	}
+	rf, ok := p.(spider.RatingFetcher)
+	if !ok {
+		return // 平台未实现 rating（如 QOJ）
+	}
+	rating, has, err := rf.FetchRating(plat.Username)
+	if err != nil {
+		log.Warnf("Spider: FetchRating %s %s: %v", plat.Platform, plat.Username, err)
+		return
+	}
+	upd := map[string]interface{}{
+		"rating":     rating,
+		"has_rating": has,
+	}
+	if !has {
+		upd["rating"] = 0
+	}
+	if err := uc.data.DB.Model(&model.Platform{}).
+		Where("user_id = ? AND platform = ?", plat.UserID, plat.Platform).
+		Updates(upd).Error; err != nil {
+		log.Warnf("Spider: save rating %s %s: %v", plat.Platform, plat.Username, err)
+		return
+	}
+	if has {
+		log.Infof("Spider: rating %s %s = %d", plat.Platform, plat.Username, rating)
+	} else {
+		log.Infof("Spider: rating %s %s = (none)", plat.Platform, plat.Username)
+	}
+}
+
 // loadOnePlatform 返回 (是否有数据变更, error)
 func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, needAll bool) (bool, error) {
 	// needAll 全量：最多 3 次（原先 12 次会把 worker 占死、队列堆积）
@@ -253,6 +288,7 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 		maxRetries = 3
 	}
 	var anyChange bool
+	var lastErr error
 	for i := 0; i < maxRetries; i++ {
 		rows, err := uc.fetchAndSave(userId, plat, needAll)
 		if rows > 0 {
@@ -264,12 +300,15 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 			anyChange = true
 		}
 		if err == nil {
+			// 与提交/比赛一并刷新 rating（未实现 RatingFetcher 的平台自动跳过）
+			uc.fetchAndSaveRating(plat)
 			log.Infof("Spider: %s %s 成功 new_rows=%d", plat.Platform, plat.Username, rows)
 			if anyChange && uc.problem != nil {
 				uc.problem.BindSubmitsAfterSpider(userId)
 			}
 			return anyChange, nil
 		}
+		lastErr = err
 		if strings.Contains(err.Error(), "平台") {
 			log.Errorf(
 				"Spider: %s %s 失败: %v",
@@ -277,6 +316,8 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 				plat.Username,
 				err,
 			)
+			// 提交失败仍尝试刷 rating（独立接口，失败不阻断）
+			uc.fetchAndSaveRating(plat)
 			return anyChange, err
 		}
 		log.Errorf(
@@ -288,9 +329,14 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 			err,
 		)
 		if !needAll || i+1 >= maxRetries {
+			uc.fetchAndSaveRating(plat)
 			return anyChange, err
 		}
 		time.Sleep(3 * time.Second)
+	}
+	uc.fetchAndSaveRating(plat)
+	if lastErr != nil {
+		return anyChange, lastErr
 	}
 	return anyChange, fmt.Errorf("platform %s max retries exceeded", plat.Platform)
 }

@@ -2,10 +2,11 @@ package core_data
 
 import (
 	"context"
-	"cwxu-algo/api/core/v1/statistic"
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"cwxu-algo/api/core/v1/statistic"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
@@ -14,27 +15,31 @@ import (
 	grpc2 "google.golang.org/grpc"
 )
 
-func (c *StatisticPeriod) coreDataRPC() (*grpc2.ClientConn, error) {
-	return grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///core-data"),
-		grpc.WithDiscovery((*c.reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
-}
-
 type StatisticPeriodParams struct {
 	UserId int `json:"userId"`
 }
 
 type StatisticPeriod struct {
 	reg *registry.Registrar
+	ctx context.Context
 }
 
-func NewStatisticPeriod(reg *registry.Registrar) *StatisticPeriod {
-	return &StatisticPeriod{
-		reg: reg,
+func NewStatisticPeriod(reg *registry.Registrar, ctxs ...context.Context) *StatisticPeriod {
+	return &StatisticPeriod{reg: reg, ctx: firstCtx(ctxs...)}
+}
+
+func (c *StatisticPeriod) AuthContext() context.Context { return toolRPCContext(c.ctx) }
+
+func (c *StatisticPeriod) coreDataRPC() (*grpc2.ClientConn, error) {
+	if c == nil || c.reg == nil {
+		return nil, fmt.Errorf("registry 未配置")
 	}
+	return grpc.DialInsecure(
+		toolRPCContext(c.ctx),
+		grpc.WithEndpoint("discovery:///core-data"),
+		grpc.WithDiscovery((*c.reg).(registry.Discovery)),
+		grpc.WithTimeout(20*time.Second),
+	)
 }
 
 func (c *StatisticPeriod) Description() *model.Tool {
@@ -77,7 +82,7 @@ func (c *StatisticPeriod) Handle(userId int) (string, error) {
 	defer conn.Close()
 	sb := statistic.NewStatisticClient(conn)
 	res, err := sb.PeriodCount(
-		context.Background(),
+		toolRPCContext(c.ctx),
 		&statistic.PeriodCountReq{UserId: int64(userId)},
 	)
 	if err != nil {

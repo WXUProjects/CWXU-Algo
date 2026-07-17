@@ -66,6 +66,10 @@ message GetSpiderRep {
   message Data {
     string platform = 1;
     string username = 2;
+    // 平台当前 rating（整数）；hasRating=false 时忽略
+    int32 rating = 3;
+    // 是否已抓到有效 rating
+    bool hasRating = 4;
   }
   repeated Data data = 1;
   // 最近一次爬虫成功时间（unix 秒；0=尚无成功同步记录）

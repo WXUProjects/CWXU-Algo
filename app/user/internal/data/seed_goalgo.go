@@ -3,6 +3,7 @@ package data
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -61,32 +62,8 @@ func seedGoAlgoFramework(db *gorm.DB) {
 		"describe": model.DefaultGroupDesc,
 	}).Error
 
-	var allOrgs []model.Org
-	if e := db.Find(&allOrgs).Error; e == nil {
-		for _, o := range allOrgs {
-			var defG model.Group
-			err := db.Where("org_id = ? AND name = ?", o.ID, model.DefaultGroupName).
-				Order("id ASC").First(&defG).Error
-			if err != nil {
-				defName := model.DefaultGroupName
-				defG = model.Group{
-					Name:     &defName,
-					Describe: model.DefaultGroupDesc,
-					OrgID:    o.ID,
-				}
-				if db.Create(&defG).Error != nil {
-					continue
-				}
-			}
-			// 该组织内 group_id=0 或无效的用户，挂到默认分组
-			// 仅当用户 current_org 属于本组织，或（公共域）全员无组时
-			if o.IsSystem {
-				_ = db.Model(&model.User{}).
-					Where("group_id = 0 OR group_id IS NULL").
-					Update("group_id", defG.ID).Error
-			}
-		}
-	}
+	// 每组织默认分组 + 全员 org_members 挂默认组（见 migrateOrgMembersDefaultGroups）
+	migrateOrgMembersDefaultGroups(db)
 
 	// 2. 旧 group 挂到公共域
 	_ = db.Model(&model.Group{}).Where("org_id = 0 OR org_id IS NULL").Update("org_id", public.ID).Error
@@ -113,6 +90,16 @@ func seedGoAlgoFramework(db *gorm.DB) {
 		log.Infof("cleaned orphan org_join_requests: %d", res.RowsAffected)
 	}
 
+	// 公共域默认分组（全员入域时写入 org_members.group_id）
+	var pubDefForJoin model.Group
+	if db.Where("org_id = ? AND name IN ?", public.ID, []string{model.DefaultGroupName, "未分组"}).
+		Order("id ASC").First(&pubDefForJoin).Error != nil {
+		defName := model.DefaultGroupName
+		pubDefForJoin = model.Group{Name: &defName, Describe: model.DefaultGroupDesc, OrgID: public.ID}
+		_ = db.Create(&pubDefForJoin).Error
+	}
+	pubDefGID := pubDefForJoin.ID
+
 	var users []model.User
 	if e := db.Find(&users).Error; e != nil {
 		log.Errorf("list users for org migrate: %v", e)
@@ -127,10 +114,16 @@ func seedGoAlgoFramework(db *gorm.DB) {
 			if display == "" {
 				display = u.Username
 			}
+			var gptr *uint
+			if pubDefGID > 0 {
+				g := pubDefGID
+				gptr = &g
+			}
 			m := model.OrgMember{
 				OrgID:          public.ID,
 				UserID:         u.ID,
 				Role:           model.OrgRoleMember,
+				GroupID:        gptr,
 				OrgDisplayName: display,
 				JoinedAt:       now,
 			}
@@ -142,6 +135,9 @@ func seedGoAlgoFramework(db *gorm.DB) {
 			_ = db.Model(&u).Update("current_org_id", public.ID).Error
 		}
 	}
+
+	// 全员入公共域后再次兜底：补 org_members 默认分组（含刚创建的 membership）
+	migrateOrgMembersDefaultGroups(db)
 
 	// 4. 站点标题默认 GoAlgo
 	var sc model.SiteConfig
@@ -298,4 +294,99 @@ func EnsurePublicOrgID(db *gorm.DB) (uint, error) {
 		return 0, fmt.Errorf("public org missing: %w", err)
 	}
 	return o.ID, nil
+}
+
+// migrateOrgMembersDefaultGroups 幂等迁移：
+// 1. 每个组织确保有「默认分组」
+// 2. 该组织内 org_members.group_id 为空 / 0 / 指向不存在或不属于本组织的分组 → 挂到默认分组
+// 3. 兼容：users.group_id 仍为空时，按 current_org 默认分组回填（旧字段）
+// 已在自定义分组的成员不受影响。
+func migrateOrgMembersDefaultGroups(db *gorm.DB) {
+	var allOrgs []model.Org
+	if e := db.Find(&allOrgs).Error; e != nil {
+		log.Errorf("migrateOrgMembersDefaultGroups list orgs: %v", e)
+		return
+	}
+
+	fixedMembers := int64(0)
+	for _, o := range allOrgs {
+		defID := ensureOrgDefaultGroup(db, o.ID)
+		if defID == 0 {
+			continue
+		}
+
+		// 空 / 0
+		res := db.Exec(`
+			UPDATE org_members
+			SET group_id = ?
+			WHERE org_id = ?
+			  AND (group_id IS NULL OR group_id = 0)
+		`, defID, o.ID)
+		if res.Error != nil {
+			log.Errorf("migrate org_members null group org_id=%d: %v", o.ID, res.Error)
+		} else {
+			fixedMembers += res.RowsAffected
+		}
+
+		// 指向不存在、或不属于本组织的分组（跨域脏数据）
+		res = db.Exec(`
+			UPDATE org_members m
+			SET group_id = ?
+			WHERE m.org_id = ?
+			  AND m.group_id IS NOT NULL
+			  AND m.group_id > 0
+			  AND NOT EXISTS (
+				SELECT 1 FROM groups g
+				WHERE g.id = m.group_id AND g.org_id = m.org_id
+			  )
+		`, defID, o.ID)
+		if res.Error != nil {
+			log.Errorf("migrate org_members invalid group org_id=%d: %v", o.ID, res.Error)
+		} else {
+			fixedMembers += res.RowsAffected
+		}
+
+		// 公共域：旧 users.group_id 仍为空的全员挂公共默认组（兼容读路径）
+		if o.IsSystem || o.Slug == model.PublicOrgSlug {
+			_ = db.Model(&model.User{}).
+				Where("group_id = 0 OR group_id IS NULL").
+				Update("group_id", defID).Error
+		}
+	}
+
+	log.Infof("migrateOrgMembersDefaultGroups: orgs=%d fixed_org_members=%d", len(allOrgs), fixedMembers)
+}
+
+// ensureOrgDefaultGroup 确保组织有默认分组，返回 id；失败返回 0
+func ensureOrgDefaultGroup(db *gorm.DB, orgID uint) uint {
+	if orgID == 0 {
+		return 0
+	}
+	var defG model.Group
+	err := db.Where("org_id = ? AND name IN ?", orgID, []string{model.DefaultGroupName, "未分组"}).
+		Order("id ASC").First(&defG).Error
+	if err == nil {
+		if defG.Name != nil && *defG.Name == "未分组" {
+			n := model.DefaultGroupName
+			_ = db.Model(&defG).Updates(map[string]interface{}{
+				"name": n, "describe": model.DefaultGroupDesc,
+			}).Error
+		}
+		return defG.ID
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Errorf("ensureOrgDefaultGroup org_id=%d: %v", orgID, err)
+		return 0
+	}
+	defName := model.DefaultGroupName
+	defG = model.Group{
+		Name:     &defName,
+		Describe: model.DefaultGroupDesc,
+		OrgID:    orgID,
+	}
+	if e := db.Create(&defG).Error; e != nil {
+		log.Errorf("create default group org_id=%d: %v", orgID, e)
+		return 0
+	}
+	return defG.ID
 }

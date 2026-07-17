@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -104,6 +105,50 @@ func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) 
 func (p NewAtCoder) Name() string {
 	return spider.AtCoder
 }
+
+// FetchRating 从 AtCoder 官方 rating 历史取最新 NewRating
+func (p NewAtCoder) FetchRating(username string) (int, bool, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return 0, false, fmt.Errorf("atcoder username 为空")
+	}
+	url := fmt.Sprintf("https://atcoder.jp/users/%s/history/json", username)
+	resp, err := ojhttp.Get(url)
+	if err != nil {
+		return 0, false, fmt.Errorf("atcoder rating 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, false, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, false, fmt.Errorf("atcoder rating 状态码 %d: %s", resp.StatusCode, string(body))
+	}
+	var hist []struct {
+		IsRated   bool `json:"IsRated"`
+		NewRating int  `json:"NewRating"`
+	}
+	if err := json.Unmarshal(body, &hist); err != nil {
+		return 0, false, fmt.Errorf("atcoder rating 解析失败: %w", err)
+	}
+	if len(hist) == 0 {
+		return 0, false, nil
+	}
+	// 优先最后一场 rated 的 NewRating；若全是非 rated，取最后一条 NewRating
+	lastRated := -1
+	for i, h := range hist {
+		if h.IsRated {
+			lastRated = i
+		}
+	}
+	if lastRated >= 0 {
+		return hist[lastRated].NewRating, true, nil
+	}
+	// 有历史但无 rated：仍返回末条（通常等于当前展示 rating）
+	return hist[len(hist)-1].NewRating, true, nil
+}
+
 func init() {
 	// 注册到注册中心
 	spider.Register(NewAtCoder{})

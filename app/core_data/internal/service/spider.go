@@ -95,8 +95,10 @@ func (s SpiderService) GetSpider(ctx context.Context, req *spider.GetSpiderReq) 
 	res := make([]*spider.GetSpiderRep_Data, 0)
 	for _, v := range plats {
 		res = append(res, &spider.GetSpiderRep_Data{
-			Platform: v.Platform,
-			Username: v.Username,
+			Platform:  v.Platform,
+			Username:  v.Username,
+			Rating:    int32(v.Rating),
+			HasRating: v.HasRating,
 		})
 	}
 	var lastSync int64

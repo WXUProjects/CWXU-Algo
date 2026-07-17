@@ -295,6 +295,7 @@ func (uc *ProblemUseCase) enqueueAnalyzePrio(id uint, priority uint8) error {
 }
 
 // ProcessFetch 仅爬取题面；成功后状态 TAGGING 并投递 AI 队列
+// Force=true 时忽略用户爬取资格；SkipAnalyze=true 时爬取成功后不入 AI。
 func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetchEvent) error {
 	if pipelineControl.IsFetchPaused() {
 		return fmt.Errorf("fetch paused")
@@ -310,7 +311,8 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		return nil
 	}
 	// 无爬取资格用户近窗提交：不爬题面（旧消息防御；前端显示「题面准备中」）
-	if !uc.shouldEnqueueFetch(p.ID) {
+	// Force：题单加题等主动场景可忽略资格
+	if !ev.Force && !uc.shouldEnqueueFetch(p.ID) {
 		log.Infof("ProcessFetch skip no fetch-eligible submitters id=%d", p.ID)
 		if strings.TrimSpace(p.ContentMD) == "" && p.Status != model.ProblemStatusSkipped {
 			_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
@@ -324,7 +326,7 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if strings.TrimSpace(p.ContentMD) != "" || p.Status == model.ProblemStatusTagging {
 		if p.Status != model.ProblemStatusCompleted {
 			_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
-			if !pipelineControl.IsAnalyzePaused() {
+			if !ev.SkipAnalyze && !pipelineControl.IsAnalyzePaused() {
 				return uc.enqueueAnalyze(p.ID)
 			}
 		}
@@ -383,8 +385,117 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	uc.BumpProblemDetailVer(p.ID)
 	uc.progressMoveStatus(p.Status, model.ProblemStatusTagging)
 	// 爬取成功后：近 6 月 + 有组织用户提交才进 AI（闸门在 enqueueAnalyzePrio）
+	// SkipAnalyze：题单加题等场景仅爬取、不分析
+	if ev.SkipAnalyze {
+		log.Infof("ProcessFetch skip analyze (forced fetch-only) id=%d", p.ID)
+		return nil
+	}
 	// 分析暂停时仍入队（暂停不清队列，恢复后继续）；高优先级延续当前已出队的爬取任务
 	return uc.enqueueAnalyzePrio(p.ID, mqPriorityIncremental)
+}
+
+// ForceEnqueueFetchOnly 强制入队题面爬取，忽略用户资格，且不触发 AI 分析。
+// 用于题单加题等用户主动场景。ContentMD 已有时 no-op。
+func (uc *ProblemUseCase) ForceEnqueueFetchOnly(problemID uint) error {
+	if uc == nil || problemID == 0 {
+		return nil
+	}
+	var p model.Problem
+	if err := uc.data.DB.First(&p, problemID).Error; err != nil {
+		return err
+	}
+	if strings.TrimSpace(p.ContentMD) != "" {
+		return nil
+	}
+	if p.Status == model.ProblemStatusCompleted || p.Status == model.ProblemStatusSkipped {
+		return nil
+	}
+	if p.Status == model.ProblemStatusFailedPerm {
+		return nil
+	}
+	// 若永久失败标记在 FAILED 上，仍允许用户主动再试一次：重置为 PENDING
+	if p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg) {
+		// 主动加题：允许再试
+		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+			"status":    model.ProblemStatusPending,
+			"error_msg": "",
+		}).Error
+		p.Status = model.ProblemStatusPending
+	}
+	return uc.enqueueFetchForced(p.ID, p.Platform, p.ExternalID, p.URL, true)
+}
+
+func (uc *ProblemUseCase) enqueueFetchForced(id uint, platform, externalID, url string, skipAnalyze bool) error {
+	if uc.mq == nil {
+		return fmt.Errorf("mq not ready")
+	}
+	body, _ := json.Marshal(event.ProblemFetchEvent{
+		ProblemID:   id,
+		Platform:    platform,
+		ExternalID:  externalID,
+		URL:         url,
+		Force:       true,
+		SkipAnalyze: skipAnalyze,
+	})
+	if err := uc.declareProblemQueue("problem_fetch"); err != nil {
+		return err
+	}
+	return uc.mq.Publish("", "problem_fetch", false, false, amqp.Publishing{
+		ContentType:  "application/json",
+		Body:         body,
+		DeliveryMode: amqp.Persistent,
+		Priority:     mqPriorityIncremental,
+	})
+}
+
+// UpsertProblemFromParsed 按 platform+external_id 幂等入库；缺题面时强制仅爬取
+func (uc *ProblemUseCase) UpsertProblemFromParsed(parsed *ParsedProblem) (*model.Problem, error) {
+	if uc == nil || parsed == nil || parsed.Platform == "" || parsed.ExternalID == "" {
+		return nil, fmt.Errorf("invalid parsed problem")
+	}
+	var existing model.Problem
+	err := uc.data.DB.Where("platform = ? AND external_id = ?", parsed.Platform, parsed.ExternalID).
+		First(&existing).Error
+	if err == gorm.ErrRecordNotFound {
+		status := model.ProblemStatusPending
+		if parsed.SkipFetch {
+			status = model.ProblemStatusSkipped
+		}
+		p := model.Problem{
+			Platform:   parsed.Platform,
+			ExternalID: parsed.ExternalID,
+			Title:      firstNonEmpty(parsed.Title, parsed.ExternalID),
+			URL:        parsed.URL,
+			Status:     status,
+			Tags:       model.StringArray{},
+		}
+		if err := uc.data.DB.Create(&p).Error; err != nil {
+			// 并发冲突再查
+			if err2 := uc.data.DB.Where("platform = ? AND external_id = ?", parsed.Platform, parsed.ExternalID).
+				First(&existing).Error; err2 != nil {
+				return nil, err
+			}
+		} else {
+			existing = p
+		}
+	} else if err != nil {
+		return nil, err
+	} else {
+		if existing.Title == "" && parsed.Title != "" {
+			_ = uc.data.DB.Model(&existing).Update("title", parsed.Title).Error
+			existing.Title = parsed.Title
+		}
+		if existing.URL == "" && parsed.URL != "" {
+			_ = uc.data.DB.Model(&existing).Update("url", parsed.URL).Error
+			existing.URL = parsed.URL
+		}
+	}
+	if !parsed.SkipFetch && strings.TrimSpace(existing.ContentMD) == "" {
+		if err := uc.ForceEnqueueFetchOnly(existing.ID); err != nil {
+			log.Warnf("ForceEnqueueFetchOnly id=%d: %v", existing.ID, err)
+		}
+	}
+	return &existing, nil
 }
 
 // ProcessAnalyze 仅 AI 打标（不爬取、不送用户代码）

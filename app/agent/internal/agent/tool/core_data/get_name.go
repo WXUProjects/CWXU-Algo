@@ -2,11 +2,12 @@ package core_data
 
 import (
 	"context"
-	"cwxu-algo/api/user/v1/profile"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
+
+	"cwxu-algo/api/user/v1/profile"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
@@ -15,28 +16,33 @@ import (
 	grpc2 "google.golang.org/grpc"
 )
 
-func (c *GetNameById) userRPC() (*grpc2.ClientConn, error) {
-	return grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery((*c.reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
-}
-
 type GetNameByIdJson struct {
 	UserId int `json:"userId"`
 }
 
 type GetNameById struct {
 	reg *registry.Registrar
+	ctx context.Context
 }
 
-func NewGetProfileById(reg *registry.Registrar) *GetNameById {
-	return &GetNameById{
-		reg: reg,
-	}
+func NewGetProfileById(reg *registry.Registrar, ctxs ...context.Context) *GetNameById {
+	return &GetNameById{reg: reg, ctx: firstCtx(ctxs...)}
 }
+
+func (c *GetNameById) AuthContext() context.Context { return toolRPCContext(c.ctx) }
+
+func (c *GetNameById) userRPC() (*grpc2.ClientConn, error) {
+	if c == nil || c.reg == nil {
+		return nil, fmt.Errorf("registry 未配置")
+	}
+	return grpc.DialInsecure(
+		toolRPCContext(c.ctx),
+		grpc.WithEndpoint("discovery:///user"),
+		grpc.WithDiscovery((*c.reg).(registry.Discovery)),
+		grpc.WithTimeout(20*time.Second),
+	)
+}
+
 func (c *GetNameById) Description() *model.Tool {
 	return &model.Tool{
 		Type: model.ToolTypeFunction,
@@ -82,7 +88,7 @@ func (c *GetNameById) Handle(userId int) (string, error) {
 	defer conn.Close()
 	sb := profile.NewProfileClient(conn)
 	res, err := sb.GetById(
-		context.Background(),
+		toolRPCContext(c.ctx),
 		&profile.GetByIdReq{UserId: int64(userId)},
 	)
 	if err != nil {

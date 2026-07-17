@@ -360,7 +360,15 @@ func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keywo
 	q := d.db.WithContext(ctx).Model(&model.User{})
 	if kw != "" {
 		like := "%" + kw + "%"
-		q = q.Where("username ILIKE ? OR name ILIKE ?", like, like)
+		// 站内昵称 ≡ 公共域 org_display_name；一并模糊匹配
+		if pubID, e := d.PublicOrgID(ctx); e == nil && pubID > 0 {
+			q = q.Where(`username ILIKE ? OR name ILIKE ? OR EXISTS (
+				SELECT 1 FROM org_members m
+				WHERE m.user_id = users.id AND m.org_id = ? AND m.org_display_name ILIKE ?
+			)`, like, like, pubID, like)
+		} else {
+			q = q.Where("username ILIKE ? OR name ILIKE ?", like, like)
+		}
 	}
 	q = d.applyDormantOnlyFilter(ctx, q, "users", dormantOnly)
 	var total int64

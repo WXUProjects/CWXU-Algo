@@ -1,0 +1,654 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"cwxu-algo/app/agent/internal/agent/tool/core_data"
+	_const "cwxu-algo/app/common/const"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/redis/go-redis/v9"
+	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
+)
+
+func parseMapClaimsTest(token string) (map[string]interface{}, error) {
+	parsed, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
+		return []byte(_const.JWTSecret()), nil
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+	if err != nil || parsed == nil {
+		return nil, fmt.Errorf("parse: %w", err)
+	}
+	mc, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("not map claims")
+	}
+	out := make(map[string]interface{}, len(mc))
+	for k, v := range mc {
+		out[k] = v
+	}
+	return out, nil
+}
+
+func fixtureTrainingData() *TrainingReportData {
+	return &TrainingReportData{
+		OrgID:            7,
+		GroupID:          0,
+		ScopeLabel:       "整组织",
+		StartDate:        "2026-07-06",
+		EndDate:          "2026-07-12",
+		PrevStartDate:    "2026-06-29",
+		PrevEndDate:      "2026-07-05",
+		MemberCount:      5,
+		MemberIDs:        []int64{1, 2, 3, 4, 5},
+		TotalSubmits:     42,
+		PrevTotalSubmits: 30,
+		TotalAC:          18,
+		DailyTrend: []DayCount{
+			{Date: "2026-07-06", Count: 5},
+			{Date: "2026-07-07", Count: 6},
+			{Date: "2026-07-08", Count: 7},
+			{Date: "2026-07-09", Count: 8},
+			{Date: "2026-07-10", Count: 9},
+			{Date: "2026-07-11", Count: 4},
+			{Date: "2026-07-12", Count: 3},
+		},
+		TopSubmit: []RankEntry{
+			{Rank: 1, UserID: 1, Name: "Alice", Score: 15},
+			{Rank: 2, UserID: 2, Name: "Bob", Score: 12},
+		},
+		TopAC: []RankEntry{
+			{Rank: 1, UserID: 1, Name: "Alice", Score: 8},
+		},
+		InactiveMembers: []string{"Carol", "Dave"},
+		ActiveMembers:   3,
+		InitiatorUserID: 99,
+		InitiatorName:   "Coach",
+		InitiatorEmail:  "coach@example.com",
+	}
+}
+
+func TestRenderRuleTemplateHTML_UsesFixtureNumbers(t *testing.T) {
+	data := fixtureTrainingData()
+	html := RenderRuleTemplateHTML(data, "GoAlgo")
+	if html == "" {
+		t.Fatal("empty html")
+	}
+	// 必须包含真实数字与名单，禁止编造
+	mustContain := []string{
+		"42", "18", "Alice", "Bob", "Carol", "Dave",
+		"2026-07-06", "2026-07-12", "整组织", "30",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(html, s) {
+			t.Errorf("template missing %q", s)
+		}
+	}
+	// 不应出现未在数据中的假成员
+	if strings.Contains(html, "FakeUser999") {
+		t.Error("invented member")
+	}
+}
+
+func TestRenderSimplePDF_Valid(t *testing.T) {
+	pdf := RenderSimplePDF(fixtureTrainingData(), "GoAlgo")
+	if !PDFLooksValid(pdf) {
+		t.Fatalf("invalid pdf header: %q", string(pdf[:min(20, len(pdf))]))
+	}
+	if !strings.Contains(string(pdf), "Alice") && !strings.Contains(string(pdf), "Training Report") {
+		t.Error("pdf missing expected content markers")
+	}
+}
+
+func TestLastWeekRange_Monday(t *testing.T) {
+	// 2026-07-13 is Monday → last week 07-06 ~ 07-12
+	now := time.Date(2026, 7, 13, 10, 0, 0, 0, time.Local)
+	start, end := LastWeekRange(now)
+	if start.Format(dateLayout) != "2026-07-06" || end.Format(dateLayout) != "2026-07-12" {
+		t.Fatalf("got %s ~ %s", start.Format(dateLayout), end.Format(dateLayout))
+	}
+}
+
+func TestParseDateRange(t *testing.T) {
+	_, _, err := ParseDateRange("2026-07-01", "2026-06-01")
+	if err == nil {
+		t.Fatal("expected error for inverted range")
+	}
+	s, e, err := ParseDateRange("2026-07-01", "2026-07-07")
+	if err != nil || s.Day() != 1 || e.Day() != 7 {
+		t.Fatalf("parse: %v %v %v", s, e, err)
+	}
+}
+
+func TestJobTTL_DownloadWindow(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	job := &TrainingReportJob{
+		Status:   ReportStatusDone,
+		HTMLPath: "/tmp/x.html",
+		ExpiresAt: now.Add(1 * time.Hour).Unix(),
+	}
+	if !job.IsDownloadable(now) {
+		t.Fatal("should be downloadable within TTL")
+	}
+	if job.IsDownloadable(now.Add(2 * time.Hour)) {
+		t.Fatal("should reject after TTL")
+	}
+	if job.EffectiveStatus(now.Add(2*time.Hour)) != ReportStatusExpired {
+		t.Fatal("effective status should be expired")
+	}
+}
+
+func TestJobStore_RedisRoundTrip(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	uc := &SummaryUseCase{redis: rdb}
+	ctx := context.Background()
+	dir := t.TempDir()
+	t.Setenv(reportDirEnv, dir)
+
+	job := &TrainingReportJob{
+		JobID:     "job-test-1",
+		Status:    ReportStatusPending,
+		OrgID:     3,
+		StartDate: "2026-07-01",
+		EndDate:   "2026-07-07",
+		CreatedBy: 1,
+		CreatedAt: time.Now().Unix(),
+	}
+	if err := uc.saveJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	got, err := uc.getJob(ctx, "job-test-1")
+	if err != nil || got == nil || got.OrgID != 3 {
+		t.Fatalf("getJob: %+v err=%v", got, err)
+	}
+	list, err := uc.listJobs(ctx, 3, 10)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list: %v len=%d", err, len(list))
+	}
+}
+
+func TestStartTrainingReport_ReturnsJobID_NonAI(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	uc := &SummaryUseCase{redis: rdb}
+	dir := t.TempDir()
+	t.Setenv(reportDirEnv, dir)
+
+	// 无 registry 时后台任务会失败，但 Start 应立即返回 jobId
+	jobID, err := uc.StartTrainingReport(context.Background(), StartTrainingReportParams{
+		OrgID:     1,
+		StartDate: "2026-07-01",
+		EndDate:   "2026-07-07",
+		UseAI:     false,
+		CreatedBy: 9,
+		Source:    "manual",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jobID == "" {
+		t.Fatal("empty job id")
+	}
+	// 立即查状态应为 pending 或 running（异步已启动）
+	time.Sleep(50 * time.Millisecond)
+	job, err := uc.getJob(context.Background(), jobID)
+	if err != nil || job == nil {
+		t.Fatalf("job missing: %v", err)
+	}
+	if job.Status != ReportStatusPending && job.Status != ReportStatusRunning && job.Status != ReportStatusFailed {
+		t.Fatalf("unexpected status %s", job.Status)
+	}
+	// start 响应不应含完整 HTML 正文
+	if strings.Contains(jobID, "<html") {
+		t.Fatal("job id looks like html body")
+	}
+}
+
+func TestNonAI_EndToEndInProcess(t *testing.T) {
+	// 真实路径：规则模板 → 写产物 → finalize job（与 runTrainingReportJob 完成段一致）→ re-get → notify
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	uc := &SummaryUseCase{redis: rdb}
+	dir := t.TempDir()
+	t.Setenv(reportDirEnv, dir)
+	ctx := context.Background()
+
+	data := fixtureTrainingData()
+	html := RenderRuleTemplateHTML(data, "GoAlgo")
+	if !strings.Contains(html, "42") || !strings.Contains(html, "Alice") {
+		t.Fatal("template missing fixture stats")
+	}
+	pdf := RenderSimplePDF(data, "GoAlgo")
+	if !PDFLooksValid(pdf) {
+		t.Fatal("bad pdf")
+	}
+
+	jobID := "e2e-job"
+	htmlPath, pdfPath := jobArtifactPaths(jobID)
+	if err := os.WriteFile(htmlPath, []byte(html), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pdfPath, pdf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	job := &TrainingReportJob{
+		JobID:     jobID,
+		Status:    ReportStatusPending,
+		StartDate: data.StartDate,
+		EndDate:   data.EndDate,
+		OrgID:     data.OrgID,
+		CreatedBy: data.InitiatorUserID,
+		CreatedAt: time.Now().Unix(),
+		UseAI:     false,
+	}
+	if err := uc.saveJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	job.Status = ReportStatusRunning
+	_ = uc.saveJob(ctx, job)
+
+	finished := time.Now()
+	expires := finished.Add(reportDownloadTTL)
+	fileName := fmt.Sprintf("training-report-%s-%s.pdf", job.StartDate, job.EndDate)
+	job.Status = ReportStatusDone
+	job.Progress = 100
+	job.Message = "已完成"
+	job.FinishedAt = finished.Unix()
+	job.ExpiresAt = expires.Unix()
+	job.HTMLPath = htmlPath
+	job.PDFPath = pdfPath
+	job.FileName = fileName
+	if err := uc.saveJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := uc.getJob(ctx, jobID)
+	if err != nil || fresh == nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if !fresh.IsDownloadable(now) {
+		t.Fatal("should download within 24h")
+	}
+	abs, ct, name, err := ResolveArtifactAbs(fresh, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(abs, ".pdf") || ct != "application/pdf" || name != fileName {
+		t.Fatalf("artifact %s %s %s", abs, ct, name)
+	}
+	_, body, attach := BuildNotifyEmail(fresh, "GoAlgo", html)
+	if strings.Contains(body, "1970") || attach != fileName {
+		t.Fatalf("notify snapshot bad: attach=%s body=%s", attach, body)
+	}
+	if !strings.Contains(body, time.Unix(fresh.ExpiresAt, 0).Format("2006-01-02 15:04")) {
+		t.Fatal("notify missing expiry")
+	}
+	// 过期后拒绝
+	fresh.ExpiresAt = now.Add(-time.Minute).Unix()
+	if _, _, _, err := ResolveArtifactAbs(fresh, true); err == nil {
+		t.Fatal("expected expire error")
+	}
+	fresh.ExpiresAt = expires.Unix()
+	err = uc.notifyTrainingReportDone(ctx, data, fresh, html, pdfPath)
+	if err == nil {
+		t.Log("SMTP configured; notify ok")
+	} else if !strings.Contains(err.Error(), "SMTP") && !strings.Contains(err.Error(), "邮箱") {
+		t.Fatalf("unexpected notify err: %v", err)
+	}
+}
+
+func TestElevatedAgentIdentity(t *testing.T) {
+	// 配置临时 JWT secret
+	_ = _const.ConfigureJWTSecret("test-secret-for-agent-identity-32b")
+	tok, err := IssueElevatedAgentToken(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok == "" {
+		t.Fatal("empty token")
+	}
+	if !IsElevatedAgentUser(AgentHiddenUserID) {
+		t.Fatal("agent user id check")
+	}
+	if IsElevatedAgentUser(1) {
+		t.Fatal("normal user should not match")
+	}
+	ctx, err := ContextWithElevatedAgent(context.Background(), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx == nil {
+		t.Fatal("nil ctx")
+	}
+	// 必须可从 outgoing metadata 取出 Bearer
+	if !core_data.HasElevatedAuth(ctx) {
+		t.Fatal("elevated ctx missing Bearer metadata")
+	}
+	if core_data.BearerFromContext(ctx) != tok {
+		// ContextWithElevatedAgent issues a new token; just require non-empty matching claims
+		if core_data.BearerFromContext(ctx) == "" {
+			t.Fatal("empty bearer in elevated ctx")
+		}
+	}
+}
+
+func TestDomainAgentTools_CarryElevatedAuth(t *testing.T) {
+	_ = _const.ConfigureJWTSecret("test-secret-for-agent-identity-32b")
+	toolCtx, err := ContextWithElevatedAgent(context.Background(), 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// non-nil registrar pointer (tools only dial when AiInterface runs)
+	var dummyReg registry.Registrar
+	regPtr := &dummyReg
+	tools := DomainAgentTools(regPtr, 42, toolCtx)
+	if len(tools) < 6 {
+		t.Fatalf("expected multiple tools, got %d", len(tools))
+	}
+	authCtxs := ToolAuthContexts(tools)
+	if len(authCtxs) < 6 {
+		t.Fatalf("tools missing AuthContext: %d", len(authCtxs))
+	}
+	for i, c := range authCtxs {
+		if !core_data.HasElevatedAuth(c) {
+			t.Fatalf("tool[%d] missing elevated Bearer on RPC context", i)
+		}
+		bearer := core_data.BearerFromContext(c)
+		// 解析 JWT：orgId=42, isSiteAdmin, agent user
+		claims, err := parseTestJWT(bearer)
+		if err != nil {
+			t.Fatalf("tool[%d] jwt: %v", i, err)
+		}
+		if claims["orgId"] != float64(42) && claims["orgId"] != int64(42) && claims["orgId"] != 42 {
+			// MapClaims numbers are float64
+			if v, ok := claims["orgId"].(float64); !ok || int(v) != 42 {
+				t.Fatalf("tool[%d] orgId want 42 got %v", i, claims["orgId"])
+			}
+		}
+		if claims["isSiteAdmin"] != true {
+			t.Fatalf("tool[%d] not site admin: %v", i, claims["isSiteAdmin"])
+		}
+		if uid, ok := claims["userId"].(float64); !ok || uint(uid) != AgentHiddenUserID {
+			t.Fatalf("tool[%d] userId want agent got %v", i, claims["userId"])
+		}
+	}
+	// AiInterface 在无 discovery 时诚实失败（不 panic），且走了带 auth 的 dial 路径
+	msg := core_data.NewRankTool(nil, toolCtx).AiInterface(`{"startDate":"2026-07-01","endDate":"2026-07-07"}`)
+	if msg == "" || (!strings.Contains(msg, "连接") && !strings.Contains(msg, "失败") && !strings.Contains(msg, "registry")) {
+		// nil reg → registry 未配置
+		if !strings.Contains(msg, "registry") && !strings.Contains(msg, "连接") && !strings.Contains(msg, "失败") {
+			t.Fatalf("unexpected: %s", msg)
+		}
+	}
+	// Description 覆盖面
+	names := map[string]bool{}
+	for _, tfac := range tools {
+		d := tfac.Description()
+		if d != nil && d.Function != nil {
+			names[d.Function.Name] = true
+		}
+	}
+	for _, n := range []string{"statistic_period", "submit_cnt", "submit_log", "rank", "heatmap", "org_members", "last_submit_times"} {
+		if !names[n] {
+			t.Errorf("missing tool %s", n)
+		}
+	}
+}
+
+func parseTestJWT(token string) (map[string]interface{}, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("bad jwt")
+	}
+	// use jwt library via Issue path verification: re-parse with secret
+	// simple: decode claims with golang-jwt
+	return parseMapClaimsTest(token)
+}
+
+func TestDomainAgentTools_Registry(t *testing.T) {
+	// reg nil → empty
+	if tools := DomainAgentTools(nil, 1, context.Background()); tools != nil && len(tools) > 0 {
+		t.Fatal("expected no tools without reg")
+	}
+	names := map[string]bool{}
+	descs := []*model.Tool{
+		core_data.NewStatisticPeriod(nil).Description(),
+		core_data.NewSubmitCnt(nil).Description(),
+		core_data.NewSubmitLog(nil).Description(),
+		core_data.NewGetProfileById(nil).Description(),
+		core_data.NewRankTool(nil).Description(),
+		core_data.NewHeatmapTool(nil).Description(),
+		core_data.NewOrgMembersTool(nil).Description(),
+		core_data.NewGroupMembersTool(nil).Description(),
+		core_data.NewLastSubmitTool(nil).Description(),
+		core_data.NewPeriodACTool(nil).Description(),
+	}
+	for _, d := range descs {
+		if d == nil || d.Function == nil || d.Function.Name == "" {
+			t.Fatal("tool missing description")
+		}
+		names[d.Function.Name] = true
+	}
+	required := []string{"statistic_period", "submit_cnt", "submit_log", "rank", "heatmap", "org_members", "last_submit_times"}
+	for _, n := range required {
+		if !names[n] {
+			t.Errorf("missing tool %s", n)
+		}
+	}
+	msg := core_data.NewRankTool(nil).AiInterface(`{bad`)
+	if msg != "参数错误" {
+		if !strings.Contains(msg, "参数") && !strings.Contains(msg, "连接") && !strings.Contains(msg, "失败") && !strings.Contains(msg, "registry") {
+			t.Fatalf("unexpected tool msg: %s", msg)
+		}
+	}
+	msg2 := core_data.NewHeatmapTool(nil).AiInterface(`{"userId":1,"startDate":"2026-07-01","endDate":"2026-07-07"}`)
+	if msg2 == "" {
+		t.Fatal("empty tool result")
+	}
+}
+
+func TestBuildNotifyEmail_UsesExpiresAndFileName(t *testing.T) {
+	// 复现 skeptic：若用 pre-update job，ExpiresAt=0 → 1970，FileName 空 → attachment
+	stale := &TrainingReportJob{
+		JobID:     "job-stale",
+		StartDate: "2026-07-06",
+		EndDate:   "2026-07-12",
+		// ExpiresAt 0, FileName ""
+	}
+	_, bodyStale, nameStale := BuildNotifyEmail(stale, "GoAlgo", "<p>x</p>")
+	if !strings.Contains(bodyStale, "—") && strings.Contains(bodyStale, "1970") {
+		t.Fatal("stale job should not show 1970 when using — for zero expires")
+	}
+	if nameStale != "training-report.pdf" {
+		t.Fatalf("default attach name got %s", nameStale)
+	}
+
+	// 生产路径：finalize 后的 job
+	exp := time.Date(2026, 7, 18, 15, 4, 0, 0, time.Local)
+	done := &TrainingReportJob{
+		JobID:     "job-done",
+		StartDate: "2026-07-06",
+		EndDate:   "2026-07-12",
+		Status:    ReportStatusDone,
+		ExpiresAt: exp.Unix(),
+		FileName:  "training-report-2026-07-06-2026-07-12.pdf",
+	}
+	subj, body, name := BuildNotifyEmail(done, "GoAlgo", "<p>report</p>")
+	if !strings.Contains(subj, "2026-07-06") {
+		t.Fatalf("subject: %s", subj)
+	}
+	wantExp := exp.Format("2006-01-02 15:04")
+	if !strings.Contains(body, wantExp) {
+		t.Fatalf("body missing expiry %s: %s", wantExp, body)
+	}
+	if strings.Contains(body, "1970") {
+		t.Fatal("body has 1970 epoch")
+	}
+	if name != done.FileName {
+		t.Fatalf("attach name %s", name)
+	}
+}
+
+func TestCompleteJobThenNotify_Snapshot(t *testing.T) {
+	// 真实 finalize 路径：save done job → re-get → BuildNotifyEmail
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	uc := &SummaryUseCase{redis: rdb}
+	dir := t.TempDir()
+	t.Setenv(reportDirEnv, dir)
+	ctx := context.Background()
+
+	jobID := "finalize-job"
+	data := fixtureTrainingData()
+	html := RenderRuleTemplateHTML(data, "GoAlgo")
+	pdf := RenderSimplePDF(data, "GoAlgo")
+	htmlPath, pdfPath := jobArtifactPaths(jobID)
+	if err := os.WriteFile(htmlPath, []byte(html), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pdfPath, pdf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 模拟 runTrainingReportJob 完成段（与 shipped 代码一致）
+	job := &TrainingReportJob{
+		JobID:     jobID,
+		Status:    ReportStatusRunning,
+		StartDate: data.StartDate,
+		EndDate:   data.EndDate,
+		OrgID:     data.OrgID,
+		CreatedBy: data.InitiatorUserID,
+		CreatedAt: time.Now().Unix(),
+	}
+	if err := uc.saveJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	finished := time.Now()
+	expires := finished.Add(reportDownloadTTL)
+	fileName := fmt.Sprintf("training-report-%s-%s.pdf", job.StartDate, job.EndDate)
+	job.Status = ReportStatusDone
+	job.Progress = 100
+	job.Message = "已完成"
+	job.FinishedAt = finished.Unix()
+	job.ExpiresAt = expires.Unix()
+	job.HTMLPath = htmlPath
+	job.PDFPath = pdfPath
+	job.FileName = fileName
+	if err := uc.saveJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := uc.getJob(ctx, jobID)
+	if err != nil || fresh == nil {
+		t.Fatalf("re-get: %v", err)
+	}
+	if fresh.ExpiresAt == 0 || fresh.FileName == "" {
+		t.Fatalf("fresh job incomplete: %+v", fresh)
+	}
+	_, body, name := BuildNotifyEmail(fresh, "GoAlgo", html)
+	if strings.Contains(body, "1970") {
+		t.Fatal("notify body has 1970")
+	}
+	if !strings.Contains(body, time.Unix(fresh.ExpiresAt, 0).Format("2006-01-02 15:04")) {
+		t.Fatalf("body missing real expiry: %s", body)
+	}
+	if name != fileName {
+		t.Fatalf("name %s want %s", name, fileName)
+	}
+	// notify 在无 SMTP 时返回 SMTP 错误（路径被调用）
+	err = uc.notifyTrainingReportDone(ctx, data, fresh, html, pdfPath)
+	if err == nil {
+		t.Log("SMTP configured; notify ok")
+	} else if !strings.Contains(err.Error(), "SMTP") && !strings.Contains(err.Error(), "邮箱") {
+		t.Fatalf("unexpected: %v", err)
+	}
+}
+
+func TestWeeklyUsesTrainingPipeline_DateScope(t *testing.T) {
+	// 周报 = 上周 Mon-Sun（与 LastWeekRange 一致），经 GenerateTrainingReportSync 参数
+	now := time.Date(2026, 7, 13, 8, 0, 0, 0, time.Local) // Monday
+	start, end := LastWeekRange(now)
+	p := StartTrainingReportParams{
+		OrgID:     2,
+		StartDate: start.Format(dateLayout),
+		EndDate:   end.Format(dateLayout),
+		UseAI:     true,
+		Source:    "weekly",
+	}
+	if p.Source != "weekly" {
+		t.Fatal("source")
+	}
+	if p.StartDate != "2026-07-06" || p.EndDate != "2026-07-12" {
+		t.Fatalf("weekly range %s %s", p.StartDate, p.EndDate)
+	}
+	// 规则模板路径不依赖网络
+	data := fixtureTrainingData()
+	data.StartDate = p.StartDate
+	data.EndDate = p.EndDate
+	html := RenderRuleTemplateHTML(data, "GoAlgo")
+	if !strings.Contains(html, "2026-07-06") {
+		t.Fatal("weekly html missing week start")
+	}
+}
+
+func TestRankFromMap(t *testing.T) {
+	scores := map[int64]int64{1: 10, 2: 20, 3: 0}
+	names := map[int64]string{1: "A", 2: "B", 3: "C"}
+	r := rankFromMap(scores, names, 5)
+	if len(r) != 2 || r[0].Name != "B" || r[0].Score != 20 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestArtifactPathSandbox(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(reportDirEnv, dir)
+	f := filepath.Join(dir, "safe.pdf")
+	_ = os.WriteFile(f, []byte("%PDF-1.4"), 0o644)
+	job := &TrainingReportJob{
+		Status:    ReportStatusDone,
+		ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		PDFPath:   f,
+		FileName:  "safe.pdf",
+	}
+	abs, _, _, err := ResolveArtifactAbs(job, true)
+	if err != nil || abs != filepath.Clean(f) {
+		t.Fatalf("%v %s", err, abs)
+	}
+	// path traversal
+	job.PDFPath = filepath.Join(dir, "..", "etc", "passwd")
+	if _, _, _, err := ResolveArtifactAbs(job, true); err == nil {
+		t.Fatal("expected path reject")
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

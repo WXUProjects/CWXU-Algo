@@ -75,10 +75,13 @@ func ApplyUserProblemStatusFromSubmits(ctx context.Context, db *gorm.DB, logs []
 			Create(&row).Error; err != nil {
 			return err
 		}
-		// 首次变为 AC：标签画像 +1
+		// 首次变为 AC：标签画像 +1；待做题单自动剔除
 		if st == model.UserProblemStatusAC && prevSt != model.UserProblemStatusAC {
 			if err := IncUserTagACForFirstProblemAC(ctx, db, k.uid, k.pid); err != nil {
 				log.Warnf("user_tag_ac first AC user=%d problem=%d: %v", k.uid, k.pid, err)
+			}
+			if err := RemoveFromTodoOnAC(ctx, db, k.uid, k.pid); err != nil {
+				log.Warnf("RemoveFromTodoOnAC user=%d problem=%d: %v", k.uid, k.pid, err)
 			}
 		}
 	}

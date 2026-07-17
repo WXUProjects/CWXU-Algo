@@ -193,6 +193,7 @@ func (s *OrgService) isMemberDB(userID, orgID uint) bool {
 }
 
 // ensureOrgMember 保证用户为组织成员；已存在则更新角色/分组/称呼，否则创建。
+// groupID 为 nil 时：新建挂组织默认分组；更新不改原分组（仅当原分组为空时补默认）。
 func (s *OrgService) ensureOrgMember(orgID, userID uint, role string, groupID *uint, displayName string) error {
 	if orgID == 0 || userID == 0 {
 		return errors.New("invalid org or user")
@@ -206,11 +207,18 @@ func (s *OrgService) ensureOrgMember(orgID, userID uint, role string, groupID *u
 	var m model.OrgMember
 	err := s.db.Where("org_id = ? AND user_id = ?", orgID, userID).First(&m).Error
 	if err == nil {
-		err = s.db.Model(&m).Updates(map[string]interface{}{
+		updates := map[string]interface{}{
 			"role":             role,
-			"group_id":         groupID,
 			"org_display_name": displayName,
-		}).Error
+		}
+		if groupID != nil {
+			updates["group_id"] = groupID
+		} else if m.GroupID == nil || *m.GroupID == 0 {
+			if def := s.ensureDefaultGroupID(orgID); def > 0 {
+				updates["group_id"] = def
+			}
+		}
+		err = s.db.Model(&m).Updates(updates).Error
 		if err == nil {
 			s.invalidateOrgMembersCache(orgID)
 			s.invalidateDisplayCache(orgID, userID)
@@ -219,6 +227,11 @@ func (s *OrgService) ensureOrgMember(orgID, userID uint, role string, groupID *u
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
+	}
+	if groupID == nil {
+		if def := s.ensureDefaultGroupID(orgID); def > 0 {
+			groupID = &def
+		}
 	}
 	err = s.db.Create(&model.OrgMember{
 		OrgID:          orgID,

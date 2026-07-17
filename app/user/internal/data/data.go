@@ -113,6 +113,12 @@ func migrateModels(db *gorm.DB) {
 		&model.BackupJob{},
 		&model.UserFollow{},
 		&model.Notification{},
+		&model.BlogArticle{},
+		&model.BlogCategory{},
+		&model.BlogArticleOrg{},
+		&model.BlogComment{},
+		&model.BlogLike{},
+		&model.BlogThemeFlag{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")

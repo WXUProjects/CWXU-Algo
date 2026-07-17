@@ -31,6 +31,7 @@ const (
 	Profile_ClearDormant_FullMethodName            = "/api.user.v1.Profile/ClearDormant"
 	Profile_GetUserIdsByGroup_FullMethodName       = "/api.user.v1.Profile/GetUserIdsByGroup"
 	Profile_GetUserIdsByOrg_FullMethodName         = "/api.user.v1.Profile/GetUserIdsByOrg"
+	Profile_GetStaffOrgIds_FullMethodName          = "/api.user.v1.Profile/GetStaffOrgIds"
 	Profile_GetNonPublicOrgUserIds_FullMethodName  = "/api.user.v1.Profile/GetNonPublicOrgUserIds"
 	Profile_GetByIds_FullMethodName                = "/api.user.v1.Profile/GetByIds"
 	Profile_GetSyncPolicies_FullMethodName         = "/api.user.v1.Profile/GetSyncPolicies"
@@ -62,6 +63,8 @@ type ProfileClient interface {
 	GetUserIdsByGroup(ctx context.Context, in *GetUserIdsByGroupReq, opts ...grpc.CallOption) (*GetUserIdsByGroupRes, error)
 	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(ctx context.Context, in *GetUserIdsByOrgReq, opts ...grpc.CallOption) (*GetUserIdsByOrgRes, error)
+	// 用户可收周报/训练报告的 staff 组织 id 列表（内部/agent）
+	GetStaffOrgIds(ctx context.Context, in *GetStaffOrgIdsReq, opts ...grpc.CallOption) (*GetStaffOrgIdsRes, error)
 	// 题面流水线资格用户（供 core 闸门；内部调用）
 	// 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
 	GetNonPublicOrgUserIds(ctx context.Context, in *GetNonPublicOrgUserIdsReq, opts ...grpc.CallOption) (*GetNonPublicOrgUserIdsRes, error)
@@ -208,6 +211,16 @@ func (c *profileClient) GetUserIdsByOrg(ctx context.Context, in *GetUserIdsByOrg
 	return out, nil
 }
 
+func (c *profileClient) GetStaffOrgIds(ctx context.Context, in *GetStaffOrgIdsReq, opts ...grpc.CallOption) (*GetStaffOrgIdsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetStaffOrgIdsRes)
+	err := c.cc.Invoke(ctx, Profile_GetStaffOrgIds_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *profileClient) GetNonPublicOrgUserIds(ctx context.Context, in *GetNonPublicOrgUserIdsReq, opts ...grpc.CallOption) (*GetNonPublicOrgUserIdsRes, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetNonPublicOrgUserIdsRes)
@@ -309,6 +322,8 @@ type ProfileServer interface {
 	GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error)
 	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error)
+	// 用户可收周报/训练报告的 staff 组织 id 列表（内部/agent）
+	GetStaffOrgIds(context.Context, *GetStaffOrgIdsReq) (*GetStaffOrgIdsRes, error)
 	// 题面流水线资格用户（供 core 闸门；内部调用）
 	// 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
 	GetNonPublicOrgUserIds(context.Context, *GetNonPublicOrgUserIdsReq) (*GetNonPublicOrgUserIdsRes, error)
@@ -370,6 +385,9 @@ func (UnimplementedProfileServer) GetUserIdsByGroup(context.Context, *GetUserIds
 }
 func (UnimplementedProfileServer) GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUserIdsByOrg not implemented")
+}
+func (UnimplementedProfileServer) GetStaffOrgIds(context.Context, *GetStaffOrgIdsReq) (*GetStaffOrgIdsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetStaffOrgIds not implemented")
 }
 func (UnimplementedProfileServer) GetNonPublicOrgUserIds(context.Context, *GetNonPublicOrgUserIdsReq) (*GetNonPublicOrgUserIdsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetNonPublicOrgUserIds not implemented")
@@ -632,6 +650,24 @@ func _Profile_GetUserIdsByOrg_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Profile_GetStaffOrgIds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetStaffOrgIdsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).GetStaffOrgIds(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_GetStaffOrgIds_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).GetStaffOrgIds(ctx, req.(*GetStaffOrgIdsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Profile_GetNonPublicOrgUserIds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetNonPublicOrgUserIdsReq)
 	if err := dec(in); err != nil {
@@ -830,6 +866,10 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetUserIdsByOrg",
 			Handler:    _Profile_GetUserIdsByOrg_Handler,
+		},
+		{
+			MethodName: "GetStaffOrgIds",
+			Handler:    _Profile_GetStaffOrgIds_Handler,
 		},
 		{
 			MethodName: "GetNonPublicOrgUserIds",

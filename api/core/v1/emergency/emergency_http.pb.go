@@ -43,15 +43,15 @@ type EmergencyHTTPServer interface {
 
 func RegisterEmergencyHTTPServer(s *http.Server, srv EmergencyHTTPServer) {
 	r := s.Route("/")
-	r.POST("/v1/core/emergency/create", _Emergency_Create0_HTTP_Handler(srv))
-	r.POST("/v1/core/emergency/update", _Emergency_Update0_HTTP_Handler(srv))
-	r.DELETE("/v1/core/emergency/delete", _Emergency_Delete0_HTTP_Handler(srv))
+	r.POST("/v1/core/emergency/create", _Emergency_Create1_HTTP_Handler(srv))
+	r.POST("/v1/core/emergency/update", _Emergency_Update1_HTTP_Handler(srv))
+	r.DELETE("/v1/core/emergency/delete", _Emergency_Delete1_HTTP_Handler(srv))
 	r.GET("/v1/core/emergency/list", _Emergency_List1_HTTP_Handler(srv))
 	r.GET("/v1/core/emergency/active", _Emergency_Active0_HTTP_Handler(srv))
 	r.POST("/v1/core/emergency/reorder", _Emergency_Reorder0_HTTP_Handler(srv))
 }
 
-func _Emergency_Create0_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Context) error {
+func _Emergency_Create1_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in CreateEmergencyReq
 		if err := ctx.Bind(&in); err != nil {
@@ -73,7 +73,7 @@ func _Emergency_Create0_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Cont
 	}
 }
 
-func _Emergency_Update0_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Context) error {
+func _Emergency_Update1_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in UpdateEmergencyReq
 		if err := ctx.Bind(&in); err != nil {
@@ -95,7 +95,7 @@ func _Emergency_Update0_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Cont
 	}
 }
 
-func _Emergency_Delete0_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Context) error {
+func _Emergency_Delete1_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in DeleteEmergencyReq
 		if err := ctx.BindQuery(&in); err != nil {

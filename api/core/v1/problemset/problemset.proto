@@ -1,0 +1,194 @@
+syntax = "proto3";
+
+package api.core.v1.problemset;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/core/v1/problemset;problemset";
+option java_multiple_files = true;
+option java_package = "api.core.v1.problemset";
+
+// 题单服务（收藏 / 待做 / 自定义 + 广场）
+// 实现位于 core_data/internal/service/problemset.go（与 community 相同，手写 HTTP 路由）。
+// 路径前缀：/v1/core/problemset/*
+//
+// 系统题单 kind=favorites|todo；自定义 kind=custom。
+// 可见性 visibility=private|password|public（仅 public 进广场 / 题目页挂出）。
+service Problemset {
+  rpc Mine (MineReq) returns (MineRes) {
+    option (google.api.http) = { get: "/v1/core/problemset/mine" };
+  }
+  rpc Square (SquareReq) returns (SquareRes) {
+    option (google.api.http) = { get: "/v1/core/problemset/square" };
+  }
+  rpc Get (GetReq) returns (GetRes) {
+    option (google.api.http) = { get: "/v1/core/problemset/get" };
+  }
+  rpc ByProblem (ByProblemReq) returns (ByProblemRes) {
+    option (google.api.http) = { get: "/v1/core/problemset/by-problem" };
+  }
+  rpc Create (CreateReq) returns (CreateRes) {
+    option (google.api.http) = { post: "/v1/core/problemset/create" body: "*" };
+  }
+  rpc Update (UpdateReq) returns (UpdateRes) {
+    option (google.api.http) = { post: "/v1/core/problemset/update" body: "*" };
+  }
+  rpc Delete (DeleteReq) returns (DeleteRes) {
+    option (google.api.http) = { post: "/v1/core/problemset/delete" body: "*" };
+  }
+  rpc Unlock (UnlockReq) returns (UnlockRes) {
+    option (google.api.http) = { post: "/v1/core/problemset/unlock" body: "*" };
+  }
+  rpc Add (AddReq) returns (AddRes) {
+    option (google.api.http) = { post: "/v1/core/problemset/add" body: "*" };
+  }
+  rpc Remove (RemoveReq) returns (RemoveRes) {
+    option (google.api.http) = { post: "/v1/core/problemset/remove" body: "*" };
+  }
+  rpc Like (LikeReq) returns (LikeRes) {
+    option (google.api.http) = { post: "/v1/core/problemset/like" body: "*" };
+  }
+}
+
+message ProblemsetItem {
+  int64 id = 1;
+  int64 problemId = 2;
+  int32 sortOrder = 3;
+  int64 createdAt = 4;
+  string title = 5;
+  string platform = 6;
+  string externalId = 7;
+  string url = 8;
+  string difficulty = 9;
+  string status = 10;
+  string userStatus = 11;
+}
+
+message ProblemsetInfo {
+  int64 id = 1;
+  int64 ownerId = 2;
+  string ownerName = 3;
+  string title = 4;
+  string description = 5;
+  string kind = 6;        // favorites|todo|custom
+  string visibility = 7;  // private|password|public
+  int32 likeCount = 8;
+  int32 itemCount = 9;
+  bool liked = 10;
+  bool isOwner = 11;
+  bool isSystem = 12;
+  int64 createdAt = 13;
+  int64 updatedAt = 14;
+  repeated ProblemsetItem items = 15;
+  bool locked = 16;
+}
+
+message MineReq {}
+message MineRes {
+  bool success = 1;
+  string message = 2;
+  repeated ProblemsetInfo data = 3;
+}
+
+message SquareReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+  string keyword = 3;
+}
+message SquareRes {
+  bool success = 1;
+  string message = 2;
+  repeated ProblemsetInfo data = 3;
+  int64 total = 4;
+  int64 page = 5;
+  int64 pageSize = 6;
+}
+
+message GetReq {
+  int64 id = 1;
+  string unlockToken = 2;
+}
+message GetRes {
+  bool success = 1;
+  string message = 2;
+  string code = 3; // PASSWORD_REQUIRED
+  ProblemsetInfo data = 4;
+}
+
+message ByProblemReq { int64 problemId = 1; }
+message ByProblemRes {
+  bool success = 1;
+  string message = 2;
+  repeated ProblemsetInfo data = 3;
+}
+
+message CreateReq {
+  string title = 1;
+  string description = 2;
+  string visibility = 3;
+  string password = 4;
+}
+message CreateRes {
+  bool success = 1;
+  string message = 2;
+  ProblemsetInfo data = 3;
+}
+
+message UpdateReq {
+  int64 id = 1;
+  string title = 2;
+  string description = 3;
+  string visibility = 4;
+  string password = 5;
+  bool clearPassword = 6;
+}
+message UpdateRes {
+  bool success = 1;
+  string message = 2;
+  ProblemsetInfo data = 3;
+}
+
+message DeleteReq { int64 id = 1; }
+message DeleteRes {
+  bool success = 1;
+  string message = 2;
+}
+
+message UnlockReq {
+  int64 id = 1;
+  string password = 2;
+}
+message UnlockRes {
+  bool success = 1;
+  string message = 2;
+  string unlockToken = 3;
+  int64 expiresIn = 4;
+}
+
+message AddReq {
+  int64 problemsetId = 1;
+  int64 problemId = 2;
+  string url = 3;
+}
+message AddRes {
+  bool success = 1;
+  string message = 2;
+  int64 problemId = 3;
+  bool fetchTriggered = 4;
+}
+
+message RemoveReq {
+  int64 problemsetId = 1;
+  int64 problemId = 2;
+}
+message RemoveRes {
+  bool success = 1;
+  string message = 2;
+}
+
+message LikeReq { int64 id = 1; }
+message LikeRes {
+  bool success = 1;
+  string message = 2;
+  bool liked = 3;
+  int32 likeCount = 4;
+}

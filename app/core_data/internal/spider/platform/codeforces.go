@@ -184,6 +184,46 @@ func (p NewCodeforces) FetchContestLog(userId int64, username string, needAll bo
 func (p NewCodeforces) Name() string {
 	return spider.CodeForces
 }
+
+// FetchRating 通过 Codeforces API user.info 取当前 rating
+func (p NewCodeforces) FetchRating(username string) (int, bool, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return 0, false, fmt.Errorf("codeforces handle 为空")
+	}
+	url := fmt.Sprintf("https://codeforces.com/api/user.info?handles=%s", username)
+	resp, err := ojhttp.Get(url)
+	if err != nil {
+		return 0, false, fmt.Errorf("codeforces rating 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, false, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, false, fmt.Errorf("codeforces rating 状态码 %d: %s", resp.StatusCode, string(body))
+	}
+	var out struct {
+		Status string `json:"status"`
+		Result []struct {
+			// 未参赛用户无 rating 字段
+			Rating *int `json:"rating"`
+		} `json:"result"`
+		Comment string `json:"comment"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return 0, false, fmt.Errorf("codeforces rating 解析失败: %w", err)
+	}
+	if out.Status != "OK" || len(out.Result) == 0 {
+		return 0, false, fmt.Errorf("codeforces rating API: %s %s", out.Status, out.Comment)
+	}
+	if out.Result[0].Rating == nil {
+		return 0, false, nil // 未参赛
+	}
+	return *out.Result[0].Rating, true, nil
+}
+
 func init() {
 	// 注册到注册中心
 	spider.Register(NewCodeforces{})

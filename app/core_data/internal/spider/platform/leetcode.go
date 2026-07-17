@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -409,6 +410,61 @@ func setLCHeaders(req *http.Request, username string) {
 	req.Header.Set("Referer", fmt.Sprintf("https://leetcode.cn/u/%s/", username))
 	req.Header.Set("Origin", "https://leetcode.cn")
 	req.Header.Set("Accept", "application/json, text/plain, */*")
+}
+
+// FetchRating 力扣竞赛 rating（noj-go GraphQL；浮点四舍五入为整数）
+func (p NewLeetCode) FetchRating(username string) (int, bool, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return 0, false, fmt.Errorf("leetcode username 为空")
+	}
+	payload := map[string]interface{}{
+		"query": `query userContestRanking($userSlug: String!) {
+			userContestRanking(userSlug: $userSlug) { rating }
+		}`,
+		"variables": map[string]string{"userSlug": username},
+	}
+	b, _ := json.Marshal(payload)
+	req, err := http.NewRequest(http.MethodPost, lcGraphQLNoj, bytes.NewReader(b))
+	if err != nil {
+		return 0, false, err
+	}
+	setLCHeaders(req, username)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := ojhttp.Do(req)
+	if err != nil {
+		return 0, false, fmt.Errorf("leetcode rating 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, false, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, false, fmt.Errorf("leetcode rating 状态码 %d: %s", resp.StatusCode, string(body))
+	}
+	var pr struct {
+		Data struct {
+			UserContestRanking *struct {
+				Rating float64 `json:"rating"`
+			} `json:"userContestRanking"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &pr); err != nil {
+		return 0, false, fmt.Errorf("leetcode rating 解析失败: %w", err)
+	}
+	if len(pr.Errors) > 0 {
+		return 0, false, fmt.Errorf("leetcode rating graphql: %s", pr.Errors[0].Message)
+	}
+	// 未参加过竞赛时 userContestRanking 为 null
+	if pr.Data.UserContestRanking == nil {
+		return 0, false, nil
+	}
+	return int(pr.Data.UserContestRanking.Rating + 0.5), true, nil
 }
 
 func init() {

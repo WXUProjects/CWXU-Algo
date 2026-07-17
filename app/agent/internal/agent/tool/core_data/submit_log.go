@@ -2,11 +2,12 @@ package core_data
 
 import (
 	"context"
-	"cwxu-algo/api/core/v1/submit_log"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
+
+	"cwxu-algo/api/core/v1/submit_log"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
@@ -14,15 +15,6 @@ import (
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 	grpc2 "google.golang.org/grpc"
 )
-
-func (c *SubmitLog) coreDataRPC() (*grpc2.ClientConn, error) {
-	return grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///core-data"),
-		grpc.WithDiscovery((*c.reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
-}
 
 type SubmitLogParms struct {
 	StartDate string `json:"startDate"`
@@ -33,13 +25,27 @@ type SubmitLogParms struct {
 
 type SubmitLog struct {
 	reg *registry.Registrar
+	ctx context.Context
 }
 
-func NewSubmitLog(reg *registry.Registrar) *SubmitLog {
-	return &SubmitLog{
-		reg: reg,
-	}
+func NewSubmitLog(reg *registry.Registrar, ctxs ...context.Context) *SubmitLog {
+	return &SubmitLog{reg: reg, ctx: firstCtx(ctxs...)}
 }
+
+func (c *SubmitLog) AuthContext() context.Context { return toolRPCContext(c.ctx) }
+
+func (c *SubmitLog) coreDataRPC() (*grpc2.ClientConn, error) {
+	if c == nil || c.reg == nil {
+		return nil, fmt.Errorf("registry 未配置")
+	}
+	return grpc.DialInsecure(
+		toolRPCContext(c.ctx),
+		grpc.WithEndpoint("discovery:///core-data"),
+		grpc.WithDiscovery((*c.reg).(registry.Discovery)),
+		grpc.WithTimeout(20*time.Second),
+	)
+}
+
 func (c *SubmitLog) Description() *model.Tool {
 	return &model.Tool{
 		Type: model.ToolTypeFunction,
@@ -94,7 +100,7 @@ func (c *SubmitLog) Handle(endDate string, userId int, limit int) (string, error
 	}
 	t = t.AddDate(0, 0, 1)
 	res, err := sb.GetSubmitLog(
-		context.Background(),
+		toolRPCContext(c.ctx),
 		&submit_log.GetSubmitLogReq{Limit: int64(limit), Cursor: t.Unix(), UserId: int64(userId)},
 	)
 	if err != nil {

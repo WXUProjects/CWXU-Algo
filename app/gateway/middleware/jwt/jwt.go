@@ -49,6 +49,25 @@ var publicExact = map[string]struct{}{
 	"/v1/user/role/list":               {},
 	"/v1/user/paste/get":               {},
 	"/api/user/paste/get":              {},
+	// Blog public reads
+	"/v1/user/blog/by-username":    {},
+	"/api/user/blog/by-username":   {},
+	"/v1/user/blog/article/get":    {},
+	"/api/user/blog/article/get":   {},
+	"/v1/user/blog/article/unlock": {},
+	"/api/user/blog/article/unlock": {},
+	"/v1/user/blog/recommend":      {},
+	"/api/user/blog/recommend":     {},
+	"/v1/user/blog/plaza":          {},
+	"/api/user/blog/plaza":         {},
+	"/v1/user/blog/authors":        {},
+	"/api/user/blog/authors":       {},
+	"/v1/user/blog/categories":     {},
+	"/api/user/blog/categories":    {},
+	"/v1/user/blog/comment/list":   {},
+	"/api/user/blog/comment/list":  {},
+	"/v1/user/blog/theme/status":   {},
+	"/api/user/blog/theme/status":  {},
 	"/v1/user/site/config":             {},
 	"/api/user/site/config":            {},
 	"/v1/user/site/visit-ping":         {},
@@ -86,6 +105,11 @@ var publicExact = map[string]struct{}{
 	"/v1/core/activity/feed":         {},
 	"/v1/core/user/recent-comments":  {},
 	"/v1/core/user/recent-solutions": {},
+	// 题单：广场 / 详情 / 按题关联 / 密码解锁 可匿名
+	"/v1/core/problemset/square":     {},
+	"/v1/core/problemset/get":        {},
+	"/v1/core/problemset/by-problem": {},
+	"/v1/core/problemset/unlock":     {},
 }
 
 func parseBearer(secret []byte, authHeader string) (tokenStr string, valid bool) {

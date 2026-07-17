@@ -37,12 +37,12 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, sm
 		cleanup()
 		return nil, nil, err
 	}
-	summaryService := service.NewSummaryService(dataData, rabbitMQ)
-	httpServer := server.NewHTTPServer(confServer, logger, dataData, summaryService)
 	register := discovery.NewConsulRegister(confServer)
 	client := data.NewDataRDB(dataData)
 	chat := agent.NewChat(confAgent, client)
 	summaryUseCase := service2.NewSummaryUseCase(chat, smtp, register, dataData)
+	summaryService := service.NewSummaryService(dataData, rabbitMQ, summaryUseCase)
+	httpServer := server.NewHTTPServer(confServer, logger, dataData, summaryService, summaryUseCase)
 	consumer := service2.NewConsumer(rabbitMQ, summaryUseCase)
 	app := newApp(logger, grpcServer, httpServer, register, consumer)
 	return app, func() {

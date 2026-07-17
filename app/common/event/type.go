@@ -11,6 +11,8 @@ type SpiderEvent struct {
 type SummaryEvent struct {
 	UserId int64  `json:"user_id"`
 	Type   string `json:"type"`
+	// JobId 训练报告异步任务（Type=TrainingReport 时使用）
+	JobId string `json:"job_id,omitempty"`
 }
 
 // ProblemFetchEvent 题面爬取任务（problem_fetch 队列）
@@ -19,6 +21,10 @@ type ProblemFetchEvent struct {
 	Platform   string `json:"platform"`
 	ExternalID string `json:"external_id"`
 	URL        string `json:"url"`
+	// Force 忽略用户题面爬取资格闸门（题单加题等主动场景）
+	Force bool `json:"force,omitempty"`
+	// SkipAnalyze 爬取成功后不入 AI 分析队列
+	SkipAnalyze bool `json:"skip_analyze,omitempty"`
 }
 
 // ProblemAnalyzeEvent AI 打标任务（problem_analyze 队列，并发 3）

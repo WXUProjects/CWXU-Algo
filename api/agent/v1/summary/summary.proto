@@ -13,6 +13,28 @@ service Summary {
       get: "/v1/agent/summary/recent"
     };
   }
+
+  // StartTrainingReport 组织训练报告（异步）
+  rpc StartTrainingReport (StartTrainingReportRequest) returns (StartTrainingReportReply) {
+    option (google.api.http) = {
+      post: "/v1/agent/training-report/start"
+      body: "*"
+    };
+  }
+
+  // GetTrainingReportJob 查询任务状态
+  rpc GetTrainingReportJob (GetTrainingReportJobRequest) returns (GetTrainingReportJobReply) {
+    option (google.api.http) = {
+      get: "/v1/agent/training-report/job"
+    };
+  }
+
+  // ListTrainingReportJobs 当前组织最近任务
+  rpc ListTrainingReportJobs (ListTrainingReportJobsRequest) returns (ListTrainingReportJobsReply) {
+    option (google.api.http) = {
+      get: "/v1/agent/training-report/jobs"
+    };
+  }
 }
 
 message GetSummaryRequest {
@@ -23,4 +45,63 @@ message GetSummaryReply {
   int64 code = 1;
   string msg = 2;
   string resp = 3;
+}
+
+message StartTrainingReportRequest {
+  // 分析起始日期 YYYY-MM-DD（含）
+  string startDate = 1;
+  // 分析结束日期 YYYY-MM-DD（含）
+  string endDate = 2;
+  // 可选：组 ID，0 或不传表示整组织
+  int64 groupId = 3;
+  // 是否启用 AI 分析
+  bool useAi = 4;
+  // 可选：组织 ID，默认取 JWT 当前组织
+  int64 orgId = 5;
+}
+
+message StartTrainingReportReply {
+  int64 code = 1;
+  string msg = 2;
+  string jobId = 3;
+}
+
+message GetTrainingReportJobRequest {
+  string jobId = 1;
+}
+
+message TrainingReportJob {
+  string jobId = 1;
+  string status = 2; // pending | running | done | failed | expired
+  int64 progress = 3;
+  string message = 4;
+  string startDate = 5;
+  string endDate = 6;
+  int64 groupId = 7;
+  bool useAi = 8;
+  int64 orgId = 9;
+  int64 createdBy = 10;
+  int64 createdAt = 11;
+  int64 finishedAt = 12;
+  int64 expiresAt = 13;
+  bool downloadable = 14;
+  string errorDetail = 15;
+  string fileName = 16;
+}
+
+message GetTrainingReportJobReply {
+  int64 code = 1;
+  string msg = 2;
+  TrainingReportJob job = 3;
+}
+
+message ListTrainingReportJobsRequest {
+  int64 orgId = 1;
+  int64 limit = 2;
+}
+
+message ListTrainingReportJobsReply {
+  int64 code = 1;
+  string msg = 2;
+  repeated TrainingReportJob jobs = 3;
 }

@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"cwxu-algo/api/user/v1/profile"
+	"cwxu-algo/app/common/blogsync"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/common/utils/auth"
@@ -445,7 +446,7 @@ func (s *CommunityService) handleSolutionList(ctx khttp.Context) error {
 	items := make([]map[string]interface{}, 0, len(list))
 	for _, sol := range list {
 		u := users[sol.UserID]
-		items = append(items, map[string]interface{}{
+		item := map[string]interface{}{
 			"id":        sol.ID,
 			"problemId": sol.ProblemID,
 			"userId":    sol.UserID,
@@ -459,7 +460,13 @@ func (s *CommunityService) handleSolutionList(ctx khttp.Context) error {
 			"liked":     likedSet[sol.ID],
 			"createdAt": sol.CreatedAt.Unix(),
 			"updatedAt": sol.UpdatedAt.Unix(),
-		})
+		}
+		if slug, ok := s.blogSlugFor(sol); ok && u.username != "" {
+			item["blogArticleId"] = sol.BlogArticleID
+			item["blogSlug"] = slug
+			item["blogUsername"] = u.username
+		}
+		items = append(items, item)
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "ok", "list": items, "total": total, "page": page, "pageSize": pageSize,
@@ -492,15 +499,31 @@ func (s *CommunityService) handleSolutionGet(ctx khttp.Context) error {
 			Count(&n).Error
 		liked = n > 0
 	}
+	// 旧题解 / 博客镜像丢失：懒同步（有 userDB 时）
+	slug, hasBlog := s.blogSlugFor(sol)
+	if !hasBlog && s.udb != nil {
+		// 缓存失效时清零以便 Upsert 重建
+		if sol.BlogArticleID > 0 {
+			sol.BlogArticleID = 0
+			_ = s.db.Model(&sol).Update("blog_article_id", 0).Error
+		}
+		s.syncSolutionToBlog(&sol)
+		slug, hasBlog = s.blogSlugFor(sol)
+	}
+	data := map[string]interface{}{
+		"id": sol.ID, "problemId": sol.ProblemID, "userId": sol.UserID,
+		"username": u.username, "name": u.name, "avatar": u.avatar,
+		"title": sol.Title, "contentMd": sol.ContentMD,
+		"likeCount": sol.LikeCount, "liked": liked,
+		"createdAt": sol.CreatedAt.Unix(), "updatedAt": sol.UpdatedAt.Unix(),
+	}
+	if hasBlog && slug != "" && u.username != "" {
+		data["blogArticleId"] = sol.BlogArticleID
+		data["blogSlug"] = slug
+		data["blogUsername"] = u.username
+	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true, "message": "ok",
-		"data": map[string]interface{}{
-			"id": sol.ID, "problemId": sol.ProblemID, "userId": sol.UserID,
-			"username": u.username, "name": u.name, "avatar": u.avatar,
-			"title": sol.Title, "contentMd": sol.ContentMD,
-			"likeCount": sol.LikeCount, "liked": liked,
-			"createdAt": sol.CreatedAt.Unix(), "updatedAt": sol.UpdatedAt.Unix(),
-		},
+		"success": true, "message": "ok", "data": data,
 	})
 	return nil
 }
@@ -552,6 +575,8 @@ func (s *CommunityService) handleSolutionCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "发布失败"})
 		return nil
 	}
+	// 同步到个人博客默认分类（失败不阻断发布）
+	s.syncSolutionToBlog(&row)
 	if pd.OrgID > 0 {
 		_ = s.db.Create(&model.ActivityFeed{
 			OrgID:     pd.OrgID,
@@ -564,12 +589,19 @@ func (s *CommunityService) handleSolutionCreate(ctx khttp.Context) error {
 		}).Error
 	}
 	s.emitMentions(ctx, pd.UserID, pd.Username, title+"\n"+content, "solution", row.ID, req.ProblemID)
+	out := map[string]interface{}{
+		"id": row.ID, "problemId": row.ProblemID, "userId": row.UserID,
+		"title": row.Title, "contentMd": row.ContentMD, "createdAt": row.CreatedAt.Unix(),
+	}
+	if row.BlogArticleID > 0 {
+		out["blogArticleId"] = row.BlogArticleID
+		if slug, ok := s.blogSlugFor(row); ok {
+			out["blogSlug"] = slug
+			out["blogUsername"] = pd.Username
+		}
+	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true, "message": "已发布",
-		"data": map[string]interface{}{
-			"id": row.ID, "problemId": row.ProblemID, "userId": row.UserID,
-			"title": row.Title, "contentMd": row.ContentMD, "createdAt": row.CreatedAt.Unix(),
-		},
+		"success": true, "message": "已发布", "data": out,
 	})
 	return nil
 }
@@ -611,11 +643,15 @@ func (s *CommunityService) handleSolutionUpdate(ctx khttp.Context) error {
 	_ = s.db.Model(&row).Updates(map[string]interface{}{
 		"title": title, "content_md": content,
 	}).Error
+	row.Title = title
+	row.ContentMD = content
 	_ = s.db.Model(&model.ActivityFeed{}).
 		Where("type = ? AND ref_id = ?", model.ActivityTypeSolution, row.ID).
 		Updates(map[string]interface{}{
 			"title": title, "excerpt": excerpt(content, maxExcerptRunes),
 		}).Error
+	// 同步更新博客镜像
+	s.syncSolutionToBlog(&row)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "已更新"})
 	return nil
 }
@@ -651,6 +687,8 @@ func (s *CommunityService) handleSolutionDelete(ctx khttp.Context) error {
 		_ = s.db.Where("target_type = ? AND target_id IN ?", model.CommunityTargetComment, commentIDs).Delete(&model.CommunityLike{}).Error
 		_ = s.db.Where("target_type = ? AND target_id IN ?", model.CommunityTargetComment, commentIDs).Delete(&model.CommunityReport{}).Error
 	}
+	// 先删博客镜像再删题解
+	blogsync.DeleteBySolution(s.udb, row.UserID, row.ID, row.BlogArticleID)
 	_ = s.db.Delete(&row).Error
 	_ = s.db.Where("type = ? AND ref_id = ?", model.ActivityTypeSolution, row.ID).Delete(&model.ActivityFeed{}).Error
 	_ = s.db.Where("target_type = ? AND target_id = ?", model.CommunityTargetSolution, row.ID).Delete(&model.CommunityLike{}).Error
@@ -942,6 +980,41 @@ func (s *CommunityService) handleUserRecentSolutions(ctx khttp.Context) error {
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "ok", "list": items})
 	return nil
+}
+
+// syncSolutionToBlog 将题解写入个人博客默认分类；失败仅打日志。
+func (s *CommunityService) syncSolutionToBlog(sol *model.ProblemUserSolution) {
+	if s == nil || sol == nil || sol.ID == 0 || s.udb == nil {
+		return
+	}
+	aid, _, err := blogsync.UpsertFromSolution(s.udb, sol.UserID, sol.ID, sol.BlogArticleID, sol.Title, sol.ContentMD)
+	if err != nil {
+		log.Warnf("blogsync solution=%d: %v", sol.ID, err)
+		return
+	}
+	if aid > 0 && aid != sol.BlogArticleID {
+		sol.BlogArticleID = aid
+		_ = s.db.Model(sol).Update("blog_article_id", aid).Error
+	}
+}
+
+// blogSlugFor 解析题解对应的博客 slug（优先缓存 article id，再按 source_solution_id）。
+func (s *CommunityService) blogSlugFor(sol model.ProblemUserSolution) (string, bool) {
+	if s.udb == nil {
+		return "", false
+	}
+	if sol.BlogArticleID > 0 {
+		if slug, ok := blogsync.LookupByArticleID(s.udb, sol.BlogArticleID, sol.UserID); ok {
+			return slug, true
+		}
+	}
+	if id, slug, ok := blogsync.LookupBySolution(s.udb, sol.ID); ok {
+		if sol.BlogArticleID == 0 && id > 0 {
+			_ = s.db.Model(&model.ProblemUserSolution{}).Where("id = ?", sol.ID).Update("blog_article_id", id).Error
+		}
+		return slug, true
+	}
+	return "", false
 }
 
 // ---------- helpers ----------

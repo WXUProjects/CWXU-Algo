@@ -19,7 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Summary_GetRecentSummary_FullMethodName = "/api.agent.v1.summary.Summary/GetRecentSummary"
+	Summary_GetRecentSummary_FullMethodName       = "/api.agent.v1.summary.Summary/GetRecentSummary"
+	Summary_StartTrainingReport_FullMethodName    = "/api.agent.v1.summary.Summary/StartTrainingReport"
+	Summary_GetTrainingReportJob_FullMethodName   = "/api.agent.v1.summary.Summary/GetTrainingReportJob"
+	Summary_ListTrainingReportJobs_FullMethodName = "/api.agent.v1.summary.Summary/ListTrainingReportJobs"
 )
 
 // SummaryClient is the client API for Summary service.
@@ -27,6 +30,12 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SummaryClient interface {
 	GetRecentSummary(ctx context.Context, in *GetSummaryRequest, opts ...grpc.CallOption) (*GetSummaryReply, error)
+	// StartTrainingReport 组织训练报告（异步）
+	StartTrainingReport(ctx context.Context, in *StartTrainingReportRequest, opts ...grpc.CallOption) (*StartTrainingReportReply, error)
+	// GetTrainingReportJob 查询任务状态
+	GetTrainingReportJob(ctx context.Context, in *GetTrainingReportJobRequest, opts ...grpc.CallOption) (*GetTrainingReportJobReply, error)
+	// ListTrainingReportJobs 当前组织最近任务
+	ListTrainingReportJobs(ctx context.Context, in *ListTrainingReportJobsRequest, opts ...grpc.CallOption) (*ListTrainingReportJobsReply, error)
 }
 
 type summaryClient struct {
@@ -47,11 +56,47 @@ func (c *summaryClient) GetRecentSummary(ctx context.Context, in *GetSummaryRequ
 	return out, nil
 }
 
+func (c *summaryClient) StartTrainingReport(ctx context.Context, in *StartTrainingReportRequest, opts ...grpc.CallOption) (*StartTrainingReportReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StartTrainingReportReply)
+	err := c.cc.Invoke(ctx, Summary_StartTrainingReport_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *summaryClient) GetTrainingReportJob(ctx context.Context, in *GetTrainingReportJobRequest, opts ...grpc.CallOption) (*GetTrainingReportJobReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTrainingReportJobReply)
+	err := c.cc.Invoke(ctx, Summary_GetTrainingReportJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *summaryClient) ListTrainingReportJobs(ctx context.Context, in *ListTrainingReportJobsRequest, opts ...grpc.CallOption) (*ListTrainingReportJobsReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTrainingReportJobsReply)
+	err := c.cc.Invoke(ctx, Summary_ListTrainingReportJobs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SummaryServer is the server API for Summary service.
 // All implementations must embed UnimplementedSummaryServer
 // for forward compatibility.
 type SummaryServer interface {
 	GetRecentSummary(context.Context, *GetSummaryRequest) (*GetSummaryReply, error)
+	// StartTrainingReport 组织训练报告（异步）
+	StartTrainingReport(context.Context, *StartTrainingReportRequest) (*StartTrainingReportReply, error)
+	// GetTrainingReportJob 查询任务状态
+	GetTrainingReportJob(context.Context, *GetTrainingReportJobRequest) (*GetTrainingReportJobReply, error)
+	// ListTrainingReportJobs 当前组织最近任务
+	ListTrainingReportJobs(context.Context, *ListTrainingReportJobsRequest) (*ListTrainingReportJobsReply, error)
 	mustEmbedUnimplementedSummaryServer()
 }
 
@@ -64,6 +109,15 @@ type UnimplementedSummaryServer struct{}
 
 func (UnimplementedSummaryServer) GetRecentSummary(context.Context, *GetSummaryRequest) (*GetSummaryReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRecentSummary not implemented")
+}
+func (UnimplementedSummaryServer) StartTrainingReport(context.Context, *StartTrainingReportRequest) (*StartTrainingReportReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartTrainingReport not implemented")
+}
+func (UnimplementedSummaryServer) GetTrainingReportJob(context.Context, *GetTrainingReportJobRequest) (*GetTrainingReportJobReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTrainingReportJob not implemented")
+}
+func (UnimplementedSummaryServer) ListTrainingReportJobs(context.Context, *ListTrainingReportJobsRequest) (*ListTrainingReportJobsReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTrainingReportJobs not implemented")
 }
 func (UnimplementedSummaryServer) mustEmbedUnimplementedSummaryServer() {}
 func (UnimplementedSummaryServer) testEmbeddedByValue()                 {}
@@ -104,6 +158,60 @@ func _Summary_GetRecentSummary_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Summary_StartTrainingReport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartTrainingReportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SummaryServer).StartTrainingReport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Summary_StartTrainingReport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SummaryServer).StartTrainingReport(ctx, req.(*StartTrainingReportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Summary_GetTrainingReportJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTrainingReportJobRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SummaryServer).GetTrainingReportJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Summary_GetTrainingReportJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SummaryServer).GetTrainingReportJob(ctx, req.(*GetTrainingReportJobRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Summary_ListTrainingReportJobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTrainingReportJobsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SummaryServer).ListTrainingReportJobs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Summary_ListTrainingReportJobs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SummaryServer).ListTrainingReportJobs(ctx, req.(*ListTrainingReportJobsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Summary_ServiceDesc is the grpc.ServiceDesc for Summary service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -114,6 +222,18 @@ var Summary_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRecentSummary",
 			Handler:    _Summary_GetRecentSummary_Handler,
+		},
+		{
+			MethodName: "StartTrainingReport",
+			Handler:    _Summary_StartTrainingReport_Handler,
+		},
+		{
+			MethodName: "GetTrainingReportJob",
+			Handler:    _Summary_GetTrainingReportJob_Handler,
+		},
+		{
+			MethodName: "ListTrainingReportJobs",
+			Handler:    _Summary_ListTrainingReportJobs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

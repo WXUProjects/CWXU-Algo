@@ -209,17 +209,19 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 	orgMap, _ := p.profileDal.GetOrgBriefsByUserIDs(ctx, uids)
 	groupNames, _ := p.profileDal.GetGroupNamesByIDs(ctx, gids)
 
-	// 组织视图：列表名称优先组织内称呼
+	// 列表名称：site=公共域外显名称（≡站内昵称）；org=当前组织内称呼
 	displayByUID := map[uint]string{}
-	if !useSite {
-		orgID := uint(0)
-		if pd := auth.GetCurrentUser(ctx); pd != nil {
-			orgID = pd.OrgID
-		}
-		if orgID == 0 {
-			orgID, _ = p.profileDal.PublicOrgID(ctx)
-		}
-		if m, e := p.profileDal.OrgDisplayNamesByUserIDs(ctx, orgID, uids); e == nil {
+	orgIDForDisplay := uint(0)
+	if useSite {
+		orgIDForDisplay, _ = p.profileDal.PublicOrgID(ctx)
+	} else if pd := auth.GetCurrentUser(ctx); pd != nil {
+		orgIDForDisplay = pd.OrgID
+	}
+	if orgIDForDisplay == 0 {
+		orgIDForDisplay, _ = p.profileDal.PublicOrgID(ctx)
+	}
+	if orgIDForDisplay > 0 {
+		if m, e := p.profileDal.OrgDisplayNamesByUserIDs(ctx, orgIDForDisplay, uids); e == nil {
 			displayByUID = m
 		}
 	}
@@ -262,13 +264,15 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		} else {
 			gName = "默认分组"
 		}
+		// site：公共域 org_display_name；org：当前组织称呼；空则回落 users.name / username
 		displayName := v.Name
-		if !useSite {
-			if d := displayByUID[v.ID]; d != "" {
-				displayName = d
-			} else if v.Username != "" {
-				displayName = v.Username
-			}
+		if d := displayByUID[v.ID]; d != "" {
+			displayName = d
+		} else if !useSite && v.Username != "" {
+			// 组织视图：无组织内称呼时用 username（不展示其他组织的昵称）
+			displayName = v.Username
+		} else if strings.TrimSpace(displayName) == "" && v.Username != "" {
+			displayName = v.Username
 		}
 		uid := int64(v.ID)
 		_, isNonPublic := nonPublicSet[uid]
@@ -489,8 +493,10 @@ func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*
 		} else if sp != nil {
 			for _, v := range sp.Data {
 				spiders = append(spiders, &profile.GetByIdRes_Spiders{
-					Platform: v.Platform,
-					Username: v.Username,
+					Platform:  v.Platform,
+					Username:  v.Username,
+					Rating:    v.GetRating(),
+					HasRating: v.GetHasRating(),
 				})
 			}
 			lastSyncAt = sp.GetLastSyncAt()
@@ -673,6 +679,22 @@ func (p *ProfileService) GetUserIdsByOrg(ctx context.Context, req *profile.GetUs
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
 	return &profile.GetUserIdsByOrgRes{UserIds: ids, OrgId: int64(orgID)}, nil
+}
+
+// GetStaffOrgIds 用户作为 coach/captain/org_admin 且组织开启周报的组织列表
+func (p *ProfileService) GetStaffOrgIds(ctx context.Context, req *profile.GetStaffOrgIdsReq) (*profile.GetStaffOrgIdsRes, error) {
+	if req.GetUserId() <= 0 {
+		return &profile.GetStaffOrgIdsRes{OrgIds: nil}, nil
+	}
+	ids, err := p.profileDal.StaffOrgIDsForWeekly(ctx, req.GetUserId())
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, int64(id))
+	}
+	return &profile.GetStaffOrgIdsRes{OrgIds: out}, nil
 }
 
 // GetNonPublicOrgUserIds 题面流水线资格用户（爬取 / AI；含个人覆盖）

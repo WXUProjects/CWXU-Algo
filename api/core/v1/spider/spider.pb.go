@@ -903,9 +903,13 @@ func (x *EnqueueUserSpiderRes) GetPublished() int64 {
 }
 
 type GetSpiderRep_Data struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Platform      string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
-	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Platform string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
+	Username string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	// 平台当前 rating（整数）；hasRating=false 时忽略
+	Rating int32 `protobuf:"varint,3,opt,name=rating,proto3" json:"rating,omitempty"`
+	// 是否已抓到有效 rating
+	HasRating     bool `protobuf:"varint,4,opt,name=hasRating,proto3" json:"hasRating,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -954,6 +958,20 @@ func (x *GetSpiderRep_Data) GetUsername() string {
 	return ""
 }
 
+func (x *GetSpiderRep_Data) GetRating() int32 {
+	if x != nil {
+		return x.Rating
+	}
+	return 0
+}
+
+func (x *GetSpiderRep_Data) GetHasRating() bool {
+	if x != nil {
+		return x.HasRating
+	}
+	return false
+}
+
 var File_core_v1_spider_spider_proto protoreflect.FileDescriptor
 
 const file_core_v1_spider_spider_proto_rawDesc = "" +
@@ -967,15 +985,17 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"&\n" +
 	"\fGetSpiderReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\xa9\x01\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\xdf\x01\n" +
 	"\fGetSpiderRep\x129\n" +
 	"\x04data\x18\x01 \x03(\v2%.api.core.v1.spider.GetSpiderRep.DataR\x04data\x12\x1e\n" +
 	"\n" +
 	"lastSyncAt\x18\x02 \x01(\x03R\n" +
-	"lastSyncAt\x1a>\n" +
+	"lastSyncAt\x1at\n" +
 	"\x04Data\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1a\n" +
-	"\busername\x18\x02 \x01(\tR\busername\"$\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12\x16\n" +
+	"\x06rating\x18\x03 \x01(\x05R\x06rating\x12\x1c\n" +
+	"\thasRating\x18\x04 \x01(\bR\thasRating\"$\n" +
 	"\tUpdateReq\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\x03R\x06userId\"9\n" +
 	"\tUpdateRes\x12\x12\n" +

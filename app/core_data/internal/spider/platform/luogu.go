@@ -13,6 +13,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -288,6 +289,99 @@ func (lg *NewLuoGu) FetchSubmitLog(userId int64, username string, needAll bool) 
 
 func (lg *NewLuoGu) Name() string {
 	return spider.LuoGu
+}
+
+// FetchRating 洛谷用户页注入数据中的 rating（需登录会话；无参赛则 hasRating=false）
+func (lg *NewLuoGu) FetchRating(username string) (int, bool, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return 0, false, fmt.Errorf("luogu username 为空")
+	}
+	client, err := lg.getClient()
+	if err != nil {
+		return 0, false, err
+	}
+	// 先用搜索把用户名解析为 uid（绑定字段是用户名）
+	uid, err := lg.resolveUID(client, username)
+	if err != nil {
+		return 0, false, err
+	}
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://www.luogu.com.cn/user/%d", uid), nil)
+	if err != nil {
+		return 0, false, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, false, fmt.Errorf("luogu user 请求失败: %w", err)
+	}
+	rb, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return 0, false, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, false, fmt.Errorf("luogu user 状态码 %d", resp.StatusCode)
+	}
+	// 复用 _feInjection 解析，但结构不同：currentData.user.rating
+	re := regexp.MustCompile(`window\._feInjection\s*=\s*JSON\.parse\(decodeURIComponent\("(.+?)"\)\)`)
+	m := re.FindStringSubmatch(string(rb))
+	if len(m) != 2 {
+		return 0, false, fmt.Errorf("luogu user 未找到 _feInjection")
+	}
+	decoded, err := url.QueryUnescape(m[1])
+	if err != nil {
+		return 0, false, err
+	}
+	var inj struct {
+		CurrentData struct {
+			User *struct {
+				// rating 可能为 null（未参加过 rated 比赛）
+				Rating *int `json:"rating"`
+			} `json:"user"`
+		} `json:"currentData"`
+	}
+	if err := json.Unmarshal([]byte(decoded), &inj); err != nil {
+		return 0, false, fmt.Errorf("luogu user 解析失败: %w", err)
+	}
+	if inj.CurrentData.User == nil || inj.CurrentData.User.Rating == nil {
+		return 0, false, nil
+	}
+	return *inj.CurrentData.User.Rating, true, nil
+}
+
+func (lg *NewLuoGu) resolveUID(client *http.Client, username string) (int64, error) {
+	// 纯数字：直接当 uid
+	if n, err := strconv.ParseInt(username, 10, 64); err == nil && n > 0 {
+		return n, nil
+	}
+	api := "https://www.luogu.com.cn/api/user/search?keyword=" + url.QueryEscape(username)
+	resp, err := client.Get(api)
+	if err != nil {
+		return 0, fmt.Errorf("luogu search 失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	var out struct {
+		Users []struct {
+			UID  int64  `json:"uid"`
+			Name string `json:"name"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return 0, fmt.Errorf("luogu search 解析失败: %w", err)
+	}
+	for _, u := range out.Users {
+		if strings.EqualFold(u.Name, username) {
+			return u.UID, nil
+		}
+	}
+	if len(out.Users) == 1 {
+		return out.Users[0].UID, nil
+	}
+	return 0, fmt.Errorf("luogu 未找到用户: %s", username)
 }
 
 func init() {
