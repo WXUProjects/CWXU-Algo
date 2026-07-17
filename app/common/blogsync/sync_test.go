@@ -47,6 +47,15 @@ func TestUpsertFromSolution(t *testing.T) {
 	if slug != "solution-99" || aid == 0 {
 		t.Fatalf("aid=%d slug=%s", aid, slug)
 	}
+	var created Article
+	_ = db.First(&created, aid).Error
+	if created.Summary != "" {
+		t.Fatalf("solution sync must not auto-fill summary, got %q", created.Summary)
+	}
+
+	// 作者手填摘要后，题解再更新不应覆盖
+	_ = db.Model(&created).Update("summary", "我手写的摘要").Error
+
 	// update
 	aid2, slug2, err := UpsertFromSolution(db, 3, 99, aid, "差分题解 v2", "新内容")
 	if err != nil || aid2 != aid || slug2 != slug {
@@ -56,6 +65,9 @@ func TestUpsertFromSolution(t *testing.T) {
 	_ = db.First(&a, aid).Error
 	if a.Title != "差分题解 v2" || a.Content != "新内容" {
 		t.Fatalf("article=%+v", a)
+	}
+	if a.Summary != "我手写的摘要" {
+		t.Fatalf("update must keep author summary, got %q", a.Summary)
 	}
 	if a.SourceSolutionID == nil || *a.SourceSolutionID != 99 {
 		t.Fatalf("source=%v", a.SourceSolutionID)

@@ -308,18 +308,36 @@ func (s *OrgService) addOrgMemberAtomic(orgID, userID uint, role, displayName st
 		if o.Status != model.OrgStatusActive {
 			return errors.New("该组织当前已暂停")
 		}
-		var existing int64
-		if err := tx.Model(&model.OrgMember{}).Where("org_id = ? AND user_id = ?", orgID, userID).Count(&existing).Error; err != nil {
-			return err
-		}
-		if existing > 0 {
+		var existing model.OrgMember
+		err := tx.Where("org_id = ? AND user_id = ?", orgID, userID).First(&existing).Error
+		if err == nil {
+			// 已是成员：补空/0 分组到默认组（不改已有有效分组）
+			if existing.GroupID == nil || *existing.GroupID == 0 {
+				var group model.Group
+				gerr := tx.Where("org_id = ? AND name IN ?", orgID, []string{model.DefaultGroupName, "未分组"}).
+					Order("id ASC").First(&group).Error
+				if errors.Is(gerr, gorm.ErrRecordNotFound) {
+					name := model.DefaultGroupName
+					group = model.Group{Name: &name, Describe: model.DefaultGroupDesc, OrgID: orgID}
+					if gerr = tx.Create(&group).Error; gerr != nil {
+						return gerr
+					}
+				} else if gerr != nil {
+					return gerr
+				}
+				gid := group.ID
+				return tx.Model(&existing).Update("group_id", gid).Error
+			}
 			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
 		}
 		if msg := seatFullMessage(tx, &o); msg != "" {
 			return errors.New(msg)
 		}
 		var group model.Group
-		err := tx.Where("org_id = ? AND name IN ?", orgID, []string{model.DefaultGroupName, "未分组"}).
+		err = tx.Where("org_id = ? AND name IN ?", orgID, []string{model.DefaultGroupName, "未分组"}).
 			Order("id ASC").First(&group).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			name := model.DefaultGroupName

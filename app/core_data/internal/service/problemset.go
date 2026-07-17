@@ -181,9 +181,25 @@ func (s *ProblemsetService) handleMine(ctx khttp.Context) error {
 		return nil
 	}
 	liked := s.likedMap(uid, idsOfSets(list))
+	// 可选 problemId：标注本题是否已在各题单中（题目页「添加到题单」用）
+	checkPID := queryUint(ctx, "problemId")
+	contains := map[uint]bool{}
+	if checkPID > 0 && len(list) > 0 {
+		var hitIDs []uint
+		_ = s.db.Model(&model.ProblemsetItem{}).
+			Where("problem_id = ? AND problemset_id IN ?", checkPID, idsOfSets(list)).
+			Pluck("problemset_id", &hitIDs).Error
+		for _, id := range hitIDs {
+			contains[id] = true
+		}
+	}
 	items := make([]map[string]interface{}, 0, len(list))
 	for i := range list {
-		items = append(items, s.toBrief(&list[i], uid, liked[list[i].ID], false))
+		b := s.toBrief(&list[i], uid, liked[list[i].ID], false)
+		if checkPID > 0 {
+			b["containsProblem"] = contains[list[i].ID]
+		}
+		items = append(items, b)
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "ok", "data": items,

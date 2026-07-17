@@ -75,7 +75,9 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 	r.POST("/v1/user/blog/comment/delete", bs.handleCommentDelete)
 	r.POST("/v1/user/blog/like", bs.handleLikeToggle)
 
-	// Site-admin theme enable
+	// Owner theme config (themeId + social links)
+	r.POST("/v1/user/blog/theme/config", bs.handleThemeConfigSave)
+	// Site-admin theme enable (legacy custom-theme capability)
 	r.POST("/v1/user/blog/theme/enable", bs.handleThemeEnable)
 }
 
@@ -364,6 +366,7 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 
 	// theme status for blog shell
 	themeOn := s.themeEnabledFor(u.ID)
+	siteCfg := s.loadSiteConfig(u.ID)
 
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code":    0,
@@ -375,12 +378,15 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 				"name":     u.Name,
 				"avatar":   u.Avatar,
 			},
-			"list":          out,
-			"total":         total,
-			"page":          page,
-			"pageSize":      pageSize,
-			"themeEnabled":  themeOn,
-			"isOwner":       viewer == u.ID,
+			"list":         out,
+			"total":        total,
+			"page":         page,
+			"pageSize":     pageSize,
+			"themeEnabled": themeOn,
+			"themeId":      siteCfg.ThemeID,
+			"subtitle":     siteCfg.Subtitle,
+			"socialLinks":  siteCfg.SocialLinks,
+			"isOwner":      viewer == u.ID,
 		},
 	})
 	return nil
@@ -636,18 +642,10 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 	if len(content) > maxBlogContent {
 		return nil, "正文过大，最大 512KB"
 	}
+	// 摘要与题解同步一致：不自动从正文截取，空着留给作者手填
 	summary := strings.TrimSpace(req.Summary)
 	if utf8.RuneCountInString(summary) > maxBlogSummary {
 		return nil, "摘要过长"
-	}
-	if summary == "" {
-		// auto excerpt
-		runes := []rune(strings.TrimSpace(content))
-		if len(runes) > 160 {
-			summary = string(runes[:160]) + "…"
-		} else {
-			summary = string(runes)
-		}
 	}
 	cover := strings.TrimSpace(req.CoverURL)
 	if len(cover) > maxBlogCover {
@@ -1493,6 +1491,88 @@ func (s *BlogService) handleLikeToggle(ctx khttp.Context) error {
 
 // ---------- theme ----------
 
+const (
+	blogThemeChirpy = "chirpy"
+	blogThemeSimple = "simple"
+	blogThemeMizuki = "mizuki"
+	maxSocialLinks  = 12
+	maxSocialURL    = 512
+	maxSubtitle     = 200
+)
+
+type blogSocialLink struct {
+	Type  string `json:"type"`
+	URL   string `json:"url"`
+	Label string `json:"label,omitempty"`
+}
+
+type blogSiteConfigView struct {
+	ThemeID     string           `json:"themeId"`
+	Subtitle    string           `json:"subtitle"`
+	SocialLinks []blogSocialLink `json:"socialLinks"`
+}
+
+func normalizeThemeID(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case blogThemeSimple:
+		return blogThemeSimple
+	case blogThemeMizuki:
+		return blogThemeMizuki
+	default:
+		return blogThemeChirpy
+	}
+}
+
+func parseSocialLinksJSON(raw string) []blogSocialLink {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []blogSocialLink{}
+	}
+	var list []blogSocialLink
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		return []blogSocialLink{}
+	}
+	out := make([]blogSocialLink, 0, len(list))
+	for _, l := range list {
+		t := strings.ToLower(strings.TrimSpace(l.Type))
+		u := strings.TrimSpace(l.URL)
+		if t == "" || u == "" {
+			continue
+		}
+		if len(u) > maxSocialURL {
+			u = u[:maxSocialURL]
+		}
+		label := strings.TrimSpace(l.Label)
+		if utf8.RuneCountInString(label) > 32 {
+			label = string([]rune(label)[:32])
+		}
+		out = append(out, blogSocialLink{Type: t, URL: u, Label: label})
+		if len(out) >= maxSocialLinks {
+			break
+		}
+	}
+	return out
+}
+
+func (s *BlogService) loadSiteConfig(userID uint) blogSiteConfigView {
+	view := blogSiteConfigView{
+		ThemeID:     blogThemeChirpy,
+		Subtitle:    "",
+		SocialLinks: []blogSocialLink{},
+	}
+	if userID == 0 {
+		return view
+	}
+	var cfg model.BlogSiteConfig
+	if err := s.db.Where("user_id = ?", userID).First(&cfg).Error; err != nil {
+		return view
+	}
+	view.ThemeID = normalizeThemeID(cfg.ThemeID)
+	view.Subtitle = strings.TrimSpace(cfg.Subtitle)
+	view.SocialLinks = parseSocialLinksJSON(cfg.SocialLinks)
+	return view
+}
+
 func (s *BlogService) themeEnabledFor(userID uint) bool {
 	var global model.BlogThemeFlag
 	globalAll := false
@@ -1524,12 +1604,96 @@ func (s *BlogService) handleThemeStatus(ctx khttp.Context) error {
 	if userID > 0 {
 		enabled = s.themeEnabledFor(userID)
 	}
-	// custom theme UI is reserved — never return theme payload unless enabled
+	siteCfg := s.loadSiteConfig(userID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "success",
 		"data": map[string]interface{}{
 			"enabled":     enabled,
+			"themeId":     siteCfg.ThemeID,
+			"subtitle":    siteCfg.Subtitle,
+			"socialLinks": siteCfg.SocialLinks,
 			"customTheme": nil, // reserved extension point
+		},
+	})
+	return nil
+}
+
+// handleThemeConfigSave owner saves theme id + subtitle + social links.
+func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
+		return nil
+	}
+	var body struct {
+		ThemeID     string           `json:"themeId"`
+		Subtitle    string           `json:"subtitle"`
+		SocialLinks []blogSocialLink `json:"socialLinks"`
+	}
+	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
+		return nil
+	}
+	themeID := normalizeThemeID(body.ThemeID)
+	subtitle := strings.TrimSpace(body.Subtitle)
+	if utf8.RuneCountInString(subtitle) > maxSubtitle {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "副标题过长"})
+		return nil
+	}
+	// re-validate social links via JSON round-trip
+	rawLinks, _ := json.Marshal(body.SocialLinks)
+	links := parseSocialLinksJSON(string(rawLinks))
+	// only allow http(s) / mailto for urls
+	clean := make([]blogSocialLink, 0, len(links))
+	for _, l := range links {
+		u := l.URL
+		lu := strings.ToLower(u)
+		if strings.HasPrefix(lu, "javascript:") || strings.HasPrefix(lu, "data:") {
+			continue
+		}
+		if l.Type == "email" {
+			if !strings.HasPrefix(lu, "mailto:") && !strings.Contains(u, "@") {
+				continue
+			}
+			if !strings.HasPrefix(lu, "mailto:") {
+				u = "mailto:" + u
+			}
+		} else if !strings.HasPrefix(lu, "http://") && !strings.HasPrefix(lu, "https://") {
+			continue
+		}
+		clean = append(clean, blogSocialLink{Type: l.Type, URL: u, Label: l.Label})
+	}
+	linksJSON, _ := json.Marshal(clean)
+
+	var cfg model.BlogSiteConfig
+	err := s.db.Where("user_id = ?", pd.UserID).First(&cfg).Error
+	if err != nil {
+		cfg = model.BlogSiteConfig{
+			UserID:      pd.UserID,
+			ThemeID:     themeID,
+			Subtitle:    subtitle,
+			SocialLinks: string(linksJSON),
+		}
+		if err := s.db.Create(&cfg).Error; err != nil {
+			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
+			return nil
+		}
+	} else {
+		cfg.ThemeID = themeID
+		cfg.Subtitle = subtitle
+		cfg.SocialLinks = string(linksJSON)
+		if err := s.db.Save(&cfg).Error; err != nil {
+			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
+			return nil
+		}
+	}
+	view := s.loadSiteConfig(pd.UserID)
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "success",
+		"data": map[string]interface{}{
+			"themeId":     view.ThemeID,
+			"subtitle":    view.Subtitle,
+			"socialLinks": view.SocialLinks,
 		},
 	})
 	return nil

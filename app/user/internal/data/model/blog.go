@@ -96,7 +96,7 @@ type BlogLike struct {
 
 func (BlogLike) TableName() string { return "blog_likes" }
 
-// BlogThemeFlag stores custom-theme enablement.
+// BlogThemeFlag stores custom-theme enablement (legacy admin switch).
 // UserID=0 row holds the global "all users" flag (Enabled=true means open for everyone).
 // Per-user rows override global when present.
 type BlogThemeFlag struct {
@@ -109,3 +109,19 @@ type BlogThemeFlag struct {
 }
 
 func (BlogThemeFlag) TableName() string { return "blog_theme_flags" }
+
+// BlogSiteConfig is per-author blog shell settings (theme + social links).
+// ThemeID: chirpy (default) | simple | mizuki
+// SocialLinks: JSON array of {type,url,label?}
+type BlogSiteConfig struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	UserID    uint   `gorm:"not null;uniqueIndex;comment:作者"`
+	ThemeID   string `gorm:"size:32;not null;default:chirpy;comment:主题 chirpy|simple|mizuki"`
+	Subtitle  string `gorm:"size:200;comment:侧栏副标题"`
+	// SocialLinks JSON: [{"type":"github","url":"https://...","label":"GitHub"},...]
+	SocialLinks string `gorm:"type:text;comment:侧栏社交链接JSON"`
+}
+
+func (BlogSiteConfig) TableName() string { return "blog_site_configs" }

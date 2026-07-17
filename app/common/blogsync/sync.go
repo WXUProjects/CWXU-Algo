@@ -15,7 +15,6 @@ const (
 	// DefaultCategoryName 每用户唯一默认分类名（首次同步时创建）
 	DefaultCategoryName = "默认"
 	maxTitle            = 200
-	maxSummary          = 500
 	visPublic           = "public"
 )
 
@@ -98,6 +97,7 @@ func EnsureDefaultCategory(db *gorm.DB, userID uint) (uint, error) {
 
 // UpsertFromSolution 创建或更新题解对应的博客文章。
 // articleID 为题解侧缓存的 blog_article_id（0 表示未知）。
+// 摘要不自动生成：新建留空，更新不覆盖（留给作者在博客编辑里自己填）。
 // 返回 articleID、slug。
 func UpsertFromSolution(db *gorm.DB, userID, solutionID, articleID uint, title, content string) (uint, string, error) {
 	if db == nil || userID == 0 || solutionID == 0 {
@@ -112,7 +112,6 @@ func UpsertFromSolution(db *gorm.DB, userID, solutionID, articleID uint, title, 
 		runes := []rune(title)
 		title = string(runes[:maxTitle])
 	}
-	summary := makeSummary(content)
 	catID, err := EnsureDefaultCategory(db, userID)
 	if err != nil {
 		return 0, "", err
@@ -121,13 +120,12 @@ func UpsertFromSolution(db *gorm.DB, userID, solutionID, articleID uint, title, 
 	sid := solutionID
 	slug := solutionSlug(solutionID)
 
-	// 1) 按 articleID
+	// 1) 按 articleID（不写 summary，避免冲掉作者手填摘要）
 	if articleID > 0 {
 		var a Article
 		if db.Where("id = ? AND user_id = ?", articleID, userID).First(&a).Error == nil {
 			_ = db.Model(&a).Updates(map[string]interface{}{
 				"title":              title,
-				"summary":            summary,
 				"content":            content,
 				"category_id":        catPtr,
 				"visibility":         visPublic,
@@ -141,7 +139,6 @@ func UpsertFromSolution(db *gorm.DB, userID, solutionID, articleID uint, title, 
 	if db.Where("source_solution_id = ?", solutionID).First(&existing).Error == nil {
 		_ = db.Model(&existing).Updates(map[string]interface{}{
 			"title":       title,
-			"summary":     summary,
 			"content":     content,
 			"category_id": catPtr,
 			"visibility":  visPublic,
@@ -152,7 +149,6 @@ func UpsertFromSolution(db *gorm.DB, userID, solutionID, articleID uint, title, 
 	if db.Where("user_id = ? AND slug = ?", userID, slug).First(&existing).Error == nil {
 		_ = db.Model(&existing).Updates(map[string]interface{}{
 			"title":              title,
-			"summary":            summary,
 			"content":            content,
 			"category_id":        catPtr,
 			"visibility":         visPublic,
@@ -166,7 +162,7 @@ func UpsertFromSolution(db *gorm.DB, userID, solutionID, articleID uint, title, 
 		UserID:            userID,
 		Slug:              slug,
 		Title:             title,
-		Summary:           summary,
+		Summary:           "", // 摘要留给作者手填，不从正文截
 		Content:           content,
 		Visibility:        visPublic,
 		Recommend:         false,
@@ -277,16 +273,4 @@ func (articleLike) TableName() string { return "blog_likes" }
 
 func solutionSlug(solutionID uint) string {
 	return fmt.Sprintf("solution-%d", solutionID)
-}
-
-func makeSummary(content string) string {
-	// strip crude markdown noise for list cards
-	s := strings.TrimSpace(content)
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, "\n", " ")
-	runes := []rune(s)
-	if len(runes) > maxSummary {
-		return string(runes[:maxSummary-1]) + "…"
-	}
-	return s
 }
