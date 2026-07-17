@@ -2,14 +2,33 @@ package model
 
 import "time"
 
-// ProblemComment 题目评论（全站可见，不做组织隔离）
+// 社区互动目标类型
+const (
+	CommunityTargetComment  = "comment"
+	CommunityTargetSolution = "solution"
+)
+
+// 评论最大嵌套深度（0=顶层，最大为 MaxCommentDepth）
+const MaxCommentDepth = 3
+
+// ProblemComment 题目评论（全站可见，不做组织隔离；支持层级回复）
 type ProblemComment struct {
 	ID        uint      `gorm:"primaryKey"`
 	CreatedAt time.Time `gorm:"index"`
 	UpdatedAt time.Time
-	ProblemID uint   `gorm:"not null;index:idx_pc_problem_created,priority:1;comment:题目id"`
+	ProblemID uint   `gorm:"not null;index:idx_pc_problem_root,priority:1;comment:题目id"`
 	UserID    uint   `gorm:"not null;index;comment:作者"`
 	Content   string `gorm:"type:text;not null;comment:评论内容"`
+	// ParentID 直接父评论；0 表示顶层
+	ParentID uint `gorm:"not null;default:0;index;comment:父评论id"`
+	// RootID 所属根评论；顶层创建后 = 自身 id
+	RootID uint `gorm:"not null;default:0;index:idx_pc_problem_root,priority:2;comment:根评论id"`
+	// ReplyToUserID 被回复用户（展示「回复 @xxx」）
+	ReplyToUserID uint `gorm:"not null;default:0;comment:被回复用户"`
+	// Depth 层级：0 顶层
+	Depth int `gorm:"not null;default:0;comment:嵌套深度"`
+	// LikeCount 冗余点赞数
+	LikeCount int `gorm:"not null;default:0;comment:点赞数"`
 }
 
 func (ProblemComment) TableName() string {
@@ -25,10 +44,47 @@ type ProblemUserSolution struct {
 	UserID    uint   `gorm:"not null;index;comment:作者"`
 	Title     string `gorm:"size:200;not null;comment:题解标题"`
 	ContentMD string `gorm:"type:text;not null;comment:Markdown 正文"`
+	// LikeCount 冗余点赞数
+	LikeCount int `gorm:"not null;default:0;comment:点赞数"`
 }
 
 func (ProblemUserSolution) TableName() string {
 	return "problem_user_solutions"
+}
+
+// CommunityLike 评论/题解点赞（每用户每目标一条）
+type CommunityLike struct {
+	ID         uint      `gorm:"primaryKey"`
+	CreatedAt  time.Time `gorm:"index"`
+	UserID     uint      `gorm:"not null;uniqueIndex:idx_cl_user_target,priority:1;comment:点赞用户"`
+	TargetType string    `gorm:"size:16;not null;uniqueIndex:idx_cl_user_target,priority:2;comment:comment|solution"`
+	TargetID   uint      `gorm:"not null;uniqueIndex:idx_cl_user_target,priority:3;index:idx_cl_target,priority:2;comment:目标id"`
+}
+
+func (CommunityLike) TableName() string {
+	return "community_likes"
+}
+
+// 举报状态
+const (
+	ReportStatusPending  = "pending"
+	ReportStatusResolved = "resolved"
+	ReportStatusDismissed = "dismissed"
+)
+
+// CommunityReport 评论/题解举报
+type CommunityReport struct {
+	ID         uint      `gorm:"primaryKey"`
+	CreatedAt  time.Time `gorm:"index"`
+	UserID     uint      `gorm:"not null;uniqueIndex:idx_cr_user_target,priority:1;comment:举报人"`
+	TargetType string    `gorm:"size:16;not null;uniqueIndex:idx_cr_user_target,priority:2;index:idx_cr_target,priority:1;comment:comment|solution"`
+	TargetID   uint      `gorm:"not null;uniqueIndex:idx_cr_user_target,priority:3;index:idx_cr_target,priority:2;comment:目标id"`
+	Reason     string    `gorm:"size:500;not null;comment:举报原因"`
+	Status     string    `gorm:"size:16;not null;default:pending;index;comment:pending|resolved|dismissed"`
+}
+
+func (CommunityReport) TableName() string {
+	return "community_reports"
 }
 
 // ActivityFeedType 发现页动态类型

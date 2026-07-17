@@ -14,19 +14,24 @@ import (
 // 用 sqlite 驱动 community 写/读路径（不依赖远端），验证 shipped handler 逻辑。
 func setupCommunityTest(t *testing.T) (*CommunityService, *gorm.DB, *gorm.DB) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{
+	// 每测独立库，避免 shared memory 串数据
+	name := "file:community_" + t.Name() + "?mode=memory&cache=shared"
+	db, err := gorm.Open(sqlite.Open(name), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	udb, err := gorm.Open(sqlite.Open("file:user_mem?mode=memory&cache=shared"), &gorm.Config{
+	udb, err := gorm.Open(sqlite.Open("file:user_"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.Problem{}, &model.ProblemComment{}, &model.ProblemUserSolution{}, &model.ActivityFeed{}); err != nil {
+	if err := db.AutoMigrate(
+		&model.Problem{}, &model.ProblemComment{}, &model.ProblemUserSolution{},
+		&model.ActivityFeed{}, &model.CommunityLike{}, &model.CommunityReport{},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := udb.AutoMigrate(&notify.Row{}); err != nil {
@@ -53,6 +58,9 @@ func TestCommunityCommentCreateListAndMention(t *testing.T) {
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatal(err)
 	}
+	// 顶层 root_id = 自身
+	_ = db.Model(&row).Update("root_id", row.ID).Error
+	row.RootID = row.ID
 	if err := db.Create(&model.ActivityFeed{
 		OrgID: 3, UserID: 10, Type: model.ActivityTypeComment, RefID: row.ID,
 		ProblemID: p.ID, Title: "思路不错", Excerpt: "思路不错 @alice 看看",
@@ -152,5 +160,154 @@ func TestCommunityCommentCreateListAndMention(t *testing.T) {
 		t.Fatalf("recent=%d", len(recent))
 	}
 
-	_ = s
+	// 层级回复
+	reply := model.ProblemComment{
+		ProblemID: p.ID, UserID: 20, Content: "同意",
+		ParentID: row.ID, RootID: row.ID, Depth: 1, ReplyToUserID: 10,
+	}
+	if err := db.Create(&reply).Error; err != nil {
+		t.Fatal(err)
+	}
+	var underRoot []model.ProblemComment
+	_ = db.Where("root_id = ?", row.ID).Order("id asc").Find(&underRoot).Error
+	if len(underRoot) < 2 {
+		t.Fatalf("want root+reply, got %d", len(underRoot))
+	}
+
+	// 点赞 toggle
+	like := model.CommunityLike{UserID: 20, TargetType: model.CommunityTargetComment, TargetID: row.ID}
+	if err := db.Create(&like).Error; err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Model(&model.ProblemComment{}).Where("id = ?", row.ID).UpdateColumn("like_count", 1).Error
+	var liked model.ProblemComment
+	_ = db.First(&liked, row.ID).Error
+	if liked.LikeCount != 1 {
+		t.Fatalf("likeCount=%d", liked.LikeCount)
+	}
+	// 题解点赞
+	solLike := model.CommunityLike{UserID: 20, TargetType: model.CommunityTargetSolution, TargetID: sol.ID}
+	if err := db.Create(&solLike).Error; err != nil {
+		t.Fatal(err)
+	}
+	// 举报
+	rep := model.CommunityReport{
+		UserID: 20, TargetType: model.CommunityTargetSolution, TargetID: sol.ID,
+		Reason: "广告", Status: model.ReportStatusPending,
+	}
+	if err := db.Create(&rep).Error; err != nil {
+		t.Fatal(err)
+	}
+	var repN int64
+	_ = db.Model(&model.CommunityReport{}).Where("target_type = ? AND target_id = ?", model.CommunityTargetSolution, sol.ID).Count(&repN).Error
+	if repN != 1 {
+		t.Fatalf("reports=%d", repN)
+	}
+
+	// 子树收集
+	ids := s.collectCommentSubtreeIDs(row.ID)
+	if len(ids) < 2 {
+		t.Fatalf("subtree=%v", ids)
+	}
+
+	// 深度挂载：回复 depth=MaxCommentDepth 时挂到其父
+	deepParent := model.ProblemComment{
+		ProblemID: p.ID, UserID: 30, Content: "L2",
+		ParentID: reply.ID, RootID: row.ID, Depth: model.MaxCommentDepth, ReplyToUserID: 20,
+	}
+	if err := db.Create(&deepParent).Error; err != nil {
+		t.Fatal(err)
+	}
+	// 模拟 create 的挂载点选择
+	attach := deepParent
+	if deepParent.Depth >= model.MaxCommentDepth && deepParent.ParentID > 0 {
+		var up model.ProblemComment
+		if db.First(&up, deepParent.ParentID).Error == nil {
+			attach = up
+		}
+	}
+	if attach.ID != reply.ID {
+		t.Fatalf("max-depth attach want parent reply %d, got %d", reply.ID, attach.ID)
+	}
+
+	// like/report 存在性
+	if !s.communityTargetExists(model.CommunityTargetComment, row.ID) {
+		t.Fatal("comment should exist")
+	}
+	if !s.communityTargetExists(model.CommunityTargetSolution, sol.ID) {
+		t.Fatal("solution should exist")
+	}
+	if s.communityTargetOwner(model.CommunityTargetComment, row.ID) != 10 {
+		t.Fatal("owner mismatch")
+	}
+	s.adjustLikeCount(model.CommunityTargetComment, row.ID, 1)
+	if s.readLikeCount(model.CommunityTargetComment, row.ID) != 2 {
+		t.Fatalf("likeCount after +1 want 2, got %d", s.readLikeCount(model.CommunityTargetComment, row.ID))
+	}
+}
+
+func TestCommentTreeMapAndLikedSet(t *testing.T) {
+	s, db, _ := setupCommunityTest(t)
+	var p model.Problem
+	_ = db.First(&p).Error
+
+	root := model.ProblemComment{ProblemID: p.ID, UserID: 1, Content: "root", LikeCount: 2}
+	_ = db.Create(&root).Error
+	_ = db.Model(&root).Update("root_id", root.ID).Error
+	root.RootID = root.ID
+
+	r1 := model.ProblemComment{
+		ProblemID: p.ID, UserID: 2, Content: "r1",
+		ParentID: root.ID, RootID: root.ID, Depth: 1, ReplyToUserID: 1,
+	}
+	_ = db.Create(&r1).Error
+	r2 := model.ProblemComment{
+		ProblemID: p.ID, UserID: 3, Content: "r2",
+		ParentID: r1.ID, RootID: root.ID, Depth: 2, ReplyToUserID: 2,
+	}
+	_ = db.Create(&r2).Error
+
+	_ = db.Create(&model.CommunityLike{
+		UserID: 9, TargetType: model.CommunityTargetComment, TargetID: root.ID,
+	}).Error
+	_ = db.Create(&model.CommunityLike{
+		UserID: 9, TargetType: model.CommunityTargetComment, TargetID: r2.ID,
+	}).Error
+
+	liked := s.likedSet(9, model.CommunityTargetComment, []uint{root.ID, r1.ID, r2.ID})
+	if !liked[root.ID] || liked[r1.ID] || !liked[r2.ID] {
+		t.Fatalf("liked set wrong: %v", liked)
+	}
+
+	users := map[uint]userBrief{
+		1: {username: "u1", name: "U1"},
+		2: {username: "u2", name: "U2"},
+		3: {username: "u3", name: "U3"},
+	}
+	all := []model.ProblemComment{root, r1, r2}
+	byID := map[uint]map[string]interface{}{}
+	for _, c := range all {
+		byID[c.ID] = s.commentToMap(c, users, liked)
+		byID[c.ID]["replies"] = []map[string]interface{}{}
+	}
+	for _, c := range []model.ProblemComment{r1, r2} {
+		parent := byID[c.ParentID]
+		list, _ := parent["replies"].([]map[string]interface{})
+		parent["replies"] = append(list, byID[c.ID])
+	}
+	rootMap := byID[root.ID]
+	if rootMap["liked"] != true {
+		t.Fatal("root should be liked")
+	}
+	replies, _ := rootMap["replies"].([]map[string]interface{})
+	if len(replies) != 1 {
+		t.Fatalf("root replies=%d", len(replies))
+	}
+	nested, _ := replies[0]["replies"].([]map[string]interface{})
+	if len(nested) != 1 || nested[0]["content"] != "r2" {
+		t.Fatalf("nested=%v", nested)
+	}
+	if nested[0]["liked"] != true {
+		t.Fatal("r2 should be liked")
+	}
 }

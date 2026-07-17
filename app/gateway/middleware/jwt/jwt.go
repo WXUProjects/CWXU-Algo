@@ -33,20 +33,37 @@ func jwtSecret(configValue string) ([]byte, error) {
 }
 
 // exact public path suffixes (after cleaning)
+// 与 shared/api.md「Auth: 否」及 user 服务 NewWhiteListMatcher 对齐；
+// 可选 JWT 的接口也列入：有合法 token 则透传，无/非法则按匿名放行。
 var publicExact = map[string]struct{}{
-	"/v1/user/auth/login":           {},
-	"/v1/user/auth/logout":          {},
-	"/v1/user/auth/register":        {},
-	"/v1/user/auth/send-code":       {},
-	"/v1/user/auth/reset-password":  {},
-	"/v1/user/profile/get-by-id":    {},
-	"/v1/user/role/list":            {},
-	"/v1/user/paste/get":            {},
-	"/api/user/paste/get":           {},
-	"/v1/user/site/config":          {},
-	"/api/user/site/config":         {},
-	"/v1/user/site/visit-ping":      {},
-	"/api/user/site/visit-ping":     {},
+	"/v1/user/auth/login":          {},
+	"/v1/user/auth/logout":         {},
+	"/v1/user/auth/register":       {},
+	"/v1/user/auth/send-code":      {},
+	"/v1/user/auth/reset-password": {},
+	// Profile 公开读
+	"/v1/user/profile/get-by-id":       {},
+	"/v1/user/profile/get-by-username": {},
+	"/v1/user/profile/get-by-name":     {},
+	"/v1/user/profile/following-ids":   {},
+	"/v1/user/role/list":               {},
+	"/v1/user/paste/get":               {},
+	"/api/user/paste/get":              {},
+	"/v1/user/site/config":             {},
+	"/api/user/site/config":            {},
+	"/v1/user/site/visit-ping":         {},
+	"/api/user/site/visit-ping":        {},
+	// Social 公开读（关注/取关仍需 JWT）
+	"/v1/user/social/following": {},
+	"/v1/user/social/followers": {},
+	"/v1/user/social/counts":    {},
+	"/v1/user/social/relation":  {},
+	"/v1/user/social/search":    {},
+	"/v1/user/social/identity":  {},
+	"/v1/user/privacy/status":   {},
+	// 组织广场公开
+	"/v1/user/org/discover": {},
+	// Core 公开读
 	"/v1/core/submit-log/get-by-id": {},
 	"/v1/core/contest/list":         {},
 	"/v1/core/contest/ranking":      {},
@@ -63,12 +80,34 @@ var publicExact = map[string]struct{}{
 	"/v1/core/problem/submissions":  {},
 	"/v1/core/problem/user-profile": {},
 	// 题目评论/用户题解/发现讨论（读公开；写仍需 JWT）
-	"/v1/core/problem/comment/list":   {},
-	"/v1/core/problem/solution/list":  {},
-	"/v1/core/problem/solution/get":   {},
-	"/v1/core/activity/feed":          {},
-	"/v1/core/user/recent-comments":   {},
-	"/v1/core/user/recent-solutions":  {},
+	"/v1/core/problem/comment/list":  {},
+	"/v1/core/problem/solution/list": {},
+	"/v1/core/problem/solution/get":  {},
+	"/v1/core/activity/feed":         {},
+	"/v1/core/user/recent-comments":  {},
+	"/v1/core/user/recent-solutions": {},
+}
+
+func parseBearer(secret []byte, authHeader string) (tokenStr string, valid bool) {
+	tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+	if tokenStr == authHeader || tokenStr == "" {
+		return "", false
+	}
+	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+		if token.Method != jwt.SigningMethodHS256 {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return secret, nil
+	},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuer("goalgo"),
+		jwt.WithAudience("goalgo-web"),
+	)
+	if err != nil || token == nil || !token.Valid {
+		return tokenStr, false
+	}
+	return tokenStr, true
 }
 
 // Middleware jwt 校验中间件
@@ -107,25 +146,29 @@ func Middleware(c *config.Middleware) (middleware.Middleware, error) {
 					request.Header.Set("Authorization", authHeader)
 				}
 			}
-			if isPublic && strings.TrimSpace(authHeader) == "" {
+
+			// 公开接口：无 token 直接放行；有合法 token 透传（域感知展示）；非法/过期则剥掉按匿名
+			if isPublic {
+				if strings.TrimSpace(authHeader) == "" {
+					return next.RoundTrip(request)
+				}
+				if _, ok := parseBearer(secret, authHeader); ok {
+					return next.RoundTrip(request)
+				}
+				request.Header.Del("Authorization")
 				return next.RoundTrip(request)
 			}
-			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-			if tokenStr == authHeader || tokenStr == "" {
+
+			// 需登录：必须有合法 JWT
+			if strings.TrimSpace(authHeader) == "" {
 				return buildUnauthorizedResp("JWT Token not found"), nil
 			}
-			token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-				if token.Method != jwt.SigningMethodHS256 {
-					return nil, jwt.ErrSignatureInvalid
+			if _, ok := parseBearer(secret, authHeader); !ok {
+				// 区分「没有 Bearer」与「非法/过期」
+				tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+				if tokenStr == authHeader || tokenStr == "" {
+					return buildUnauthorizedResp("JWT Token not found"), nil
 				}
-				return secret, nil
-			},
-				jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
-				jwt.WithExpirationRequired(),
-				jwt.WithIssuer("goalgo"),
-				jwt.WithAudience("goalgo-web"),
-			)
-			if err != nil || !token.Valid {
 				return buildUnauthorizedResp("JWT Token invalid"), nil
 			}
 			return next.RoundTrip(request)

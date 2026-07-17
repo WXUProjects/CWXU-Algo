@@ -123,10 +123,14 @@ func migrateModels(db *gorm.DB) {
 		&model.ProblemComment{},
 		&model.ProblemUserSolution{},
 		&model.ActivityFeed{},
+		&model.CommunityLike{},
+		&model.CommunityReport{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
 	}
+	// 旧顶层评论 root_id=0 → 回填为自身 id（层级评论依赖）
+	_ = db.Exec(`UPDATE problem_comments SET root_id = id WHERE parent_id = 0 AND (root_id = 0 OR root_id IS NULL)`).Error
 	// 丢弃旧无 platform 日汇总（清洗任务会从 submit_logs 全量重建）
 	_ = db.Exec(`DROP TABLE IF EXISTS daily_user_stats_pre_platform`).Error
 	// 废弃：预聚合去重改以 submit_logs.submit_id 为准，不再维护账本表

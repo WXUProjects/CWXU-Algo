@@ -15,6 +15,7 @@ const (
 	TypeOrgJoinApproved     = "org_join_approved"
 	TypeOrgJoinRejected     = "org_join_rejected"
 	TypeMention             = "mention"
+	TypeCommentReply        = "comment_reply"
 )
 
 // Row 与 user.notifications 表对齐（避免 core 依赖 user 包）
