@@ -14,8 +14,41 @@ import (
 
 const problemDetailCacheSchema = "1"
 
+const (
+	problemTagsVerKey   = "problem:tags:ver"
+	problemListVerKey   = "problem:list:ver"
+	problemTagsCacheTTL = 30 * time.Minute
+	problemListCacheTTL = 90 * time.Second
+)
+
 func problemDetailVerKey(id uint) string {
 	return fmt.Sprintf("problem:detail:ver:%d", id)
+}
+
+// BumpProblemTagsVer 标签倒排变更后失效 ListTags 缓存
+func (uc *ProblemUseCase) BumpProblemTagsVer() {
+	if uc.data == nil || uc.data.RDB == nil {
+		return
+	}
+	_ = uc.data.RDB.Incr(context.Background(), problemTagsVerKey).Err()
+}
+
+// BumpProblemListVer 题库列表缓存失效（入库/大批状态变更时可调用；有节流需求时外层 SetNX）
+func (uc *ProblemUseCase) BumpProblemListVer() {
+	if uc.data == nil || uc.data.RDB == nil {
+		return
+	}
+	_ = uc.data.RDB.Incr(context.Background(), problemListVerKey).Err()
+}
+
+func (uc *ProblemUseCase) redisVer(key string) string {
+	if uc.data == nil || uc.data.RDB == nil {
+		return "0"
+	}
+	if v, err := uc.data.RDB.Get(context.Background(), key).Result(); err == nil && v != "" {
+		return v
+	}
+	return "0"
 }
 
 func problemDetailCacheKey(id uint, ver string) string {

@@ -10,6 +10,7 @@ import (
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/userrpc"
 	"fmt"
 	"strconv"
 	"time"
@@ -17,11 +18,28 @@ import (
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/redis/go-redis/v9"
 	grpc2 "google.golang.org/grpc"
 	"gorm.io/gorm"
 )
+
+// orgFeedFirstPageCursor 首屏游标（与 dal 默认最新一致）
+const orgFeedFirstPageCursor int64 = -1
+const orgFeedCacheTTL = 60 * time.Second
+
+// feedCacheItem gob 友好（避免直接缓存 proto 消息）
+type feedCacheItem struct {
+	Id        uint32
+	UserId    int64
+	Platform  string
+	SubmitId  string
+	Contest   string
+	Problem   string
+	Lang      string
+	Status    string
+	Time      int64
+	ProblemId uint32
+}
 
 type SubmitLogService struct {
 	submit_log.UnimplementedSubmitServer
@@ -32,15 +50,7 @@ type SubmitLogService struct {
 }
 
 func (s SubmitLogService) userRPC() (*grpc2.ClientConn, error) {
-	if s.reg == nil {
-		return nil, fmt.Errorf("registry not configured")
-	}
-	return grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery((*s.reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
+	return userrpc.Conn(s.reg)
 }
 
 func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetSubmitLogReq) (*submit_log.GetSubmitLogRes, error) {
@@ -50,6 +60,7 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 		limit = 10
 	}
 	var memberIDs []int64
+	var resolvedOrg uint
 	queryUserID := req.UserId
 	// following_only：仅关注用户（与组织聚合流组合）
 	// userId=-1 或 following_only 时走 scoped 查询
@@ -58,11 +69,12 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 		// 组织聚合动态：仅当前组织成员
 		// 注意：followingOnly 与具体 userId>0 互斥语义由调用方保证；
 		// 若同时传 followingOnly + userId>0，以 following 组织流为准（忽略单用户 id）。
-		ids, resolvedOrg, _, err := ResolveOrgMemberIDs(ctx, s.reg, 0, false)
+		ids, orgID, _, err := ResolveOrgMemberIDs(ctx, s.reg, 0, false)
 		if err != nil {
 			log.Warnf("org members for submit feed: %v", err)
 			ids = []int64{}
 		}
+		resolvedOrg = orgID
 		// 公共域：剔除关闭「公共域动态」的用户（隐私仅在公共域生效）
 		if isPublicOrgContext(ctx, s.reg, resolvedOrg) {
 			ids = filterPublicFeedUserIDs(ctx, s.reg, ids)
@@ -78,8 +90,54 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 		memberIDs = ids
 	}
 
+	// 组织聚合首屏短缓存（不含 following）
+	cacheOrgFeed := req.UserId == -1 && !req.FollowingOnly &&
+		(req.Cursor == orgFeedFirstPageCursor || req.Cursor == 0) &&
+		limit <= 50 && s.rdb != nil && resolvedOrg > 0
+	var feedCacheKey string
+	if cacheOrgFeed {
+		ver := "0"
+		if v, e := s.rdb.Get(ctx, "core:submit_feed:global:ver").Result(); e == nil && v != "" {
+			ver = v
+		}
+		feedCacheKey = fmt.Sprintf("core:submit_feed:org:%d:v%s:lim%d", resolvedOrg, ver, limit)
+		if b, e := s.rdb.Get(ctx, feedCacheKey).Bytes(); e == nil && len(b) > 0 {
+			var cached []feedCacheItem
+			if utils.GobDecoder(b, &cached) == nil {
+				r := make([]*submit_log.SubmitLog, 0, len(cached))
+				for _, it := range cached {
+					r = append(r, &submit_log.SubmitLog{
+						Id: it.Id, UserId: it.UserId, Platform: it.Platform, SubmitId: it.SubmitId,
+						Contest: it.Contest, Problem: it.Problem, Lang: it.Lang, Status: it.Status,
+						Time: it.Time, ProblemId: it.ProblemId,
+					})
+				}
+				nameMap := s.fetchUserNames(ctx, r)
+				metaMap := s.fetchProblemMeta(ctx, r)
+				for _, item := range r {
+					if n, ok := nameMap[item.UserId]; ok {
+						item.UserName = n
+					}
+					if item.ProblemId > 0 {
+						if m, ok := metaMap[item.ProblemId]; ok {
+							item.ProblemTitle = m.Title
+							if len(m.Tags) > 0 {
+								item.ProblemTags = m.Tags
+							}
+							item.ProblemDifficulty = m.Difficulty
+						}
+					}
+				}
+				return &submit_log.GetSubmitLogRes{Data: r}, nil
+			}
+		}
+	}
+
 	r := make([]*submit_log.SubmitLog, 0, limit)
 	cursor := req.Cursor
+	if cursor == 0 && queryUserID == -1 {
+		cursor = orgFeedFirstPageCursor
+	}
 	// 最多多轮回源，避免合成记录占比高时只吐半页导致前端误判「没有更多」
 	const maxRounds = 6
 	for round := 0; round < maxRounds && int64(len(r)) < limit; round++ {
@@ -128,6 +186,20 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 		}
 	}
 
+	if feedCacheKey != "" {
+		items := make([]feedCacheItem, 0, len(r))
+		for _, it := range r {
+			items = append(items, feedCacheItem{
+				Id: it.Id, UserId: it.UserId, Platform: it.Platform, SubmitId: it.SubmitId,
+				Contest: it.Contest, Problem: it.Problem, Lang: it.Lang, Status: it.Status,
+				Time: it.Time, ProblemId: it.ProblemId,
+			})
+		}
+		if b, e := utils.GobEncoder(items); e == nil {
+			_ = s.rdb.Set(ctx, feedCacheKey, b, orgFeedCacheTTL).Err()
+		}
+	}
+
 	// 一次 RPC + 一次 SQL，补齐展示字段，避免前端 N+1
 	nameMap := s.fetchUserNames(ctx, r)
 	metaMap := s.fetchProblemMeta(ctx, r)
@@ -171,18 +243,16 @@ func (s SubmitLogService) fetchUserNames(ctx context.Context, logs []*submit_log
 		userIds = append(userIds, id)
 	}
 
-	conn, err := s.userRPC()
+	client, err := userrpc.ProfileClient(s.reg)
 	if err != nil {
 		log.Errorf("submit_log userRPC: %v", err)
 		return result
 	}
-	defer conn.Close()
 
 	var orgID int64
 	if pd := auth.GetCurrentUser(ctx); pd != nil {
 		orgID = int64(pd.OrgID)
 	}
-	client := profile.NewProfileClient(conn)
 	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIds, OrgId: orgID})
 	if err != nil {
 		log.Errorf("submit_log GetByIds: %v", err)

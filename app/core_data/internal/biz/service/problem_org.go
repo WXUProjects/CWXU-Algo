@@ -7,10 +7,9 @@ import (
 
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/userrpc"
 
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 )
 
 // pipelineUserCacheTTL 题面流水线资格用户缓存
@@ -172,17 +171,10 @@ func (uc *ProblemUseCase) fetchPipelineUserIDs() (fetchIDs, aiIDs []int64, err e
 	if uc.reg == nil {
 		return nil, nil, fmt.Errorf("registry nil")
 	}
-	conn, err := grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery((*uc.reg).(registry.Discovery)),
-		grpc.WithTimeout(15*time.Second),
-	)
+	client, err := userrpc.ProfileClient(uc.reg)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer conn.Close()
-	client := profile.NewProfileClient(conn)
 	res, err := client.GetNonPublicOrgUserIds(context.Background(), &profile.GetNonPublicOrgUserIdsReq{})
 	if err != nil {
 		return nil, nil, err

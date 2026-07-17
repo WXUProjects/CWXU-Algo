@@ -253,25 +253,30 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			aiMin = 180
 		}
 		item := &profile.GetListRes_List{
-			UserId:                     uint64(v.ID),
-			Username:                   v.Username,
-			Name:                       displayName,
-			Avatar:                     v.Avatar,
-			GroupId:                    v.GroupId,
-			RoleId:                     int32(v.RoleID),
-			LastSubmit:                 t,
-			IsSiteAdmin:                v.IsSiteAdmin,
-			GroupName:                  gName,
-			EmailEnabled:               v.EmailEnabled,
-			EmailWeeklyEnabled:         v.EmailWeeklyEnabled,
-			EmailAllowedByOrg:          dailyGrant[uid],
-			EmailWeeklyAllowedByOrg:    weeklyGrant[uid],
-			ProblemFetchEnabled:        dal.EffectiveProblemPipeline(v.ProblemFetchEnabled, isNonPublic),
-			ProblemAiEnabled:           dal.EffectiveProblemPipeline(v.ProblemAIEnabled, isNonPublic),
-			SpiderIntervalMin:          spMin,
-			AiSummaryIntervalMin:       aiMin,
-			SpiderIntervalOverridden:   v.SpiderIntervalMinOverride != nil && *v.SpiderIntervalMinOverride > 0,
+			UserId:                      uint64(v.ID),
+			Username:                    v.Username,
+			Name:                        displayName,
+			Avatar:                      v.Avatar,
+			GroupId:                     v.GroupId,
+			RoleId:                      int32(v.RoleID),
+			LastSubmit:                  t,
+			IsSiteAdmin:                 v.IsSiteAdmin,
+			GroupName:                   gName,
+			EmailEnabled:                v.EmailEnabled,
+			EmailWeeklyEnabled:          v.EmailWeeklyEnabled,
+			EmailAllowedByOrg:           dailyGrant[uid],
+			EmailWeeklyAllowedByOrg:     weeklyGrant[uid],
+			ProblemFetchEnabled:         dal.EffectiveProblemPipeline(v.ProblemFetchEnabled, isNonPublic),
+			ProblemAiEnabled:            dal.EffectiveProblemPipeline(v.ProblemAIEnabled, isNonPublic),
+			SpiderIntervalMin:           spMin,
+			AiSummaryIntervalMin:        aiMin,
+			SpiderIntervalOverridden:    v.SpiderIntervalMinOverride != nil && *v.SpiderIntervalMinOverride > 0,
 			AiSummaryIntervalOverridden: v.AISummaryIntervalMinOverride != nil && *v.AISummaryIntervalMinOverride > 0,
+			SyncExempt:                  v.SyncExempt,
+			Dormant:                     pol.UserID != 0 && !pol.SyncActive,
+		}
+		if v.LastLoginAt != nil && !v.LastLoginAt.IsZero() {
+			item.LastLoginAt = v.LastLoginAt.Unix()
 		}
 		if !v.CreatedAt.IsZero() {
 			item.CreatedAt = v.CreatedAt.Unix()
@@ -381,7 +386,9 @@ func (p *ProfileService) GetFollowingIds(ctx context.Context, req *profile.GetFo
 	if p.socialDal == nil {
 		return &profile.GetFollowingIdsRes{UserIds: []int64{}}, nil
 	}
-	ids, err := p.socialDal.FollowingIDs(ctx, uid)
+	ids, err := dal.FollowingIDsCached(ctx, p.profileDal.RDB(), uid, func() ([]int64, error) {
+		return p.socialDal.FollowingIDs(ctx, uid)
+	})
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
@@ -547,9 +554,31 @@ func (p *ProfileService) GetSyncPolicies(ctx context.Context, req *profile.GetSy
 			EmailWeeklyEnabled:   v.EmailWeeklyEnabled,
 			SpiderIntervalMin:    int32(v.SpiderIntervalMin),
 			AiSummaryIntervalMin: int32(v.AISummaryIntervalMin),
+			SyncActive:           v.SyncActive,
 		})
 	}
 	return res, nil
+}
+
+// SetSyncExempt 站点管理员：永不休眠
+func (p *ProfileService) SetSyncExempt(ctx context.Context, req *profile.SetSyncExemptReq) (*profile.SetSyncExemptRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "仅站点管理员可设置")
+	}
+	if req.UserId <= 0 {
+		return nil, errors.BadRequest("参数错误", "用户ID无效")
+	}
+	if _, err := p.profileDal.GetById(ctx, req.UserId); err != nil {
+		return nil, errors.BadRequest("参数错误", "用户不存在")
+	}
+	if err := p.profileDal.SetSyncExempt(ctx, req.UserId, req.Exempt); err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	msg := "已取消永不休眠"
+	if req.Exempt {
+		msg = "已标记永不休眠"
+	}
+	return &profile.SetSyncExemptRes{Code: 0, Message: msg}, nil
 }
 
 // GetUserIdsByOrg 组织成员 ID（数据隔离）
@@ -570,7 +599,7 @@ func (p *ProfileService) GetUserIdsByOrg(ctx context.Context, req *profile.GetUs
 	if orgID == 0 {
 		return &profile.GetUserIdsByOrgRes{UserIds: []int64{}, OrgId: 0}, nil
 	}
-	ids, err := p.profileDal.GetUserIdsByOrg(ctx, orgID)
+	ids, err := p.profileDal.GetUserIdsByOrgCached(ctx, orgID)
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
@@ -678,7 +707,7 @@ func (p *ProfileService) GetByIds(ctx context.Context, req *profile.GetByIdsReq)
 	if orgID == 0 {
 		orgID, _ = p.profileDal.PublicOrgID(ctx)
 	}
-	profiles, err := p.profileDal.GetByIdsForOrg(ctx, orgID, req.UserIds)
+	profiles, err := p.profileDal.GetByIdsForOrgCached(ctx, orgID, req.UserIds)
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}

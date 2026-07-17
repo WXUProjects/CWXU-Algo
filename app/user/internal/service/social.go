@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"strconv"
 	"strings"
 
@@ -62,6 +63,9 @@ func (s *SocialService) handleFollow(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": err.Error()})
 		return nil
 	}
+	if s.dbData != nil {
+		dal.InvalidateFollowingCacheRDB(context.Background(), s.dbData.RDB, pd.UserID)
+	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "已关注"})
 	return nil
 }
@@ -80,6 +84,9 @@ func (s *SocialService) handleUnfollow(ctx khttp.Context) error {
 		return nil
 	}
 	_ = s.social.Unfollow(ctx, pd.UserID, req.UserID)
+	if s.dbData != nil {
+		dal.InvalidateFollowingCacheRDB(context.Background(), s.dbData.RDB, pd.UserID)
+	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "已取消关注"})
 	return nil
 }

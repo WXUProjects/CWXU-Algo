@@ -2,19 +2,22 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"time"
+
 	"cwxu-algo/api/core/v1/contest_log"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
-	"time"
+	"cwxu-algo/app/core_data/internal/userrpc"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/redis/go-redis/v9"
 	grpc2 "google.golang.org/grpc"
 	"gorm.io/gorm"
@@ -29,29 +32,60 @@ type ContestLogService struct {
 }
 
 func (c ContestLogService) userRPC() (*grpc2.ClientConn, error) {
-	return grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery((*c.reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
+	return userrpc.Conn(c.reg)
 }
 
 func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.GetContestListReq) (*contest_log.GetContestListRes, error) {
 	var memberIDs []int64
+	var resolvedOrg uint
 	if req.UserId == -1 {
-		ids, _, unrestricted, err := ResolveOrgMemberIDs(ctx, c.reg, 0, false)
+		ids, orgID, unrestricted, err := ResolveOrgMemberIDs(ctx, c.reg, 0, false)
 		if err != nil {
 			log.Warnf("org members for contest list: %v", err)
 			ids = []int64{}
 		}
+		resolvedOrg = orgID
 		if !unrestricted {
 			memberIDs = ids
 		}
 	}
-	logs, total, err := c.sbDal.GetContestListScoped(ctx, req.UserId, req.Offset, req.Limit, req.Platform, memberIDs)
-	if err != nil {
-		return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
+
+	type listPayload struct {
+		Logs  []model.ContestLog
+		Total int64
+	}
+	var logs []model.ContestLog
+	var total int64
+	var err error
+
+	// 组织首页短缓存（90s + global ver）
+	if req.UserId == -1 && c.rdb != nil && req.Offset == 0 && req.Limit > 0 && req.Limit <= 50 {
+		ver := "0"
+		if v, e := c.rdb.Get(ctx, "core:contest:list:global:ver").Result(); e == nil && v != "" {
+			ver = v
+		}
+		key := fmt.Sprintf("core:contest:list:org%d:p%s:off%d:lim%d:v%s",
+			resolvedOrg, req.Platform, req.Offset, req.Limit, ver)
+		if b, e := c.rdb.Get(ctx, key).Bytes(); e == nil && len(b) > 0 {
+			var p listPayload
+			if utils.GobDecoder(b, &p) == nil {
+				logs, total = p.Logs, p.Total
+			}
+		}
+		if logs == nil {
+			logs, total, err = c.sbDal.GetContestListScoped(ctx, req.UserId, req.Offset, req.Limit, req.Platform, memberIDs)
+			if err != nil {
+				return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
+			}
+			if b, e := utils.GobEncoder(listPayload{Logs: logs, Total: total}); e == nil {
+				_ = c.rdb.Set(ctx, key, b, 90*time.Second).Err()
+			}
+		}
+	} else {
+		logs, total, err = c.sbDal.GetContestListScoped(ctx, req.UserId, req.Offset, req.Limit, req.Platform, memberIDs)
+		if err != nil {
+			return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
+		}
 	}
 
 	items := make([]*contest_log.ContestLog, 0, len(logs))
@@ -89,19 +123,12 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 		Time:        contest.Time.Unix(),
 	}
 
-	// 建立到 user 服务的共享连接，避免 N+1 连接开销
-	conn, err := c.userRPC()
-	if err != nil {
-		log.Errorf("userRPC failed: %v", err)
-		// 连接失败降级：仍然返回排名数据，只是没有用户信息
-		conn = nil
-	} else {
-		defer conn.Close()
-	}
-
+	// 复用进程内 user 长连接
 	var userClient profile.ProfileClient
-	if conn != nil {
-		userClient = profile.NewProfileClient(conn)
+	if cli, err := userrpc.ProfileClient(c.reg); err != nil {
+		log.Errorf("userRPC failed: %v", err)
+	} else {
+		userClient = cli
 	}
 
 	var userIds []int64
@@ -172,9 +199,41 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 		}
 	}
 
-	logs, total, err := c.sbDal.GetContestRanking(ctx, contest.ContestId, contest.Platform, req.Offset, req.Limit, userIds)
-	if err != nil {
-		return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
+	// 非 following 的榜单短缓存（60s）；scope 用 group 或成员数量哈希
+	type rankPayload struct {
+		Logs  []model.ContestLog
+		Total int64
+	}
+	var logs []model.ContestLog
+	var total int64
+	var err error
+	rankCacheKey := ""
+	if !req.FollowingOnly && c.rdb != nil && req.Offset == 0 && req.Limit > 0 && req.Limit <= 50 {
+		scope := "all"
+		if req.GroupId != nil {
+			scope = fmt.Sprintf("g%d", *req.GroupId)
+		} else if userIds != nil {
+			scope = fmt.Sprintf("n%d", len(userIds))
+		}
+		rankCacheKey = fmt.Sprintf("core:contest:rank:%s:%s:%s:off%d:lim%d",
+			contest.Platform, contest.ContestId, scope, req.Offset, req.Limit)
+		if b, e := c.rdb.Get(ctx, rankCacheKey).Bytes(); e == nil && len(b) > 0 {
+			var p rankPayload
+			if utils.GobDecoder(b, &p) == nil {
+				logs, total = p.Logs, p.Total
+			}
+		}
+	}
+	if logs == nil {
+		logs, total, err = c.sbDal.GetContestRanking(ctx, contest.ContestId, contest.Platform, req.Offset, req.Limit, userIds)
+		if err != nil {
+			return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
+		}
+		if rankCacheKey != "" {
+			if b, e := utils.GobEncoder(rankPayload{Logs: logs, Total: total}); e == nil {
+				_ = c.rdb.Set(ctx, rankCacheKey, b, 60*time.Second).Err()
+			}
+		}
 	}
 
 	// 批量获取用户信息，一次 RPC 替代原来的 N 次 GetById

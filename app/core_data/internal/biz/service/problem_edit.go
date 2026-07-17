@@ -81,8 +81,12 @@ func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, ta
 		oldTags, newTags, e := dal.SyncProblemTags(context.Background(), uc.data.DB, p.ID, []string(p.Tags))
 		if e != nil {
 			log.Warnf("SyncProblemTags edit id=%d: %v", p.ID, e)
-		} else if e2 := dal.AdjustUserTagACForProblemTagsChange(context.Background(), uc.data.DB, p.ID, oldTags, newTags); e2 != nil {
-			log.Warnf("AdjustUserTagAC edit id=%d: %v", p.ID, e2)
+		} else {
+			uc.BumpProblemTagsVer()
+			uc.BumpProblemListVer()
+			if e2 := dal.AdjustUserTagACForProblemTagsChange(context.Background(), uc.data.DB, p.ID, oldTags, newTags); e2 != nil {
+				log.Warnf("AdjustUserTagAC edit id=%d: %v", p.ID, e2)
+			}
 		}
 	}
 

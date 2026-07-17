@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"cwxu-algo/api/core/v1/problem"
 	"cwxu-algo/api/user/v1/profile"
@@ -14,12 +13,11 @@ import (
 	"cwxu-algo/app/common/utils/auth"
 	biz "cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/userrpc"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
-	grpc2 "google.golang.org/grpc"
 )
 
 type ProblemService struct {
@@ -32,34 +30,20 @@ func NewProblemService(uc *biz.ProblemUseCase, reg *discovery.Register) *Problem
 	return &ProblemService{uc: uc, reg: &reg.Reg}
 }
 
-func (s *ProblemService) userRPC() (*grpc2.ClientConn, error) {
-	if s.reg == nil {
-		return nil, errors.InternalServer("no registry", "registry nil")
-	}
-	return grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery((*s.reg).(registry.Discovery)),
-		grpc.WithTimeout(10*time.Second),
-	)
-}
-
 func (s *ProblemService) fetchUserNames(ctx context.Context, userIDs []int64) map[int64]string {
 	out := map[int64]string{}
 	if len(userIDs) == 0 {
 		return out
 	}
-	conn, err := s.userRPC()
+	client, err := userrpc.ProfileClient(s.reg)
 	if err != nil {
 		log.Errorf("problem userRPC: %v", err)
 		return out
 	}
-	defer conn.Close()
 	var orgID int64
 	if pd := auth.GetCurrentUser(ctx); pd != nil {
 		orgID = int64(pd.OrgID)
 	}
-	client := profile.NewProfileClient(conn)
 	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIDs, OrgId: orgID})
 	if err != nil {
 		log.Errorf("problem GetByIds: %v", err)
@@ -349,12 +333,10 @@ func (s *ProblemService) fetchUserProfiles(ctx context.Context, userIDs []int64)
 	if len(userIDs) == 0 {
 		return out
 	}
-	conn, err := s.userRPC()
+	client, err := userrpc.ProfileClient(s.reg)
 	if err != nil {
 		return out
 	}
-	defer conn.Close()
-	client := profile.NewProfileClient(conn)
 	var orgID int64
 	if pd := auth.GetCurrentUser(ctx); pd != nil {
 		orgID = int64(pd.OrgID)

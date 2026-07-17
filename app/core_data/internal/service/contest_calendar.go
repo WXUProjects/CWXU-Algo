@@ -15,11 +15,10 @@ import (
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/userrpc"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"gorm.io/gorm"
 )
 
@@ -287,17 +286,10 @@ func (s *ContestCalendarService) lookupUserEmail(ctx context.Context, userID int
 	if s.reg == nil {
 		return "", nil
 	}
-	conn, err := grpc.DialInsecure(
-		ctx,
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery(s.reg.Reg.(registry.Discovery)),
-		grpc.WithTimeout(10*time.Second),
-	)
+	cli, err := userrpc.ProfileClient(&s.reg.Reg)
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
-	cli := profile.NewProfileClient(conn)
 	res, err := cli.GetContactEmail(ctx, &profile.GetContactEmailReq{UserId: userID})
 	if err != nil {
 		return "", err

@@ -2,12 +2,16 @@ package dal
 
 import (
 	"context"
-	data2 "cwxu-algo/app/common/data"
-	"cwxu-algo/app/user/internal/data"
-	"cwxu-algo/app/user/internal/data/model"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
+
+	data2 "cwxu-algo/app/common/data"
+	"cwxu-algo/app/common/utils"
+	"cwxu-algo/app/user/internal/biz/dormancy"
+	"cwxu-algo/app/user/internal/data"
+	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -83,6 +87,204 @@ func (d *ProfileDal) InvalidateProfileCache(ctx context.Context, userID uint) {
 		return
 	}
 	_ = d.rdb.Del(ctx, fmt.Sprintf("user:%d:profile", userID)).Err()
+	// 展示名缓存：资料/头像变更时清公共域 + 未知 org 依赖 TTL
+	d.InvalidateDisplayCache(ctx, 0, int64(userID))
+}
+
+// --- P0 Redis：组织成员 / 展示名 ---
+
+const (
+	orgMembersCacheTTL = 5 * time.Minute
+	displayCacheTTL    = 10 * time.Minute
+	followingCacheTTL  = 10 * time.Minute
+)
+
+func orgMembersCacheKey(orgID uint) string {
+	return fmt.Sprintf("user:org:members:v1:%d", orgID)
+}
+
+func displayCacheKey(orgID uint, userID int64) string {
+	return fmt.Sprintf("user:display:v1:o%d:u%d", orgID, userID)
+}
+
+func followingCacheKey(userID uint) string {
+	return fmt.Sprintf("user:social:following:v1:%d", userID)
+}
+
+// InvalidateOrgMembersCache 成员变更后失效
+func (d *ProfileDal) InvalidateOrgMembersCache(ctx context.Context, orgID uint) {
+	if d == nil || d.rdb == nil || orgID == 0 {
+		return
+	}
+	_ = d.rdb.Del(ctx, orgMembersCacheKey(orgID)).Err()
+}
+
+// InvalidateDisplayCache 展示名/头像变更：按 org+user 精确删；orgID=0 时只依赖 TTL
+func (d *ProfileDal) InvalidateDisplayCache(ctx context.Context, orgID uint, userID int64) {
+	if d == nil || d.rdb == nil || userID == 0 {
+		return
+	}
+	if orgID > 0 {
+		_ = d.rdb.Del(ctx, displayCacheKey(orgID, userID)).Err()
+	}
+	// 公共域也常见：顺带删 public org（若可解析）
+	if pub, err := d.PublicOrgID(ctx); err == nil && pub > 0 && pub != orgID {
+		_ = d.rdb.Del(ctx, displayCacheKey(pub, userID)).Err()
+	}
+}
+
+// InvalidateFollowingCache 关注列表变更
+func (d *ProfileDal) InvalidateFollowingCache(ctx context.Context, userID uint) {
+	if d == nil || d.rdb == nil || userID == 0 {
+		return
+	}
+	_ = d.rdb.Del(ctx, followingCacheKey(userID)).Err()
+}
+
+// GetUserIdsByOrgCached 组织成员列表（Redis 5min + 写路径失效）
+func (d *ProfileDal) GetUserIdsByOrgCached(ctx context.Context, orgID uint) ([]int64, error) {
+	if orgID == 0 {
+		return []int64{}, nil
+	}
+	if d.rdb == nil {
+		return d.GetUserIdsByOrg(ctx, orgID)
+	}
+	key := orgMembersCacheKey(orgID)
+	ids, _, err := data2.GetCacheDalTTL[[]int64](ctx, d.rdb, key, orgMembersCacheTTL, func(data *[]int64) error {
+		list, e := d.GetUserIdsByOrg(ctx, orgID)
+		if e != nil {
+			return e
+		}
+		if list == nil {
+			list = []int64{}
+		}
+		*data = list
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		return []int64{}, nil
+	}
+	return *ids, nil
+}
+
+// GetByIdsForOrgCached 批量展示名：MGET 部分命中 + miss 回源
+func (d *ProfileDal) GetByIdsForOrgCached(ctx context.Context, orgID uint, userIds []int64) ([]UserProfile, error) {
+	if len(userIds) == 0 {
+		return nil, nil
+	}
+	if d.rdb == nil {
+		return d.GetByIdsForOrg(ctx, orgID, userIds)
+	}
+	// 去重保序
+	seen := make(map[int64]struct{}, len(userIds))
+	ordered := make([]int64, 0, len(userIds))
+	for _, id := range userIds {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ordered = append(ordered, id)
+	}
+	if len(ordered) == 0 {
+		return nil, nil
+	}
+	if orgID == 0 {
+		if pub, e := d.PublicOrgID(ctx); e == nil {
+			orgID = pub
+		}
+	}
+
+	keys := make([]string, len(ordered))
+	for i, id := range ordered {
+		keys[i] = displayCacheKey(orgID, id)
+	}
+	vals, err := d.rdb.MGet(ctx, keys...).Result()
+	if err != nil {
+		return d.GetByIdsForOrg(ctx, orgID, ordered)
+	}
+
+	outMap := make(map[int64]UserProfile, len(ordered))
+	var miss []int64
+	for i, id := range ordered {
+		if vals[i] == nil {
+			miss = append(miss, id)
+			continue
+		}
+		s, ok := vals[i].(string)
+		if !ok || s == "" {
+			miss = append(miss, id)
+			continue
+		}
+		var p UserProfile
+		if e := utils.GobDecoder([]byte(s), &p); e != nil || p.ID == 0 {
+			miss = append(miss, id)
+			continue
+		}
+		outMap[id] = p
+	}
+	if len(miss) > 0 {
+		loaded, e := d.GetByIdsForOrg(ctx, orgID, miss)
+		if e != nil {
+			return nil, e
+		}
+		pipe := d.rdb.Pipeline()
+		for _, p := range loaded {
+			outMap[int64(p.ID)] = p
+			if b, e2 := utils.GobEncoder(p); e2 == nil {
+				pipe.Set(ctx, displayCacheKey(orgID, int64(p.ID)), b, displayCacheTTL)
+			}
+		}
+		_, _ = pipe.Exec(ctx)
+	}
+	out := make([]UserProfile, 0, len(ordered))
+	for _, id := range ordered {
+		if p, ok := outMap[id]; ok {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// FollowingIDsCached 关注列表缓存（由 service 在 follow/unfollow 失效）
+func FollowingIDsCached(ctx context.Context, rdb *redis.Client, userID uint, load func() ([]int64, error)) ([]int64, error) {
+	if userID == 0 {
+		return []int64{}, nil
+	}
+	if rdb == nil {
+		return load()
+	}
+	key := followingCacheKey(userID)
+	ids, _, err := data2.GetCacheDalTTL[[]int64](ctx, rdb, key, followingCacheTTL, func(data *[]int64) error {
+		list, e := load()
+		if e != nil {
+			return e
+		}
+		if list == nil {
+			list = []int64{}
+		}
+		*data = list
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		return []int64{}, nil
+	}
+	return *ids, nil
+}
+
+func InvalidateFollowingCacheRDB(ctx context.Context, rdb *redis.Client, userID uint) {
+	if rdb == nil || userID == 0 {
+		return
+	}
+	_ = rdb.Del(ctx, followingCacheKey(userID)).Err()
 }
 
 // UpdateAvatarEmail 更新头像；emailChanged 时同时写邮箱。不再改 name（昵称走组织内称呼）。
@@ -792,7 +994,8 @@ func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pag
 		Select(`u.id, u.username, u.name, COALESCE(m.group_id, 0) AS group_id, u.avatar, u.role_id, u.is_site_admin,
 			u.email_enabled, u.email_weekly_enabled,
 			u.problem_fetch_enabled, u.problem_ai_enabled,
-			u.spider_interval_min_override, u.ai_summary_interval_min_override, u.created_at`).
+			u.spider_interval_min_override, u.ai_summary_interval_min_override, u.created_at,
+			u.sync_exempt, u.last_login_at`).
 		Joins("JOIN org_members AS m ON m.user_id = u.id AND m.org_id = ?", orgID).
 		Order("u.id").
 		Limit(int(pageSize)).Offset(int(pageNum-1) * int(pageSize)).

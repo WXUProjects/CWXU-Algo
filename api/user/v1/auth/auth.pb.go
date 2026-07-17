@@ -81,9 +81,9 @@ type LoginRes struct {
 	Message  string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	JwtToken string                 `protobuf:"bytes,2,opt,name=jwtToken,proto3" json:"jwtToken,omitempty"`
 	// 登录前处于休眠（不活跃）；已触发全量同步
-	WasDormant bool `protobuf:"varint,4,opt,name=was_dormant,json=wasDormant,proto3" json:"was_dormant,omitempty"`
+	WasDormant bool `protobuf:"varint,4,opt,name=was_dormant,json=wasDormant,proto3" json:"wasDormant,omitempty"`
 	// 是否已为该用户入队全量爬虫
-	SyncStarted   bool `protobuf:"varint,5,opt,name=sync_started,json=syncStarted,proto3" json:"sync_started,omitempty"`
+	SyncStarted   bool `protobuf:"varint,5,opt,name=sync_started,json=syncStarted,proto3" json:"syncStarted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

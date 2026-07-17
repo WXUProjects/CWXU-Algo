@@ -14,6 +14,7 @@ import (
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/common/utils/clientip"
 	secretutil "cwxu-algo/app/common/utils/secret"
+	"cwxu-algo/app/user/internal/biz/dormancy"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 
@@ -226,6 +227,7 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		AiAnalyzeSecretMasked: sitesettings.MaskSecret(rt.AiAnalyzeSecret),
 		AiAnalyzeSecretSet:    strings.TrimSpace(rt.AiAnalyzeSecret) != "",
 		FooterIcp:             row.FooterIcp,
+		InactiveDays:          int32(dormancy.ClampInactiveDays(row.InactiveDays)),
 	}, nil
 }
 
@@ -262,6 +264,9 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 		"agent_model":         strings.TrimSpace(req.AgentModel),
 		"ai_analyze_endpoint": strings.TrimSpace(req.AiAnalyzeEndpoint),
 		"ai_analyze_model":    strings.TrimSpace(req.AiAnalyzeModel),
+	}
+	if req.SetInactiveDays {
+		updates["inactive_days"] = dormancy.ClampInactiveDays(int(req.InactiveDays))
 	}
 
 	if req.ClearSmtpPassword {
@@ -400,6 +405,18 @@ func (s *SiteService) VisitPing(ctx context.Context, req *site.VisitPingReq) (*s
 	var userID uint
 	if pd := auth.GetCurrentUser(ctx); pd != nil {
 		userID = pd.UserID
+	}
+	// 已登录：节流更新 last_login_at，避免长会话被误判休眠（不触发全量爬）
+	if userID > 0 && s.data.RDB != nil {
+		key := fmt.Sprintf("active:touch:%d", userID)
+		ok, err := s.data.RDB.SetNX(ctx, key, "1", time.Hour).Result()
+		if err == nil && ok {
+			now := time.Now()
+			if e := s.data.DB.WithContext(ctx).Model(&model.User{}).
+				Where("id = ?", userID).Update("last_login_at", now).Error; e != nil {
+				log.Warnf("visit touch last_login user=%d: %v", userID, e)
+			}
+		}
 	}
 	clientIP := clientip.FromContext(ctx)
 	rec, err := s.data.RecordVisit(ctx, userID, visitorID, clientIP, path)

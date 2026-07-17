@@ -316,13 +316,18 @@ func (uc *SpiderUseCase) invalidateCache(userId int64) {
 	// 3. 组织/全站全局版本：节流 INCR，避免 50 用户 cron 轮询时缓存 thrash
 	//    SetNX 成功才 bump，窗口内其它爬虫跳过全局失效
 	ok, err := rdb.SetNX(ctx, "statistic:global:ver:lock", "1", globalCacheBumpMinInterval).Result()
+	bumpGlobal := func() {
+		_ = rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
+		_ = rdb.Incr(ctx, "statistic:period:global:ver").Err()
+		// 组织动态首屏 / 比赛列表短缓存
+		_ = rdb.Incr(ctx, "core:submit_feed:global:ver").Err()
+		_ = rdb.Incr(ctx, "core:contest:list:global:ver").Err()
+	}
 	if err != nil {
 		// Redis 异常时仍尝试 bump，保证正确性优先
-		_ = rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
-		_ = rdb.Incr(ctx, "statistic:period:global:ver").Err()
+		bumpGlobal()
 	} else if ok {
-		_ = rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
-		_ = rdb.Incr(ctx, "statistic:period:global:ver").Err()
+		bumpGlobal()
 	}
 
 	_ = rdb.Incr(ctx, fmt.Sprintf("core:contest_log:user:%d:ver", userId)).Err()

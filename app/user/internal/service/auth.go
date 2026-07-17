@@ -13,16 +13,21 @@ import (
 	"strings"
 	"time"
 
+	spiderpb "cwxu-algo/api/core/v1/spider"
 	pb "cwxu-algo/api/user/v1/auth"
 	"cwxu-algo/app/common/conf"
+	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/common/utils/clientip"
 	"cwxu-algo/app/user/internal/data"
+	"cwxu-algo/app/user/internal/data/dal"
 	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -49,13 +54,21 @@ var usernameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{3,64}$`)
 
 type AuthService struct {
 	pb.UnimplementedAuthServer
-	db       *gorm.DB
-	rdb      *redis.Client
-	yamlSMTP *conf.SMTP
+	db         *gorm.DB
+	rdb        *redis.Client
+	yamlSMTP   *conf.SMTP
+	reg        *discovery.Register
+	profileDal *dal.ProfileDal
 }
 
-func NewAuthService(d *data.Data, smtp *conf.SMTP) *AuthService {
-	return &AuthService{db: d.DB, rdb: d.RDB, yamlSMTP: smtp}
+func NewAuthService(d *data.Data, smtp *conf.SMTP, reg *discovery.Register) *AuthService {
+	return &AuthService{
+		db:         d.DB,
+		rdb:        d.RDB,
+		yamlSMTP:   smtp,
+		reg:        reg,
+		profileDal: dal.NewProfileDal(d),
+	}
 }
 
 func (s *AuthService) runtime(ctx context.Context) *sitesettings.Runtime {
@@ -130,6 +143,19 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 		}
 	}
 	_ = s.rdb.Del(ctx, pairAttemptKey, accountAttemptKey).Err()
+
+	// 休眠判定须在 touch last_login 之前
+	wasDormant := false
+	if s.profileDal != nil {
+		wasDormant = s.profileDal.IsUserDormant(ctx, u)
+	}
+	now := time.Now()
+	if err := s.db.Model(u).Update("last_login_at", now).Error; err != nil {
+		log.Warnf("login touch last_login user=%d: %v", u.ID, err)
+	} else {
+		u.LastLoginAt = &now
+	}
+
 	token, err := IssueJWT(s.db, u)
 	if err != nil {
 		res.Success = false
@@ -140,8 +166,51 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 	res.Success = true
 	res.Message = "登录成功"
 	res.JwtToken = token
+	res.WasDormant = wasDormant
+	if wasDormant {
+		syncStarted := s.enqueueWakeSpider(int64(u.ID))
+		res.SyncStarted = syncStarted
+		res.Message = "欢迎回来！检测到你一段时间未登录，正在全量同步 OJ 数据，请稍候刷新查看。"
+	}
 	setSessionCookie(ctx, token)
 	return res, nil
+}
+
+// enqueueWakeSpider 休眠唤醒：全量入队爬虫（异步 gRPC）
+func (s *AuthService) enqueueWakeSpider(userID int64) bool {
+	if userID <= 0 || s.reg == nil {
+		return false
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		conn, err := grpc.DialInsecure(
+			ctx,
+			grpc.WithEndpoint("discovery:///core-data"),
+			grpc.WithDiscovery(s.reg.Reg.(registry.Discovery)),
+			grpc.WithTimeout(12*time.Second),
+		)
+		if err != nil {
+			log.Warnf("wake spider dial user=%d: %v", userID, err)
+			return
+		}
+		defer conn.Close()
+		cli := spiderpb.NewSpiderClient(conn)
+		res, err := cli.EnqueueUserSpider(ctx, &spiderpb.EnqueueUserSpiderReq{
+			UserId:  userID,
+			NeedAll: true,
+		})
+		if err != nil {
+			log.Warnf("wake spider enqueue user=%d: %v", userID, err)
+			return
+		}
+		if res != nil && res.Code != 0 {
+			log.Warnf("wake spider enqueue user=%d code=%d msg=%s", userID, res.Code, res.Message)
+			return
+		}
+		log.Infof("wake spider enqueued user=%d published=%d", userID, res.GetPublished())
+	}()
+	return true
 }
 
 func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *pb.RegisterRes, err error) {

@@ -3,13 +3,12 @@ package service
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/utils/auth"
+	"cwxu-algo/app/core_data/internal/userrpc"
 
 	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 )
 
 // fetchOrgMemberIDs 通过 user 服务取组织成员
@@ -22,17 +21,10 @@ func fetchOrgMemberIDs(ctx context.Context, reg *registry.Registrar, orgID uint)
 			orgID = pd.OrgID
 		}
 	}
-	conn, err := grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery((*reg).(registry.Discovery)),
-		grpc.WithTimeout(15*time.Second),
-	)
+	client, err := userrpc.ProfileClient(reg)
 	if err != nil {
 		return nil, orgID, false, err
 	}
-	defer conn.Close()
-	client := profile.NewProfileClient(conn)
 	res, err := client.GetUserIdsByOrg(ctx, &profile.GetUserIdsByOrgReq{OrgId: int64(orgID)})
 	if err != nil {
 		return nil, orgID, false, err
@@ -54,17 +46,10 @@ func fetchDisplayNames(ctx context.Context, reg *registry.Registrar, userIDs []i
 	if pd := auth.GetCurrentUser(ctx); pd != nil {
 		orgID = int64(pd.OrgID)
 	}
-	conn, err := grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery((*reg).(registry.Discovery)),
-		grpc.WithTimeout(15*time.Second),
-	)
+	client, err := userrpc.ProfileClient(reg)
 	if err != nil {
 		return out
 	}
-	defer conn.Close()
-	client := profile.NewProfileClient(conn)
 	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIDs, OrgId: orgID})
 	if err != nil || res == nil {
 		return out

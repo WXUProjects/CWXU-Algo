@@ -153,6 +153,8 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 	if err := s.rdb.Del(ctx,
 		fmt.Sprintf("core:submit_log:user:%d", req.UserId),
 		fmt.Sprintf("user:%d:lastSubmitTime", req.UserId),
+		"core:platforms:bound_users:v1",
+		fmt.Sprintf("core:platforms:user:%d:v1", req.UserId),
 	).Err(); err != nil {
 		log.Errorf("SetSpider: redis del failed: %v", err)
 	}
@@ -408,6 +410,19 @@ func deleteAllInBatches(ctx context.Context, db *gorm.DB, table string, batch in
 	return total, nil
 }
 
+// EnqueueUserSpider 服务间入队（休眠唤醒等）；无站管鉴权
+func (s SpiderService) EnqueueUserSpider(ctx context.Context, req *spider.EnqueueUserSpiderReq) (*spider.EnqueueUserSpiderRes, error) {
+	if req == nil || req.UserId <= 0 {
+		return &spider.EnqueueUserSpiderRes{Code: 1, Message: "用户ID无效"}, nil
+	}
+	res := s.spider.Do(req.UserId, req.NeedAll)
+	return &spider.EnqueueUserSpiderRes{
+		Code:      0,
+		Message:   "已入队",
+		Published: int64(res.Published),
+	}, nil
+}
+
 // PurgeUserData 硬删除用户在 core 库的全部关联数据（删除用户时调用）
 func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserDataReq) (*spider.PurgeUserDataRes, error) {
 	if req.UserId <= 0 {
@@ -437,6 +452,8 @@ func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserD
 		fmt.Sprintf("spider:inflight:%d", uid),
 		fmt.Sprintf("user:%d:profile", uid),
 		fmt.Sprintf("statistic:user:%d:ver", uid),
+		"core:platforms:bound_users:v1",
+		fmt.Sprintf("core:platforms:user:%d:v1", uid),
 	}
 	if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
 		log.Warnf("PurgeUserData: redis del user=%d: %v", uid, err)

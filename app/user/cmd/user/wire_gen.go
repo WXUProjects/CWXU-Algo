@@ -35,7 +35,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, sm
 	profileUseCase := biz.NewProfileUseCase(profileDal)
 	profileService := service.NewProfileService(profileDal, register, profileUseCase, dataData)
 	grpcServer := server.NewGRPCServer(confServer, logger, profileService)
-	authService := service.NewAuthService(dataData, smtp)
+	authService := service.NewAuthService(dataData, smtp, register)
 	groupDal := dal.NewGroupDal(dataData)
 	groupUseCase := biz.NewGroupUseCase(groupDal)
 	groupService := service.NewGroupService(register, groupUseCase, groupDal)

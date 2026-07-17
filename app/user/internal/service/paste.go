@@ -143,18 +143,21 @@ func (s *PasteService) handleMine(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
 		return nil
 	}
+	now := time.Now()
+	// 顺手清掉已过期（硬删）；列表本身只查未过期，避免 Limit(50) 全是过期项时看起来「历史没了」
+	_ = s.db.Where("user_id = ? AND expire_at IS NOT NULL AND expire_at < ?", pd.UserID, now).
+		Delete(&model.Paste{}).Error
+
 	var list []model.Paste
-	_ = s.db.Where("user_id = ?", pd.UserID).
+	if err := s.db.Where("user_id = ? AND (expire_at IS NULL OR expire_at >= ?)", pd.UserID, now).
 		Order("id DESC").
 		Limit(50).
-		Find(&list).Error
-	now := time.Now()
+		Find(&list).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
+		return nil
+	}
 	out := make([]map[string]interface{}, 0, len(list))
 	for i := range list {
-		if list[i].ExpireAt != nil && list[i].ExpireAt.Before(now) {
-			_ = s.db.Delete(&list[i]).Error
-			continue
-		}
 		out = append(out, pasteToMap(&list[i], false))
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{

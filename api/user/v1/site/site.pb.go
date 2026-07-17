@@ -205,7 +205,7 @@ type GetAdminConfigRes struct {
 	// 页脚
 	FooterIcp string `protobuf:"bytes,19,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
 	// 不活跃天数阈值（默认 14）
-	InactiveDays  int32 `protobuf:"varint,20,opt,name=inactive_days,json=inactiveDays,proto3" json:"inactive_days,omitempty"`
+	InactiveDays  int32 `protobuf:"varint,20,opt,name=inactive_days,json=inactiveDays,proto3" json:"inactiveDays,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -404,9 +404,9 @@ type UpdateConfigReq struct {
 	// 页脚备案号
 	FooterIcp string `protobuf:"bytes,17,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
 	// 不活跃天数；0 或不传 = 不修改；>0 时夹取 1–365
-	InactiveDays int32 `protobuf:"varint,18,opt,name=inactive_days,json=inactiveDays,proto3" json:"inactive_days,omitempty"`
+	InactiveDays int32 `protobuf:"varint,18,opt,name=inactive_days,json=inactiveDays,proto3" json:"inactiveDays,omitempty"`
 	// 是否写入 inactive_days（与间隔覆盖同一套语义）
-	SetInactiveDays bool `protobuf:"varint,19,opt,name=set_inactive_days,json=setInactiveDays,proto3" json:"set_inactive_days,omitempty"`
+	SetInactiveDays bool `protobuf:"varint,19,opt,name=set_inactive_days,json=setInactiveDays,proto3" json:"setInactiveDays,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }

@@ -2,6 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	data2 "cwxu-algo/app/common/data"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
 	"cwxu-algo/app/core_data/internal/data"
@@ -10,11 +17,6 @@ import (
 	"cwxu-algo/app/core_data/internal/spider"
 	"cwxu-algo/app/core_data/internal/spider/problem_fetch"
 	"cwxu-algo/app/core_data/task"
-	"encoding/json"
-	"fmt"
-	"strings"
-	"sync"
-	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
@@ -494,8 +496,12 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	oldTags, newTags, e := dal.SyncProblemTags(ctx, uc.data.DB, p.ID, result.AlgorithmTags)
 	if e != nil {
 		log.Warnf("SyncProblemTags analyze id=%d: %v", p.ID, e)
-	} else if e2 := dal.AdjustUserTagACForProblemTagsChange(ctx, uc.data.DB, p.ID, oldTags, newTags); e2 != nil {
-		log.Warnf("AdjustUserTagAC analyze id=%d: %v", p.ID, e2)
+	} else {
+		uc.BumpProblemTagsVer()
+		uc.BumpProblemListVer()
+		if e2 := dal.AdjustUserTagACForProblemTagsChange(ctx, uc.data.DB, p.ID, oldTags, newTags); e2 != nil {
+			log.Warnf("AdjustUserTagAC analyze id=%d: %v", p.ID, e2)
+		}
 	}
 	uc.BumpProblemDetailVer(p.ID)
 	uc.progressMoveStatus(oldStatus, model.ProblemStatusCompleted)
@@ -939,6 +945,28 @@ type ListProblemFilter struct {
 	FollowingIDs  []int64 // 非空：仅这些用户提交过的题
 }
 
+type listCachePayload struct {
+	List  []model.Problem
+	Total int64
+}
+
+func listFilterCacheable(f ListProblemFilter) bool {
+	// 首屏、无关键词/状态筛选/关注过滤；platforms/tags/difficulty 写入 key
+	if f.Page != 1 {
+		return false
+	}
+	if strings.TrimSpace(f.Keyword) != "" {
+		return false
+	}
+	if strings.TrimSpace(f.UserStatus) != "" {
+		return false
+	}
+	if f.FollowingIDs != nil {
+		return false
+	}
+	return true
+}
+
 func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]string, int64, error) {
 	if f.Page <= 0 {
 		f.Page = 1
@@ -946,12 +974,62 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 	if f.PageSize <= 0 {
 		f.PageSize = 20
 	}
+
+	// 默认列表短缓存（不含 userStatusMap）
+	if listFilterCacheable(f) && uc.data != nil && uc.data.RDB != nil {
+		ver := uc.redisVer(problemListVerKey)
+		plats := strings.Join(f.Platforms, ",")
+		tags := strings.Join(dal.NormalizeTags(f.Tags), ",")
+		diff := strings.TrimSpace(f.Difficulty)
+		key := fmt.Sprintf("problem:list:v%s:p%d:ps%d:plat{%s}:tag{%s}:diff{%s}",
+			ver, f.Page, f.PageSize, plats, tags, diff)
+		payload, _, err := data2.GetCacheDalTTL[listCachePayload](context.Background(), uc.data.RDB, key, problemListCacheTTL, func(data *listCachePayload) error {
+			list, total, e := uc.listProblemsDB(f)
+			if e != nil {
+				return e
+			}
+			data.List = list
+			data.Total = total
+			return nil
+		})
+		if err == nil && payload != nil {
+			userStatusMap := map[uint]string{}
+			if f.UserID > 0 && len(payload.List) > 0 {
+				ids := make([]uint, 0, len(payload.List))
+				for i := range payload.List {
+					ids = append(ids, payload.List[i].ID)
+				}
+				if m, e := dal.GetUserProblemStatuses(context.Background(), uc.data.DB, f.UserID, ids); e == nil {
+					userStatusMap = m
+				}
+			}
+			return payload.List, userStatusMap, payload.Total, nil
+		}
+	}
+
+	list, total, err := uc.listProblemsDB(f)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	userStatusMap := map[uint]string{}
+	if f.UserID > 0 && len(list) > 0 {
+		ids := make([]uint, 0, len(list))
+		for i := range list {
+			ids = append(ids, list[i].ID)
+		}
+		if m, e := dal.GetUserProblemStatuses(context.Background(), uc.data.DB, f.UserID, ids); e == nil {
+			userStatusMap = m
+		}
+	}
+	return list, userStatusMap, total, nil
+}
+
+func (uc *ProblemUseCase) listProblemsDB(f ListProblemFilter) ([]model.Problem, int64, error) {
 	q := uc.data.DB.Model(&model.Problem{})
 	if len(f.Platforms) > 0 {
 		q = q.Where("platform IN ?", f.Platforms)
 	}
 	if len(f.Tags) > 0 {
-		// 倒排表 problem_tags（OR：任一标签命中）
 		clean := dal.NormalizeTags(f.Tags)
 		if len(clean) > 0 {
 			q = q.Where(`id IN (
@@ -972,41 +1050,34 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 			WHERE ups.problem_id = problems.id AND ups.user_id IN ?
 		)`, f.FollowingIDs)
 	} else if f.FollowingIDs != nil {
-		// 空切片：关注列表为空 → 无结果
 		q = q.Where("1 = 0")
 	}
 
-	// 用户状态：读预聚合 user_problem_status
-	userStatusMap := map[uint]string{}
-	if f.UserID > 0 {
-		if f.UserStatus != "" {
-			want := strings.ToUpper(strings.TrimSpace(f.UserStatus))
-			switch want {
-			case "NONE":
-				q = q.Where(`NOT EXISTS (
-					SELECT 1 FROM user_problem_status ups
-					WHERE ups.problem_id = problems.id AND ups.user_id = ?
-				)`, f.UserID)
-			case "AC":
-				q = q.Where(`EXISTS (
-					SELECT 1 FROM user_problem_status ups
-					WHERE ups.problem_id = problems.id AND ups.user_id = ? AND ups.status = 'AC'
-				)`, f.UserID)
-			case "TRIED":
-				q = q.Where(`EXISTS (
-					SELECT 1 FROM user_problem_status ups
-					WHERE ups.problem_id = problems.id AND ups.user_id = ? AND ups.status = 'TRIED'
-				)`, f.UserID)
-			}
+	if f.UserID > 0 && f.UserStatus != "" {
+		want := strings.ToUpper(strings.TrimSpace(f.UserStatus))
+		switch want {
+		case "NONE":
+			q = q.Where(`NOT EXISTS (
+				SELECT 1 FROM user_problem_status ups
+				WHERE ups.problem_id = problems.id AND ups.user_id = ?
+			)`, f.UserID)
+		case "AC":
+			q = q.Where(`EXISTS (
+				SELECT 1 FROM user_problem_status ups
+				WHERE ups.problem_id = problems.id AND ups.user_id = ? AND ups.status = 'AC'
+			)`, f.UserID)
+		case "TRIED":
+			q = q.Where(`EXISTS (
+				SELECT 1 FROM user_problem_status ups
+				WHERE ups.problem_id = problems.id AND ups.user_id = ? AND ups.status = 'TRIED'
+			)`, f.UserID)
 		}
 	}
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
-		return nil, nil, 0, err
+		return nil, 0, err
 	}
-	// 无题面 / 无标签 → 靠后；有题面且有标签 → 按最近提交正常排序
-	// （公共域-only 入库无题面时前端仍可见，但不抢前排）
 	order := `
 		CASE
 			WHEN content_md IS NULL OR btrim(content_md) = '' THEN 2
@@ -1017,21 +1088,7 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 		id DESC`
 	var list []model.Problem
 	err := q.Order(order).Offset(int((f.Page - 1) * f.PageSize)).Limit(int(f.PageSize)).Find(&list).Error
-	if err != nil {
-		return nil, nil, 0, err
-	}
-
-	// 仅补当前页的用户状态（预聚合）
-	if f.UserID > 0 && len(list) > 0 {
-		ids := make([]uint, 0, len(list))
-		for i := range list {
-			ids = append(ids, list[i].ID)
-		}
-		if m, e := dal.GetUserProblemStatuses(context.Background(), uc.data.DB, f.UserID, ids); e == nil {
-			userStatusMap = m
-		}
-	}
-	return list, userStatusMap, total, nil
+	return list, total, err
 }
 
 // TagCount 标签及题目数（用于筛选器）
@@ -1040,8 +1097,31 @@ type TagCount struct {
 	Count int64
 }
 
-// ListTags 从 problem_tags 倒排聚合
+// ListTags 从 problem_tags 倒排聚合（Redis 缓存）
 func (uc *ProblemUseCase) ListTags(limit int) ([]TagCount, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	ctx := context.Background()
+	if uc.data != nil && uc.data.RDB != nil {
+		ver := uc.redisVer(problemTagsVerKey)
+		key := fmt.Sprintf("problem:tags:count:v%s:lim%d", ver, limit)
+		cached, _, err := data2.GetCacheDalTTL[[]TagCount](ctx, uc.data.RDB, key, problemTagsCacheTTL, func(data *[]TagCount) error {
+			list, e := uc.listTagsDB(limit)
+			if e != nil {
+				return e
+			}
+			*data = list
+			return nil
+		})
+		if err == nil && cached != nil {
+			return *cached, nil
+		}
+	}
+	return uc.listTagsDB(limit)
+}
+
+func (uc *ProblemUseCase) listTagsDB(limit int) ([]TagCount, error) {
 	rows, err := dal.ListTagCounts(context.Background(), uc.data.DB, limit)
 	if err != nil {
 		return nil, err

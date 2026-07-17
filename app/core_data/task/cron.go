@@ -8,12 +8,12 @@ import (
 
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/userrpc"
 
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
@@ -39,6 +39,7 @@ type UserSyncPolicy struct {
 	EmailWeeklyEnabled   bool
 	SpiderIntervalMin    int
 	AISummaryIntervalMin int
+	SyncActive           bool
 }
 
 type CronTask struct {
@@ -102,14 +103,34 @@ func clampInterval(v, def int) int {
 	return v
 }
 
-// getBoundUserIds 仅返回 platform 表中已绑定 OJ 的用户（去重）
+const platformsBoundUsersKey = "core:platforms:bound_users:v1"
+const platformsBoundUsersTTL = 2 * time.Minute
+
+// getBoundUserIds 仅返回 platform 表中已绑定 OJ 的用户（去重）；Redis 短缓存降 platforms 全表扫
 func (t *CronTask) getBoundUserIds() []int64 {
+	ctx := context.Background()
+	if t.rdb != nil {
+		if b, err := t.rdb.Get(ctx, platformsBoundUsersKey).Bytes(); err == nil && len(b) > 0 {
+			var cached []int64
+			if utils.GobDecoder(b, &cached) == nil {
+				return cached
+			}
+		}
+	}
 	var userIds []int64
 	if err := t.db.Model(&model.Platform{}).
 		Distinct("user_id").
 		Pluck("user_id", &userIds).Error; err != nil {
 		log.Errorf("CronTask: query bound users failed: %v", err)
 		return nil
+	}
+	if userIds == nil {
+		userIds = []int64{}
+	}
+	if t.rdb != nil {
+		if b, err := utils.GobEncoder(userIds); err == nil {
+			_ = t.rdb.Set(ctx, platformsBoundUsersKey, b, platformsBoundUsersTTL).Err()
+		}
 	}
 	return userIds
 }
@@ -131,6 +152,7 @@ func (t *CronTask) fetchPolicies(userIds []int64) map[int64]UserSyncPolicy {
 			EmailWeeklyEnabled:   false,
 			SpiderIntervalMin:    defaultSpiderIntervalMin,
 			AISummaryIntervalMin: defaultAIIntervalMin,
+			SyncActive:           true,
 		}
 	}
 	if t.reg == nil {
@@ -138,18 +160,11 @@ func (t *CronTask) fetchPolicies(userIds []int64) map[int64]UserSyncPolicy {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	conn, err := grpc.DialInsecure(
-		ctx,
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery(t.reg.Reg.(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
+	cli, err := userrpc.ProfileClient(&t.reg.Reg)
 	if err != nil {
 		log.Warnf("CronTask: dial user for policies: %v", err)
 		return out
 	}
-	defer conn.Close()
-	cli := profile.NewProfileClient(conn)
 	// 分批，避免超大 body
 	const batch = 200
 	for i := 0; i < len(userIds); i += batch {
@@ -174,6 +189,8 @@ func (t *CronTask) fetchPolicies(userIds []int64) map[int64]UserSyncPolicy {
 				EmailWeeklyEnabled:   p.GetEmailWeeklyEnabled(),
 				SpiderIntervalMin:    clampInterval(int(p.GetSpiderIntervalMin()), defaultSpiderIntervalMin),
 				AISummaryIntervalMin: clampInterval(int(p.GetAiSummaryIntervalMin()), defaultAIIntervalMin),
+				// 旧 user 服务无该字段时默认 false；兼容：无字段时仍以开关为准（见 runUserProfilePrewarm）
+				SyncActive: p.GetSyncActive() || p.GetEnableSpider() || p.GetEnableAiSummary(),
 			}
 		}
 	}
@@ -412,9 +429,21 @@ func (t *CronTask) runUserProfilePrewarm(full bool) {
 		log.Errorf("CronTask user_profile: pluck users: %v", err)
 		return
 	}
-	pub, dedup, fail := t.profile.DoBatch(userIDs)
-	log.Infof("CronTask user_profile prewarm full=%v candidates=%d published=%d dedup=%d failed=%d",
-		full, len(userIDs), pub, dedup, fail)
+	// 过滤休眠用户：仅 SyncActive 入队画像预热
+	policies := t.fetchPolicies(userIDs)
+	active := make([]int64, 0, len(userIDs))
+	skipped := 0
+	for _, uid := range userIDs {
+		p := policies[uid]
+		if p.SyncActive || p.EnableSpider || p.EnableAISummary {
+			active = append(active, uid)
+		} else {
+			skipped++
+		}
+	}
+	pub, dedup, fail := t.profile.DoBatch(active)
+	log.Infof("CronTask user_profile prewarm full=%v candidates=%d active=%d dormant_skip=%d published=%d dedup=%d failed=%d",
+		full, len(userIDs), len(active), skipped, pub, dedup, fail)
 }
 
 // Do 启动 cron 并阻塞到 Stop，供 runForever 使用（只应有一个存活实例）。

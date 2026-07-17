@@ -40,6 +40,23 @@ func (s *OrgService) invalidateUserProfileCache(userID uint) {
 	_ = s.rdb.Del(context.Background(), fmt.Sprintf("user:%d:profile", userID)).Err()
 }
 
+func (s *OrgService) invalidateOrgMembersCache(orgID uint) {
+	if s == nil || s.rdb == nil || orgID == 0 {
+		return
+	}
+	_ = s.rdb.Del(context.Background(), fmt.Sprintf("user:org:members:v1:%d", orgID)).Err()
+}
+
+func (s *OrgService) invalidateDisplayCache(orgID uint, userID uint) {
+	if s == nil || s.rdb == nil || userID == 0 {
+		return
+	}
+	ctx := context.Background()
+	if orgID > 0 {
+		_ = s.rdb.Del(ctx, fmt.Sprintf("user:display:v1:o%d:u%d", orgID, userID)).Err()
+	}
+}
+
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -139,6 +156,7 @@ func orgToMap(o *model.Org, includeInvite bool) map[string]interface{} {
 		"spiderIntervalMin":    o.SpiderIntervalMin,
 		"aiSummaryIntervalMin": o.AISummaryIntervalMin,
 		"aiEmailSchedule":      o.AIEmailSchedule,
+		"forceSync":            o.ForceSync,
 	}
 	if includeInvite {
 		m["inviteCode"] = o.InviteCode
@@ -188,16 +206,21 @@ func (s *OrgService) ensureOrgMember(orgID, userID uint, role string, groupID *u
 	var m model.OrgMember
 	err := s.db.Where("org_id = ? AND user_id = ?", orgID, userID).First(&m).Error
 	if err == nil {
-		return s.db.Model(&m).Updates(map[string]interface{}{
+		err = s.db.Model(&m).Updates(map[string]interface{}{
 			"role":             role,
 			"group_id":         groupID,
 			"org_display_name": displayName,
 		}).Error
+		if err == nil {
+			s.invalidateOrgMembersCache(orgID)
+			s.invalidateDisplayCache(orgID, userID)
+		}
+		return err
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	return s.db.Create(&model.OrgMember{
+	err = s.db.Create(&model.OrgMember{
 		OrgID:          orgID,
 		UserID:         userID,
 		Role:           role,
@@ -205,6 +228,11 @@ func (s *OrgService) ensureOrgMember(orgID, userID uint, role string, groupID *u
 		OrgDisplayName: displayName,
 		JoinedAt:       now,
 	}).Error
+	if err == nil {
+		s.invalidateOrgMembersCache(orgID)
+		s.invalidateDisplayCache(orgID, userID)
+	}
+	return err
 }
 
 // setDefaultOrg 将组织设为用户默认（current_org_id）；登录/打开站点自动进入该组织。
@@ -259,7 +287,7 @@ func (s *OrgService) ensureDefaultGroupID(orgID uint) uint {
 // addOrgMemberAtomic serializes membership creation per organization so the
 // seat limit cannot be exceeded by concurrent join/add/review requests.
 func (s *OrgService) addOrgMemberAtomic(orgID, userID uint, role, displayName string) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var o model.Org
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&o, orgID).Error; err != nil {
 			return err
@@ -298,6 +326,11 @@ func (s *OrgService) addOrgMemberAtomic(orgID, userID uint, role, displayName st
 			OrgDisplayName: strings.TrimSpace(displayName), JoinedAt: time.Now(),
 		}).Error
 	})
+	if err == nil {
+		s.invalidateOrgMembersCache(orgID)
+		s.invalidateDisplayCache(orgID, userID)
+	}
+	return err
 }
 
 // RegisterOrgRoutes HTTP 路由（与 upload 同模式）
@@ -565,6 +598,8 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "创建失败，请稍后重试"})
 		return nil
 	}
+	s.invalidateOrgMembersCache(o.ID)
+	s.invalidateDisplayCache(o.ID, adminUID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "创建成功", "data": s.orgToMapWithSeats(&o, true),
 	})
@@ -650,6 +685,7 @@ func (s *OrgService) handleDelete(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "删除失败，请稍后重试"})
 		return nil
 	}
+	s.invalidateOrgMembersCache(o.ID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除组织"})
 	return nil
 }
@@ -676,6 +712,7 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 		AISummaryIntervalMin *int    `json:"aiSummaryIntervalMin"`
 		AIEmailSchedule      *string `json:"aiEmailSchedule"`
 		SeatLimit            *int    `json:"seatLimit"`
+		ForceSync            *bool   `json:"forceSync"` // 仅站管
 	}
 	if err := readJSON(ctx.Request(), &req); err != nil || req.ID == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
@@ -766,6 +803,9 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 				return nil
 			}
 			updates["seat_limit"] = *req.SeatLimit
+		}
+		if req.ForceSync != nil {
+			updates["force_sync"] = *req.ForceSync
 		}
 	}
 
@@ -977,6 +1017,8 @@ func (s *OrgService) handleLeave(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "退出失败，请稍后重试"})
 		return nil
 	}
+	s.invalidateOrgMembersCache(req.OrgID)
+	s.invalidateDisplayCache(req.OrgID, pd.UserID)
 	// 若当前组织是离开的组织，切回公共域
 	u, _ := s.loadUser(pd.UserID)
 	token := ""
@@ -1239,6 +1281,7 @@ func (s *OrgService) handleSetDisplayName(ctx khttp.Context) error {
 	}
 	// 旁路更新 users.name 后清资料缓存，避免编辑页仍显示旧昵称/旧字段
 	s.invalidateUserProfileCache(uid)
+	s.invalidateDisplayCache(req.OrgID, uid)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更新组织内名称"})
 	return nil
 }
@@ -1349,6 +1392,8 @@ func (s *OrgService) handleRemoveMember(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "移除失败，请稍后重试"})
 		return nil
 	}
+	s.invalidateOrgMembersCache(req.OrgID)
+	s.invalidateDisplayCache(req.OrgID, req.UserID)
 	// 若被移出的是其默认组织，回落公共域
 	s.fallbackDefaultOrgIf(req.UserID, req.OrgID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已移除成员"})

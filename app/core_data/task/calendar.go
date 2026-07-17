@@ -12,10 +12,9 @@ import (
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
 	calspider "cwxu-algo/app/core_data/internal/spider/calendar"
+	"cwxu-algo/app/core_data/internal/userrpc"
 
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 )
 
 const maxAdvanceMinutes = 4320 // 与 model 白名单最大值一致
@@ -180,18 +179,11 @@ func (t *CronTask) lookupEmail(userID int64) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	conn, err := grpc.DialInsecure(
-		ctx,
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery(t.reg.Reg.(registry.Discovery)),
-		grpc.WithTimeout(8*time.Second),
-	)
+	cli, err := userrpc.ProfileClient(&t.reg.Reg)
 	if err != nil {
 		log.Warnf("CronTask calendar email dial: %v", err)
 		return ""
 	}
-	defer conn.Close()
-	cli := profile.NewProfileClient(conn)
 	res, err := cli.GetContactEmail(ctx, &profile.GetContactEmailReq{UserId: userID})
 	if err != nil || res == nil {
 		return ""
