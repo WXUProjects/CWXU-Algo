@@ -61,6 +61,13 @@ var publicExact = map[string]struct{}{
 	"/v1/core/problem/get":          {},
 	"/v1/core/problem/submissions":  {},
 	"/v1/core/problem/user-profile": {},
+	// 题目评论/用户题解/发现讨论（读公开；写仍需 JWT）
+	"/v1/core/problem/comment/list":   {},
+	"/v1/core/problem/solution/list":  {},
+	"/v1/core/problem/solution/get":   {},
+	"/v1/core/activity/feed":          {},
+	"/v1/core/user/recent-comments":   {},
+	"/v1/core/user/recent-solutions":  {},
 }
 
 // Middleware jwt 校验中间件
