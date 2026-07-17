@@ -1086,7 +1086,7 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 		Where("m.org_id = ?", orgID)
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		base = base.Where("u.name LIKE ? OR u.username LIKE ? OR m.org_display_name LIKE ?", like, like, like)
+		base = base.Where("u.name ILIKE ? OR u.username ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
 	}
 
 	var total int64
@@ -1095,7 +1095,7 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 		Where("m.org_id = ?", orgID)
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		countQ = countQ.Where("u.name LIKE ? OR u.username LIKE ? OR m.org_display_name LIKE ?", like, like, like)
+		countQ = countQ.Where("u.name ILIKE ? OR u.username ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
 	}
 	_ = countQ.Count(&total).Error
 

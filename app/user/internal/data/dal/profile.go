@@ -41,7 +41,7 @@ func (d *ProfileDal) GetById(ctx context.Context, userId int64) (*model.User, er
 	return profile, err
 }
 
-// GetByName 按姓名或用户名模糊查询
+// GetByName 按姓名或用户名模糊查询（ILIKE，忽略大小写）
 func (d *ProfileDal) GetByName(ctx context.Context, name string) ([]*model.User, error) {
 	var userList []*model.User
 	kw := strings.TrimSpace(name)
@@ -51,7 +51,7 @@ func (d *ProfileDal) GetByName(ctx context.Context, name string) ([]*model.User,
 	like := "%" + kw + "%"
 	err := d.db.WithContext(ctx).
 		Select("id, name, username").
-		Where("name LIKE ? OR username LIKE ?", like, like).
+		Where("name ILIKE ? OR username ILIKE ?", like, like).
 		Limit(15).
 		Find(&userList).Error
 	if err != nil {
@@ -354,21 +354,28 @@ func (d *ProfileDal) OrgDisplayNamesByUserIDs(ctx context.Context, orgID uint, u
 	return out, nil
 }
 
-func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64) ([]model.User, int64, error) {
+func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keyword string) ([]model.User, int64, error) {
+	kw := strings.TrimSpace(keyword)
+	q := d.db.WithContext(ctx).Model(&model.User{})
+	if kw != "" {
+		like := "%" + kw + "%"
+		q = q.Where("username ILIKE ? OR name ILIKE ?", like, like)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
 	var list []model.User
-	err := d.db.WithContext(ctx).
+	err := q.
 		Select("id", "username", "name", "group_id", "avatar", "role_id", "is_site_admin",
 			"problem_fetch_enabled", "problem_ai_enabled",
 			"spider_interval_min_override", "ai_summary_interval_min_override",
-			"email_enabled", "email_weekly_enabled", "created_at").
+			"email_enabled", "email_weekly_enabled", "created_at",
+			"sync_exempt", "last_login_at").
 		Order("id").
 		Limit(int(pageSize)).Offset(int(pageNum-1) * int(pageSize)).
 		Find(&list).Error
 	if err != nil {
-		return nil, 0, err
-	}
-	var total int64
-	if err = d.db.WithContext(ctx).Model(&model.User{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	return list, total, nil
@@ -979,24 +986,35 @@ func (d *ProfileDal) SetSyncExempt(ctx context.Context, userID int64, exempt boo
 
 // GetListByOrg 分页列出组织成员用户
 // total 与列表一致：仅统计仍存在于 users 表的成员（忽略孤儿 org_members）
-func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pageNum int64) ([]model.User, int64, error) {
-	var total int64
-	if err := d.db.WithContext(ctx).
+// keyword 非空时模糊匹配 username / name / org_display_name（ILIKE）
+func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pageNum int64, keyword string) ([]model.User, int64, error) {
+	kw := strings.TrimSpace(keyword)
+	countQ := d.db.WithContext(ctx).
 		Table("org_members AS m").
 		Joins("JOIN users AS u ON u.id = m.user_id").
-		Where("m.org_id = ?", orgID).
-		Count(&total).Error; err != nil {
+		Where("m.org_id = ?", orgID)
+	if kw != "" {
+		like := "%" + kw + "%"
+		countQ = countQ.Where("u.username ILIKE ? OR u.name ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
+	}
+	var total int64
+	if err := countQ.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var list []model.User
-	err := d.db.WithContext(ctx).
+	listQ := d.db.WithContext(ctx).
 		Table("users AS u").
 		Select(`u.id, u.username, u.name, COALESCE(m.group_id, 0) AS group_id, u.avatar, u.role_id, u.is_site_admin,
 			u.email_enabled, u.email_weekly_enabled,
 			u.problem_fetch_enabled, u.problem_ai_enabled,
 			u.spider_interval_min_override, u.ai_summary_interval_min_override, u.created_at,
 			u.sync_exempt, u.last_login_at`).
-		Joins("JOIN org_members AS m ON m.user_id = u.id AND m.org_id = ?", orgID).
+		Joins("JOIN org_members AS m ON m.user_id = u.id AND m.org_id = ?", orgID)
+	if kw != "" {
+		like := "%" + kw + "%"
+		listQ = listQ.Where("u.username ILIKE ? OR u.name ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
+	}
+	var list []model.User
+	err := listQ.
 		Order("u.id").
 		Limit(int(pageSize)).Offset(int(pageNum-1) * int(pageSize)).
 		Find(&list).Error

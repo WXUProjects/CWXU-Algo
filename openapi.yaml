@@ -1437,6 +1437,11 @@ paths:
                   description: 'scope: org=当前组织成员；site=全站（仅站点管理员）；空=兼容旧逻辑（站管全站/否则组织）'
                   schema:
                     type: string
+                - name: keyword
+                  in: query
+                  description: 模糊搜索：用户名 / 昵称；org 范围另含组织内名称（org_display_name）
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK

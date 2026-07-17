@@ -3,6 +3,7 @@ package backup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,6 +35,22 @@ func TestExpandedAndNeedsCore(t *testing.T) {
 	if NeedsCoreDB(ExpandedScopes([]string{ScopeUsers})) {
 		t.Fatal("users does not need core")
 	}
+}
+
+func TestPlanQuotaTableName(t *testing.T) {
+	// 回归：GORM 把 PlanQuota 收成 plan_quota，备份清单不得写成 plan_quotas
+	for _, spec := range AllTableSpecs {
+		if strings.Contains(spec.File, "plan_quota") || strings.Contains(spec.Table, "plan_quota") {
+			if spec.Table != "plan_quota" {
+				t.Fatalf("PlanQuota table must be plan_quota, got %q", spec.Table)
+			}
+			if spec.File != "plan_quota.ndjson" {
+				t.Fatalf("PlanQuota file must be plan_quota.ndjson, got %q", spec.File)
+			}
+			return
+		}
+	}
+	t.Fatal("plan_quota missing from AllTableSpecs")
 }
 
 func TestZipRoundTrip(t *testing.T) {

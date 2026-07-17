@@ -119,6 +119,11 @@ func exportTable(db *gorm.DB, table, outPath string) (int64, error) {
 	}
 	defer f.Close()
 
+	// 表尚未 AutoMigrate / 历史库缺表时：写出空文件并继续，避免整站导出因一张表挂掉
+	if !tableExists(db, table) {
+		return 0, nil
+	}
+
 	enc := json.NewEncoder(f)
 	var total int64
 	var lastID int64 = -1
@@ -160,6 +165,18 @@ func exportTable(db *gorm.DB, table, outPath string) (int64, error) {
 		}
 	}
 	return total, nil
+}
+
+func tableExists(db *gorm.DB, table string) bool {
+	if db == nil {
+		return false
+	}
+	var n int64
+	err := db.Raw(`
+		SELECT COUNT(*) FROM information_schema.tables
+		WHERE table_schema = current_schema() AND table_name = ?
+	`, table).Scan(&n).Error
+	return err == nil && n > 0
 }
 
 func tableHasColumn(db *gorm.DB, table, col string) bool {

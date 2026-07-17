@@ -42,7 +42,8 @@ type TableSpec struct {
 // AllTableSpecs export/import order (dependencies first for import).
 var AllTableSpecs = []TableSpec{
 	{File: "site_configs.ndjson", DB: "user", Table: "site_configs", Scope: ScopeSite, SeqCol: "id"},
-	{File: "plan_quotas.ndjson", DB: "user", Table: "plan_quotas", Scope: ScopeOrgs, SeqCol: "id"},
+	// GORM 默认将 PlanQuota 复数化为 plan_quota（quota 不规则），勿写成 plan_quotas
+	{File: "plan_quota.ndjson", DB: "user", Table: "plan_quota", Scope: ScopeOrgs, SeqCol: "id"},
 	{File: "users.ndjson", DB: "user", Table: "users", Scope: ScopeUsers, SeqCol: "id"},
 	{File: "orgs.ndjson", DB: "user", Table: "orgs", Scope: ScopeOrgs, SeqCol: "id"},
 	{File: "groups.ndjson", DB: "user", Table: "groups", Scope: ScopeOrgs, SeqCol: "id"},

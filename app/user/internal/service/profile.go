@@ -130,8 +130,9 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		// 兼容旧客户端
 		useSite = auth.VerifySiteAdmin(ctx)
 	}
+	keyword := strings.TrimSpace(req.GetKeyword())
 	if useSite {
-		pf, total, err = p.profileUseCase.GetList(ctx, pageSize, pageNum)
+		pf, total, err = p.profileUseCase.GetList(ctx, pageSize, pageNum, keyword)
 	} else {
 		orgID := uint(0)
 		if pd := auth.GetCurrentUser(ctx); pd != nil {
@@ -140,7 +141,7 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		if orgID == 0 {
 			orgID, _ = p.profileDal.PublicOrgID(ctx)
 		}
-		pf, total, err = p.profileDal.GetListByOrg(ctx, orgID, pageSize, pageNum)
+		pf, total, err = p.profileDal.GetListByOrg(ctx, orgID, pageSize, pageNum, keyword)
 	}
 	if err != nil {
 		return nil, InternalServer

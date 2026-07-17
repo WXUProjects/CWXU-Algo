@@ -100,6 +100,7 @@ type OrgJoinRequest struct {
 }
 
 // PlanQuota 套餐配额模板
+// 表名须显式指定：GORM 默认 inflection 会把 PlanQuota 收成 plan_quota（非 plan_quotas）。
 type PlanQuota struct {
 	ID                uint `gorm:"primaryKey"`
 	CreatedAt         time.Time
@@ -109,3 +110,5 @@ type PlanQuota struct {
 	DailySyncPerUser  int    `gorm:"default:24"`
 	AISummaryPerMonth int    `gorm:"default:0"`
 }
+
+func (PlanQuota) TableName() string { return "plan_quota" }

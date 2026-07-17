@@ -150,9 +150,18 @@ func truncateList(db *gorm.DB, tables []string) error {
 	if db == nil || len(tables) == 0 {
 		return nil
 	}
-	// quote identifiers
-	parts := make([]string, len(tables))
-	for i, t := range tables {
+	// 只截断实际存在的表（与导出侧 tableExists 一致，避免历史库缺表导致整站恢复失败）
+	existing := make([]string, 0, len(tables))
+	for _, t := range tables {
+		if tableExists(db, t) {
+			existing = append(existing, t)
+		}
+	}
+	if len(existing) == 0 {
+		return nil
+	}
+	parts := make([]string, len(existing))
+	for i, t := range existing {
 		parts[i] = quoteIdent(t)
 	}
 	sql := fmt.Sprintf("TRUNCATE TABLE %s RESTART IDENTITY CASCADE", strings.Join(parts, ", "))
@@ -172,6 +181,15 @@ func importTable(db *gorm.DB, spec TableSpec, path string) (int64, error) {
 		return 0, err
 	}
 	defer f.Close()
+
+	// 目标表不存在：无数据可视为跳过；有数据则明确报错，避免静默丢行
+	if !tableExists(db, spec.Table) {
+		st, _ := f.Stat()
+		if st != nil && st.Size() > 0 {
+			return 0, fmt.Errorf("表 %s 不存在，但备份中有数据；请先启动 user 服务完成 AutoMigrate", spec.Table)
+		}
+		return 0, nil
+	}
 
 	sc := bufio.NewScanner(f)
 	// large problem content / paste
