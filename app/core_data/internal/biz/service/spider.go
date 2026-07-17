@@ -141,7 +141,7 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 			log.Infof("Spider: pruned %d duplicate leetcode recent-AC rows user=%d", n, userId)
 		}
 	}
-	// 回写已入库的 pending/空状态（CF 评测中先入库后终态不会再进 FilterUncounted）
+	// 回写已入库的 pending/空状态（CF 评测中先入库后终态不会再进 FilterNew）
 	nRefresh, rerr := dal.RefreshPendingSubmitVerdicts(ctx, uc.data.DB, tmp)
 	if rerr != nil {
 		log.Warnf("Spider: refresh pending status user=%d platform=%s: %v", userId, plat.Platform, rerr)
@@ -149,29 +149,26 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 		log.Infof("Spider: refreshed pending status user=%d platform=%s n=%d", userId, plat.Platform, nRefresh)
 	}
 
-	// 账本去重：已计入预聚合的 submit_id 不再累加（防全量重爬双计）
-	neu, err := dal.FilterUncountedSubmits(ctx, uc.data.DB, tmp)
+	// submit_logs 去重：已有 submit_id 不再累加预聚合（防全量重爬双计）
+	neu, err := dal.FilterNewSubmitLogs(ctx, uc.data.DB, tmp)
 	if err != nil {
 		return 0, err
 	}
 	if len(neu) == 0 {
 		return nRefresh, nil
 	}
-	// 异常大批量：多为账本残缺后全量把历史当新行叠统计
+	// 异常大批量：多为首次全量或明细被清后重爬
 	if len(neu) >= 2000 {
-		log.Warnf("Spider: large uncounted batch user=%d platform=%s fetched=%d uncounted=%d needAll=%v (check counted_submit_ids)",
+		log.Warnf("Spider: large new batch user=%d platform=%s fetched=%d new=%d needAll=%v",
 			userId, plat.Platform, len(tmp), len(neu), needAll)
 	}
 
-	// 预聚合+账本，并全量写入 submit_logs（不再做热窗裁剪）
+	// 预聚合 + 写入 submit_logs（unique submit_id + OnConflict DoNothing）
 	err = uc.data.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := dal.ApplyDailyDeltas(ctx, tx, dal.AggregateSubmitDeltas(neu)); err != nil {
 			return err
 		}
 		if err := dal.ApplyUserACFromSubmits(ctx, tx, neu); err != nil {
-			return err
-		}
-		if err := dal.InsertCountedSubmitIDs(ctx, tx, neu); err != nil {
 			return err
 		}
 		return tx.Clauses(clause.OnConflict{

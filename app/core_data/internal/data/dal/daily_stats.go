@@ -89,52 +89,14 @@ func ApplyDailyDeltas(ctx context.Context, db *gorm.DB, deltas []DailyDelta) err
 	return nil
 }
 
-// InsertCountedSubmitIDs 写入已计入账本（ON CONFLICT DO NOTHING）
-func InsertCountedSubmitIDs(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) error {
-	if db == nil || len(logs) == 0 {
-		return nil
-	}
-	rows := make([]model.CountedSubmitID, 0, len(logs))
-	for i := range logs {
-		if logs[i].SubmitID == "" {
-			continue
-		}
-		rows = append(rows, model.CountedSubmitID{
-			SubmitID: logs[i].SubmitID,
-			UserID:   logs[i].UserID,
-			Platform: strings.TrimSpace(logs[i].Platform),
-		})
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-	const batch = 500
-	for i := 0; i < len(rows); i += batch {
-		j := i + batch
-		if j > len(rows) {
-			j = len(rows)
-		}
-		chunk := rows[i:j]
-		if err := db.WithContext(ctx).
-			Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "submit_id"}},
-				DoNothing: true,
-			}).
-			Create(&chunk).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// FilterUncountedSubmits 入库前去重（账本为真相）：
+// FilterNewSubmitLogs 入库前去重（submit_logs.submit_id 唯一约束为真相）：
 //  1) 本批内按 submit_id 去重
-//  2) 去掉 counted_submit_ids 已有（防全量重爬双计）
-//  3) submit_logs 兜底（账本未写完时）
-//  4) 力扣 lc-prob：同一用户同一 titleSlug 已有则跳过
+//  2) 去掉 submit_logs 已有（防全量重爬对 daily/user_ac 双计）
+//  3) 力扣 lc-prob：同一用户同一 titleSlug 已有则跳过
 //
-// 注意：daily_user_stats 是累加语义；若账本残缺，全量爬会把历史再次 ApplyDaily。
-func FilterUncountedSubmits(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) ([]model.SubmitLog, error) {
+// 注意：daily_user_stats 是累加语义；必须只对「将新插入」的行 ApplyDaily。
+// OnConflict DoNothing 无法区分新旧行，故在插入前用 submit_logs 过滤。
+func FilterNewSubmitLogs(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) ([]model.SubmitLog, error) {
 	if len(logs) == 0 {
 		return nil, nil
 	}
@@ -150,33 +112,19 @@ func FilterUncountedSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 	}
 	const chunk = 500
 	exist := make(map[string]struct{}, len(ids)/2)
-	hasLedger := db.Migrator().HasTable(&model.CountedSubmitID{})
-	// 账本为唯一真相；submit_logs 仅兜底
 	for i := 0; i < len(ids); i += chunk {
 		j := i + chunk
 		if j > len(ids) {
 			j = len(ids)
 		}
 		part := ids[i:j]
-		if hasLedger {
-			var found []string
-			if err := db.WithContext(ctx).Model(&model.CountedSubmitID{}).
-				Where("submit_id IN ?", part).
-				Pluck("submit_id", &found).Error; err != nil {
-				return nil, err
-			}
-			for _, id := range found {
-				exist[id] = struct{}{}
-			}
-		}
-		// submit_logs 兜底：防止账本短暂落后时双计
-		var foundHot []string
+		var found []string
 		if err := db.WithContext(ctx).Model(&model.SubmitLog{}).
 			Where("submit_id IN ?", part).
-			Pluck("submit_id", &foundHot).Error; err != nil {
+			Pluck("submit_id", &found).Error; err != nil {
 			return nil, err
 		}
-		for _, id := range foundHot {
+		for _, id := range found {
 			exist[id] = struct{}{}
 		}
 	}
@@ -201,9 +149,9 @@ func FilterUncountedSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 	return out, nil
 }
 
-// FilterNewSubmitLogs 兼容旧名：等价 FilterUncountedSubmits
-func FilterNewSubmitLogs(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) ([]model.SubmitLog, error) {
-	return FilterUncountedSubmits(ctx, db, logs)
+// FilterUncountedSubmits 兼容旧名：等价 FilterNewSubmitLogs
+func FilterUncountedSubmits(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) ([]model.SubmitLog, error) {
+	return FilterNewSubmitLogs(ctx, db, logs)
 }
 
 // BackfillDailyUserStatsIfEmpty 表为空时从 submit_logs 全量聚合一次（启动幂等）
@@ -350,7 +298,7 @@ func filterLeetCodeProbAlreadyHaveSlug(ctx context.Context, db *gorm.DB, logs []
 	for _, r := range rows {
 		have[ukey{uid: r.UserID, ext: r.ExternalID}] = struct{}{}
 	}
-	// 账本时代：同题已在 user_ac_problems（e:LeetCode:slug）也视为已有
+	// 同题已在 user_ac_problems（e:LeetCode:slug）也视为已有
 	if db.Migrator().HasTable(&model.UserACProblem{}) {
 		keys := make([]string, 0, len(need))
 		for k := range need {
@@ -414,28 +362,5 @@ func DeletePlatformDailyStats(ctx context.Context, db *gorm.DB, userID int64, pl
 		Delete(&model.DailyUserStat{}).Error
 }
 
-// DeletePlatformCountedIDs 换绑：删某用户某平台账本
-func DeletePlatformCountedIDs(ctx context.Context, db *gorm.DB, userID int64, platform string) error {
-	if db == nil || userID <= 0 || platform == "" {
-		return nil
-	}
-	if !db.Migrator().HasTable(&model.CountedSubmitID{}) {
-		return nil
-	}
-	return db.WithContext(ctx).
-		Where("user_id = ? AND platform = ?", userID, platform).
-		Delete(&model.CountedSubmitID{}).Error
-}
-
-// DeleteUserCountedIDs 硬删用户账本
-func DeleteUserCountedIDs(ctx context.Context, db *gorm.DB, userID int64) error {
-	if db == nil || userID <= 0 {
-		return nil
-	}
-	if !db.Migrator().HasTable(&model.CountedSubmitID{}) {
-		return nil
-	}
-	return db.WithContext(ctx).Where("user_id = ?", userID).Delete(&model.CountedSubmitID{}).Error
-}
 
 

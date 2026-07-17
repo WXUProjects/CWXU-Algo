@@ -100,6 +100,10 @@ func Middleware(c *config.Middleware) (middleware.Middleware, error) {
 				if cookie, err := request.Cookie("goalgo_session"); err == nil && strings.TrimSpace(cookie.Value) != "" {
 					authHeader = "Bearer " + cookie.Value
 					request.Header.Set("Authorization", authHeader)
+				} else if t := strings.TrimSpace(request.URL.Query().Get("access_token")); t != "" {
+					// 浏览器原生下载无法带 Authorization，备份等附件下载可用 query 兜底
+					authHeader = "Bearer " + t
+					request.Header.Set("Authorization", authHeader)
 				}
 			}
 			if isPublic && strings.TrimSpace(authHeader) == "" {

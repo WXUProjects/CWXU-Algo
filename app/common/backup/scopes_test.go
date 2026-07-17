@@ -55,12 +55,12 @@ func TestBuildExportOrderBy(t *testing.T) {
 	if !strings.Contains(order2, "day") || !strings.Contains(order2, "platform") {
 		t.Fatalf("daily_user_stats order: %q", order2)
 	}
-	// counted_submit_ids
+	// submit_logs: submit_id 优先
 	order3 := buildExportOrderBy(func(c string) bool {
-		return c == "submit_id" || c == "user_id" || c == "platform"
+		return c == "submit_id" || c == "user_id" || c == "platform" || c == "id"
 	})
 	if !strings.Contains(order3, "submit_id") {
-		t.Fatalf("counted_submit_ids order: %q", order3)
+		t.Fatalf("submit_logs order: %q", order3)
 	}
 }
 

@@ -2794,7 +2794,7 @@ components:
                     description: 计入提交统计的行（排除 lc-ac / lc-prob）
                 countedSubmitIdsTotal:
                     type: string
-                    description: counted_submit_ids 账本行数
+                    description: 已废弃（账本表已删，固定 0）
                 oldestTime:
                     type: string
                     description: 明细时间范围（unix 秒；无数据为 0）

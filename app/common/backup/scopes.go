@@ -25,7 +25,6 @@ const (
 	ScopeEmergency  = "emergency"
 	ScopeDailyStats = "daily_stats"
 	ScopeUserAC     = "user_ac"
-	ScopeCounted    = "counted_submits"
 	ScopeFiles      = "files"
 )
 
@@ -58,7 +57,6 @@ var AllTableSpecs = []TableSpec{
 	{File: "daily_user_stats.ndjson", DB: "core", Table: "daily_user_stats", Scope: ScopeDailyStats, SeqCol: ""},
 	{File: "user_ac_problems.ndjson", DB: "core", Table: "user_ac_problems", Scope: ScopeUserAC, SeqCol: ""},
 	{File: "user_ac_problem_days.ndjson", DB: "core", Table: "user_ac_problem_days", Scope: ScopeUserAC, SeqCol: ""},
-	{File: "counted_submit_ids.ndjson", DB: "core", Table: "counted_submit_ids", Scope: ScopeCounted, SeqCol: ""},
 	{File: "bulletins.ndjson", DB: "core", Table: "bulletins", Scope: ScopeBulletins, SeqCol: "id"},
 	{File: "emergency_notices.ndjson", DB: "core", Table: "emergency_notices", Scope: ScopeEmergency, SeqCol: "id"},
 }
@@ -68,7 +66,7 @@ func ValidScopes() []string {
 	return []string{
 		ScopeSite, ScopeUsers, ScopeOrgs, ScopePastes, ScopeVisits,
 		ScopePlatforms, ScopeSubmits, ScopeContests, ScopeProblems,
-		ScopeBulletins, ScopeEmergency, ScopeDailyStats, ScopeUserAC, ScopeCounted, ScopeFiles,
+		ScopeBulletins, ScopeEmergency, ScopeDailyStats, ScopeUserAC, ScopeFiles,
 	}
 }
 
@@ -134,7 +132,7 @@ func NeedsCoreDB(concrete []string) bool {
 	for _, s := range concrete {
 		switch s {
 		case ScopePlatforms, ScopeSubmits, ScopeContests, ScopeProblems,
-			ScopeBulletins, ScopeEmergency, ScopeDailyStats, ScopeUserAC, ScopeCounted:
+			ScopeBulletins, ScopeEmergency, ScopeDailyStats, ScopeUserAC:
 			return true
 		}
 	}

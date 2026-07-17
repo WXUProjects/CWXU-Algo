@@ -134,14 +134,11 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 		if err := tx.Where("user_id = ? AND platform = ?", req.UserId, platformName).Delete(&model.ContestLog{}).Error; err != nil {
 			return err
 		}
-		// 按平台剪枝预聚合 + 账本，再全量重爬该平台
+		// 按平台剪枝预聚合，再全量重爬该平台
 		if err := dal.DeletePlatformDailyStats(ctx, tx, req.UserId, platformName); err != nil {
 			return err
 		}
 		if err := dal.DeletePlatformUserAC(ctx, tx, req.UserId, platformName); err != nil {
-			return err
-		}
-		if err := dal.DeletePlatformCountedIDs(ctx, tx, req.UserId, platformName); err != nil {
 			return err
 		}
 		return tx.Create(&platform).Error
@@ -179,7 +176,7 @@ func (s SpiderService) SubmitInventory(ctx context.Context, _ *spider.SubmitInve
 	if !auth.VerifySiteAdmin(ctx) {
 		return nil, errors.Forbidden("权限不足", "仅站点管理员可查看提交库存")
 	}
-	var total, realTotal, ledger int64
+	var total, realTotal int64
 	if err := s.db.WithContext(ctx).Model(&model.SubmitLog{}).Count(&total).Error; err != nil {
 		return nil, InternalError
 	}
@@ -187,9 +184,6 @@ func (s SpiderService) SubmitInventory(ctx context.Context, _ *spider.SubmitInve
 		Where(model.SQLExcludeLeetCodeNonSubmit).
 		Count(&realTotal).Error; err != nil {
 		return nil, InternalError
-	}
-	if s.db.Migrator().HasTable(&model.CountedSubmitID{}) {
-		_ = s.db.WithContext(ctx).Model(&model.CountedSubmitID{}).Count(&ledger).Error
 	}
 	var bounds struct {
 		Oldest *time.Time
@@ -206,11 +200,12 @@ func (s SpiderService) SubmitInventory(ctx context.Context, _ *spider.SubmitInve
 		newest = bounds.Newest.Unix()
 	}
 	return &spider.SubmitInventoryRes{
-		Code:                  0,
-		Message:               "ok",
-		SubmitLogsTotal:       total,
-		SubmitLogsRealTotal:   realTotal,
-		CountedSubmitIdsTotal: ledger,
+		Code:                0,
+		Message:             "ok",
+		SubmitLogsTotal:     total,
+		SubmitLogsRealTotal: realTotal,
+		// CountedSubmitIdsTotal 已废弃（账本表已删），固定 0 保持 wire 兼容
+		CountedSubmitIdsTotal: 0,
 		OldestTime:            oldest,
 		NewestTime:            newest,
 	}, nil
@@ -219,7 +214,7 @@ func (s SpiderService) SubmitInventory(ctx context.Context, _ *spider.SubmitInve
 // PurgeSubmitsAndRecrawl 运维：硬清训练数据并全量重爬（仅站管）。
 //
 // 保留：platforms（OJ 绑定）、problems/题库、bulletin/emergency、比赛日历赛程与订阅。
-// 硬删：submit_logs（真假全删）、账本、日汇总、AC 预聚合、contest_logs、提醒发送日志、
+// 硬删：submit_logs（真假全删）、日汇总、AC 预聚合、contest_logs、提醒发送日志、
 // 以及相关 Redis 缓存。用户账号在 user 库，本接口不动。
 func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.PurgeSubmitsAndRecrawlReq) (*spider.PurgeSubmitsAndRecrawlRes, error) {
 	if !auth.VerifySiteAdmin(ctx) {
@@ -257,7 +252,6 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 		return n
 	}
 	deletedLogs := countTable("submit_logs")
-	deletedLedger := countTable("counted_submit_ids")
 	deletedDaily := countTable("daily_user_stats")
 	deletedAc := countTable("user_ac_problems") + countTable("user_ac_problem_days")
 	deletedContests := countTable("contest_logs")
@@ -265,7 +259,6 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 	// 仅允许白名单表名，防注入
 	toTruncate := []string{
 		"submit_logs",
-		"counted_submit_ids",
 		"daily_user_stats",
 		"user_ac_problems",
 		"user_ac_problem_days",
@@ -303,23 +296,24 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 	// Redis：全局 ver + 每用户训练相关缓存/爬虫锁
 	s.purgeTrainingCaches(ctx, userIds)
 
-	// 全部入队全量重爬（写路径会重新灌 submit_logs + daily/user_ac/ledger）
+	// 全部入队全量重爬（写路径会重新灌 submit_logs + daily/user_ac）
 	go s.spider.DoBatch(context.Background(), userIds, true, 0, 0)
 
-	log.Warnf("ops purge-submits admin=%d logs=%d ledger=%d daily=%d ac=%d contests=%d enqueued=%d",
-		adminID, deletedLogs, deletedLedger, deletedDaily, deletedAc, deletedContests, len(userIds))
+	log.Warnf("ops purge-submits admin=%d logs=%d daily=%d ac=%d contests=%d enqueued=%d",
+		adminID, deletedLogs, deletedDaily, deletedAc, deletedContests, len(userIds))
 
 	return &spider.PurgeSubmitsAndRecrawlRes{
-		Code:              0,
+		Code: 0,
 		Message: fmt.Sprintf(
 			"已硬清提交/统计/比赛记录等训练数据（保留 OJ 绑定与题库），并为 %d 名用户触发全量重爬",
 			len(userIds),
 		),
 		DeletedSubmitLogs: deletedLogs,
-		DeletedLedger:     deletedLedger,
-		DeletedDaily:      deletedDaily,
-		DeletedAc:         deletedAc,
-		EnqueuedUsers:     int64(len(userIds)),
+		// DeletedLedger 已废弃（账本表已删），固定 0 保持 wire 兼容
+		DeletedLedger: 0,
+		DeletedDaily:  deletedDaily,
+		DeletedAc:     deletedAc,
+		EnqueuedUsers: int64(len(userIds)),
 	}, nil
 }
 
@@ -382,7 +376,7 @@ func deleteAllInBatches(ctx context.Context, db *gorm.DB, table string, batch in
 	}
 	// 白名单
 	switch table {
-	case "submit_logs", "counted_submit_ids", "daily_user_stats",
+	case "submit_logs", "daily_user_stats",
 		"user_ac_problems", "user_ac_problem_days", "contest_logs",
 		"contest_calendar_notify_logs":
 	default:

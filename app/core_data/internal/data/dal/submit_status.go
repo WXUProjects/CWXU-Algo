@@ -12,7 +12,7 @@ import (
 )
 
 // RefreshPendingSubmitVerdicts 回写已入库但状态仍为评测中/空的提交。
-// 场景：CF 首次爬到时 verdict 为空或 TESTING，已进账本后 FilterUncounted 会跳过，
+// 场景：CF 首次爬到时 verdict 为空或 TESTING，已在 submit_logs 后 FilterNew 会跳过，
 // 若不回写则 UI 永久空白。不重计 submit_cnt；若 is_ac 0→1 则补 daily.ac 与 user_ac。
 // 另：允许把历史长字面量（WRONG_ANSWER）归一为短码（WA），不改 is_ac 统计。
 func RefreshPendingSubmitVerdicts(ctx context.Context, db *gorm.DB, fetched []model.SubmitLog) (int64, error) {

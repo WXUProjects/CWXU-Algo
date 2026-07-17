@@ -418,7 +418,7 @@ func DeletePlatformUserAC(ctx context.Context, db *gorm.DB, userID int64, platfo
 	return nil
 }
 
-// DeleteUserPreagg 删除用户全部预聚合 + 账本（硬删账号时用）
+// DeleteUserPreagg 删除用户全部预聚合（硬删账号时用）
 func DeleteUserPreagg(ctx context.Context, db *gorm.DB, userId int64) error {
 	if db == nil || userId <= 0 {
 		return nil
@@ -438,7 +438,7 @@ func DeleteUserPreagg(ctx context.Context, db *gorm.DB, userId int64) error {
 			return err
 		}
 	}
-	return DeleteUserCountedIDs(ctx, db, userId)
+	return nil
 }
 
 // BackfillUserACIfEmpty 空表时从 submit_logs 回填（启动幂等）

@@ -63,6 +63,8 @@ message LoginRes {
   bool was_dormant = 4;
   // 是否已为该用户入队全量爬虫
   bool sync_started = 5;
+  // 距上次活跃的整天数（登录前计算；从未记录则按注册时间）
+  int32 inactive_days = 6;
 }
 
 message RegisterReq {

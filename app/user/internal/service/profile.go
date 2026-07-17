@@ -16,6 +16,7 @@ import (
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/biz"
+	"cwxu-algo/app/user/internal/biz/dormancy"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/dal"
 	"cwxu-algo/app/user/internal/data/model"
@@ -23,9 +24,34 @@ import (
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/go-kratos/kratos/v2/transport"
 	"github.com/go-kratos/kratos/v2/transport/grpc"
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	grpc2 "google.golang.org/grpc"
 )
+
+// queryBoolTrue 从 HTTP query 解析布尔（1/true/yes）；非 HTTP 上下文返回 false。
+func queryBoolTrue(ctx context.Context, keys ...string) bool {
+	if ctx == nil {
+		return false
+	}
+	tr, ok := transport.FromServerContext(ctx)
+	if !ok {
+		return false
+	}
+	ht, ok := tr.(*khttp.Transport)
+	if !ok || ht.Request() == nil {
+		return false
+	}
+	q := ht.Request().URL.Query()
+	for _, k := range keys {
+		v := strings.ToLower(strings.TrimSpace(q.Get(k)))
+		if v == "1" || v == "true" || v == "yes" {
+			return true
+		}
+	}
+	return false
+}
 
 // 与 auth 包校验规则一致
 var profileEmailRe = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
@@ -131,7 +157,8 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		useSite = auth.VerifySiteAdmin(ctx)
 	}
 	keyword := strings.TrimSpace(req.GetKeyword())
-	dormantOnly := req.GetDormantOnly()
+	// BindQuery 对手写 proto 字段/bool 偶发丢参；再从 URL 兜底解析
+	dormantOnly := req.GetDormantOnly() || queryBoolTrue(ctx, "dormantOnly", "dormant")
 	if useSite {
 		pf, total, err = p.profileUseCase.GetList(ctx, pageSize, pageNum, keyword, dormantOnly)
 	} else {
@@ -275,7 +302,17 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			SpiderIntervalOverridden:    v.SpiderIntervalMinOverride != nil && *v.SpiderIntervalMinOverride > 0,
 			AiSummaryIntervalOverridden: v.AISummaryIntervalMinOverride != nil && *v.AISummaryIntervalMinOverride > 0,
 			SyncExempt:                  v.SyncExempt,
-			Dormant:                     pol.UserID != 0 && !pol.SyncActive,
+			// 已暂停同步：优先策略；策略缺失时回落单用户判定
+			// last_login 为空且无豁免 → 不活跃休眠
+			Dormant: func() bool {
+				if pol.UserID != 0 {
+					return !pol.SyncActive
+				}
+				if p.profileDal != nil {
+					return p.profileDal.IsUserDormant(ctx, &v)
+				}
+				return dormancy.IsInactiveByTime(v.LastLoginAt, dormancy.DefaultInactiveDays, time.Now())
+			}(),
 		}
 		if v.LastLoginAt != nil && !v.LastLoginAt.IsZero() {
 			item.LastLoginAt = v.LastLoginAt.Unix()

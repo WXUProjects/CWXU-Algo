@@ -83,7 +83,9 @@ type LoginRes struct {
 	// 登录前处于休眠（不活跃）；已触发全量同步
 	WasDormant bool `protobuf:"varint,4,opt,name=was_dormant,json=wasDormant,proto3" json:"was_dormant,omitempty"`
 	// 是否已为该用户入队全量爬虫
-	SyncStarted   bool `protobuf:"varint,5,opt,name=sync_started,json=syncStarted,proto3" json:"sync_started,omitempty"`
+	SyncStarted bool `protobuf:"varint,5,opt,name=sync_started,json=syncStarted,proto3" json:"sync_started,omitempty"`
+	// 距上次活跃的整天数（登录前计算）
+	InactiveDays  int32 `protobuf:"varint,6,opt,name=inactive_days,json=inactiveDays,proto3" json:"inactive_days,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -151,6 +153,13 @@ func (x *LoginRes) GetSyncStarted() bool {
 		return x.SyncStarted
 	}
 	return false
+}
+
+func (x *LoginRes) GetInactiveDays() int32 {
+	if x != nil {
+		return x.InactiveDays
+	}
+	return 0
 }
 
 type RegisterReq struct {

@@ -382,17 +382,22 @@ func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keywo
 	return list, total, nil
 }
 
-// applyDormantOnlyFilter 仅保留「不活跃且无豁免」= 后台已暂停同步 的用户。
-// 判定与 dormancy.IsDormant / GetSyncPolicies 对齐。
+// applyDormantOnlyFilter 列表「不活跃 / 已暂停同步」筛选，与 dormancy.IsDormant 对齐：
+//  1) last_login 为空或超过 inactive_days（OR 必须括号，防 AND/OR 拆坏条件）
+//  2) 无任何豁免：站管 / 站管「始终同步」/ 组织 staff / 组织 force_sync（永不冻结）/ team·pro 套餐
+// 豁免用户即使很久未登录也**不**出现在本筛选中、后台也不暂停同步。
 func (d *ProfileDal) applyDormantOnlyFilter(ctx context.Context, q *gorm.DB, userTable string, dormantOnly bool) *gorm.DB {
 	if !dormantOnly || q == nil {
 		return q
 	}
 	days := d.GetInactiveDays(ctx)
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	loginCol := userTable + ".last_login_at"
 	idCol := userTable + ".id"
-	return q.Where(userTable+".is_site_admin = ? AND "+userTable+".sync_exempt = ?", false, false).
-		Where(userTable+".last_login_at IS NULL OR "+userTable+".last_login_at < ?", cutoff).
+	return q.
+		Where(userTable+".is_site_admin = ?", false).
+		Where(userTable+".sync_exempt = ?", false).
+		Where("("+loginCol+" IS NULL OR "+loginCol+" < ?)", cutoff).
 		Where(`NOT EXISTS (
 			SELECT 1 FROM org_members m
 			JOIN orgs o ON o.id = m.org_id

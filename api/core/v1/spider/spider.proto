@@ -105,7 +105,7 @@ message SubmitInventoryRes {
   int64 submitLogsTotal = 3;
   // 计入提交统计的行（排除 lc-ac / lc-prob）
   int64 submitLogsRealTotal = 4;
-  // counted_submit_ids 账本行数
+  // 已废弃（账本表已删，固定 0，保留字段号兼容）
   int64 countedSubmitIdsTotal = 5;
   // 明细时间范围（unix 秒；无数据为 0）
   int64 oldestTime = 6;
@@ -121,6 +121,7 @@ message PurgeSubmitsAndRecrawlRes {
   int64 code = 1;
   string message = 2;
   int64 deletedSubmitLogs = 3;
+  // 已废弃（账本表已删，固定 0，保留字段号兼容）
   int64 deletedLedger = 4;
   int64 deletedDaily = 5;
   int64 deletedAc = 6;

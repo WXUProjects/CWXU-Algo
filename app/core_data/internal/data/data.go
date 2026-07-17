@@ -114,7 +114,6 @@ func migrateModels(db *gorm.DB) {
 		&model.DailyUserStat{},
 		&model.UserACProblem{},
 		&model.UserACProblemDay{},
-		&model.CountedSubmitID{},
 		&model.ContestCalendar{},
 		&model.ContestCalendarSub{},
 		&model.ContestCalendarNotifyLog{},
@@ -130,6 +129,8 @@ func migrateModels(db *gorm.DB) {
 	}
 	// 丢弃旧无 platform 日汇总（清洗任务会从 submit_logs 全量重建）
 	_ = db.Exec(`DROP TABLE IF EXISTS daily_user_stats_pre_platform`).Error
+	// 废弃：预聚合去重改以 submit_logs.submit_id 为准，不再维护账本表
+	_ = db.Exec(`DROP TABLE IF EXISTS counted_submit_ids`).Error
 	ensureSubmitLogPerf(db)
 	// 空表兜底回填（清洗任务会覆盖重建；新环境无历史时有用）
 	backfillDailyUserStatsIfEmpty(db)
@@ -301,7 +302,6 @@ func ensureSubmitLogPerf(db *gorm.DB) {
 		`CREATE INDEX IF NOT EXISTS idx_uac_user_first ON user_ac_problems (user_id, first_ac_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_uac_user_plat ON user_ac_problems (user_id, platform)`,
 		`CREATE INDEX IF NOT EXISTS idx_uac_day_plat ON user_ac_problem_days (user_id, platform)`,
-		`CREATE INDEX IF NOT EXISTS idx_counted_user_plat ON counted_submit_ids (user_id, platform)`,
 	}
 	for _, sql := range indexSQLs {
 		if err := db.Exec(sql).Error; err != nil {

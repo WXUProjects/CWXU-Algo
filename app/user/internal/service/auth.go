@@ -144,11 +144,12 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 	}
 	_ = s.rdb.Del(ctx, pairAttemptKey, accountAttemptKey).Err()
 
-	// 休眠判定须在 touch last_login 之前
+	// 休眠判定与「距上次登录天数」须在 touch last_login 之前
 	wasDormant := false
 	if s.profileDal != nil {
 		wasDormant = s.profileDal.IsUserDormant(ctx, u)
 	}
+	inactiveDays := daysSinceLastActive(u)
 	now := time.Now()
 	if err := s.db.Model(u).Update("last_login_at", now).Error; err != nil {
 		log.Warnf("login touch last_login user=%d: %v", u.ID, err)
@@ -167,13 +168,44 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 	res.Message = "登录成功"
 	res.JwtToken = token
 	res.WasDormant = wasDormant
+	res.InactiveDays = int32(inactiveDays)
 	if wasDormant {
 		syncStarted := s.enqueueWakeSpider(int64(u.ID))
 		res.SyncStarted = syncStarted
-		res.Message = "欢迎回来！检测到你一段时间未登录，正在全量同步 OJ 数据，请稍候刷新查看。"
+		if inactiveDays > 0 {
+			res.Message = fmt.Sprintf(
+				"欢迎回来！你已经有 %d 天没登录了，正在为你同步做题数据，请稍候刷新查看。",
+				inactiveDays,
+			)
+		} else {
+			res.Message = "欢迎回来！检测到你一段时间未登录，正在全量同步 OJ 数据，请稍候刷新查看。"
+		}
+	} else if inactiveDays >= 3 {
+		// 未触发休眠但已多日未登录：温和欢迎
+		res.Message = fmt.Sprintf("欢迎回来！你已经有 %d 天没登录了。", inactiveDays)
 	}
 	setSessionCookie(ctx, token)
 	return res, nil
+}
+
+// daysSinceLastActive 距上次活跃的整天数；从未记录时用注册时间，仍无则 0。
+func daysSinceLastActive(u *model.User) int {
+	if u == nil {
+		return 0
+	}
+	var ref time.Time
+	if u.LastLoginAt != nil && !u.LastLoginAt.IsZero() {
+		ref = *u.LastLoginAt
+	} else if !u.CreatedAt.IsZero() {
+		ref = u.CreatedAt
+	} else {
+		return 0
+	}
+	d := int(time.Since(ref).Hours() / 24)
+	if d < 0 {
+		return 0
+	}
+	return d
 }
 
 // enqueueWakeSpider 休眠唤醒：全量入队爬虫（异步 gRPC）
