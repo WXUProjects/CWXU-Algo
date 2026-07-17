@@ -37,6 +37,33 @@ func TestExpandedAndNeedsCore(t *testing.T) {
 	}
 }
 
+func TestBuildExportOrderBy(t *testing.T) {
+	// user_ac_problems: 无 day，不得出现 day
+	order := buildExportOrderBy(func(c string) bool {
+		return c == "user_id" || c == "problem_key" || c == "platform" || c == "first_ac_at"
+	})
+	if !strings.Contains(order, "user_id") || !strings.Contains(order, "problem_key") {
+		t.Fatalf("user_ac_problems order: %q", order)
+	}
+	if strings.Contains(order, "day") {
+		t.Fatalf("must not order by missing day: %q", order)
+	}
+	// daily_user_stats: user_id + day + platform
+	order2 := buildExportOrderBy(func(c string) bool {
+		return c == "user_id" || c == "day" || c == "platform"
+	})
+	if !strings.Contains(order2, "day") || !strings.Contains(order2, "platform") {
+		t.Fatalf("daily_user_stats order: %q", order2)
+	}
+	// counted_submit_ids
+	order3 := buildExportOrderBy(func(c string) bool {
+		return c == "submit_id" || c == "user_id" || c == "platform"
+	})
+	if !strings.Contains(order3, "submit_id") {
+		t.Fatalf("counted_submit_ids order: %q", order3)
+	}
+}
+
 func TestPlanQuotaTableName(t *testing.T) {
 	// 回归：GORM 把 PlanQuota 收成 plan_quota，备份清单不得写成 plan_quotas
 	for _, spec := range AllTableSpecs {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	secretutil "cwxu-algo/app/common/utils/secret"
@@ -128,8 +129,12 @@ func exportTable(db *gorm.DB, table, outPath string) (int64, error) {
 	var total int64
 	var lastID int64 = -1
 
-	// Prefer keyset pagination on id when the table has an id column.
+	// Prefer keyset pagination on id; otherwise offset + ORDER BY 实际存在的列。
+	// 不可写死 user_id,day：user_ac_problems 等无 day 列。
 	hasID := tableHasColumn(db, table, "id")
+	orderBy := buildExportOrderBy(func(col string) bool {
+		return tableHasColumn(db, table, col)
+	})
 	for {
 		var rows []map[string]interface{}
 		q := db.Table(table).Limit(pageSize)
@@ -139,8 +144,10 @@ func exportTable(db *gorm.DB, table, outPath string) (int64, error) {
 			}
 			q = q.Order("id ASC")
 		} else {
-			// composite PK tables (daily_user_stats): offset pagination
-			q = q.Offset(int(total)).Order("user_id ASC, day ASC")
+			q = q.Offset(int(total))
+			if orderBy != "" {
+				q = q.Order(orderBy)
+			}
 		}
 		if err := q.Find(&rows).Error; err != nil {
 			return total, err
@@ -165,6 +172,26 @@ func exportTable(db *gorm.DB, table, outPath string) (int64, error) {
 		}
 	}
 	return total, nil
+}
+
+// exportOrderCandidates 无 id 表的稳定排序候选（按常见复合主键优先级）。
+// 仅选用表中真实存在的列，避免 SQLSTATE 42703。
+var exportOrderCandidates = []string{
+	"user_id", "day", "problem_key", "platform", "submit_id", "first_ac_at",
+}
+
+// buildExportOrderBy 根据 hasCol 拼 ORDER BY 子句（不含 id 键集路径）。
+func buildExportOrderBy(hasCol func(string) bool) string {
+	if hasCol == nil {
+		return ""
+	}
+	var parts []string
+	for _, c := range exportOrderCandidates {
+		if hasCol(c) {
+			parts = append(parts, quoteIdent(c)+" ASC")
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func tableExists(db *gorm.DB, table string) bool {
