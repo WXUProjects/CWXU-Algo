@@ -1,6 +1,9 @@
 package data
 
 import (
+	"os"
+	"strings"
+
 	"cwxu-algo/app/common/conf"
 	gorm2 "cwxu-algo/app/common/data/gorm"
 	redis2 "cwxu-algo/app/common/data/redis"
@@ -10,7 +13,9 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // ProviderSet is data providers.
@@ -28,21 +33,69 @@ func NewDataRDB(data *Data) *redis.Client {
 
 // Data .
 type Data struct {
-	DB  *gorm.DB
-	RDB *redis.Client
+	DB     *gorm.DB
+	UserDB *gorm.DB // optional: algo_user（写站内通知）
+	RDB    *redis.Client
 }
 
 // NewData .
 func NewData(c *conf.Data) (*Data, func(), error) {
 	data := &Data{DB: gorm2.InitGorm(c), RDB: redis2.InitRedis(c)}
+	if udb := openUserDB(c); udb != nil {
+		data.UserDB = udb
+		log.Info("notify: user database connected")
+	} else {
+		log.Warn("notify: user database not configured; mention/review notifications will be skipped")
+	}
 	migrateModels(data.DB)
 	spidermetrics.BindRedis(data.RDB)
 	cleanup := func() {
 		log.Info("closing the data resources")
 		sql, _ := data.DB.DB()
 		sql.Close()
+		if data.UserDB != nil {
+			if s, err := data.UserDB.DB(); err == nil {
+				_ = s.Close()
+			}
+		}
 	}
 	return data, cleanup, nil
+}
+
+// openUserDB 连接 algo_user 以便 core 写站内通知。
+// Priority: CWXU_USER_DATABASE_SOURCE → derive from core DSN (algo_core_data → algo_user).
+func openUserDB(c *conf.Data) *gorm.DB {
+	src := strings.TrimSpace(os.Getenv("CWXU_USER_DATABASE_SOURCE"))
+	if src == "" && c != nil && c.Database != nil {
+		u := c.Database.Source
+		if strings.Contains(u, "dbname=algo_core_data") {
+			src = strings.Replace(u, "dbname=algo_core_data", "dbname=algo_user", 1)
+		}
+	}
+	if src == "" {
+		return nil
+	}
+	db, err := gorm.Open(postgres.Open(src), &gorm.Config{
+		Logger:      logger.Default.LogMode(logger.Warn),
+		PrepareStmt: true,
+	})
+	if err != nil {
+		log.Warnf("notify: open user database failed: %v", err)
+		return nil
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Warnf("notify: user database pool: %v", err)
+		return nil
+	}
+	sqlDB.SetMaxOpenConns(4)
+	sqlDB.SetMaxIdleConns(2)
+	if err := sqlDB.Ping(); err != nil {
+		log.Warnf("notify: user database ping failed: %v", err)
+		_ = sqlDB.Close()
+		return nil
+	}
+	return db
 }
 
 // migrateModels 合并
@@ -68,6 +121,9 @@ func migrateModels(db *gorm.DB) {
 		&model.ProblemTag{},
 		&model.UserProblemStatus{},
 		&model.UserTagAC{},
+		&model.ProblemComment{},
+		&model.ProblemUserSolution{},
+		&model.ActivityFeed{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")

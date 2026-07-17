@@ -1,0 +1,72 @@
+// Package notify 提供跨服务写入站内通知的最小能力（core → user DB）。
+package notify
+
+import (
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+)
+
+// Type constants（与 user model 保持一致）
+const (
+	TypeProblemEditApproved = "problem_edit_approved"
+	TypeProblemEditRejected = "problem_edit_rejected"
+	TypeOrgJoinApproved     = "org_join_approved"
+	TypeOrgJoinRejected     = "org_join_rejected"
+	TypeMention             = "mention"
+)
+
+// Row 与 user.notifications 表对齐（避免 core 依赖 user 包）
+type Row struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UserID    uint   `gorm:"column:user_id"`
+	Type      string `gorm:"column:type"`
+	Title     string `gorm:"column:title"`
+	Body      string `gorm:"column:body"`
+	ActorID   uint   `gorm:"column:actor_id"`
+	RefType   string `gorm:"column:ref_type"`
+	RefID     uint   `gorm:"column:ref_id"`
+	ProblemID uint   `gorm:"column:problem_id"`
+	Payload   string `gorm:"column:payload"`
+	IsRead    bool   `gorm:"column:is_read"`
+}
+
+func (Row) TableName() string { return "notifications" }
+
+// Create 写入一条通知；db 为 nil 时静默跳过
+func Create(db *gorm.DB, n Row) error {
+	if db == nil || n.UserID == 0 {
+		return nil
+	}
+	n.Title = strings.TrimSpace(n.Title)
+	if n.Title == "" {
+		n.Title = "通知"
+	}
+	if n.CreatedAt.IsZero() {
+		n.CreatedAt = time.Now()
+	}
+	return db.Create(&n).Error
+}
+
+// CreateMany 批量写入（去重接收者）
+func CreateMany(db *gorm.DB, rows []Row) error {
+	if db == nil || len(rows) == 0 {
+		return nil
+	}
+	seen := map[uint]struct{}{}
+	for _, r := range rows {
+		if r.UserID == 0 {
+			continue
+		}
+		if _, ok := seen[r.UserID]; ok {
+			continue
+		}
+		seen[r.UserID] = struct{}{}
+		if err := Create(db, r); err != nil {
+			return err
+		}
+	}
+	return nil
+}

@@ -1543,14 +1543,42 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 		_ = s.db.Model(&jr).Updates(map[string]interface{}{
 			"status": model.JoinReqApproved, "reviewed_by": uid,
 		}).Error
+		orgName := s.orgName(jr.OrgID)
+		_ = CreateNotification(s.db, model.Notification{
+			UserID:  jr.UserID,
+			Type:    model.NotifTypeOrgJoinApproved,
+			Title:   "加入组织申请已通过",
+			Body:    "你加入「" + orgName + "」的申请已通过",
+			ActorID: uid,
+			RefType: "org_join",
+			RefID:   jr.ID,
+		})
 		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已通过"})
 		return nil
 	}
 	_ = s.db.Model(&jr).Updates(map[string]interface{}{
 		"status": model.JoinReqRejected, "reviewed_by": uid,
 	}).Error
+	orgName := s.orgName(jr.OrgID)
+	_ = CreateNotification(s.db, model.Notification{
+		UserID:  jr.UserID,
+		Type:    model.NotifTypeOrgJoinRejected,
+		Title:   "加入组织申请未通过",
+		Body:    "你加入「" + orgName + "」的申请未通过",
+		ActorID: uid,
+		RefType: "org_join",
+		RefID:   jr.ID,
+	})
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已拒绝"})
 	return nil
+}
+
+func (s *OrgService) orgName(orgID uint) string {
+	var o model.Org
+	if s.db.Select("name").First(&o, orgID).Error == nil && strings.TrimSpace(o.Name) != "" {
+		return o.Name
+	}
+	return "组织"
 }
 
 func (s *OrgService) handleSetSiteAdmin(ctx khttp.Context) error {

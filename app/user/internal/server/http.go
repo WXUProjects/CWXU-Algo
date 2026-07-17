@@ -84,6 +84,7 @@ func NewHTTPServer(
 	orgService *service.OrgService,
 	pasteService *service.PasteService,
 	socialService *service.SocialService,
+	notificationService *service.NotificationService,
 	logger log.Logger,
 
 ) *http.Server {
@@ -122,6 +123,7 @@ func NewHTTPServer(
 	service.RegisterOrgRoutes(srv, orgService)
 	service.RegisterPasteRoutes(srv, pasteService)
 	service.RegisterSocialRoutes(srv, socialService)
+	service.RegisterNotificationRoutes(srv, notificationService)
 	service.RegisterBackupRoutes(srv, d)
 	return srv
 }

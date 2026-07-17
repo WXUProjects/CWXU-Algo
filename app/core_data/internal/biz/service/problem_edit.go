@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
 
@@ -282,11 +283,15 @@ func (uc *ProblemUseCase) ReviewProblemEdit(requestID, reviewerID uint, approve 
 	}
 	if !approve {
 		rid := reviewerID
-		return uc.data.DB.Model(&req).Updates(map[string]interface{}{
+		if err := uc.data.DB.Model(&req).Updates(map[string]interface{}{
 			"status":      model.ProblemEditRejected,
 			"reviewer_id": rid,
 			"review_note": strings.TrimSpace(reviewNote),
-		}).Error
+		}).Error; err != nil {
+			return err
+		}
+		uc.notifyProblemEditResult(&req, false, strings.TrimSpace(reviewNote), reviewerID)
+		return nil
 	}
 	// 通过：应用修改
 	_, err := uc.ApplyProblemFields(
@@ -299,11 +304,45 @@ func (uc *ProblemUseCase) ReviewProblemEdit(requestID, reviewerID uint, approve 
 		return err
 	}
 	rid := reviewerID
-	return uc.data.DB.Model(&req).Updates(map[string]interface{}{
+	if err := uc.data.DB.Model(&req).Updates(map[string]interface{}{
 		"status":      model.ProblemEditApproved,
 		"reviewer_id": rid,
 		"review_note": strings.TrimSpace(reviewNote),
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	uc.notifyProblemEditResult(&req, true, strings.TrimSpace(reviewNote), reviewerID)
+	return nil
+}
+
+// notifyProblemEditResult 审核结果站内信（写 user.notifications）
+func (uc *ProblemUseCase) notifyProblemEditResult(req *model.ProblemEditRequest, approved bool, note string, reviewerID uint) {
+	if req == nil || req.UserID == 0 {
+		return
+	}
+	typ := notify.TypeProblemEditRejected
+	title := "题面修改申请未通过"
+	body := "你的题面/标签修改申请已被驳回"
+	if approved {
+		typ = notify.TypeProblemEditApproved
+		title = "题面修改申请已通过"
+		body = "你的题面/标签修改申请已通过并生效"
+	}
+	if note != "" {
+		body = body + "。备注：" + note
+	}
+	if err := notify.Create(uc.data.UserDB, notify.Row{
+		UserID:    req.UserID,
+		Type:      typ,
+		Title:     title,
+		Body:      body,
+		ActorID:   reviewerID,
+		RefType:   "problem_edit",
+		RefID:     req.ID,
+		ProblemID: req.ProblemID,
+	}); err != nil {
+		log.Warnf("notifyProblemEditResult: %v", err)
+	}
 }
 
 // MyPendingProblemEdit 当前用户对该题的待审申请

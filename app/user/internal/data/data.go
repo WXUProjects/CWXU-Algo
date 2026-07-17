@@ -112,6 +112,7 @@ func migrateModels(db *gorm.DB) {
 		&model.SiteVisitDaily{},
 		&model.BackupJob{},
 		&model.UserFollow{},
+		&model.Notification{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
