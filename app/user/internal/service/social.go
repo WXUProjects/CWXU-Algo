@@ -9,8 +9,13 @@ import (
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/dal"
 
+	"github.com/go-kratos/kratos/v2/log"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
+
+func logSocialErr(op string, uid uint, err error) {
+	log.Errorf("social %s uid=%d: %v", op, uid, err)
+}
 
 // SocialService 关注 / 粉丝 / 隐私
 type SocialService struct {
@@ -123,6 +128,8 @@ func (s *SocialService) handleFollowing(ctx khttp.Context) error {
 	}
 	list, total, err := s.social.ListFollowing(ctx, uid, page, pageSize)
 	if err != nil {
+		// 保留简短用户文案；细节打日志便于排查
+		logSocialErr("ListFollowing", uid, err)
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加载失败"})
 		return nil
 	}
@@ -145,6 +152,7 @@ func (s *SocialService) handleFollowers(ctx khttp.Context) error {
 	}
 	list, total, err := s.social.ListFollowers(ctx, uid, page, pageSize)
 	if err != nil {
+		logSocialErr("ListFollowers", uid, err)
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加载失败"})
 		return nil
 	}
@@ -203,6 +211,7 @@ func (s *SocialService) handleSearch(ctx khttp.Context) error {
 	viewerID, viewerOrgID := viewerContext(ctx)
 	list, total, err := s.social.SearchUsersInContext(ctx, q, page, pageSize, viewerID, viewerOrgID)
 	if err != nil {
+		logSocialErr("SearchUsers", 0, err)
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "搜索失败"})
 		return nil
 	}

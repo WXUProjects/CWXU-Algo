@@ -87,16 +87,38 @@ func (d *SocialDal) FollowingIDs(ctx context.Context, userID uint) ([]int64, err
 }
 
 // SocialUser 列表项（Name 为解析后的主展示名）
+// 注意：InCurrentOrg / SharedOrgs 仅运行时填充，禁止被 GORM Scan 当成列（会 500）。
 type SocialUser struct {
-	UserID   uint
-	Username string
-	Name     string
-	Avatar   string
+	UserID   uint   `gorm:"column:user_id"`
+	Username string `gorm:"column:username"`
+	Name     string `gorm:"column:name"`
+	Avatar   string `gorm:"column:avatar"`
 	// InCurrentOrg 目标是否属于观众当前组织
-	InCurrentOrg bool
+	InCurrentOrg bool `gorm:"-"`
 	// SharedOrgs 双方共属、且非当前域的组织称呼（含公共域；切换组织后仍返回）
 	// 观众不可见的组织绝不出现
-	SharedOrgs []SharedOrgAlias
+	SharedOrgs []SharedOrgAlias `gorm:"-"`
+}
+
+// socialUserRow 纯 DB 扫描行（无切片/派生字段，避免 Scan 崩溃）
+type socialUserRow struct {
+	UserID   uint   `gorm:"column:user_id"`
+	Username string `gorm:"column:username"`
+	Name     string `gorm:"column:name"`
+	Avatar   string `gorm:"column:avatar"`
+}
+
+func rowsToSocialUsers(rows []socialUserRow) []SocialUser {
+	out := make([]SocialUser, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, SocialUser{
+			UserID:   r.UserID,
+			Username: r.Username,
+			Name:     r.Name,
+			Avatar:   r.Avatar,
+		})
+	}
+	return out
 }
 
 // SharedOrgAlias 双方共属的其他组织内称呼（隐私边界：观众必须同属该组织）
@@ -119,7 +141,7 @@ func (d *SocialDal) ListFollowing(ctx context.Context, userID uint, page, pageSi
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var rows []SocialUser
+	var rows []socialUserRow
 	err := d.db.WithContext(ctx).Table("user_follows f").
 		Select("u.id AS user_id, u.username, u.name, u.avatar").
 		Joins("JOIN users u ON u.id = f.followee_id").
@@ -127,10 +149,10 @@ func (d *SocialDal) ListFollowing(ctx context.Context, userID uint, page, pageSi
 		Order("f.id DESC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error
-	if rows == nil {
-		rows = []SocialUser{}
+	if err != nil {
+		return []SocialUser{}, 0, err
 	}
-	return rows, total, err
+	return rowsToSocialUsers(rows), total, nil
 }
 
 // ListFollowers 粉丝列表
@@ -146,7 +168,7 @@ func (d *SocialDal) ListFollowers(ctx context.Context, userID uint, page, pageSi
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var rows []SocialUser
+	var rows []socialUserRow
 	err := d.db.WithContext(ctx).Table("user_follows f").
 		Select("u.id AS user_id, u.username, u.name, u.avatar").
 		Joins("JOIN users u ON u.id = f.follower_id").
@@ -154,10 +176,10 @@ func (d *SocialDal) ListFollowers(ctx context.Context, userID uint, page, pageSi
 		Order("f.id DESC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error
-	if rows == nil {
-		rows = []SocialUser{}
+	if err != nil {
+		return []SocialUser{}, 0, err
 	}
-	return rows, total, err
+	return rowsToSocialUsers(rows), total, nil
 }
 
 // SearchUsers 搜索用户（用户名 / 昵称）。
@@ -182,15 +204,15 @@ func (d *SocialDal) SearchUsers(ctx context.Context, keyword string, page, pageS
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var rows []SocialUser
+	var rows []socialUserRow
 	err := q.Select("id AS user_id, username, name, avatar").
 		Order("id ASC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error
-	if rows == nil {
-		rows = []SocialUser{}
+	if err != nil {
+		return []SocialUser{}, 0, err
 	}
-	return rows, total, err
+	return rowsToSocialUsers(rows), total, nil
 }
 
 // GetPrivacy 读取隐私字段
@@ -528,16 +550,13 @@ func (d *SocialDal) SearchUsersInContext(ctx context.Context, keyword string, pa
 	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var rows []SocialUser
+	var rows []socialUserRow
 	err := base.Select("u.id AS user_id, u.username, u.name, u.avatar").
 		Order("u.id ASC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error
-	if rows == nil {
-		rows = []SocialUser{}
-	}
 	if err != nil {
-		return rows, total, err
+		return []SocialUser{}, 0, err
 	}
-	return d.EnrichDisplay(ctx, viewerID, viewerOrgID, rows), total, nil
+	return d.EnrichDisplay(ctx, viewerID, viewerOrgID, rowsToSocialUsers(rows)), total, nil
 }
