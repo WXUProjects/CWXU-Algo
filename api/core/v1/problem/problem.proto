@@ -19,6 +19,12 @@ service Problem {
       get: "/v1/core/problem/tags"
     };
   }
+  // 全站热题：近 N 天按提交次数 / 做题人数 / AC 次数综合热度排序
+  rpc Hot (HotProblemReq) returns (HotProblemRes) {
+    option (google.api.http) = {
+      get: "/v1/core/problem/hot"
+    };
+  }
   rpc Get (GetProblemReq) returns (GetProblemRes) {
     option (google.api.http) = {
       get: "/v1/core/problem/get"
@@ -197,6 +203,39 @@ message ListTagsReq {
 message TagCount {
   string tag = 1;
   int64 count = 2;
+}
+
+// Hot 全站热题
+message HotProblemReq {
+  int64 page = 1;
+  int64 page_size = 2;
+  // 统计窗口天数，默认 2，允许 1–7
+  int32 days = 3;
+}
+
+message HotProblemItem {
+  ProblemInfo problem = 1;
+  // 窗口内提交次数（排除力扣合成/不计入提交的行）
+  int64 submit_count = 2;
+  // 窗口内做题人数（去重 user_id）
+  int64 solver_count = 3;
+  // 窗口内 AC 次数
+  int64 ac_count = 4;
+  // 综合热度分（服务端权重：submit*1 + solver*3 + ac*2）
+  double score = 5;
+  // 窗口内最近一次提交时间 unix 秒
+  int64 last_submitted_at = 6;
+}
+
+message HotProblemRes {
+  int64 code = 1;
+  string message = 2;
+  repeated HotProblemItem data = 3;
+  int64 total = 4;
+  int64 page = 5;
+  int64 page_size = 6;
+  // 实际使用的窗口天数
+  int32 days = 7;
 }
 
 message ListTagsRes {

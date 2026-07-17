@@ -41,6 +41,13 @@ service Emergency {
       get: "/v1/core/emergency/active"
     };
   }
+  // 拖拽排序：按 ids 顺序重写 sortOrder（站点管理员）
+  rpc Reorder (ReorderEmergencyReq) returns (ReorderEmergencyRes) {
+    option (google.api.http) = {
+      post: "/v1/core/emergency/reorder"
+      body: "*"
+    };
+  }
 }
 
 message EmergencyInfo {
@@ -111,4 +118,14 @@ message ActiveEmergencyRes {
   int64 code = 1;
   string message = 2;
   repeated EmergencyInfo data = 3;
+}
+
+message ReorderEmergencyReq {
+  // 新顺序的 id 列表（从前到后）；未出现的条目 sortOrder 不变
+  repeated int64 ids = 1;
+}
+
+message ReorderEmergencyRes {
+  int64 code = 1;
+  string message = 2;
 }

@@ -23,6 +23,7 @@ const OperationEmergencyActive = "/api.core.v1.emergency.Emergency/Active"
 const OperationEmergencyCreate = "/api.core.v1.emergency.Emergency/Create"
 const OperationEmergencyDelete = "/api.core.v1.emergency.Emergency/Delete"
 const OperationEmergencyList = "/api.core.v1.emergency.Emergency/List"
+const OperationEmergencyReorder = "/api.core.v1.emergency.Emergency/Reorder"
 const OperationEmergencyUpdate = "/api.core.v1.emergency.Emergency/Update"
 
 type EmergencyHTTPServer interface {
@@ -34,6 +35,8 @@ type EmergencyHTTPServer interface {
 	Delete(context.Context, *DeleteEmergencyReq) (*DeleteEmergencyRes, error)
 	// List 后台分页列表（站点管理员）
 	List(context.Context, *ListEmergencyReq) (*ListEmergencyRes, error)
+	// Reorder 拖拽排序：按 ids 顺序重写 sortOrder（站点管理员）
+	Reorder(context.Context, *ReorderEmergencyReq) (*ReorderEmergencyRes, error)
 	// Update 更新紧急通知（站点管理员）
 	Update(context.Context, *UpdateEmergencyReq) (*UpdateEmergencyRes, error)
 }
@@ -45,6 +48,7 @@ func RegisterEmergencyHTTPServer(s *http.Server, srv EmergencyHTTPServer) {
 	r.DELETE("/v1/core/emergency/delete", _Emergency_Delete0_HTTP_Handler(srv))
 	r.GET("/v1/core/emergency/list", _Emergency_List1_HTTP_Handler(srv))
 	r.GET("/v1/core/emergency/active", _Emergency_Active0_HTTP_Handler(srv))
+	r.POST("/v1/core/emergency/reorder", _Emergency_Reorder0_HTTP_Handler(srv))
 }
 
 func _Emergency_Create0_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Context) error {
@@ -148,6 +152,28 @@ func _Emergency_Active0_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Cont
 	}
 }
 
+func _Emergency_Reorder0_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ReorderEmergencyReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationEmergencyReorder)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.Reorder(ctx, req.(*ReorderEmergencyReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ReorderEmergencyRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type EmergencyHTTPClient interface {
 	// Active 当前生效的紧急通知（公开，前端弹窗用）
 	Active(ctx context.Context, req *ActiveEmergencyReq, opts ...http.CallOption) (rsp *ActiveEmergencyRes, err error)
@@ -157,6 +183,8 @@ type EmergencyHTTPClient interface {
 	Delete(ctx context.Context, req *DeleteEmergencyReq, opts ...http.CallOption) (rsp *DeleteEmergencyRes, err error)
 	// List 后台分页列表（站点管理员）
 	List(ctx context.Context, req *ListEmergencyReq, opts ...http.CallOption) (rsp *ListEmergencyRes, err error)
+	// Reorder 拖拽排序：按 ids 顺序重写 sortOrder（站点管理员）
+	Reorder(ctx context.Context, req *ReorderEmergencyReq, opts ...http.CallOption) (rsp *ReorderEmergencyRes, err error)
 	// Update 更新紧急通知（站点管理员）
 	Update(ctx context.Context, req *UpdateEmergencyReq, opts ...http.CallOption) (rsp *UpdateEmergencyRes, err error)
 }
@@ -219,6 +247,20 @@ func (c *EmergencyHTTPClientImpl) List(ctx context.Context, in *ListEmergencyReq
 	opts = append(opts, http.Operation(OperationEmergencyList))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Reorder 拖拽排序：按 ids 顺序重写 sortOrder（站点管理员）
+func (c *EmergencyHTTPClientImpl) Reorder(ctx context.Context, in *ReorderEmergencyReq, opts ...http.CallOption) (*ReorderEmergencyRes, error) {
+	var out ReorderEmergencyRes
+	pattern := "/v1/core/emergency/reorder"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationEmergencyReorder))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {
 		return nil, err
 	}

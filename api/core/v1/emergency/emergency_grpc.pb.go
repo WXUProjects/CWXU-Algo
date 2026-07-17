@@ -19,11 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Emergency_Create_FullMethodName = "/api.core.v1.emergency.Emergency/Create"
-	Emergency_Update_FullMethodName = "/api.core.v1.emergency.Emergency/Update"
-	Emergency_Delete_FullMethodName = "/api.core.v1.emergency.Emergency/Delete"
-	Emergency_List_FullMethodName   = "/api.core.v1.emergency.Emergency/List"
-	Emergency_Active_FullMethodName = "/api.core.v1.emergency.Emergency/Active"
+	Emergency_Create_FullMethodName  = "/api.core.v1.emergency.Emergency/Create"
+	Emergency_Update_FullMethodName  = "/api.core.v1.emergency.Emergency/Update"
+	Emergency_Delete_FullMethodName  = "/api.core.v1.emergency.Emergency/Delete"
+	Emergency_List_FullMethodName    = "/api.core.v1.emergency.Emergency/List"
+	Emergency_Active_FullMethodName  = "/api.core.v1.emergency.Emergency/Active"
+	Emergency_Reorder_FullMethodName = "/api.core.v1.emergency.Emergency/Reorder"
 )
 
 // EmergencyClient is the client API for Emergency service.
@@ -42,6 +43,8 @@ type EmergencyClient interface {
 	List(ctx context.Context, in *ListEmergencyReq, opts ...grpc.CallOption) (*ListEmergencyRes, error)
 	// 当前生效的紧急通知（公开，前端弹窗用）
 	Active(ctx context.Context, in *ActiveEmergencyReq, opts ...grpc.CallOption) (*ActiveEmergencyRes, error)
+	// 拖拽排序：按 ids 顺序重写 sortOrder（站点管理员）
+	Reorder(ctx context.Context, in *ReorderEmergencyReq, opts ...grpc.CallOption) (*ReorderEmergencyRes, error)
 }
 
 type emergencyClient struct {
@@ -102,6 +105,16 @@ func (c *emergencyClient) Active(ctx context.Context, in *ActiveEmergencyReq, op
 	return out, nil
 }
 
+func (c *emergencyClient) Reorder(ctx context.Context, in *ReorderEmergencyReq, opts ...grpc.CallOption) (*ReorderEmergencyRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReorderEmergencyRes)
+	err := c.cc.Invoke(ctx, Emergency_Reorder_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // EmergencyServer is the server API for Emergency service.
 // All implementations must embed UnimplementedEmergencyServer
 // for forward compatibility.
@@ -118,6 +131,8 @@ type EmergencyServer interface {
 	List(context.Context, *ListEmergencyReq) (*ListEmergencyRes, error)
 	// 当前生效的紧急通知（公开，前端弹窗用）
 	Active(context.Context, *ActiveEmergencyReq) (*ActiveEmergencyRes, error)
+	// 拖拽排序：按 ids 顺序重写 sortOrder（站点管理员）
+	Reorder(context.Context, *ReorderEmergencyReq) (*ReorderEmergencyRes, error)
 	mustEmbedUnimplementedEmergencyServer()
 }
 
@@ -142,6 +157,9 @@ func (UnimplementedEmergencyServer) List(context.Context, *ListEmergencyReq) (*L
 }
 func (UnimplementedEmergencyServer) Active(context.Context, *ActiveEmergencyReq) (*ActiveEmergencyRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Active not implemented")
+}
+func (UnimplementedEmergencyServer) Reorder(context.Context, *ReorderEmergencyReq) (*ReorderEmergencyRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Reorder not implemented")
 }
 func (UnimplementedEmergencyServer) mustEmbedUnimplementedEmergencyServer() {}
 func (UnimplementedEmergencyServer) testEmbeddedByValue()                   {}
@@ -254,6 +272,24 @@ func _Emergency_Active_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Emergency_Reorder_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReorderEmergencyReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EmergencyServer).Reorder(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Emergency_Reorder_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EmergencyServer).Reorder(ctx, req.(*ReorderEmergencyReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Emergency_ServiceDesc is the grpc.ServiceDesc for Emergency service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -280,6 +316,10 @@ var Emergency_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Active",
 			Handler:    _Emergency_Active_Handler,
+		},
+		{
+			MethodName: "Reorder",
+			Handler:    _Emergency_Reorder_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

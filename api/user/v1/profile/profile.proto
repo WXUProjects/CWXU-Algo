@@ -61,6 +61,13 @@ service Profile {
       body: "*",
     };
   }
+  // 站点管理员：批量解除不活跃（仅刷新 last_login_at 为当前时间；超时后仍会再休眠）
+  rpc ClearDormant (ClearDormantReq) returns (ClearDormantRes) {
+    option (google.api.http) = {
+      post: "/v1/user/profile/clear-dormant",
+      body: "*",
+    };
+  }
   rpc GetUserIdsByGroup (GetUserIdsByGroupReq) returns (GetUserIdsByGroupRes) {
     option (google.api.http) = {
       get: "/v1/user/profile/ids-by-group"
@@ -144,6 +151,8 @@ message GetByIdRes {
     string username = 2;
   }
   repeated Spiders spiders = 7;
+  // 最近一次 OJ 数据同步成功时间（unix 秒；0=尚无记录）
+  int64 lastSyncAt = 13;
 }
 
 message GetByNameReq {
@@ -290,6 +299,18 @@ message SetSyncExemptReq {
 message SetSyncExemptRes {
   int64 code = 1;
   string message = 2;
+}
+
+// ClearDormantReq 批量把最近活跃刷新为当前时间，一次性解除休眠（非永久豁免）
+message ClearDormantReq {
+  repeated int64 userIds = 1;
+}
+
+message ClearDormantRes {
+  int64 code = 1;
+  string message = 2;
+  // 实际更新的用户数
+  int32 updated = 3;
 }
 
 message GetUserIdsByGroupReq {

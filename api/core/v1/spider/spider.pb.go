@@ -179,8 +179,10 @@ func (x *GetSpiderReq) GetUserId() int64 {
 }
 
 type GetSpiderRep struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Data          []*GetSpiderRep_Data   `protobuf:"bytes,1,rep,name=data,proto3" json:"data,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Data  []*GetSpiderRep_Data   `protobuf:"bytes,1,rep,name=data,proto3" json:"data,omitempty"`
+	// 最近一次爬虫成功时间（unix 秒；0=尚无成功同步记录）
+	LastSyncAt    int64 `protobuf:"varint,2,opt,name=lastSyncAt,proto3" json:"lastSyncAt,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -220,6 +222,13 @@ func (x *GetSpiderRep) GetData() []*GetSpiderRep_Data {
 		return x.Data
 	}
 	return nil
+}
+
+func (x *GetSpiderRep) GetLastSyncAt() int64 {
+	if x != nil {
+		return x.LastSyncAt
+	}
+	return 0
 }
 
 type UpdateReq struct {
@@ -554,7 +563,7 @@ type SubmitInventoryRes struct {
 	SubmitLogsTotal int64 `protobuf:"varint,3,opt,name=submitLogsTotal,proto3" json:"submitLogsTotal,omitempty"`
 	// 计入提交统计的行（排除 lc-ac / lc-prob）
 	SubmitLogsRealTotal int64 `protobuf:"varint,4,opt,name=submitLogsRealTotal,proto3" json:"submitLogsRealTotal,omitempty"`
-	// counted_submit_ids 账本行数
+	// 已废弃（账本表已删，固定 0，保留字段号兼容）
 	CountedSubmitIdsTotal int64 `protobuf:"varint,5,opt,name=countedSubmitIdsTotal,proto3" json:"countedSubmitIdsTotal,omitempty"`
 	// 明细时间范围（unix 秒；无数据为 0）
 	OldestTime    int64 `protobuf:"varint,6,opt,name=oldestTime,proto3" json:"oldestTime,omitempty"`
@@ -692,12 +701,13 @@ type PurgeSubmitsAndRecrawlRes struct {
 	Code              int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
 	Message           string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	DeletedSubmitLogs int64                  `protobuf:"varint,3,opt,name=deletedSubmitLogs,proto3" json:"deletedSubmitLogs,omitempty"`
-	DeletedLedger     int64                  `protobuf:"varint,4,opt,name=deletedLedger,proto3" json:"deletedLedger,omitempty"`
-	DeletedDaily      int64                  `protobuf:"varint,5,opt,name=deletedDaily,proto3" json:"deletedDaily,omitempty"`
-	DeletedAc         int64                  `protobuf:"varint,6,opt,name=deletedAc,proto3" json:"deletedAc,omitempty"`
-	EnqueuedUsers     int64                  `protobuf:"varint,7,opt,name=enqueuedUsers,proto3" json:"enqueuedUsers,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// 已废弃（账本表已删，固定 0，保留字段号兼容）
+	DeletedLedger int64 `protobuf:"varint,4,opt,name=deletedLedger,proto3" json:"deletedLedger,omitempty"`
+	DeletedDaily  int64 `protobuf:"varint,5,opt,name=deletedDaily,proto3" json:"deletedDaily,omitempty"`
+	DeletedAc     int64 `protobuf:"varint,6,opt,name=deletedAc,proto3" json:"deletedAc,omitempty"`
+	EnqueuedUsers int64 `protobuf:"varint,7,opt,name=enqueuedUsers,proto3" json:"enqueuedUsers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PurgeSubmitsAndRecrawlRes) Reset() {
@@ -957,9 +967,12 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"&\n" +
 	"\fGetSpiderReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\x89\x01\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\xa9\x01\n" +
 	"\fGetSpiderRep\x129\n" +
-	"\x04data\x18\x01 \x03(\v2%.api.core.v1.spider.GetSpiderRep.DataR\x04data\x1a>\n" +
+	"\x04data\x18\x01 \x03(\v2%.api.core.v1.spider.GetSpiderRep.DataR\x04data\x12\x1e\n" +
+	"\n" +
+	"lastSyncAt\x18\x02 \x01(\x03R\n" +
+	"lastSyncAt\x1a>\n" +
 	"\x04Data\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\"$\n" +

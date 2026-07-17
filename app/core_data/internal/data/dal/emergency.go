@@ -60,3 +60,20 @@ func (d *EmergencyDal) ListActive() ([]model.EmergencyNotice, error) {
 		Find(&list).Error
 	return list, err
 }
+
+// Reorder 按 ids 顺序重写 sort_order（0,1,2…）
+func (d *EmergencyDal) Reorder(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return d.db.Transaction(func(tx *gorm.DB) error {
+		for i, id := range ids {
+			if err := tx.Model(&model.EmergencyNotice{}).
+				Where("id = ?", id).
+				Update("sort_order", int64(i)).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}

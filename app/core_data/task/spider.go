@@ -61,6 +61,11 @@ func InflightKey(userId int64, platform string) string {
 	return fmt.Sprintf("spider:inflight:%d:%s", userId, platform)
 }
 
+// LastOKKey 该用户最近一次爬虫成功时间（unix 秒字符串）
+func LastOKKey(userId int64) string {
+	return fmt.Sprintf("spider:last_ok:%d", userId)
+}
+
 // EnqueueResult 单次入队结果（供 cron claim 是否保留判断）
 type EnqueueResult struct {
 	Published int // MQ 成功条数
@@ -186,6 +191,34 @@ func (t *SpiderTask) ClearInflight(userId int64, platform string) {
 		return
 	}
 	_ = t.rdb.Del(context.Background(), InflightKey(userId, platform)).Err()
+}
+
+// MarkLastOK 记录该用户最近一次爬虫成功时间（unix 秒，无 TTL）
+func (t *SpiderTask) MarkLastOK(userId int64) {
+	if t.rdb == nil || userId <= 0 {
+		return
+	}
+	_ = t.rdb.Set(context.Background(), LastOKKey(userId), time.Now().Unix(), 0).Err()
+}
+
+// GetLastOK 读取最近成功同步时间（unix 秒；无记录返回 0）
+func (t *SpiderTask) GetLastOK(userId int64) int64 {
+	if t.rdb == nil || userId <= 0 {
+		return 0
+	}
+	v, err := t.rdb.Get(context.Background(), LastOKKey(userId)).Int64()
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// ClearLastOK 删除用户时清除上次同步标记
+func (t *SpiderTask) ClearLastOK(userId int64) {
+	if t.rdb == nil || userId <= 0 {
+		return
+	}
+	_ = t.rdb.Del(context.Background(), LastOKKey(userId)).Err()
 }
 
 // ResetDedup 清除 pending/inflight，强制允许再次入队。

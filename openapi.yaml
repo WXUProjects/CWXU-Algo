@@ -27,7 +27,7 @@ paths:
         post:
             tags:
                 - Bulletin
-            description: 创建公告（教练/管理员）
+            description: 创建公告
             operationId: Bulletin_Create
             requestBody:
                 content:
@@ -46,7 +46,7 @@ paths:
         delete:
             tags:
                 - Bulletin
-            description: 删除公告（教练/管理员）
+            description: 删除公告
             operationId: Bulletin_Delete
             parameters:
                 - name: id
@@ -82,7 +82,7 @@ paths:
         get:
             tags:
                 - Bulletin
-            description: 分页获取公告列表（公开）
+            description: 分页获取公告列表（公开；可按 scope 过滤）
             operationId: Bulletin_List
             parameters:
                 - name: page
@@ -90,6 +90,10 @@ paths:
                   schema:
                     type: string
                 - name: pageSize
+                  in: query
+                  schema:
+                    type: string
+                - name: scope
                   in: query
                   schema:
                     type: string
@@ -104,7 +108,7 @@ paths:
         post:
             tags:
                 - Bulletin
-            description: 更新公告（教练/管理员）
+            description: 更新公告
             operationId: Bulletin_Update
             requestBody:
                 content:
@@ -388,6 +392,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.emergency.ListEmergencyRes'
+    /v1/core/emergency/reorder:
+        post:
+            tags:
+                - Emergency
+            description: 拖拽排序：按 ids 顺序重写 sortOrder（站点管理员）
+            operationId: Emergency_Reorder
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.emergency.ReorderEmergencyReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.emergency.ReorderEmergencyRes'
     /v1/core/emergency/update:
         post:
             tags:
@@ -527,6 +550,34 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.GetProblemRes'
+    /v1/core/problem/hot:
+        get:
+            tags:
+                - Problem
+            description: 全站热题：近 N 天按提交次数 / 做题人数 / AC 次数综合热度排序
+            operationId: Problem_Hot
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: string
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: string
+                - name: days
+                  in: query
+                  description: 统计窗口天数，默认 2，允许 1–7
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.HotProblemRes'
     /v1/core/problem/list:
         get:
             tags:
@@ -1257,6 +1308,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.group.UpdateReply'
+    /v1/user/profile/clear-dormant:
+        post:
+            tags:
+                - Profile
+            description: 站点管理员：批量解除不活跃（仅刷新 last_login_at 为当前时间；超时后仍会再休眠）
+            operationId: Profile_ClearDormant
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.ClearDormantReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ClearDormantRes'
     /v1/user/profile/delete:
         post:
             tags:
@@ -1442,6 +1512,11 @@ paths:
                   description: 模糊搜索：用户名 / 昵称；org 范围另含组织内名称（org_display_name）
                   schema:
                     type: string
+                - name: dormantOnly
+                  in: query
+                  description: true=仅不活跃（已暂停同步）用户；与 dormant 判定一致（阈值 + 豁免）
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     description: OK
@@ -1770,6 +1845,12 @@ components:
                     type: string
                 updatedAt:
                     type: string
+                scope:
+                    type: string
+                    description: site=站点公告；org=组织公告
+                orgId:
+                    type: string
+                    description: scope=org 时有值
             description: 公告实体
         api.core.v1.bulletin.CreateBulletinReq:
             type: object
@@ -1780,7 +1861,11 @@ components:
                     type: string
                 isPinned:
                     type: boolean
-            description: 创建公告
+                scope:
+                    type: string
+            description: |-
+                创建公告
+                 scope 可选：site（仅站点管理员）/ org（默认，组织公告）
         api.core.v1.bulletin.CreateBulletinRes:
             type: object
             properties:
@@ -2140,6 +2225,21 @@ components:
                     type: string
                 pageSize:
                     type: string
+        api.core.v1.emergency.ReorderEmergencyReq:
+            type: object
+            properties:
+                ids:
+                    type: array
+                    items:
+                        type: string
+                    description: 新顺序的 id 列表（从前到后）；未出现的条目 sortOrder 不变
+        api.core.v1.emergency.ReorderEmergencyRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
         api.core.v1.emergency.UpdateEmergencyReq:
             type: object
             properties:
@@ -2301,6 +2401,48 @@ components:
                     type: string
                 data:
                     $ref: '#/components/schemas/api.core.v1.problem.ProblemInfo'
+        api.core.v1.problem.HotProblemItem:
+            type: object
+            properties:
+                problem:
+                    $ref: '#/components/schemas/api.core.v1.problem.ProblemInfo'
+                submitCount:
+                    type: string
+                    description: 窗口内提交次数（排除力扣合成/不计入提交的行）
+                solverCount:
+                    type: string
+                    description: 窗口内做题人数（去重 user_id）
+                acCount:
+                    type: string
+                    description: 窗口内 AC 次数
+                score:
+                    type: number
+                    description: 综合热度分（服务端权重：submit*1 + solver*3 + ac*2）
+                    format: double
+                lastSubmittedAt:
+                    type: string
+                    description: 窗口内最近一次提交时间 unix 秒
+        api.core.v1.problem.HotProblemRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.HotProblemItem'
+                total:
+                    type: string
+                page:
+                    type: string
+                pageSize:
+                    type: string
+                days:
+                    type: integer
+                    description: 实际使用的窗口天数
+                    format: int32
         api.core.v1.problem.ListProblemEditRes:
             type: object
             properties:
@@ -2756,6 +2898,7 @@ components:
                     type: string
                 deletedLedger:
                     type: string
+                    description: 已废弃（账本表已删，固定 0，保留字段号兼容）
                 deletedDaily:
                     type: string
                 deletedAc:
@@ -2794,7 +2937,7 @@ components:
                     description: 计入提交统计的行（排除 lc-ac / lc-prob）
                 countedSubmitIdsTotal:
                     type: string
-                    description: 已废弃（账本表已删，固定 0）
+                    description: 已废弃（账本表已删，固定 0，保留字段号兼容）
                 oldestTime:
                     type: string
                     description: 明细时间范围（unix 秒；无数据为 0）
@@ -3051,6 +3194,25 @@ components:
                     type: boolean
                 message:
                     type: string
+        api.user.v1.ClearDormantReq:
+            type: object
+            properties:
+                userIds:
+                    type: array
+                    items:
+                        type: string
+            description: ClearDormantReq 批量把最近活跃刷新为当前时间，一次性解除休眠（非永久豁免）
+        api.user.v1.ClearDormantRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                updated:
+                    type: integer
+                    description: 实际更新的用户数
+                    format: int32
         api.user.v1.DeleteReq:
             type: object
             properties:
@@ -3108,6 +3270,9 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/api.user.v1.GetByIdRes_Spiders'
+                lastSyncAt:
+                    type: string
+                    description: 最近一次 OJ 数据同步成功时间（unix 秒；0=尚无记录）
         api.user.v1.GetByIdRes_Spiders:
             type: object
             properties:
@@ -3320,6 +3485,10 @@ components:
                 syncStarted:
                     type: boolean
                     description: 是否已为该用户入队全量爬虫
+                inactiveDays:
+                    type: integer
+                    description: 距上次活跃的整天数（登录前计算；从未记录则按注册时间）
+                    format: int32
         api.user.v1.MoveGroupReq:
             type: object
             properties:
@@ -3855,7 +4024,7 @@ tags:
     - name: Auth
       description: Auth 认证服务
     - name: Bulletin
-      description: 公告服务：管理员和教练可发布/编辑/删除公告，所有人可查看
+      description: 公告：scope=site 全站（仅站点管理员）/ scope=org 组织公告（组织教练及以上）
     - name: Contest
       description: 竞赛服务
     - name: ContestCalendar

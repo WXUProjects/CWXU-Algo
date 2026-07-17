@@ -7,23 +7,23 @@ option go_package = "cwxu-algo/api/core/v1/bulletin;bulletin";
 option java_multiple_files = true;
 option java_package = "api.core.v1.bulletin";
 
-// 公告服务：管理员和教练可发布/编辑/删除公告，所有人可查看
+// 公告：scope=site 全站（仅站点管理员）/ scope=org 组织公告（组织教练及以上）
 service Bulletin {
-  // 创建公告（教练/管理员）
+  // 创建公告
   rpc Create (CreateBulletinReq) returns (CreateBulletinRes) {
     option (google.api.http) = {
       post: "/v1/core/bulletin/create"
       body: "*"
     };
   }
-  // 更新公告（教练/管理员）
+  // 更新公告
   rpc Update (UpdateBulletinReq) returns (UpdateBulletinRes) {
     option (google.api.http) = {
       post: "/v1/core/bulletin/update"
       body: "*"
     };
   }
-  // 删除公告（教练/管理员）
+  // 删除公告
   rpc Delete (DeleteBulletinReq) returns (DeleteBulletinRes) {
     option (google.api.http) = {
       delete: "/v1/core/bulletin/delete"
@@ -35,7 +35,7 @@ service Bulletin {
       get: "/v1/core/bulletin/get"
     };
   }
-  // 分页获取公告列表（公开）
+  // 分页获取公告列表（公开；可按 scope 过滤）
   rpc List (ListBulletinReq) returns (ListBulletinRes) {
     option (google.api.http) = {
       get: "/v1/core/bulletin/list"
@@ -53,13 +53,19 @@ message BulletinInfo {
   bool isPinned = 6;
   int64 createdAt = 7;
   int64 updatedAt = 8;
+  // site=站点公告；org=组织公告
+  string scope = 9;
+  // scope=org 时有值
+  int64 orgId = 10;
 }
 
 // 创建公告
+// scope 可选：site（仅站点管理员）/ org（默认，组织公告）
 message CreateBulletinReq {
   string title = 1;
   string content = 2;
   bool isPinned = 3;
+  string scope = 4;
 }
 
 message CreateBulletinRes {
@@ -104,9 +110,13 @@ message GetBulletinRes {
 }
 
 // 分页获取公告列表
+// scope 空：全站 ∪ 当前组织（前台流，站点公告优先）
+// scope=site：仅站点公告
+// scope=org：仅当前组织公告
 message ListBulletinReq {
   int64 page = 1;       // 页码，默认1
   int64 pageSize = 2;   // 每页条数，默认10
+  string scope = 3;
 }
 
 message ListBulletinRes {

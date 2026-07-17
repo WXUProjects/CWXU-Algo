@@ -108,8 +108,9 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 		return nil
 	}
 	var req struct {
-		ProblemID uint   `json:"problemId"`
-		Content   string `json:"content"`
+		ProblemID    uint   `json:"problemId"`
+		Content      string `json:"content"`
+		SyncToPublic bool   `json:"syncToPublic"` // 非公共域时可选：额外写入公共域发现流
 	}
 	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ProblemID == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
@@ -137,7 +138,8 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "发布失败"})
 		return nil
 	}
-	// 发现流（组织隔离）
+	ex := excerpt(content, maxExcerptRunes)
+	// 发现流：当前组织
 	if pd.OrgID > 0 {
 		_ = s.db.Create(&model.ActivityFeed{
 			OrgID:     pd.OrgID,
@@ -145,9 +147,24 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 			Type:      model.ActivityTypeComment,
 			RefID:     row.ID,
 			ProblemID: req.ProblemID,
-			Title:     excerpt(content, maxExcerptRunes),
-			Excerpt:   excerpt(content, maxExcerptRunes),
+			Title:     ex,
+			Excerpt:   ex,
 		}).Error
+	}
+	// 可选：同步到公共域发现流（已在公共域则跳过，避免重复）
+	if req.SyncToPublic {
+		pubID := s.resolvePublicOrgID(ctx)
+		if pubID > 0 && pubID != pd.OrgID {
+			_ = s.db.Create(&model.ActivityFeed{
+				OrgID:     pubID,
+				UserID:    pd.UserID,
+				Type:      model.ActivityTypeComment,
+				RefID:     row.ID,
+				ProblemID: req.ProblemID,
+				Title:     ex,
+				Excerpt:   ex,
+			}).Error
+		}
 	}
 	// @ 通知
 	s.emitMentions(ctx, pd.UserID, pd.Username, content, "comment", row.ID, req.ProblemID)
@@ -536,6 +553,24 @@ func (s *CommunityService) handleUserRecentSolutions(ctx khttp.Context) error {
 }
 
 // ---------- helpers ----------
+
+// resolvePublicOrgID 通过 user 服务 GetUserIdsByOrg(0) 回落得到公共域 orgId。
+func (s *CommunityService) resolvePublicOrgID(ctx khttp.Context) uint {
+	if s.reg == nil {
+		return 0
+	}
+	client, err := userrpc.ProfileClient(s.reg)
+	if err != nil {
+		log.Warnf("resolvePublicOrgID dial: %v", err)
+		return 0
+	}
+	pub, err := client.GetUserIdsByOrg(context.Background(), &profile.GetUserIdsByOrgReq{OrgId: 0})
+	if err != nil || pub == nil {
+		log.Warnf("resolvePublicOrgID: %v", err)
+		return 0
+	}
+	return uint(pub.GetOrgId())
+}
 
 type userBrief struct {
 	username, name, avatar string

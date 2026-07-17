@@ -58,6 +58,7 @@ var publicExact = map[string]struct{}{
 	"/v1/core/emergency/active":     {},
 	"/v1/core/problem/list":         {},
 	"/v1/core/problem/tags":         {},
+	"/v1/core/problem/hot":          {},
 	"/v1/core/problem/get":          {},
 	"/v1/core/problem/submissions":  {},
 	"/v1/core/problem/user-profile": {},

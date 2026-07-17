@@ -19,6 +19,7 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
+const OperationProfileClearDormant = "/api.user.v1.Profile/ClearDormant"
 const OperationProfileDelete = "/api.user.v1.Profile/Delete"
 const OperationProfileFilterPublicFeedUserIds = "/api.user.v1.Profile/FilterPublicFeedUserIds"
 const OperationProfileGetById = "/api.user.v1.Profile/GetById"
@@ -39,6 +40,8 @@ const OperationProfileSetSyncIntervals = "/api.user.v1.Profile/SetSyncIntervals"
 const OperationProfileUpdate = "/api.user.v1.Profile/Update"
 
 type ProfileHTTPServer interface {
+	// ClearDormant 站点管理员：批量解除不活跃（仅刷新 last_login_at 为当前时间；超时后仍会再休眠）
+	ClearDormant(context.Context, *ClearDormantReq) (*ClearDormantRes, error)
 	// Delete 管理员删除用户（硬删除）
 	Delete(context.Context, *DeleteReq) (*DeleteRes, error)
 	// FilterPublicFeedUserIds 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
@@ -81,6 +84,7 @@ func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r.POST("/v1/user/profile/set-problem-pipeline", _Profile_SetProblemPipeline0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-sync-intervals", _Profile_SetSyncIntervals0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-sync-exempt", _Profile_SetSyncExempt0_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/clear-dormant", _Profile_ClearDormant0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-group", _Profile_GetUserIdsByGroup0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-org", _Profile_GetUserIdsByOrg0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/non-public-org-user-ids", _Profile_GetNonPublicOrgUserIds0_HTTP_Handler(srv))
@@ -281,6 +285,28 @@ func _Profile_SetSyncExempt0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.C
 	}
 }
 
+func _Profile_ClearDormant0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ClearDormantReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileClearDormant)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ClearDormant(ctx, req.(*ClearDormantReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ClearDormantRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 func _Profile_GetUserIdsByGroup0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in GetUserIdsByGroupReq
@@ -465,6 +491,8 @@ func _Profile_FilterPublicFeedUserIds0_HTTP_Handler(srv ProfileHTTPServer) func(
 }
 
 type ProfileHTTPClient interface {
+	// ClearDormant 站点管理员：批量解除不活跃（仅刷新 last_login_at 为当前时间；超时后仍会再休眠）
+	ClearDormant(ctx context.Context, req *ClearDormantReq, opts ...http.CallOption) (rsp *ClearDormantRes, err error)
 	// Delete 管理员删除用户（硬删除）
 	Delete(ctx context.Context, req *DeleteReq, opts ...http.CallOption) (rsp *DeleteRes, err error)
 	// FilterPublicFeedUserIds 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
@@ -502,6 +530,20 @@ type ProfileHTTPClientImpl struct {
 
 func NewProfileHTTPClient(client *http.Client) ProfileHTTPClient {
 	return &ProfileHTTPClientImpl{client}
+}
+
+// ClearDormant 站点管理员：批量解除不活跃（仅刷新 last_login_at 为当前时间；超时后仍会再休眠）
+func (c *ProfileHTTPClientImpl) ClearDormant(ctx context.Context, in *ClearDormantReq, opts ...http.CallOption) (*ClearDormantRes, error) {
+	var out ClearDormantRes
+	pattern := "/v1/user/profile/clear-dormant"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProfileClearDormant))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // Delete 管理员删除用户（硬删除）

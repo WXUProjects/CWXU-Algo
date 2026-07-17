@@ -99,7 +99,12 @@ func (s SpiderService) GetSpider(ctx context.Context, req *spider.GetSpiderReq) 
 			Username: v.Username,
 		})
 	}
+	var lastSync int64
+	if s.spider != nil {
+		lastSync = s.spider.GetLastOK(req.UserId)
+	}
 	return &spider.GetSpiderRep{
+		LastSyncAt: lastSync,
 		Data: res,
 	}, nil
 }
@@ -341,6 +346,7 @@ func (s SpiderService) purgeTrainingCaches(ctx context.Context, userIds []int64)
 				fmt.Sprintf("core:contest_log:user:%d:ver", uid),
 				fmt.Sprintf("spider:pending:%d", uid),
 				fmt.Sprintf("spider:inflight:%d", uid),
+				fmt.Sprintf("spider:last_ok:%d", uid),
 			)
 			for _, p := range plats {
 				keys = append(keys,
@@ -439,11 +445,12 @@ func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserD
 		log.Errorf("PurgeUserData: preagg user=%d: %v", uid, err)
 		return nil, InternalError
 	}
-	// 缓存 / 爬虫 inflight
+	// 缓存 / 爬虫 inflight / 上次同步
 	keys := []string{
 		fmt.Sprintf("core:submit_log:user:%d", uid),
 		fmt.Sprintf("spider:pending:%d", uid),
 		fmt.Sprintf("spider:inflight:%d", uid),
+		fmt.Sprintf("spider:last_ok:%d", uid),
 		fmt.Sprintf("user:%d:profile", uid),
 		fmt.Sprintf("statistic:user:%d:ver", uid),
 		"core:platforms:bound_users:v1",

@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	Problem_List_FullMethodName             = "/api.core.v1.problem.Problem/List"
 	Problem_ListTags_FullMethodName         = "/api.core.v1.problem.Problem/ListTags"
+	Problem_Hot_FullMethodName              = "/api.core.v1.problem.Problem/Hot"
 	Problem_Get_FullMethodName              = "/api.core.v1.problem.Problem/Get"
 	Problem_ListSubmissions_FullMethodName  = "/api.core.v1.problem.Problem/ListSubmissions"
 	Problem_FollowingStatus_FullMethodName  = "/api.core.v1.problem.Problem/FollowingStatus"
@@ -48,6 +49,8 @@ type ProblemClient interface {
 	List(ctx context.Context, in *ListProblemReq, opts ...grpc.CallOption) (*ListProblemRes, error)
 	// 标签聚合（名称 + 题量），供筛选器选择
 	ListTags(ctx context.Context, in *ListTagsReq, opts ...grpc.CallOption) (*ListTagsRes, error)
+	// 全站热题：近 N 天按提交次数 / 做题人数 / AC 次数综合热度排序
+	Hot(ctx context.Context, in *HotProblemReq, opts ...grpc.CallOption) (*HotProblemRes, error)
 	Get(ctx context.Context, in *GetProblemReq, opts ...grpc.CallOption) (*GetProblemRes, error)
 	ListSubmissions(ctx context.Context, in *ListSubmissionsReq, opts ...grpc.CallOption) (*ListSubmissionsRes, error)
 	// 关注用户对本题状态（不受组织域限制；需登录）
@@ -103,6 +106,16 @@ func (c *problemClient) ListTags(ctx context.Context, in *ListTagsReq, opts ...g
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListTagsRes)
 	err := c.cc.Invoke(ctx, Problem_ListTags_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) Hot(ctx context.Context, in *HotProblemReq, opts ...grpc.CallOption) (*HotProblemRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HotProblemRes)
+	err := c.cc.Invoke(ctx, Problem_Hot_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -296,6 +309,8 @@ type ProblemServer interface {
 	List(context.Context, *ListProblemReq) (*ListProblemRes, error)
 	// 标签聚合（名称 + 题量），供筛选器选择
 	ListTags(context.Context, *ListTagsReq) (*ListTagsRes, error)
+	// 全站热题：近 N 天按提交次数 / 做题人数 / AC 次数综合热度排序
+	Hot(context.Context, *HotProblemReq) (*HotProblemRes, error)
 	Get(context.Context, *GetProblemReq) (*GetProblemRes, error)
 	ListSubmissions(context.Context, *ListSubmissionsReq) (*ListSubmissionsRes, error)
 	// 关注用户对本题状态（不受组织域限制；需登录）
@@ -342,6 +357,9 @@ func (UnimplementedProblemServer) List(context.Context, *ListProblemReq) (*ListP
 }
 func (UnimplementedProblemServer) ListTags(context.Context, *ListTagsReq) (*ListTagsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListTags not implemented")
+}
+func (UnimplementedProblemServer) Hot(context.Context, *HotProblemReq) (*HotProblemRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Hot not implemented")
 }
 func (UnimplementedProblemServer) Get(context.Context, *GetProblemReq) (*GetProblemRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Get not implemented")
@@ -450,6 +468,24 @@ func _Problem_ListTags_Handler(srv interface{}, ctx context.Context, dec func(in
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProblemServer).ListTags(ctx, req.(*ListTagsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_Hot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HotProblemReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).Hot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_Hot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).Hot(ctx, req.(*HotProblemReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -792,6 +828,10 @@ var Problem_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTags",
 			Handler:    _Problem_ListTags_Handler,
+		},
+		{
+			MethodName: "Hot",
+			Handler:    _Problem_Hot_Handler,
 		},
 		{
 			MethodName: "Get",

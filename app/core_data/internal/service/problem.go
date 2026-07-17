@@ -145,6 +145,49 @@ func (s *ProblemService) ListTags(ctx context.Context, req *problem.ListTagsReq)
 	return &problem.ListTagsRes{Code: 0, Message: "success", Data: data}, nil
 }
 
+func (s *ProblemService) Hot(ctx context.Context, req *problem.HotProblemReq) (*problem.HotProblemRes, error) {
+	page := req.Page
+	if page <= 0 {
+		page = 1
+	}
+	ps := req.PageSize
+	if ps <= 0 {
+		ps = 20
+	}
+	rows, total, days, err := s.uc.ListHot(page, ps, int(req.Days))
+	if err != nil {
+		return nil, errors.InternalServer("hot list failed", "service unavailable")
+	}
+	data := make([]*problem.HotProblemItem, 0, len(rows))
+	for i := range rows {
+		info := s.toInfo(&rows[i].Problem, "")
+		info.ContentMd = ""
+		// 热度榜用窗口内最近提交时间覆盖题库字段，便于前端展示
+		var last int64
+		if !rows[i].LastTime.IsZero() {
+			last = rows[i].LastTime.Unix()
+			info.LastSubmittedAt = last
+		}
+		data = append(data, &problem.HotProblemItem{
+			Problem:         info,
+			SubmitCount:     rows[i].SubmitCount,
+			SolverCount:     rows[i].SolverCount,
+			AcCount:         rows[i].AcCount,
+			Score:           rows[i].Score,
+			LastSubmittedAt: last,
+		})
+	}
+	return &problem.HotProblemRes{
+		Code:     0,
+		Message:  "success",
+		Data:     data,
+		Total:    total,
+		Page:     page,
+		PageSize: ps,
+		Days:     int32(days),
+	}, nil
+}
+
 func (s *ProblemService) List(ctx context.Context, req *problem.ListProblemReq) (*problem.ListProblemRes, error) {
 	var followingIDs []int64
 	if req.FollowingOnly {

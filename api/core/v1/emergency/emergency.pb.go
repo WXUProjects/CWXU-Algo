@@ -722,6 +722,103 @@ func (x *ActiveEmergencyRes) GetData() []*EmergencyInfo {
 	return nil
 }
 
+type ReorderEmergencyReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 新顺序的 id 列表（从前到后）；未出现的条目 sortOrder 不变
+	Ids           []int64 `protobuf:"varint,1,rep,packed,name=ids,proto3" json:"ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReorderEmergencyReq) Reset() {
+	*x = ReorderEmergencyReq{}
+	mi := &file_core_v1_emergency_emergency_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReorderEmergencyReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReorderEmergencyReq) ProtoMessage() {}
+
+func (x *ReorderEmergencyReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_emergency_emergency_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReorderEmergencyReq.ProtoReflect.Descriptor instead.
+func (*ReorderEmergencyReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_emergency_emergency_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ReorderEmergencyReq) GetIds() []int64 {
+	if x != nil {
+		return x.Ids
+	}
+	return nil
+}
+
+type ReorderEmergencyRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReorderEmergencyRes) Reset() {
+	*x = ReorderEmergencyRes{}
+	mi := &file_core_v1_emergency_emergency_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReorderEmergencyRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReorderEmergencyRes) ProtoMessage() {}
+
+func (x *ReorderEmergencyRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_emergency_emergency_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReorderEmergencyRes.ProtoReflect.Descriptor instead.
+func (*ReorderEmergencyRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_emergency_emergency_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ReorderEmergencyRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *ReorderEmergencyRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_core_v1_emergency_emergency_proto protoreflect.FileDescriptor
 
 const file_core_v1_emergency_emergency_proto_rawDesc = "" +
@@ -777,13 +874,19 @@ const file_core_v1_emergency_emergency_proto_rawDesc = "" +
 	"\x12ActiveEmergencyRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x128\n" +
-	"\x04data\x18\x03 \x03(\v2$.api.core.v1.emergency.EmergencyInfoR\x04data2\x9c\x05\n" +
+	"\x04data\x18\x03 \x03(\v2$.api.core.v1.emergency.EmergencyInfoR\x04data\"'\n" +
+	"\x13ReorderEmergencyReq\x12\x10\n" +
+	"\x03ids\x18\x01 \x03(\x03R\x03ids\"C\n" +
+	"\x13ReorderEmergencyRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\xa7\x06\n" +
 	"\tEmergency\x12\x84\x01\n" +
 	"\x06Create\x12).api.core.v1.emergency.CreateEmergencyReq\x1a).api.core.v1.emergency.CreateEmergencyRes\"$\x82\xd3\xe4\x93\x02\x1e:\x01*\"\x19/v1/core/emergency/create\x12\x84\x01\n" +
 	"\x06Update\x12).api.core.v1.emergency.UpdateEmergencyReq\x1a).api.core.v1.emergency.UpdateEmergencyRes\"$\x82\xd3\xe4\x93\x02\x1e:\x01*\"\x19/v1/core/emergency/update\x12\x81\x01\n" +
 	"\x06Delete\x12).api.core.v1.emergency.DeleteEmergencyReq\x1a).api.core.v1.emergency.DeleteEmergencyRes\"!\x82\xd3\xe4\x93\x02\x1b*\x19/v1/core/emergency/delete\x12y\n" +
 	"\x04List\x12'.api.core.v1.emergency.ListEmergencyReq\x1a'.api.core.v1.emergency.ListEmergencyRes\"\x1f\x82\xd3\xe4\x93\x02\x19\x12\x17/v1/core/emergency/list\x12\x81\x01\n" +
-	"\x06Active\x12).api.core.v1.emergency.ActiveEmergencyReq\x1a).api.core.v1.emergency.ActiveEmergencyRes\"!\x82\xd3\xe4\x93\x02\x1b\x12\x19/v1/core/emergency/activeBD\n" +
+	"\x06Active\x12).api.core.v1.emergency.ActiveEmergencyReq\x1a).api.core.v1.emergency.ActiveEmergencyRes\"!\x82\xd3\xe4\x93\x02\x1b\x12\x19/v1/core/emergency/active\x12\x88\x01\n" +
+	"\aReorder\x12*.api.core.v1.emergency.ReorderEmergencyReq\x1a*.api.core.v1.emergency.ReorderEmergencyRes\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/v1/core/emergency/reorderBD\n" +
 	"\x15api.core.v1.emergencyP\x01Z)cwxu-algo/api/core/v1/emergency;emergencyb\x06proto3"
 
 var (
@@ -798,19 +901,21 @@ func file_core_v1_emergency_emergency_proto_rawDescGZIP() []byte {
 	return file_core_v1_emergency_emergency_proto_rawDescData
 }
 
-var file_core_v1_emergency_emergency_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_core_v1_emergency_emergency_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_core_v1_emergency_emergency_proto_goTypes = []any{
-	(*EmergencyInfo)(nil),      // 0: api.core.v1.emergency.EmergencyInfo
-	(*CreateEmergencyReq)(nil), // 1: api.core.v1.emergency.CreateEmergencyReq
-	(*CreateEmergencyRes)(nil), // 2: api.core.v1.emergency.CreateEmergencyRes
-	(*UpdateEmergencyReq)(nil), // 3: api.core.v1.emergency.UpdateEmergencyReq
-	(*UpdateEmergencyRes)(nil), // 4: api.core.v1.emergency.UpdateEmergencyRes
-	(*DeleteEmergencyReq)(nil), // 5: api.core.v1.emergency.DeleteEmergencyReq
-	(*DeleteEmergencyRes)(nil), // 6: api.core.v1.emergency.DeleteEmergencyRes
-	(*ListEmergencyReq)(nil),   // 7: api.core.v1.emergency.ListEmergencyReq
-	(*ListEmergencyRes)(nil),   // 8: api.core.v1.emergency.ListEmergencyRes
-	(*ActiveEmergencyReq)(nil), // 9: api.core.v1.emergency.ActiveEmergencyReq
-	(*ActiveEmergencyRes)(nil), // 10: api.core.v1.emergency.ActiveEmergencyRes
+	(*EmergencyInfo)(nil),       // 0: api.core.v1.emergency.EmergencyInfo
+	(*CreateEmergencyReq)(nil),  // 1: api.core.v1.emergency.CreateEmergencyReq
+	(*CreateEmergencyRes)(nil),  // 2: api.core.v1.emergency.CreateEmergencyRes
+	(*UpdateEmergencyReq)(nil),  // 3: api.core.v1.emergency.UpdateEmergencyReq
+	(*UpdateEmergencyRes)(nil),  // 4: api.core.v1.emergency.UpdateEmergencyRes
+	(*DeleteEmergencyReq)(nil),  // 5: api.core.v1.emergency.DeleteEmergencyReq
+	(*DeleteEmergencyRes)(nil),  // 6: api.core.v1.emergency.DeleteEmergencyRes
+	(*ListEmergencyReq)(nil),    // 7: api.core.v1.emergency.ListEmergencyReq
+	(*ListEmergencyRes)(nil),    // 8: api.core.v1.emergency.ListEmergencyRes
+	(*ActiveEmergencyReq)(nil),  // 9: api.core.v1.emergency.ActiveEmergencyReq
+	(*ActiveEmergencyRes)(nil),  // 10: api.core.v1.emergency.ActiveEmergencyRes
+	(*ReorderEmergencyReq)(nil), // 11: api.core.v1.emergency.ReorderEmergencyReq
+	(*ReorderEmergencyRes)(nil), // 12: api.core.v1.emergency.ReorderEmergencyRes
 }
 var file_core_v1_emergency_emergency_proto_depIdxs = []int32{
 	0,  // 0: api.core.v1.emergency.CreateEmergencyRes.data:type_name -> api.core.v1.emergency.EmergencyInfo
@@ -822,13 +927,15 @@ var file_core_v1_emergency_emergency_proto_depIdxs = []int32{
 	5,  // 6: api.core.v1.emergency.Emergency.Delete:input_type -> api.core.v1.emergency.DeleteEmergencyReq
 	7,  // 7: api.core.v1.emergency.Emergency.List:input_type -> api.core.v1.emergency.ListEmergencyReq
 	9,  // 8: api.core.v1.emergency.Emergency.Active:input_type -> api.core.v1.emergency.ActiveEmergencyReq
-	2,  // 9: api.core.v1.emergency.Emergency.Create:output_type -> api.core.v1.emergency.CreateEmergencyRes
-	4,  // 10: api.core.v1.emergency.Emergency.Update:output_type -> api.core.v1.emergency.UpdateEmergencyRes
-	6,  // 11: api.core.v1.emergency.Emergency.Delete:output_type -> api.core.v1.emergency.DeleteEmergencyRes
-	8,  // 12: api.core.v1.emergency.Emergency.List:output_type -> api.core.v1.emergency.ListEmergencyRes
-	10, // 13: api.core.v1.emergency.Emergency.Active:output_type -> api.core.v1.emergency.ActiveEmergencyRes
-	9,  // [9:14] is the sub-list for method output_type
-	4,  // [4:9] is the sub-list for method input_type
+	11, // 9: api.core.v1.emergency.Emergency.Reorder:input_type -> api.core.v1.emergency.ReorderEmergencyReq
+	2,  // 10: api.core.v1.emergency.Emergency.Create:output_type -> api.core.v1.emergency.CreateEmergencyRes
+	4,  // 11: api.core.v1.emergency.Emergency.Update:output_type -> api.core.v1.emergency.UpdateEmergencyRes
+	6,  // 12: api.core.v1.emergency.Emergency.Delete:output_type -> api.core.v1.emergency.DeleteEmergencyRes
+	8,  // 13: api.core.v1.emergency.Emergency.List:output_type -> api.core.v1.emergency.ListEmergencyRes
+	10, // 14: api.core.v1.emergency.Emergency.Active:output_type -> api.core.v1.emergency.ActiveEmergencyRes
+	12, // 15: api.core.v1.emergency.Emergency.Reorder:output_type -> api.core.v1.emergency.ReorderEmergencyRes
+	10, // [10:16] is the sub-list for method output_type
+	4,  // [4:10] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
@@ -845,7 +952,7 @@ func file_core_v1_emergency_emergency_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_emergency_emergency_proto_rawDesc), len(file_core_v1_emergency_emergency_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

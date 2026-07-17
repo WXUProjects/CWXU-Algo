@@ -22,7 +22,11 @@ func NewBulletinService(bulletinDal *dal.BulletinDal) *BulletinService {
 
 // modelToProto 将 GORM 模型转换为 proto 消息
 func (s *BulletinService) modelToProto(m *model.Bulletin) *bulletin.BulletinInfo {
-	return &bulletin.BulletinInfo{
+	scope := m.Scope
+	if scope == "" {
+		scope = model.BulletinScopeSite
+	}
+	info := &bulletin.BulletinInfo{
 		Id:         m.ID,
 		Title:      m.Title,
 		Content:    m.Content,
@@ -31,9 +35,15 @@ func (s *BulletinService) modelToProto(m *model.Bulletin) *bulletin.BulletinInfo
 		IsPinned:   m.IsPinned,
 		CreatedAt:  m.CreatedAt.Unix(),
 		UpdatedAt:  m.UpdatedAt.Unix(),
+		Scope:      scope,
 	}
+	if m.OrgID != nil {
+		info.OrgId = int64(*m.OrgID)
+	}
+	return info
 }
 
+// canManageBulletin 站点公告仅站点管理员；组织公告为该组织教练及以上（或站管）
 func canManageBulletin(ctx context.Context, user *auth.JwtPayload, m *model.Bulletin) bool {
 	if user == nil {
 		return false
@@ -41,35 +51,74 @@ func canManageBulletin(ctx context.Context, user *auth.JwtPayload, m *model.Bull
 	if auth.VerifySiteAdmin(ctx) {
 		return true
 	}
-	// 组织公告：当前组织管理员且 org 匹配
-	if m.Scope == model.BulletinScopeOrg && m.OrgID != nil {
-		return auth.VerifyOrgAdmin(ctx) && user.OrgID == *m.OrgID
+	scope := m.Scope
+	if scope == "" {
+		scope = model.BulletinScopeSite
 	}
 	// 全站公告仅站点管理员
+	if scope == model.BulletinScopeSite {
+		return false
+	}
+	// 组织公告：当前组织 staff 且 org 匹配
+	if scope == model.BulletinScopeOrg && m.OrgID != nil {
+		return auth.VerifyOrgCoach(ctx) && user.OrgID == *m.OrgID
+	}
 	return false
 }
 
-// Create 创建公告：站点管理员可发全站；组织管理员默认发当前组织公告
+// Create 创建公告
+// - scope=site：仅站点管理员
+// - scope=org 或空：组织教练及以上，写入当前 JWT 组织
 func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBulletinReq) (*bulletin.CreateBulletinRes, error) {
 	user := auth.GetCurrentUser(ctx)
 	if user == nil {
 		return &bulletin.CreateBulletinRes{Code: 1, Message: "未获取到用户信息"}, nil
 	}
 
-	scope := model.BulletinScopeOrg
+	reqScope := req.Scope
+	if reqScope == "" {
+		// 默认：站管发站点公告；其余发组织公告
+		if auth.VerifySiteAdmin(ctx) {
+			reqScope = model.BulletinScopeSite
+		} else {
+			reqScope = model.BulletinScopeOrg
+		}
+	}
+
+	var scope string
 	var orgID *uint
-	if auth.VerifySiteAdmin(ctx) {
-		// 站点管理员默认全站；若 JWT 有 org 且非仅站点场景，仍发全站（规格：全站仅站点管理员）
+
+	switch reqScope {
+	case model.BulletinScopeSite:
+		if !auth.VerifySiteAdmin(ctx) {
+			return &bulletin.CreateBulletinRes{
+				Code:    1,
+				Message: "权限不足，仅站点管理员可发布站点公告",
+			}, nil
+		}
 		scope = model.BulletinScopeSite
 		orgID = nil
-	} else if auth.VerifyOrgAdmin(ctx) && user.OrgID > 0 {
+	case model.BulletinScopeOrg:
+		// 组织公告：组织教练及以上；站管也可代发当前组织公告
+		if !auth.VerifyOrgCoach(ctx) {
+			return &bulletin.CreateBulletinRes{
+				Code:    1,
+				Message: "权限不足，仅组织管理员或教练可发布组织公告",
+			}, nil
+		}
+		if user.OrgID == 0 {
+			return &bulletin.CreateBulletinRes{
+				Code:    1,
+				Message: "请先切换到要发布公告的组织",
+			}, nil
+		}
 		scope = model.BulletinScopeOrg
 		oid := user.OrgID
 		orgID = &oid
-	} else {
+	default:
 		return &bulletin.CreateBulletinRes{
-			Code:    1,
-			Message: "权限不足，仅站点管理员或团队管理员可发布公告",
+			Code:    2,
+			Message: "无效的公告范围",
 		}, nil
 	}
 
@@ -80,7 +129,6 @@ func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBullet
 		return &bulletin.CreateBulletinRes{Code: 3, Message: "内容不能为空"}, nil
 	}
 
-	// 作者展示名：JWT name 为全局昵称（≡公共域称呼）；组织公告后续可再解析 org_display_name
 	m := &model.Bulletin{
 		Title:      req.Title,
 		Content:    req.Content,
@@ -118,7 +166,6 @@ func (s *BulletinService) Update(ctx context.Context, req *bulletin.UpdateBullet
 		}, nil
 	}
 
-	// 构建更新字段（管理员/教练均可改任意字段，不校验作者）
 	updates := make(map[string]interface{})
 	if req.Title != "" {
 		updates["title"] = req.Title
@@ -139,7 +186,6 @@ func (s *BulletinService) Update(ctx context.Context, req *bulletin.UpdateBullet
 		return nil, errors.InternalServer("更新失败", "服务暂时不可用")
 	}
 
-	// 重新查询获取最新数据
 	updated, err := s.bulletinDal.GetById(req.Id)
 	if err != nil {
 		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
@@ -196,7 +242,8 @@ func (s *BulletinService) Get(ctx context.Context, req *bulletin.GetBulletinReq)
 	}, nil
 }
 
-// List 分页获取公告列表（公开）
+// List 分页获取公告列表
+// scope 空：全站 ∪ 当前组织；scope=site / org 仅对应范围
 func (s *BulletinService) List(ctx context.Context, req *bulletin.ListBulletinReq) (*bulletin.ListBulletinRes, error) {
 	page := req.Page
 	if page < 1 {
@@ -214,7 +261,21 @@ func (s *BulletinService) List(ctx context.Context, req *bulletin.ListBulletinRe
 	if u := auth.GetCurrentUser(ctx); u != nil {
 		orgID = u.OrgID
 	}
-	bulletins, total, err := s.bulletinDal.List(page, pageSize, orgID)
+
+	scope := req.Scope
+	// 管理端请求 org 范围但无组织上下文时，不泄露其他组织公告
+	if scope == model.BulletinScopeOrg && orgID == 0 {
+		return &bulletin.ListBulletinRes{
+			Code:     0,
+			Message:  "success",
+			Data:     []*bulletin.BulletinInfo{},
+			Total:    0,
+			Page:     page,
+			PageSize: pageSize,
+		}, nil
+	}
+
+	bulletins, total, err := s.bulletinDal.List(page, pageSize, orgID, scope)
 	if err != nil {
 		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}

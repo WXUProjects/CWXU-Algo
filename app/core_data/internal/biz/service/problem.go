@@ -1097,6 +1097,109 @@ type TagCount struct {
 	Count int64
 }
 
+// HotProblemRow 全站热题一行（含题库信息 + 近窗统计）
+type HotProblemRow struct {
+	Problem     model.Problem
+	SubmitCount int64
+	SolverCount int64
+	AcCount     int64
+	Score       float64
+	LastTime    time.Time
+}
+
+type hotListCachePayload struct {
+	Rows  []HotProblemRow
+	Total int64
+	Days  int
+}
+
+const (
+	// problemHotCacheTTL 热题榜短缓存（窗口聚合较重）
+	problemHotCacheTTL = 90 * time.Second
+	// hotScore weights documented for API
+	// score = submit*1 + solver*3 + ac*2
+)
+
+// ListHot 全站热题：近 days 天 submit/solver/ac 综合分排序。
+// days 默认 2，夹紧到 [1,7]。
+func (uc *ProblemUseCase) ListHot(page, pageSize int64, days int) ([]HotProblemRow, int64, int, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	if days <= 0 {
+		days = 2
+	}
+	if days > 7 {
+		days = 7
+	}
+
+	ctx := context.Background()
+	if uc.data != nil && uc.data.RDB != nil {
+		key := fmt.Sprintf("problem:hot:d%d:p%d:ps%d", days, page, pageSize)
+		payload, _, err := data2.GetCacheDalTTL[hotListCachePayload](ctx, uc.data.RDB, key, problemHotCacheTTL, func(data *hotListCachePayload) error {
+			rows, total, e := uc.listHotDB(page, pageSize, days)
+			if e != nil {
+				return e
+			}
+			data.Rows = rows
+			data.Total = total
+			data.Days = days
+			return nil
+		})
+		if err == nil && payload != nil {
+			return payload.Rows, payload.Total, payload.Days, nil
+		}
+	}
+	rows, total, err := uc.listHotDB(page, pageSize, days)
+	return rows, total, days, err
+}
+
+func (uc *ProblemUseCase) listHotDB(page, pageSize int64, days int) ([]HotProblemRow, int64, error) {
+	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	aggs, total, err := dal.ListHotProblems(context.Background(), uc.data.DB, since, page, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(aggs) == 0 {
+		return []HotProblemRow{}, total, nil
+	}
+	ids := make([]uint, 0, len(aggs))
+	for _, a := range aggs {
+		ids = append(ids, a.ProblemID)
+	}
+	var problems []model.Problem
+	if err := uc.data.DB.Where("id IN ?", ids).Find(&problems).Error; err != nil {
+		return nil, 0, err
+	}
+	byID := make(map[uint]model.Problem, len(problems))
+	for i := range problems {
+		byID[problems[i].ID] = problems[i]
+	}
+	out := make([]HotProblemRow, 0, len(aggs))
+	for _, a := range aggs {
+		p, ok := byID[a.ProblemID]
+		if !ok {
+			// 题库行缺失时跳过（孤儿 problem_id）
+			continue
+		}
+		out = append(out, HotProblemRow{
+			Problem:     p,
+			SubmitCount: a.SubmitCount,
+			SolverCount: a.SolverCount,
+			AcCount:     a.AcCount,
+			Score:       a.Score,
+			LastTime:    a.LastTime,
+		})
+	}
+	return out, total, nil
+}
+
 // ListTags 从 problem_tags 倒排聚合（Redis 缓存）
 func (uc *ProblemUseCase) ListTags(limit int) ([]TagCount, error) {
 	if limit <= 0 {

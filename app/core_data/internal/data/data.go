@@ -291,6 +291,9 @@ func ensureSubmitLogPerf(db *gorm.DB) {
 	indexSQLs := []string{
 		`CREATE INDEX IF NOT EXISTS idx_submit_user_isac_time ON submit_logs (user_id, is_ac, time DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_submit_isac_time ON submit_logs (time DESC) WHERE is_ac = true`,
+		// 热题聚合：近窗 time 过滤 + 有 problem_id
+		`CREATE INDEX IF NOT EXISTS idx_submit_time_problem ON submit_logs (time DESC)
+			WHERE problem_id IS NOT NULL AND problem_id > 0`,
 		`CREATE INDEX IF NOT EXISTS idx_submit_user_time_nonsynthetic ON submit_logs (user_id, time DESC)
 			WHERE ` + model.SQLExcludeLeetCodeNonSubmit,
 		`CREATE INDEX IF NOT EXISTS idx_submit_time_nonsynthetic ON submit_logs (time DESC)

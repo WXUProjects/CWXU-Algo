@@ -24,6 +24,7 @@ const OperationProblemBackfill = "/api.core.v1.problem.Problem/Backfill"
 const OperationProblemEmergencyStop = "/api.core.v1.problem.Problem/EmergencyStop"
 const OperationProblemFollowingStatus = "/api.core.v1.problem.Problem/FollowingStatus"
 const OperationProblemGet = "/api.core.v1.problem.Problem/Get"
+const OperationProblemHot = "/api.core.v1.problem.Problem/Hot"
 const OperationProblemList = "/api.core.v1.problem.Problem/List"
 const OperationProblemListEditRequests = "/api.core.v1.problem.Problem/ListEditRequests"
 const OperationProblemListSubmissions = "/api.core.v1.problem.Problem/ListSubmissions"
@@ -49,6 +50,8 @@ type ProblemHTTPServer interface {
 	// FollowingStatus 关注用户对本题状态（不受组织域限制；需登录）
 	FollowingStatus(context.Context, *FollowingStatusReq) (*FollowingStatusRes, error)
 	Get(context.Context, *GetProblemReq) (*GetProblemRes, error)
+	// Hot 全站热题：近 N 天按提交次数 / 做题人数 / AC 次数综合热度排序
+	Hot(context.Context, *HotProblemReq) (*HotProblemRes, error)
 	List(context.Context, *ListProblemReq) (*ListProblemRes, error)
 	// ListEditRequests 站点管理员：审核申请列表
 	ListEditRequests(context.Context, *ListProblemEditReq) (*ListProblemEditRes, error)
@@ -81,6 +84,7 @@ func RegisterProblemHTTPServer(s *http.Server, srv ProblemHTTPServer) {
 	r := s.Route("/")
 	r.GET("/v1/core/problem/list", _Problem_List0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/tags", _Problem_ListTags0_HTTP_Handler(srv))
+	r.GET("/v1/core/problem/hot", _Problem_Hot0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/get", _Problem_Get0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/submissions", _Problem_ListSubmissions0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/following-status", _Problem_FollowingStatus0_HTTP_Handler(srv))
@@ -135,6 +139,25 @@ func _Problem_ListTags0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Contex
 			return err
 		}
 		reply := out.(*ListTagsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problem_Hot0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in HotProblemReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemHot)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.Hot(ctx, req.(*HotProblemReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*HotProblemRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -523,6 +546,8 @@ type ProblemHTTPClient interface {
 	// FollowingStatus 关注用户对本题状态（不受组织域限制；需登录）
 	FollowingStatus(ctx context.Context, req *FollowingStatusReq, opts ...http.CallOption) (rsp *FollowingStatusRes, err error)
 	Get(ctx context.Context, req *GetProblemReq, opts ...http.CallOption) (rsp *GetProblemRes, err error)
+	// Hot 全站热题：近 N 天按提交次数 / 做题人数 / AC 次数综合热度排序
+	Hot(ctx context.Context, req *HotProblemReq, opts ...http.CallOption) (rsp *HotProblemRes, err error)
 	List(ctx context.Context, req *ListProblemReq, opts ...http.CallOption) (rsp *ListProblemRes, err error)
 	// ListEditRequests 站点管理员：审核申请列表
 	ListEditRequests(ctx context.Context, req *ListProblemEditReq, opts ...http.CallOption) (rsp *ListProblemEditRes, err error)
@@ -619,6 +644,20 @@ func (c *ProblemHTTPClientImpl) Get(ctx context.Context, in *GetProblemReq, opts
 	pattern := "/v1/core/problem/get"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationProblemGet))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Hot 全站热题：近 N 天按提交次数 / 做题人数 / AC 次数综合热度排序
+func (c *ProblemHTTPClientImpl) Hot(ctx context.Context, in *HotProblemReq, opts ...http.CallOption) (*HotProblemRes, error) {
+	var out HotProblemRes
+	pattern := "/v1/core/problem/hot"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProblemHot))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {

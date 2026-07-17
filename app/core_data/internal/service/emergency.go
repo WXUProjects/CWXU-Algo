@@ -169,3 +169,32 @@ func (s *EmergencyService) Active(ctx context.Context, _ *emergency.ActiveEmerge
 		Data:    data,
 	}, nil
 }
+
+func (s *EmergencyService) Reorder(ctx context.Context, req *emergency.ReorderEmergencyReq) (*emergency.ReorderEmergencyRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return &emergency.ReorderEmergencyRes{Code: 1, Message: "权限不足"}, nil
+	}
+	if len(req.Ids) == 0 {
+		return &emergency.ReorderEmergencyRes{Code: 2, Message: "顺序列表不能为空"}, nil
+	}
+	// 去重，保持首次出现顺序
+	seen := make(map[int64]struct{}, len(req.Ids))
+	ids := make([]int64, 0, len(req.Ids))
+	for _, id := range req.Ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return &emergency.ReorderEmergencyRes{Code: 2, Message: "顺序列表不能为空"}, nil
+	}
+	if err := s.dal.Reorder(ids); err != nil {
+		return nil, errors.InternalServer("排序失败", "服务暂时不可用")
+	}
+	return &emergency.ReorderEmergencyRes{Code: 0, Message: "success"}, nil
+}

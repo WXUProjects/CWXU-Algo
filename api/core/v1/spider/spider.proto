@@ -68,6 +68,8 @@ message GetSpiderRep {
     string username = 2;
   }
   repeated Data data = 1;
+  // 最近一次爬虫成功时间（unix 秒；0=尚无成功同步记录）
+  int64 lastSyncAt = 2;
 }
 
 message UpdateReq {

@@ -84,7 +84,7 @@ type LoginRes struct {
 	WasDormant bool `protobuf:"varint,4,opt,name=was_dormant,json=wasDormant,proto3" json:"was_dormant,omitempty"`
 	// 是否已为该用户入队全量爬虫
 	SyncStarted bool `protobuf:"varint,5,opt,name=sync_started,json=syncStarted,proto3" json:"sync_started,omitempty"`
-	// 距上次活跃的整天数（登录前计算）
+	// 距上次活跃的整天数（登录前计算；从未记录则按注册时间）
 	InactiveDays  int32 `protobuf:"varint,6,opt,name=inactive_days,json=inactiveDays,proto3" json:"inactive_days,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -665,14 +665,15 @@ const file_user_v1_auth_auth_proto_rawDesc = "" +
 	"\x17user/v1/auth/auth.proto\x12\vapi.user.v1\x1a\x1cgoogle/api/annotations.proto\"B\n" +
 	"\bLoginReq\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"\x9e\x01\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\"\xc3\x01\n" +
 	"\bLoginRes\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12\x1a\n" +
 	"\bjwtToken\x18\x02 \x01(\tR\bjwtToken\x12\x1f\n" +
 	"\vwas_dormant\x18\x04 \x01(\bR\n" +
 	"wasDormant\x12!\n" +
-	"\fsync_started\x18\x05 \x01(\bR\vsyncStarted\"\x9d\x01\n" +
+	"\fsync_started\x18\x05 \x01(\bR\vsyncStarted\x12#\n" +
+	"\rinactive_days\x18\x06 \x01(\x05R\finactiveDays\"\x9d\x01\n" +
 	"\vRegisterReq\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x12\n" +

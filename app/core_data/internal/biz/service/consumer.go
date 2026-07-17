@@ -66,6 +66,10 @@ func (c *Consumer) Consume() {
 				log.Errorf("RabbitMQ(Spider): %v", err)
 				return err
 			}
+			// 任一平台抓取成功即更新「上次同步」时间（个人资料页展示）
+			if c.spiderTask != nil {
+				c.spiderTask.MarkLastOK(msg.UserId)
+			}
 			return nil
 		},
 	})

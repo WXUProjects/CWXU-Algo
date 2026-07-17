@@ -1008,6 +1008,29 @@ func (d *ProfileDal) TouchLastLogin(ctx context.Context, userID uint, at time.Ti
 		Update("last_login_at", at).Error
 }
 
+// TouchLastLoginBatch 批量刷新最近活跃时间，返回实际更新行数
+func (d *ProfileDal) TouchLastLoginBatch(ctx context.Context, userIDs []int64, at time.Time) (int64, error) {
+	ids := make([]int64, 0, len(userIDs))
+	seen := make(map[int64]struct{}, len(userIDs))
+	for _, id := range userIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res := d.db.WithContext(ctx).Model(&model.User{}).
+		Where("id IN ?", ids).
+		Update("last_login_at", at)
+	return res.RowsAffected, res.Error
+}
+
 // SetSyncExempt 站管设置永不休眠
 func (d *ProfileDal) SetSyncExempt(ctx context.Context, userID int64, exempt bool) error {
 	return d.db.WithContext(ctx).Model(&model.User{}).

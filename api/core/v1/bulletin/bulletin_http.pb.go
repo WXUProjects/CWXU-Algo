@@ -26,15 +26,15 @@ const OperationBulletinList = "/api.core.v1.bulletin.Bulletin/List"
 const OperationBulletinUpdate = "/api.core.v1.bulletin.Bulletin/Update"
 
 type BulletinHTTPServer interface {
-	// Create 创建公告（教练/管理员）
+	// Create 创建公告
 	Create(context.Context, *CreateBulletinReq) (*CreateBulletinRes, error)
-	// Delete 删除公告（教练/管理员）
+	// Delete 删除公告
 	Delete(context.Context, *DeleteBulletinReq) (*DeleteBulletinRes, error)
 	// Get 获取单条公告详情（公开）
 	Get(context.Context, *GetBulletinReq) (*GetBulletinRes, error)
-	// List 分页获取公告列表（公开）
+	// List 分页获取公告列表（公开；可按 scope 过滤）
 	List(context.Context, *ListBulletinReq) (*ListBulletinRes, error)
-	// Update 更新公告（教练/管理员）
+	// Update 更新公告
 	Update(context.Context, *UpdateBulletinReq) (*UpdateBulletinRes, error)
 }
 
@@ -149,15 +149,15 @@ func _Bulletin_List2_HTTP_Handler(srv BulletinHTTPServer) func(ctx http.Context)
 }
 
 type BulletinHTTPClient interface {
-	// Create 创建公告（教练/管理员）
+	// Create 创建公告
 	Create(ctx context.Context, req *CreateBulletinReq, opts ...http.CallOption) (rsp *CreateBulletinRes, err error)
-	// Delete 删除公告（教练/管理员）
+	// Delete 删除公告
 	Delete(ctx context.Context, req *DeleteBulletinReq, opts ...http.CallOption) (rsp *DeleteBulletinRes, err error)
 	// Get 获取单条公告详情（公开）
 	Get(ctx context.Context, req *GetBulletinReq, opts ...http.CallOption) (rsp *GetBulletinRes, err error)
-	// List 分页获取公告列表（公开）
+	// List 分页获取公告列表（公开；可按 scope 过滤）
 	List(ctx context.Context, req *ListBulletinReq, opts ...http.CallOption) (rsp *ListBulletinRes, err error)
-	// Update 更新公告（教练/管理员）
+	// Update 更新公告
 	Update(ctx context.Context, req *UpdateBulletinReq, opts ...http.CallOption) (rsp *UpdateBulletinRes, err error)
 }
 
@@ -169,7 +169,7 @@ func NewBulletinHTTPClient(client *http.Client) BulletinHTTPClient {
 	return &BulletinHTTPClientImpl{client}
 }
 
-// Create 创建公告（教练/管理员）
+// Create 创建公告
 func (c *BulletinHTTPClientImpl) Create(ctx context.Context, in *CreateBulletinReq, opts ...http.CallOption) (*CreateBulletinRes, error) {
 	var out CreateBulletinRes
 	pattern := "/v1/core/bulletin/create"
@@ -183,7 +183,7 @@ func (c *BulletinHTTPClientImpl) Create(ctx context.Context, in *CreateBulletinR
 	return &out, nil
 }
 
-// Delete 删除公告（教练/管理员）
+// Delete 删除公告
 func (c *BulletinHTTPClientImpl) Delete(ctx context.Context, in *DeleteBulletinReq, opts ...http.CallOption) (*DeleteBulletinRes, error) {
 	var out DeleteBulletinRes
 	pattern := "/v1/core/bulletin/delete"
@@ -211,7 +211,7 @@ func (c *BulletinHTTPClientImpl) Get(ctx context.Context, in *GetBulletinReq, op
 	return &out, nil
 }
 
-// List 分页获取公告列表（公开）
+// List 分页获取公告列表（公开；可按 scope 过滤）
 func (c *BulletinHTTPClientImpl) List(ctx context.Context, in *ListBulletinReq, opts ...http.CallOption) (*ListBulletinRes, error) {
 	var out ListBulletinRes
 	pattern := "/v1/core/bulletin/list"
@@ -225,7 +225,7 @@ func (c *BulletinHTTPClientImpl) List(ctx context.Context, in *ListBulletinReq, 
 	return &out, nil
 }
 
-// Update 更新公告（教练/管理员）
+// Update 更新公告
 func (c *BulletinHTTPClientImpl) Update(ctx context.Context, in *UpdateBulletinReq, opts ...http.CallOption) (*UpdateBulletinRes, error) {
 	var out UpdateBulletinRes
 	pattern := "/v1/core/bulletin/update"

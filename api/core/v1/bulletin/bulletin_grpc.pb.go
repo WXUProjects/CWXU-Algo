@@ -30,17 +30,17 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// 公告服务：管理员和教练可发布/编辑/删除公告，所有人可查看
+// 公告：scope=site 全站（仅站点管理员）/ scope=org 组织公告（组织教练及以上）
 type BulletinClient interface {
-	// 创建公告（教练/管理员）
+	// 创建公告
 	Create(ctx context.Context, in *CreateBulletinReq, opts ...grpc.CallOption) (*CreateBulletinRes, error)
-	// 更新公告（教练/管理员）
+	// 更新公告
 	Update(ctx context.Context, in *UpdateBulletinReq, opts ...grpc.CallOption) (*UpdateBulletinRes, error)
-	// 删除公告（教练/管理员）
+	// 删除公告
 	Delete(ctx context.Context, in *DeleteBulletinReq, opts ...grpc.CallOption) (*DeleteBulletinRes, error)
 	// 获取单条公告详情（公开）
 	Get(ctx context.Context, in *GetBulletinReq, opts ...grpc.CallOption) (*GetBulletinRes, error)
-	// 分页获取公告列表（公开）
+	// 分页获取公告列表（公开；可按 scope 过滤）
 	List(ctx context.Context, in *ListBulletinReq, opts ...grpc.CallOption) (*ListBulletinRes, error)
 }
 
@@ -106,17 +106,17 @@ func (c *bulletinClient) List(ctx context.Context, in *ListBulletinReq, opts ...
 // All implementations must embed UnimplementedBulletinServer
 // for forward compatibility.
 //
-// 公告服务：管理员和教练可发布/编辑/删除公告，所有人可查看
+// 公告：scope=site 全站（仅站点管理员）/ scope=org 组织公告（组织教练及以上）
 type BulletinServer interface {
-	// 创建公告（教练/管理员）
+	// 创建公告
 	Create(context.Context, *CreateBulletinReq) (*CreateBulletinRes, error)
-	// 更新公告（教练/管理员）
+	// 更新公告
 	Update(context.Context, *UpdateBulletinReq) (*UpdateBulletinRes, error)
-	// 删除公告（教练/管理员）
+	// 删除公告
 	Delete(context.Context, *DeleteBulletinReq) (*DeleteBulletinRes, error)
 	// 获取单条公告详情（公开）
 	Get(context.Context, *GetBulletinReq) (*GetBulletinRes, error)
-	// 分页获取公告列表（公开）
+	// 分页获取公告列表（公开；可按 scope 过滤）
 	List(context.Context, *ListBulletinReq) (*ListBulletinRes, error)
 	mustEmbedUnimplementedBulletinServer()
 }

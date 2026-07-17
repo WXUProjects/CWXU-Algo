@@ -478,6 +478,7 @@ func (p *ProfileService) enforceProfileVisibility(ctx context.Context, targetUID
 func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*profile.GetByIdRes, error) {
 	// 获取 platform spider 信息（失败不阻断资料：旧用户/core 暂不可用时仍应能看邮箱与昵称）
 	spiders := make([]*profile.GetByIdRes_Spiders, 0)
+	var lastSyncAt int64
 	if conn, err := p.coreDataRPC(); err != nil {
 		log.Warnf("GetById spider dial user=%d: %v", pf.ID, err)
 	} else {
@@ -492,6 +493,7 @@ func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*
 					Username: v.Username,
 				})
 			}
+			lastSyncAt = sp.GetLastSyncAt()
 		}
 	}
 	canViewPrivate := auth.VerifySelfOrAbove(ctx, pf.ID)
@@ -526,6 +528,7 @@ func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*
 		EmailWeeklyEnabled:      weeklyOn,
 		EmailAllowedByOrg:       dailyGrant,
 		EmailWeeklyAllowedByOrg: weeklyGrant,
+		LastSyncAt:              lastSyncAt,
 	}
 	if canViewPrivate {
 		reply.Email = pf.Email
@@ -618,6 +621,29 @@ func (p *ProfileService) SetSyncExempt(ctx context.Context, req *profile.SetSync
 		msg = "已标记永不休眠"
 	}
 	return &profile.SetSyncExemptRes{Code: 0, Message: msg}, nil
+}
+
+// ClearDormant 站点管理员：批量刷新最近活跃时间，一次性解除休眠（非永久豁免）
+func (p *ProfileService) ClearDormant(ctx context.Context, req *profile.ClearDormantReq) (*profile.ClearDormantRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "仅站点管理员可操作")
+	}
+	if req == nil || len(req.UserIds) == 0 {
+		return nil, errors.BadRequest("参数错误", "请选择至少一个用户")
+	}
+	const maxBatch = 200
+	if len(req.UserIds) > maxBatch {
+		return nil, errors.BadRequest("参数错误", fmt.Sprintf("单次最多 %d 人", maxBatch))
+	}
+	n, err := p.profileDal.TouchLastLoginBatch(ctx, req.UserIds, time.Now())
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	return &profile.ClearDormantRes{
+		Code:    0,
+		Message: fmt.Sprintf("已解除 %d 人的不活跃状态", n),
+		Updated: int32(n),
+	}, nil
 }
 
 // GetUserIdsByOrg 组织成员 ID（数据隔离）

@@ -24,15 +24,19 @@ const (
 
 // 公告实体
 type BulletinInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
-	Content       string                 `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
-	AuthorId      int64                  `protobuf:"varint,4,opt,name=authorId,proto3" json:"authorId,omitempty"`
-	AuthorName    string                 `protobuf:"bytes,5,opt,name=authorName,proto3" json:"authorName,omitempty"`
-	IsPinned      bool                   `protobuf:"varint,6,opt,name=isPinned,proto3" json:"isPinned,omitempty"`
-	CreatedAt     int64                  `protobuf:"varint,7,opt,name=createdAt,proto3" json:"createdAt,omitempty"`
-	UpdatedAt     int64                  `protobuf:"varint,8,opt,name=updatedAt,proto3" json:"updatedAt,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Id         int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Title      string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Content    string                 `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
+	AuthorId   int64                  `protobuf:"varint,4,opt,name=authorId,proto3" json:"authorId,omitempty"`
+	AuthorName string                 `protobuf:"bytes,5,opt,name=authorName,proto3" json:"authorName,omitempty"`
+	IsPinned   bool                   `protobuf:"varint,6,opt,name=isPinned,proto3" json:"isPinned,omitempty"`
+	CreatedAt  int64                  `protobuf:"varint,7,opt,name=createdAt,proto3" json:"createdAt,omitempty"`
+	UpdatedAt  int64                  `protobuf:"varint,8,opt,name=updatedAt,proto3" json:"updatedAt,omitempty"`
+	// site=站点公告；org=组织公告
+	Scope string `protobuf:"bytes,9,opt,name=scope,proto3" json:"scope,omitempty"`
+	// scope=org 时有值
+	OrgId         int64 `protobuf:"varint,10,opt,name=orgId,proto3" json:"orgId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -123,12 +127,28 @@ func (x *BulletinInfo) GetUpdatedAt() int64 {
 	return 0
 }
 
+func (x *BulletinInfo) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *BulletinInfo) GetOrgId() int64 {
+	if x != nil {
+		return x.OrgId
+	}
+	return 0
+}
+
 // 创建公告
+// scope 可选：site（仅站点管理员）/ org（默认，组织公告）
 type CreateBulletinReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Title         string                 `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"`
 	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
 	IsPinned      bool                   `protobuf:"varint,3,opt,name=isPinned,proto3" json:"isPinned,omitempty"`
+	Scope         string                 `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -182,6 +202,13 @@ func (x *CreateBulletinReq) GetIsPinned() bool {
 		return x.IsPinned
 	}
 	return false
+}
+
+func (x *CreateBulletinReq) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
 }
 
 type CreateBulletinRes struct {
@@ -576,10 +603,14 @@ func (x *GetBulletinRes) GetData() *BulletinInfo {
 }
 
 // 分页获取公告列表
+// scope 空：全站 ∪ 当前组织（前台流，站点公告优先）
+// scope=site：仅站点公告
+// scope=org：仅当前组织公告
 type ListBulletinReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Page          int64                  `protobuf:"varint,1,opt,name=page,proto3" json:"page,omitempty"`         // 页码，默认1
 	PageSize      int64                  `protobuf:"varint,2,opt,name=pageSize,proto3" json:"pageSize,omitempty"` // 每页条数，默认10
+	Scope         string                 `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -626,6 +657,13 @@ func (x *ListBulletinReq) GetPageSize() int64 {
 		return x.PageSize
 	}
 	return 0
+}
+
+func (x *ListBulletinReq) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
 }
 
 type ListBulletinRes struct {
@@ -716,7 +754,7 @@ var File_core_v1_bulletin_bulletin_proto protoreflect.FileDescriptor
 
 const file_core_v1_bulletin_bulletin_proto_rawDesc = "" +
 	"\n" +
-	"\x1fcore/v1/bulletin/bulletin.proto\x12\x14api.core.v1.bulletin\x1a\x1cgoogle/api/annotations.proto\"\xe2\x01\n" +
+	"\x1fcore/v1/bulletin/bulletin.proto\x12\x14api.core.v1.bulletin\x1a\x1cgoogle/api/annotations.proto\"\x8e\x02\n" +
 	"\fBulletinInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x18\n" +
@@ -727,11 +765,15 @@ const file_core_v1_bulletin_bulletin_proto_rawDesc = "" +
 	"authorName\x12\x1a\n" +
 	"\bisPinned\x18\x06 \x01(\bR\bisPinned\x12\x1c\n" +
 	"\tcreatedAt\x18\a \x01(\x03R\tcreatedAt\x12\x1c\n" +
-	"\tupdatedAt\x18\b \x01(\x03R\tupdatedAt\"_\n" +
+	"\tupdatedAt\x18\b \x01(\x03R\tupdatedAt\x12\x14\n" +
+	"\x05scope\x18\t \x01(\tR\x05scope\x12\x14\n" +
+	"\x05orgId\x18\n" +
+	" \x01(\x03R\x05orgId\"u\n" +
 	"\x11CreateBulletinReq\x12\x14\n" +
 	"\x05title\x18\x01 \x01(\tR\x05title\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12\x1a\n" +
-	"\bisPinned\x18\x03 \x01(\bR\bisPinned\"y\n" +
+	"\bisPinned\x18\x03 \x01(\bR\bisPinned\x12\x14\n" +
+	"\x05scope\x18\x04 \x01(\tR\x05scope\"y\n" +
 	"\x11CreateBulletinRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x126\n" +
@@ -755,10 +797,11 @@ const file_core_v1_bulletin_bulletin_proto_rawDesc = "" +
 	"\x0eGetBulletinRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x126\n" +
-	"\x04data\x18\x03 \x01(\v2\".api.core.v1.bulletin.BulletinInfoR\x04data\"A\n" +
+	"\x04data\x18\x03 \x01(\v2\".api.core.v1.bulletin.BulletinInfoR\x04data\"W\n" +
 	"\x0fListBulletinReq\x12\x12\n" +
 	"\x04page\x18\x01 \x01(\x03R\x04page\x12\x1a\n" +
-	"\bpageSize\x18\x02 \x01(\x03R\bpageSize\"\xbd\x01\n" +
+	"\bpageSize\x18\x02 \x01(\x03R\bpageSize\x12\x14\n" +
+	"\x05scope\x18\x03 \x01(\tR\x05scope\"\xbd\x01\n" +
 	"\x0fListBulletinRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x126\n" +
