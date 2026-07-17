@@ -43,6 +43,8 @@ service Spider {
       body: "*"
     };
   }
+  // 内部：休眠唤醒 / 服务间入队爬虫（无 HTTP）
+  rpc EnqueueUserSpider (EnqueueUserSpiderReq) returns (EnqueueUserSpiderRes) {}
 }
 
 message SetSpiderReq {
@@ -123,5 +125,17 @@ message PurgeSubmitsAndRecrawlRes {
   int64 deletedDaily = 5;
   int64 deletedAc = 6;
   int64 enqueuedUsers = 7;
+}
+
+message EnqueueUserSpiderReq {
+  int64 userId = 1;
+  // true=全量（休眠唤醒）
+  bool needAll = 2;
+}
+
+message EnqueueUserSpiderRes {
+  int64 code = 1;
+  string message = 2;
+  int64 published = 3;
 }
 

@@ -53,6 +53,9 @@ type Org struct {
 	AIEmailSchedule      string `gorm:"size:64;default:30 7 * * *;comment:邮件 cron(站点写)"`
 
 	DailySyncLimit int `gorm:"default:0;comment:组织日同步上限 0=未启用"`
+
+	// ForceSync 本队强制同步（集训/比赛期跳过成员休眠）；仅站点管理员可写
+	ForceSync bool `gorm:"default:false;comment:强制同步跳过休眠(站管)"`
 }
 
 // OrgMember 用户与组织关系

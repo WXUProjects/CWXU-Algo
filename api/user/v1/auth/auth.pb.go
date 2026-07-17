@@ -76,10 +76,14 @@ func (x *LoginReq) GetPassword() string {
 }
 
 type LoginRes struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	JwtToken      string                 `protobuf:"bytes,2,opt,name=jwtToken,proto3" json:"jwtToken,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Success  bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message  string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	JwtToken string                 `protobuf:"bytes,2,opt,name=jwtToken,proto3" json:"jwtToken,omitempty"`
+	// 登录前处于休眠（不活跃）；已触发全量同步
+	WasDormant bool `protobuf:"varint,4,opt,name=was_dormant,json=wasDormant,proto3" json:"was_dormant,omitempty"`
+	// 是否已为该用户入队全量爬虫
+	SyncStarted   bool `protobuf:"varint,5,opt,name=sync_started,json=syncStarted,proto3" json:"sync_started,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -133,6 +137,20 @@ func (x *LoginRes) GetJwtToken() string {
 		return x.JwtToken
 	}
 	return ""
+}
+
+func (x *LoginRes) GetWasDormant() bool {
+	if x != nil {
+		return x.WasDormant
+	}
+	return false
+}
+
+func (x *LoginRes) GetSyncStarted() bool {
+	if x != nil {
+		return x.SyncStarted
+	}
+	return false
 }
 
 type RegisterReq struct {
@@ -638,11 +656,14 @@ const file_user_v1_auth_auth_proto_rawDesc = "" +
 	"\x17user/v1/auth/auth.proto\x12\vapi.user.v1\x1a\x1cgoogle/api/annotations.proto\"B\n" +
 	"\bLoginReq\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"Z\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\"\x9e\x01\n" +
 	"\bLoginRes\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12\x1a\n" +
-	"\bjwtToken\x18\x02 \x01(\tR\bjwtToken\"\x9d\x01\n" +
+	"\bjwtToken\x18\x02 \x01(\tR\bjwtToken\x12\x1f\n" +
+	"\vwas_dormant\x18\x04 \x01(\bR\n" +
+	"wasDormant\x12!\n" +
+	"\fsync_started\x18\x05 \x01(\bR\vsyncStarted\"\x9d\x01\n" +
 	"\vRegisterReq\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x12\n" +

@@ -118,6 +118,35 @@ func migrateModels(db *gorm.DB) {
 	}
 	seedPlanQuotas(db)
 	seedGoAlgoFramework(db)
+	backfillLastLoginAt(db)
+	ensureSiteInactiveDays(db)
+}
+
+// backfillLastLoginAt 避免上线瞬间全员被判休眠
+func backfillLastLoginAt(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasColumn(&model.User{}, "last_login_at") {
+		return
+	}
+	if err := db.Exec(`
+		UPDATE users
+		SET last_login_at = COALESCE(updated_at, created_at, NOW())
+		WHERE last_login_at IS NULL
+	`).Error; err != nil {
+		log.Warnf("backfill last_login_at: %v", err)
+	}
+}
+
+// ensureSiteInactiveDays 旧行补默认 14
+func ensureSiteInactiveDays(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasColumn(&model.SiteConfig{}, "inactive_days") {
+		return
+	}
+	if err := db.Exec(`
+		UPDATE site_configs SET inactive_days = 14
+		WHERE inactive_days IS NULL OR inactive_days <= 0
+	`).Error; err != nil {
+		log.Warnf("ensure inactive_days: %v", err)
+	}
 }
 
 // reconcileOrgJoinRequestDuplicates prepares legacy data for the composite

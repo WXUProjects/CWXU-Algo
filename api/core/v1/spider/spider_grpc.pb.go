@@ -26,6 +26,7 @@ const (
 	Spider_PurgeUserData_FullMethodName          = "/api.core.v1.spider.Spider/PurgeUserData"
 	Spider_SubmitInventory_FullMethodName        = "/api.core.v1.spider.Spider/SubmitInventory"
 	Spider_PurgeSubmitsAndRecrawl_FullMethodName = "/api.core.v1.spider.Spider/PurgeSubmitsAndRecrawl"
+	Spider_EnqueueUserSpider_FullMethodName      = "/api.core.v1.spider.Spider/EnqueueUserSpider"
 )
 
 // SpiderClient is the client API for Spider service.
@@ -43,6 +44,8 @@ type SpiderClient interface {
 	SubmitInventory(ctx context.Context, in *SubmitInventoryReq, opts ...grpc.CallOption) (*SubmitInventoryRes, error)
 	// 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
 	PurgeSubmitsAndRecrawl(ctx context.Context, in *PurgeSubmitsAndRecrawlReq, opts ...grpc.CallOption) (*PurgeSubmitsAndRecrawlRes, error)
+	// 内部：休眠唤醒 / 服务间入队爬虫（无 HTTP）
+	EnqueueUserSpider(ctx context.Context, in *EnqueueUserSpiderReq, opts ...grpc.CallOption) (*EnqueueUserSpiderRes, error)
 }
 
 type spiderClient struct {
@@ -123,6 +126,16 @@ func (c *spiderClient) PurgeSubmitsAndRecrawl(ctx context.Context, in *PurgeSubm
 	return out, nil
 }
 
+func (c *spiderClient) EnqueueUserSpider(ctx context.Context, in *EnqueueUserSpiderReq, opts ...grpc.CallOption) (*EnqueueUserSpiderRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnqueueUserSpiderRes)
+	err := c.cc.Invoke(ctx, Spider_EnqueueUserSpider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SpiderServer is the server API for Spider service.
 // All implementations must embed UnimplementedSpiderServer
 // for forward compatibility.
@@ -138,6 +151,8 @@ type SpiderServer interface {
 	SubmitInventory(context.Context, *SubmitInventoryReq) (*SubmitInventoryRes, error)
 	// 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
 	PurgeSubmitsAndRecrawl(context.Context, *PurgeSubmitsAndRecrawlReq) (*PurgeSubmitsAndRecrawlRes, error)
+	// 内部：休眠唤醒 / 服务间入队爬虫（无 HTTP）
+	EnqueueUserSpider(context.Context, *EnqueueUserSpiderReq) (*EnqueueUserSpiderRes, error)
 	mustEmbedUnimplementedSpiderServer()
 }
 
@@ -168,6 +183,9 @@ func (UnimplementedSpiderServer) SubmitInventory(context.Context, *SubmitInvento
 }
 func (UnimplementedSpiderServer) PurgeSubmitsAndRecrawl(context.Context, *PurgeSubmitsAndRecrawlReq) (*PurgeSubmitsAndRecrawlRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method PurgeSubmitsAndRecrawl not implemented")
+}
+func (UnimplementedSpiderServer) EnqueueUserSpider(context.Context, *EnqueueUserSpiderReq) (*EnqueueUserSpiderRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method EnqueueUserSpider not implemented")
 }
 func (UnimplementedSpiderServer) mustEmbedUnimplementedSpiderServer() {}
 func (UnimplementedSpiderServer) testEmbeddedByValue()                {}
@@ -316,6 +334,24 @@ func _Spider_PurgeSubmitsAndRecrawl_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Spider_EnqueueUserSpider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnqueueUserSpiderReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).EnqueueUserSpider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_EnqueueUserSpider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).EnqueueUserSpider(ctx, req.(*EnqueueUserSpiderReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Spider_ServiceDesc is the grpc.ServiceDesc for Spider service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -350,6 +386,10 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PurgeSubmitsAndRecrawl",
 			Handler:    _Spider_PurgeSubmitsAndRecrawl_Handler,
+		},
+		{
+			MethodName: "EnqueueUserSpider",
+			Handler:    _Spider_EnqueueUserSpider_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

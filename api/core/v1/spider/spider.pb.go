@@ -779,6 +779,119 @@ func (x *PurgeSubmitsAndRecrawlRes) GetEnqueuedUsers() int64 {
 	return 0
 }
 
+type EnqueueUserSpiderReq struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	UserId int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	// true=全量（休眠唤醒）
+	NeedAll       bool `protobuf:"varint,2,opt,name=needAll,proto3" json:"needAll,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnqueueUserSpiderReq) Reset() {
+	*x = EnqueueUserSpiderReq{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnqueueUserSpiderReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnqueueUserSpiderReq) ProtoMessage() {}
+
+func (x *EnqueueUserSpiderReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnqueueUserSpiderReq.ProtoReflect.Descriptor instead.
+func (*EnqueueUserSpiderReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *EnqueueUserSpiderReq) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *EnqueueUserSpiderReq) GetNeedAll() bool {
+	if x != nil {
+		return x.NeedAll
+	}
+	return false
+}
+
+type EnqueueUserSpiderRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Published     int64                  `protobuf:"varint,3,opt,name=published,proto3" json:"published,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnqueueUserSpiderRes) Reset() {
+	*x = EnqueueUserSpiderRes{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnqueueUserSpiderRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnqueueUserSpiderRes) ProtoMessage() {}
+
+func (x *EnqueueUserSpiderRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnqueueUserSpiderRes.ProtoReflect.Descriptor instead.
+func (*EnqueueUserSpiderRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *EnqueueUserSpiderRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *EnqueueUserSpiderRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *EnqueueUserSpiderRes) GetPublished() int64 {
+	if x != nil {
+		return x.Published
+	}
+	return 0
+}
+
 type GetSpiderRep_Data struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Platform      string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
@@ -789,7 +902,7 @@ type GetSpiderRep_Data struct {
 
 func (x *GetSpiderRep_Data) Reset() {
 	*x = GetSpiderRep_Data{}
-	mi := &file_core_v1_spider_spider_proto_msgTypes[14]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -801,7 +914,7 @@ func (x *GetSpiderRep_Data) String() string {
 func (*GetSpiderRep_Data) ProtoMessage() {}
 
 func (x *GetSpiderRep_Data) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_spider_spider_proto_msgTypes[14]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -887,7 +1000,14 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\rdeletedLedger\x18\x04 \x01(\x03R\rdeletedLedger\x12\"\n" +
 	"\fdeletedDaily\x18\x05 \x01(\x03R\fdeletedDaily\x12\x1c\n" +
 	"\tdeletedAc\x18\x06 \x01(\x03R\tdeletedAc\x12$\n" +
-	"\renqueuedUsers\x18\a \x01(\x03R\renqueuedUsers2\xcb\x06\n" +
+	"\renqueuedUsers\x18\a \x01(\x03R\renqueuedUsers\"H\n" +
+	"\x14EnqueueUserSpiderReq\x12\x16\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x18\n" +
+	"\aneedAll\x18\x02 \x01(\bR\aneedAll\"b\n" +
+	"\x14EnqueueUserSpiderRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1c\n" +
+	"\tpublished\x18\x03 \x01(\x03R\tpublished2\xb6\a\n" +
 	"\x06Spider\x12o\n" +
 	"\tSetSpider\x12 .api.core.v1.spider.SetSpiderReq\x1a .api.core.v1.spider.SetSpiderRep\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/v1/core/spider/set\x12Q\n" +
 	"\tGetSpider\x12 .api.core.v1.spider.GetSpiderReq\x1a .api.core.v1.spider.GetSpiderRep\"\x00\x12i\n" +
@@ -895,7 +1015,8 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\tUpdateAll\x12 .api.core.v1.spider.UpdateAllReq\x1a .api.core.v1.spider.UpdateAllRes\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/v1/core/spider/update-all\x12]\n" +
 	"\rPurgeUserData\x12$.api.core.v1.spider.PurgeUserDataReq\x1a$.api.core.v1.spider.PurgeUserDataRes\"\x00\x12\x8b\x01\n" +
 	"\x0fSubmitInventory\x12&.api.core.v1.spider.SubmitInventoryReq\x1a&.api.core.v1.spider.SubmitInventoryRes\"(\x82\xd3\xe4\x93\x02\"\x12 /v1/core/spider/submit-inventory\x12\xac\x01\n" +
-	"\x16PurgeSubmitsAndRecrawl\x12-.api.core.v1.spider.PurgeSubmitsAndRecrawlReq\x1a-.api.core.v1.spider.PurgeSubmitsAndRecrawlRes\"4\x82\xd3\xe4\x93\x02.:\x01*\")/v1/core/spider/purge-submits-and-recrawlB;\n" +
+	"\x16PurgeSubmitsAndRecrawl\x12-.api.core.v1.spider.PurgeSubmitsAndRecrawlReq\x1a-.api.core.v1.spider.PurgeSubmitsAndRecrawlRes\"4\x82\xd3\xe4\x93\x02.:\x01*\")/v1/core/spider/purge-submits-and-recrawl\x12i\n" +
+	"\x11EnqueueUserSpider\x12(.api.core.v1.spider.EnqueueUserSpiderReq\x1a(.api.core.v1.spider.EnqueueUserSpiderRes\"\x00B;\n" +
 	"\x12api.core.v1.spiderP\x01Z#cwxu-algo/api/core/v1/spider;spiderb\x06proto3"
 
 var (
@@ -910,7 +1031,7 @@ func file_core_v1_spider_spider_proto_rawDescGZIP() []byte {
 	return file_core_v1_spider_spider_proto_rawDescData
 }
 
-var file_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_core_v1_spider_spider_proto_goTypes = []any{
 	(*SetSpiderReq)(nil),              // 0: api.core.v1.spider.SetSpiderReq
 	(*SetSpiderRep)(nil),              // 1: api.core.v1.spider.SetSpiderRep
@@ -926,10 +1047,12 @@ var file_core_v1_spider_spider_proto_goTypes = []any{
 	(*SubmitInventoryRes)(nil),        // 11: api.core.v1.spider.SubmitInventoryRes
 	(*PurgeSubmitsAndRecrawlReq)(nil), // 12: api.core.v1.spider.PurgeSubmitsAndRecrawlReq
 	(*PurgeSubmitsAndRecrawlRes)(nil), // 13: api.core.v1.spider.PurgeSubmitsAndRecrawlRes
-	(*GetSpiderRep_Data)(nil),         // 14: api.core.v1.spider.GetSpiderRep.Data
+	(*EnqueueUserSpiderReq)(nil),      // 14: api.core.v1.spider.EnqueueUserSpiderReq
+	(*EnqueueUserSpiderRes)(nil),      // 15: api.core.v1.spider.EnqueueUserSpiderRes
+	(*GetSpiderRep_Data)(nil),         // 16: api.core.v1.spider.GetSpiderRep.Data
 }
 var file_core_v1_spider_spider_proto_depIdxs = []int32{
-	14, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
+	16, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
 	0,  // 1: api.core.v1.spider.Spider.SetSpider:input_type -> api.core.v1.spider.SetSpiderReq
 	2,  // 2: api.core.v1.spider.Spider.GetSpider:input_type -> api.core.v1.spider.GetSpiderReq
 	4,  // 3: api.core.v1.spider.Spider.Update:input_type -> api.core.v1.spider.UpdateReq
@@ -937,15 +1060,17 @@ var file_core_v1_spider_spider_proto_depIdxs = []int32{
 	8,  // 5: api.core.v1.spider.Spider.PurgeUserData:input_type -> api.core.v1.spider.PurgeUserDataReq
 	10, // 6: api.core.v1.spider.Spider.SubmitInventory:input_type -> api.core.v1.spider.SubmitInventoryReq
 	12, // 7: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:input_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlReq
-	1,  // 8: api.core.v1.spider.Spider.SetSpider:output_type -> api.core.v1.spider.SetSpiderRep
-	3,  // 9: api.core.v1.spider.Spider.GetSpider:output_type -> api.core.v1.spider.GetSpiderRep
-	5,  // 10: api.core.v1.spider.Spider.Update:output_type -> api.core.v1.spider.UpdateRes
-	7,  // 11: api.core.v1.spider.Spider.UpdateAll:output_type -> api.core.v1.spider.UpdateAllRes
-	9,  // 12: api.core.v1.spider.Spider.PurgeUserData:output_type -> api.core.v1.spider.PurgeUserDataRes
-	11, // 13: api.core.v1.spider.Spider.SubmitInventory:output_type -> api.core.v1.spider.SubmitInventoryRes
-	13, // 14: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:output_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlRes
-	8,  // [8:15] is the sub-list for method output_type
-	1,  // [1:8] is the sub-list for method input_type
+	14, // 8: api.core.v1.spider.Spider.EnqueueUserSpider:input_type -> api.core.v1.spider.EnqueueUserSpiderReq
+	1,  // 9: api.core.v1.spider.Spider.SetSpider:output_type -> api.core.v1.spider.SetSpiderRep
+	3,  // 10: api.core.v1.spider.Spider.GetSpider:output_type -> api.core.v1.spider.GetSpiderRep
+	5,  // 11: api.core.v1.spider.Spider.Update:output_type -> api.core.v1.spider.UpdateRes
+	7,  // 12: api.core.v1.spider.Spider.UpdateAll:output_type -> api.core.v1.spider.UpdateAllRes
+	9,  // 13: api.core.v1.spider.Spider.PurgeUserData:output_type -> api.core.v1.spider.PurgeUserDataRes
+	11, // 14: api.core.v1.spider.Spider.SubmitInventory:output_type -> api.core.v1.spider.SubmitInventoryRes
+	13, // 15: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:output_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlRes
+	15, // 16: api.core.v1.spider.Spider.EnqueueUserSpider:output_type -> api.core.v1.spider.EnqueueUserSpiderRes
+	9,  // [9:17] is the sub-list for method output_type
+	1,  // [1:9] is the sub-list for method input_type
 	1,  // [1:1] is the sub-list for extension type_name
 	1,  // [1:1] is the sub-list for extension extendee
 	0,  // [0:1] is the sub-list for field type_name
@@ -962,7 +1087,7 @@ func file_core_v1_spider_spider_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_spider_spider_proto_rawDesc), len(file_core_v1_spider_spider_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -167,7 +168,30 @@ func (uc *StatisticUseCase) Rank(ctx context.Context, req *statistic.RankReq) (*
 		groupId = -1
 	}
 
-	memberIDs, _ := uc.resolveMembers(ctx, false)
+	memberIDs, orgID := uc.resolveMembers(ctx, false)
+
+	// TopN 首页快照：page=1、无 group、pageSize≤50
+	useSnap := req.Page <= 1 && groupId < 0 && req.PageSize > 0 && req.PageSize <= 50 && uc.rdb != nil
+	globalVer := uc.redisVer(ctx, "statistic:period:global:ver")
+	snapKey := ""
+	if useSnap {
+		scope := "org"
+		if orgID == 0 {
+			scope = "all"
+		} else {
+			scope = fmt.Sprintf("org%d", orgID)
+		}
+		snapKey = fmt.Sprintf("rank:snap:s1:%s:%s:%s_%s:v%s:ps%d",
+			scope, scoreType, req.StartDate, req.EndDate, globalVer, req.PageSize)
+		if b, e := uc.rdb.Get(ctx, snapKey).Bytes(); e == nil && len(b) > 0 {
+			var cached statistic.RankResp
+			if json.Unmarshal(b, &cached) == nil && cached.Data != nil {
+				cached.Code = 0
+				return &cached, nil
+			}
+		}
+	}
+
 	items, total, err := uc.dal.GetRankByRangeScoped(ctx, start, endExclusive, scoreType, groupId, req.Page, req.PageSize, memberIDs)
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
@@ -194,7 +218,13 @@ func (uc *StatisticUseCase) Rank(ctx context.Context, req *statistic.RankReq) (*
 			Score:  v.Score,
 		}
 	}
-	return &statistic.RankResp{Code: 0, Data: data, Total: total}, nil
+	resp := &statistic.RankResp{Code: 0, Data: data, Total: total}
+	if useSnap && snapKey != "" {
+		if b, e := json.Marshal(resp); e == nil {
+			_ = uc.rdb.Set(ctx, snapKey, b, data2.OrgStatsCacheTTL).Err()
+		}
+	}
+	return resp, nil
 }
 
 // PeriodCount 获取时间段统计数据

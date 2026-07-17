@@ -40,4 +40,10 @@ type User struct {
 	SpiderIntervalMinOverride *int `gorm:"comment:爬取间隔覆盖分钟 null=组织MIN"`
 	// AISummaryIntervalMinOverride AI 总结间隔（分钟）
 	AISummaryIntervalMinOverride *int `gorm:"comment:AI总结间隔覆盖分钟 null=组织MIN"`
+
+	// —— 活跃 / 休眠 ——
+	// LastLoginAt 最近一次登录或已登录 VisitPing 触达
+	LastLoginAt *time.Time `gorm:"index;comment:最近活跃时间"`
+	// SyncExempt 站管手动永不休眠（跳过不活跃判定）
+	SyncExempt bool `gorm:"default:false;comment:永不休眠(站管)"`
 }

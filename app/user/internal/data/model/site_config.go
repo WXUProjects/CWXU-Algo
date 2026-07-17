@@ -23,7 +23,9 @@ type SiteConfig struct {
 	AiAnalyzeEndpoint string `gorm:"size:512;column:ai_analyze_endpoint"`
 	AiAnalyzeModel    string `gorm:"size:128;column:ai_analyze_model"`
 	AiAnalyzeSecret   string `gorm:"size:512;column:ai_analyze_secret"`
-	UpdatedAt         time.Time `gorm:"autoUpdateTime"`
+	// InactiveDays 超过该天数未活跃则休眠后台任务；默认 14
+	InactiveDays int `gorm:"column:inactive_days;default:14;comment:不活跃天数阈值"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime"`
 }
 
 func (SiteConfig) TableName() string { return "site_configs" }

@@ -203,7 +203,9 @@ type GetAdminConfigRes struct {
 	AiAnalyzeSecretMasked string `protobuf:"bytes,17,opt,name=ai_analyze_secret_masked,json=aiAnalyzeSecretMasked,proto3" json:"ai_analyze_secret_masked,omitempty"`
 	AiAnalyzeSecretSet    bool   `protobuf:"varint,18,opt,name=ai_analyze_secret_set,json=aiAnalyzeSecretSet,proto3" json:"ai_analyze_secret_set,omitempty"`
 	// 页脚
-	FooterIcp     string `protobuf:"bytes,19,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
+	FooterIcp string `protobuf:"bytes,19,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
+	// 不活跃天数阈值（默认 14）
+	InactiveDays  int32 `protobuf:"varint,20,opt,name=inactive_days,json=inactiveDays,proto3" json:"inactive_days,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -371,6 +373,13 @@ func (x *GetAdminConfigRes) GetFooterIcp() string {
 	return ""
 }
 
+func (x *GetAdminConfigRes) GetInactiveDays() int32 {
+	if x != nil {
+		return x.InactiveDays
+	}
+	return 0
+}
+
 type UpdateConfigReq struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SiteTitle string                 `protobuf:"bytes,1,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
@@ -393,9 +402,13 @@ type UpdateConfigReq struct {
 	AiAnalyzeSecret      string `protobuf:"bytes,15,opt,name=ai_analyze_secret,json=aiAnalyzeSecret,proto3" json:"ai_analyze_secret,omitempty"`
 	ClearAiAnalyzeSecret bool   `protobuf:"varint,16,opt,name=clear_ai_analyze_secret,json=clearAiAnalyzeSecret,proto3" json:"clear_ai_analyze_secret,omitempty"`
 	// 页脚备案号
-	FooterIcp     string `protobuf:"bytes,17,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	FooterIcp string `protobuf:"bytes,17,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
+	// 不活跃天数；0 或不传 = 不修改；>0 时夹取 1–365
+	InactiveDays int32 `protobuf:"varint,18,opt,name=inactive_days,json=inactiveDays,proto3" json:"inactive_days,omitempty"`
+	// 是否写入 inactive_days（与间隔覆盖同一套语义）
+	SetInactiveDays bool `protobuf:"varint,19,opt,name=set_inactive_days,json=setInactiveDays,proto3" json:"set_inactive_days,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *UpdateConfigReq) Reset() {
@@ -545,6 +558,20 @@ func (x *UpdateConfigReq) GetFooterIcp() string {
 		return x.FooterIcp
 	}
 	return ""
+}
+
+func (x *UpdateConfigReq) GetInactiveDays() int32 {
+	if x != nil {
+		return x.InactiveDays
+	}
+	return 0
+}
+
+func (x *UpdateConfigReq) GetSetInactiveDays() bool {
+	if x != nil {
+		return x.SetInactiveDays
+	}
+	return false
 }
 
 type UpdateConfigRes struct {
@@ -1478,7 +1505,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1d\n" +
 	"\n" +
 	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\"\x13\n" +
-	"\x11GetAdminConfigReq\"\xd1\x05\n" +
+	"\x11GetAdminConfigReq\"\xf6\x05\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -1502,7 +1529,8 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x18ai_analyze_secret_masked\x18\x11 \x01(\tR\x15aiAnalyzeSecretMasked\x121\n" +
 	"\x15ai_analyze_secret_set\x18\x12 \x01(\bR\x12aiAnalyzeSecretSet\x12\x1d\n" +
 	"\n" +
-	"footer_icp\x18\x13 \x01(\tR\tfooterIcp\"\x86\x05\n" +
+	"footer_icp\x18\x13 \x01(\tR\tfooterIcp\x12#\n" +
+	"\rinactive_days\x18\x14 \x01(\x05R\finactiveDays\"\xd7\x05\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
 	"site_title\x18\x01 \x01(\tR\tsiteTitle\x12\x1b\n" +
@@ -1524,7 +1552,9 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x11ai_analyze_secret\x18\x0f \x01(\tR\x0faiAnalyzeSecret\x125\n" +
 	"\x17clear_ai_analyze_secret\x18\x10 \x01(\bR\x14clearAiAnalyzeSecret\x12\x1d\n" +
 	"\n" +
-	"footer_icp\x18\x11 \x01(\tR\tfooterIcp\"\xb4\x01\n" +
+	"footer_icp\x18\x11 \x01(\tR\tfooterIcp\x12#\n" +
+	"\rinactive_days\x18\x12 \x01(\x05R\finactiveDays\x12*\n" +
+	"\x11set_inactive_days\x18\x13 \x01(\bR\x0fsetInactiveDays\"\xb4\x01\n" +
 	"\x0fUpdateConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +

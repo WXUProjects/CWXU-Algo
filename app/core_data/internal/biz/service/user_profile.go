@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"cwxu-algo/app/common/utils"
-	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/data/dal"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"golang.org/x/sync/singleflight"
@@ -215,9 +215,32 @@ func unpackProfile(snap *UserProfileSnapshot) (radar []struct {
 	return
 }
 
-// computeUserProfile 重 JOIN 聚合（仅后台 / 小用户同步路径）
+// computeUserProfile 雷达读 user_tag_ac；平台/难度仍 JOIN 预聚合 AC 表
 func (uc *ProblemUseCase) computeUserProfile(userID int64) (*UserProfileSnapshot, error) {
 	snap := &UserProfileSnapshot{BuiltAt: time.Now().Unix()}
+
+	// 雷达：写时预聚合 user_tag_ac
+	if tags, err := dal.ListUserTagAC(context.Background(), uc.data.DB, userID, 20); err != nil {
+		log.Errorf("radar preagg user=%d: %v", userID, err)
+	} else {
+		var maxC int64
+		for _, t := range tags {
+			if t.Count > maxC {
+				maxC = t.Count
+			}
+		}
+		for _, t := range tags {
+			score := 0.0
+			if maxC > 0 {
+				score = math.Round(float64(t.Count)/float64(maxC)*1000) / 10
+			}
+			snap.Radar = append(snap.Radar, struct {
+				Tag     string
+				Score   float64
+				ACCount int64
+			}{Tag: t.Tag, Score: score, ACCount: t.Count})
+		}
+	}
 
 	const userACJoinProblems = `
 		FROM user_ac_problems u
@@ -229,42 +252,6 @@ func (uc *ProblemUseCase) computeUserProfile(userID int64) (*UserProfileSnapshot
 			)
 		)
 	`
-
-	type tagRow struct {
-		Tag   string
-		Count int64
-	}
-	var tags []tagRow
-	if err := uc.data.DB.Raw(`
-		SELECT tag, COUNT(DISTINCT p.id) AS count
-		`+userACJoinProblems+`
-		CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(p.tags::jsonb, '[]'::jsonb)) AS tag
-		WHERE u.user_id = ? AND p.status = ?
-		  AND p.tags IS NOT NULL AND p.tags::text NOT IN ('', '[]', 'null')
-		GROUP BY tag
-		ORDER BY count DESC
-		LIMIT 20
-	`, userID, model.ProblemStatusCompleted).Scan(&tags).Error; err != nil {
-		log.Errorf("radar sql user=%d: %v", userID, err)
-	}
-
-	var maxC int64
-	for _, t := range tags {
-		if t.Count > maxC {
-			maxC = t.Count
-		}
-	}
-	for _, t := range tags {
-		score := 0.0
-		if maxC > 0 {
-			score = math.Round(float64(t.Count)/float64(maxC)*1000) / 10
-		}
-		snap.Radar = append(snap.Radar, struct {
-			Tag     string
-			Score   float64
-			ACCount int64
-		}{Tag: t.Tag, Score: score, ACCount: t.Count})
-	}
 
 	type nc struct {
 		Name  string

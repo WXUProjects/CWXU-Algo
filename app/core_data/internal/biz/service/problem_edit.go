@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -66,6 +68,7 @@ func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, ta
 	if len(updates) == 0 {
 		return &p, nil
 	}
+	oldStatus := p.Status
 	if err := uc.data.DB.Model(&p).Updates(updates).Error; err != nil {
 		return nil, err
 	}
@@ -74,22 +77,34 @@ func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, ta
 		return nil, err
 	}
 
+	if updateTags {
+		oldTags, newTags, e := dal.SyncProblemTags(context.Background(), uc.data.DB, p.ID, []string(p.Tags))
+		if e != nil {
+			log.Warnf("SyncProblemTags edit id=%d: %v", p.ID, e)
+		} else if e2 := dal.AdjustUserTagACForProblemTagsChange(context.Background(), uc.data.DB, p.ID, oldTags, newTags); e2 != nil {
+			log.Warnf("AdjustUserTagAC edit id=%d: %v", p.ID, e2)
+		}
+	}
+
 	hasTags := len(nonEmptyTags(p.Tags)) > 0
 	hasContent := strings.TrimSpace(p.ContentMD) != ""
 	statusUpdates := map[string]interface{}{}
 	needAnalyze := false
+	newStatus := oldStatus
 
 	switch {
 	case hasContent && hasTags:
 		// 人工已补齐：完成，后续 AI 跳过
 		statusUpdates["status"] = model.ProblemStatusCompleted
 		statusUpdates["error_msg"] = ""
+		newStatus = model.ProblemStatusCompleted
 	case hasContent && !hasTags:
 		// 有题面无标签：仍需 AI 分析
 		if p.Status != model.ProblemStatusSkipped {
 			statusUpdates["status"] = model.ProblemStatusTagging
 			statusUpdates["error_msg"] = ""
 			needAnalyze = true
+			newStatus = model.ProblemStatusTagging
 		}
 	case !hasContent && hasTags:
 		// 仅有标签：等题面；不强制 COMPLETED
@@ -99,6 +114,7 @@ func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, ta
 			if p.Status != model.ProblemStatusSkipped {
 				statusUpdates["status"] = model.ProblemStatusPending
 				statusUpdates["error_msg"] = "标签已人工填写，待题面"
+				newStatus = model.ProblemStatusPending
 			}
 		}
 	}
@@ -121,6 +137,10 @@ func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, ta
 		if err := uc.enqueueAnalyze(p.ID); err != nil {
 			log.Warnf("ApplyProblemFields enqueue analyze id=%d: %v", p.ID, err)
 		}
+	}
+	uc.BumpProblemDetailVer(p.ID)
+	if newStatus != oldStatus {
+		uc.progressMoveStatus(oldStatus, newStatus)
 	}
 	return &p, nil
 }

@@ -90,6 +90,10 @@ func ApplyUserACFromSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 			return err
 		}
 	}
+	// 同步 user_problem_status + 首次 AC 的 tag 画像
+	if err := ApplyUserProblemStatusFromSubmits(ctx, db, logs); err != nil {
+		log.Warnf("ApplyUserProblemStatusFromSubmits: %v", err)
+	}
 	return nil
 }
 

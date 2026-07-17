@@ -378,6 +378,8 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if err := uc.data.DB.Model(&p).Updates(updates).Error; err != nil {
 		return err
 	}
+	uc.BumpProblemDetailVer(p.ID)
+	uc.progressMoveStatus(p.Status, model.ProblemStatusTagging)
 	// 爬取成功后：近 6 月 + 有组织用户提交才进 AI（闸门在 enqueueAnalyzePrio）
 	// 分析暂停时仍入队（暂停不清队列，恢复后继续）；高优先级延续当前已出队的爬取任务
 	return uc.enqueueAnalyzePrio(p.ID, mqPriorityIncremental)
@@ -473,6 +475,7 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 		}).Error
 		return aerr
 	}
+	oldStatus := p.Status
 	updates := map[string]interface{}{
 		"problem_type":   result.ProblemType,
 		"difficulty":     result.Difficulty,
@@ -485,7 +488,18 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	if strings.TrimSpace(result.ContentMD) != "" {
 		updates["content_md"] = result.ContentMD
 	}
-	return uc.data.DB.Model(&p).Updates(updates).Error
+	if err := uc.data.DB.Model(&p).Updates(updates).Error; err != nil {
+		return err
+	}
+	oldTags, newTags, e := dal.SyncProblemTags(ctx, uc.data.DB, p.ID, result.AlgorithmTags)
+	if e != nil {
+		log.Warnf("SyncProblemTags analyze id=%d: %v", p.ID, e)
+	} else if e2 := dal.AdjustUserTagACForProblemTagsChange(ctx, uc.data.DB, p.ID, oldTags, newTags); e2 != nil {
+		log.Warnf("AdjustUserTagAC analyze id=%d: %v", p.ID, e2)
+	}
+	uc.BumpProblemDetailVer(p.ID)
+	uc.progressMoveStatus(oldStatus, model.ProblemStatusCompleted)
+	return nil
 }
 
 // backfillWindow 历史回填 / AI 分析仅处理最近 N 个月有提交的题
@@ -937,26 +951,12 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 		q = q.Where("platform IN ?", f.Platforms)
 	}
 	if len(f.Tags) > 0 {
-		// jsonb 数组包含任一 tag（OR）
-		// 禁止 tags::jsonb ? ?（GORM 占位符冲突）
-		// 禁止 jsonb_build_array(?)（PG 无法推断 $1 类型 → 42P18）
-		// 用 CAST(? AS jsonb) 传入 JSON 数组字面量，类型明确
-		ors := make([]string, 0, len(f.Tags))
-		args := make([]interface{}, 0, len(f.Tags))
-		for _, t := range f.Tags {
-			t = strings.TrimSpace(t)
-			if t == "" {
-				continue
-			}
-			b, err := json.Marshal([]string{t})
-			if err != nil {
-				continue
-			}
-			ors = append(ors, "tags::jsonb @> CAST(? AS jsonb)")
-			args = append(args, string(b))
-		}
-		if len(ors) > 0 {
-			q = q.Where(strings.Join(ors, " OR "), args...)
+		// 倒排表 problem_tags（OR：任一标签命中）
+		clean := dal.NormalizeTags(f.Tags)
+		if len(clean) > 0 {
+			q = q.Where(`id IN (
+				SELECT problem_id FROM problem_tags WHERE tag IN ?
+			)`, clean)
 		}
 	}
 	if kw := strings.TrimSpace(f.Keyword); kw != "" {
@@ -968,15 +968,15 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 	}
 	if len(f.FollowingIDs) > 0 {
 		q = q.Where(`EXISTS (
-			SELECT 1 FROM submit_logs s
-			WHERE s.problem_id = problems.id AND s.user_id IN ?
+			SELECT 1 FROM user_problem_status ups
+			WHERE ups.problem_id = problems.id AND ups.user_id IN ?
 		)`, f.FollowingIDs)
 	} else if f.FollowingIDs != nil {
 		// 空切片：关注列表为空 → 无结果
 		q = q.Where("1 = 0")
 	}
 
-	// 用户状态：用 SQL 聚合，避免拉全量 submit_logs
+	// 用户状态：读预聚合 user_problem_status
 	userStatusMap := map[uint]string{}
 	if f.UserID > 0 {
 		if f.UserStatus != "" {
@@ -984,25 +984,19 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 			switch want {
 			case "NONE":
 				q = q.Where(`NOT EXISTS (
-					SELECT 1 FROM submit_logs s
-					WHERE s.problem_id = problems.id AND s.user_id = ?
+					SELECT 1 FROM user_problem_status ups
+					WHERE ups.problem_id = problems.id AND ups.user_id = ?
 				)`, f.UserID)
 			case "AC":
-				// 与 isACStatus / 画像统计一致：按 problem_id 关联
 				q = q.Where(`EXISTS (
-					SELECT 1 FROM submit_logs s
-					WHERE s.problem_id = problems.id AND s.user_id = ?
-					  AND (`+sqlACStatusCond("s.status")+`)
+					SELECT 1 FROM user_problem_status ups
+					WHERE ups.problem_id = problems.id AND ups.user_id = ? AND ups.status = 'AC'
 				)`, f.UserID)
 			case "TRIED":
 				q = q.Where(`EXISTS (
-					SELECT 1 FROM submit_logs s
-					WHERE s.problem_id = problems.id AND s.user_id = ?
-				) AND NOT EXISTS (
-					SELECT 1 FROM submit_logs s
-					WHERE s.problem_id = problems.id AND s.user_id = ?
-					  AND (`+sqlACStatusCond("s.status")+`)
-				)`, f.UserID, f.UserID)
+					SELECT 1 FROM user_problem_status ups
+					WHERE ups.problem_id = problems.id AND ups.user_id = ? AND ups.status = 'TRIED'
+				)`, f.UserID)
 			}
 		}
 	}
@@ -1027,30 +1021,14 @@ func (uc *ProblemUseCase) List(f ListProblemFilter) ([]model.Problem, map[uint]s
 		return nil, nil, 0, err
 	}
 
-	// 仅补当前页的用户状态
+	// 仅补当前页的用户状态（预聚合）
 	if f.UserID > 0 && len(list) > 0 {
 		ids := make([]uint, 0, len(list))
 		for i := range list {
 			ids = append(ids, list[i].ID)
 		}
-		type row struct {
-			ProblemID uint
-			Status    string
-		}
-		var rows []row
-		_ = uc.data.DB.Model(&model.SubmitLog{}).
-			Select("problem_id, status").
-			Where("user_id = ? AND problem_id IN ?", f.UserID, ids).
-			Find(&rows).Error
-		for _, r := range rows {
-			if r.ProblemID == 0 {
-				continue
-			}
-			cur := userStatusMap[r.ProblemID]
-			ns := mapSubmitStatus(r.Status)
-			if rankStatus(ns) > rankStatus(cur) {
-				userStatusMap[r.ProblemID] = ns
-			}
+		if m, e := dal.GetUserProblemStatuses(context.Background(), uc.data.DB, f.UserID, ids); e == nil {
+			userStatusMap = m
 		}
 	}
 	return list, userStatusMap, total, nil
@@ -1062,39 +1040,33 @@ type TagCount struct {
 	Count int64
 }
 
-// ListTags 聚合已有算法标签及题量，按 count 降序
+// ListTags 从 problem_tags 倒排聚合
 func (uc *ProblemUseCase) ListTags(limit int) ([]TagCount, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-	if limit > 300 {
-		limit = 300
-	}
-	var rows []TagCount
-	err := uc.data.DB.Raw(`
-		SELECT tag, COUNT(DISTINCT p.id) AS count
-		FROM problems p
-		CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(p.tags::jsonb, '[]'::jsonb)) AS tag
-		WHERE p.status = ?
-		  AND p.tags IS NOT NULL
-		  AND p.tags::text NOT IN ('', '[]', 'null')
-		  AND BTRIM(tag) <> ''
-		GROUP BY tag
-		ORDER BY count DESC, tag ASC
-		LIMIT ?
-	`, model.ProblemStatusCompleted, limit).Scan(&rows).Error
+	rows, err := dal.ListTagCounts(context.Background(), uc.data.DB, limit)
 	if err != nil {
 		return nil, err
 	}
-	return rows, nil
+	out := make([]TagCount, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, TagCount{Tag: r.Tag, Count: r.Count})
+	}
+	// 表空时回退 jsonb（启动竞态）
+	if len(out) == 0 {
+		var fb []TagCount
+		_ = uc.data.DB.Raw(`
+			SELECT tag, COUNT(DISTINCT p.id) AS count
+			FROM problems p
+			CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(p.tags::jsonb, '[]'::jsonb)) AS tag
+			WHERE p.tags IS NOT NULL AND p.tags::text NOT IN ('', '[]', 'null') AND BTRIM(tag) <> ''
+			GROUP BY tag ORDER BY count DESC, tag ASC LIMIT ?
+		`, limit).Scan(&fb).Error
+		return fb, nil
+	}
+	return out, nil
 }
 
 func (uc *ProblemUseCase) Get(id uint) (*model.Problem, error) {
-	var p model.Problem
-	if err := uc.data.DB.First(&p, id).Error; err != nil {
-		return nil, err
-	}
-	return &p, nil
+	return uc.getProblemCached(id)
 }
 
 func (uc *ProblemUseCase) ListSubmissions(problemID uint, userID, page, pageSize int64, followingIDs []int64, status string) ([]model.SubmitLog, int64, error) {
@@ -1126,7 +1098,7 @@ func (uc *ProblemUseCase) ListSubmissions(problemID uint, userID, page, pageSize
 	return list, total, err
 }
 
-// FollowingProblemStatus 关注用户对本题 AC/TRIED/NONE（上限 200）
+// FollowingProblemStatus 关注用户对本题 AC/TRIED/NONE（上限 200，读预聚合）
 func (uc *ProblemUseCase) FollowingProblemStatus(problemID uint, followingIDs []int64) ([]struct {
 	UserID int64
 	Status string
@@ -1141,31 +1113,17 @@ func (uc *ProblemUseCase) FollowingProblemStatus(problemID uint, followingIDs []
 	if len(followingIDs) > 200 {
 		followingIDs = followingIDs[:200]
 	}
-	// 默认全部 NONE
 	statusMap := make(map[int64]string, len(followingIDs))
 	for _, id := range followingIDs {
 		statusMap[id] = "NONE"
 	}
-	type row struct {
-		UserID int64
-		Status string
-	}
-	var rows []row
-	err := uc.data.DB.Model(&model.SubmitLog{}).
-		Select("user_id, status").
-		Where("problem_id = ? AND user_id IN ?", problemID, followingIDs).
-		Find(&rows).Error
+	m, err := dal.GetFollowingProblemStatuses(context.Background(), uc.data.DB, problemID, followingIDs)
 	if err != nil {
 		return nil, err
 	}
-	for _, r := range rows {
-		if r.UserID == 0 {
-			continue
-		}
-		ns := mapSubmitStatus(r.Status)
-		cur := statusMap[r.UserID]
-		if rankStatus(ns) > rankStatus(cur) {
-			statusMap[r.UserID] = ns
+	for uid, st := range m {
+		if st == model.UserProblemStatusAC || st == model.UserProblemStatusTried {
+			statusMap[uid] = st
 		}
 	}
 	for _, id := range followingIDs {
@@ -1215,12 +1173,32 @@ func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
 		model.ProblemStatusFetching,
 		model.ProblemStatusCompleted,
 	}
+
+	// 优先 Redis 全量状态计数（P8）；近窗状态仍 SQL
 	var rows []sc
-	if err := uc.data.DB.Model(&model.Problem{}).
-		Select("status, count(*) as count").
-		Where("status IN ?", fullStatuses).
-		Group("status").Scan(&rows).Error; err != nil {
-		return snap, err
+	if m, ok := uc.progressCountersFromRedis(); ok {
+		for st, c := range m {
+			// 全量三类直接用 hash；其余仍走近窗 SQL
+			isFull := false
+			for _, fs := range fullStatuses {
+				if st == fs {
+					isFull = true
+					break
+				}
+			}
+			if isFull {
+				rows = append(rows, sc{Status: st, Count: c})
+			}
+		}
+	} else {
+		if err := uc.data.DB.Model(&model.Problem{}).
+			Select("status, count(*) as count").
+			Where("status IN ?", fullStatuses).
+			Group("status").Scan(&rows).Error; err != nil {
+			return snap, err
+		}
+		// 异步回填 hash
+		go uc.rebuildProgressCounters()
 	}
 	var recent []sc
 	if err := uc.data.DB.Model(&model.Problem{}).

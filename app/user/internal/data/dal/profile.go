@@ -564,16 +564,33 @@ type UserSyncPolicy struct {
 	EmailWeeklyEnabled   bool // 个人周报偏好
 	SpiderIntervalMin    int
 	AISummaryIntervalMin int
+	SyncActive           bool // 非休眠或已豁免，允许后台定时
 }
 
-// GetSyncPolicies 对每个用户：取其所属 active 组织，开关=任一开启，间隔=开启组织中的 MIN
+// GetInactiveDays 站点不活跃天数阈值
+func (d *ProfileDal) GetInactiveDays(ctx context.Context) int {
+	var days int
+	if err := d.db.WithContext(ctx).Model(&model.SiteConfig{}).
+		Select("inactive_days").Where("id = ?", 1).Scan(&days).Error; err != nil || days <= 0 {
+		return dormancy.DefaultInactiveDays
+	}
+	return dormancy.ClampInactiveDays(days)
+}
+
+// GetSyncPolicies 对每个用户：取其所属 active 组织，开关=任一开启，间隔=开启组织中的 MIN；
+// 休眠用户强制关闭后台开关。
 func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]UserSyncPolicy, error) {
 	if len(userIDs) == 0 {
 		return nil, nil
 	}
+	inactiveDays := d.GetInactiveDays(ctx)
+	now := time.Now()
+
 	type row struct {
 		UserID               int64
 		Role                 string
+		Plan                 string
+		ForceSync            bool
 		EnableSpider         bool
 		EnableAISummary      bool
 		EnableAIEmail        bool
@@ -585,6 +602,7 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 	err := d.db.WithContext(ctx).
 		Table("org_members AS m").
 		Select(`m.user_id AS user_id, m.role AS role,
+			o.plan AS plan, o.force_sync AS force_sync,
 			o.enable_spider AS enable_spider,
 			o.enable_ai_summary AS enable_ai_summary,
 			o.enable_ai_email AS enable_ai_email,
@@ -604,6 +622,8 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		emailOn   bool
 		weeklyOn  bool
 		staff     bool
+		forceSync bool
+		paidPlan  bool
 		spiderMin int
 		aiMin     int
 	}
@@ -617,6 +637,12 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		isStaff := r.Role == model.OrgRoleCoach || r.Role == model.OrgRoleCaptain || r.Role == model.OrgRoleOrgAdmin
 		if isStaff {
 			a.staff = true
+		}
+		if r.ForceSync {
+			a.forceSync = true
+		}
+		if dormancy.IsPaidPlan(r.Plan) {
+			a.paidPlan = true
 		}
 		if r.EnableSpider {
 			a.spiderOn = true
@@ -640,17 +666,22 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		}
 	}
 
-	// 个人邮件偏好 + 站管间隔覆盖（优先级最高）
+	// 个人邮件偏好 + 站管间隔覆盖 + 活跃/豁免
 	type pref struct {
 		ID                           int64
 		EmailEnabled                 bool
 		EmailWeeklyEnabled           bool
 		SpiderIntervalMinOverride    *int
 		AISummaryIntervalMinOverride *int
+		IsSiteAdmin                  bool
+		SyncExempt                   bool
+		LastLoginAt                  *time.Time
 	}
 	var prefs []pref
 	_ = d.db.WithContext(ctx).Model(&model.User{}).
-		Select("id, email_enabled, email_weekly_enabled, spider_interval_min_override, ai_summary_interval_min_override").
+		Select(`id, email_enabled, email_weekly_enabled,
+			spider_interval_min_override, ai_summary_interval_min_override,
+			is_site_admin, sync_exempt, last_login_at`).
 		Where("id IN ?", userIDs).
 		Scan(&prefs).Error
 	prefMap := make(map[int64]pref, len(prefs))
@@ -662,31 +693,18 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 	for _, uid := range userIDs {
 		a := byUser[uid]
 		pr := prefMap[uid]
-		if a == nil {
-			sp, ai := 60, 180
-			// 无组织时仍尊重站管覆盖
-			if pr.SpiderIntervalMinOverride != nil && *pr.SpiderIntervalMinOverride > 0 {
-				sp = clampSyncInterval(*pr.SpiderIntervalMinOverride, 60)
+		sp, ai := 60, 180
+		spiderOn, aiOn, emailOn, weeklyOn, staff := false, false, false, false, false
+		forceSync, paidPlan := false, false
+		if a != nil {
+			if a.spiderMin > 0 {
+				sp = a.spiderMin
 			}
-			if pr.AISummaryIntervalMinOverride != nil && *pr.AISummaryIntervalMinOverride > 0 {
-				ai = clampSyncInterval(*pr.AISummaryIntervalMinOverride, 180)
+			if a.aiMin > 0 {
+				ai = a.aiMin
 			}
-			out = append(out, UserSyncPolicy{
-				UserID:               uid,
-				EmailEnabled:         pr.EmailEnabled,
-				EmailWeeklyEnabled:   pr.EmailWeeklyEnabled,
-				SpiderIntervalMin:    sp,
-				AISummaryIntervalMin: ai,
-			})
-			continue
-		}
-		sp := 60
-		if a.spiderMin > 0 {
-			sp = a.spiderMin
-		}
-		ai := 180
-		if a.aiMin > 0 {
-			ai = a.aiMin
+			spiderOn, aiOn, emailOn, weeklyOn = a.spiderOn, a.aiOn, a.emailOn, a.weeklyOn
+			staff, forceSync, paidPlan = a.staff, a.forceSync, a.paidPlan
 		}
 		// 站点管理员个人覆盖：优先级最高
 		if pr.SpiderIntervalMinOverride != nil && *pr.SpiderIntervalMinOverride > 0 {
@@ -695,20 +713,66 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		if pr.AISummaryIntervalMinOverride != nil && *pr.AISummaryIntervalMinOverride > 0 {
 			ai = clampSyncInterval(*pr.AISummaryIntervalMinOverride, 180)
 		}
+
+		ex := dormancy.ExemptFlags{
+			IsSiteAdmin: pr.IsSiteAdmin,
+			SyncExempt:  pr.SyncExempt,
+			IsOrgStaff:  staff,
+			ForceSync:   forceSync,
+			PaidPlan:    paidPlan,
+		}
+		dormant := dormancy.IsDormant(pr.LastLoginAt, inactiveDays, ex, now)
+		syncActive := !dormant
+		if dormant {
+			spiderOn, aiOn, emailOn, weeklyOn = false, false, false, false
+		}
+
 		out = append(out, UserSyncPolicy{
 			UserID:               uid,
-			EnableSpider:         a.spiderOn,
-			EnableAISummary:      a.aiOn,
-			EnableAIEmail:        a.emailOn,
-			EnableAIWeeklyEmail:  a.weeklyOn,
-			IsOrgStaff:           a.staff,
+			EnableSpider:         spiderOn,
+			EnableAISummary:      aiOn,
+			EnableAIEmail:        emailOn,
+			EnableAIWeeklyEmail:  weeklyOn,
+			IsOrgStaff:           staff,
 			EmailEnabled:         pr.EmailEnabled,
 			EmailWeeklyEnabled:   pr.EmailWeeklyEnabled,
 			SpiderIntervalMin:    sp,
 			AISummaryIntervalMin: ai,
+			SyncActive:           syncActive,
 		})
 	}
 	return out, nil
+}
+
+// IsUserDormant 单用户休眠判定（登录唤醒用）
+func (d *ProfileDal) IsUserDormant(ctx context.Context, u *model.User) bool {
+	if u == nil {
+		return false
+	}
+	policies, err := d.GetSyncPolicies(ctx, []int64{int64(u.ID)})
+	if err != nil || len(policies) == 0 {
+		// 兜底：仅看时间 + 站管/手动豁免
+		ex := dormancy.ExemptFlags{IsSiteAdmin: u.IsSiteAdmin, SyncExempt: u.SyncExempt}
+		return dormancy.IsDormant(u.LastLoginAt, d.GetInactiveDays(ctx), ex, time.Now())
+	}
+	return !policies[0].SyncActive
+}
+
+// TouchLastLogin 更新最近活跃时间
+func (d *ProfileDal) TouchLastLogin(ctx context.Context, userID uint, at time.Time) error {
+	if userID == 0 {
+		return nil
+	}
+	return d.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", userID).
+		Update("last_login_at", at).Error
+}
+
+// SetSyncExempt 站管设置永不休眠
+func (d *ProfileDal) SetSyncExempt(ctx context.Context, userID int64, exempt bool) error {
+	return d.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", userID).
+		Update("sync_exempt", exempt).Error
 }
 
 // GetListByOrg 分页列出组织成员用户

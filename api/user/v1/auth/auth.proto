@@ -59,6 +59,10 @@ message LoginRes {
   bool success = 1;
   string message = 3;
   string jwtToken = 2;
+  // 登录前处于休眠（不活跃）；已触发全量同步
+  bool was_dormant = 4;
+  // 是否已为该用户入队全量爬虫
+  bool sync_started = 5;
 }
 
 message RegisterReq {

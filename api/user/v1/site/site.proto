@@ -86,6 +86,8 @@ message GetAdminConfigRes {
   bool ai_analyze_secret_set = 18;
   // 页脚
   string footer_icp = 19;
+  // 不活跃天数阈值（默认 14）
+  int32 inactive_days = 20;
 }
 
 message UpdateConfigReq {
@@ -110,6 +112,10 @@ message UpdateConfigReq {
   bool clear_ai_analyze_secret = 16;
   // 页脚备案号
   string footer_icp = 17;
+  // 不活跃天数；0 或不传 = 不修改；>0 时夹取 1–365
+  int32 inactive_days = 18;
+  // 是否写入 inactive_days（与间隔覆盖同一套语义）
+  bool set_inactive_days = 19;
 }
 
 message UpdateConfigRes {

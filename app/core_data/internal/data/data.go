@@ -65,6 +65,9 @@ func migrateModels(db *gorm.DB) {
 		&model.ContestCalendar{},
 		&model.ContestCalendarSub{},
 		&model.ContestCalendarNotifyLog{},
+		&model.ProblemTag{},
+		&model.UserProblemStatus{},
+		&model.UserTagAC{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
@@ -75,6 +78,10 @@ func migrateModels(db *gorm.DB) {
 	// 空表兜底回填（清洗任务会覆盖重建；新环境无历史时有用）
 	backfillDailyUserStatsIfEmpty(db)
 	backfillUserACIfEmpty(db)
+	// P8 预聚合：标签倒排 → 用户题状态 → 用户标签 AC（顺序有依赖）
+	backfillProblemTagsIfEmpty(db)
+	backfillUserProblemStatusIfEmpty(db)
+	backfillUserTagACIfEmpty(db)
 }
 
 // prepareDailyUserStatsPlatform 旧 PK (user_id,day) → 新 PK (user_id,day,platform)

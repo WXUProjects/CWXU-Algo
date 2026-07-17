@@ -54,6 +54,13 @@ service Profile {
       body: "*",
     };
   }
+  // 站点管理员：标记用户永不休眠（跳过不活跃判定）
+  rpc SetSyncExempt (SetSyncExemptReq) returns (SetSyncExemptRes) {
+    option (google.api.http) = {
+      post: "/v1/user/profile/set-sync-exempt",
+      body: "*",
+    };
+  }
   rpc GetUserIdsByGroup (GetUserIdsByGroupReq) returns (GetUserIdsByGroupRes) {
     option (google.api.http) = {
       get: "/v1/user/profile/ids-by-group"
@@ -192,6 +199,12 @@ message GetListRes {
     // 是否存在站点管理员个人覆盖（true=不走组织 MIN）
     bool spiderIntervalOverridden = 21;
     bool aiSummaryIntervalOverridden = 22;
+    // 永不休眠（站管）
+    bool syncExempt = 23;
+    // 最近活跃 unix 秒；0=未知
+    int64 lastLoginAt = 24;
+    // 当前是否处于休眠（后台定时任务已停）
+    bool dormant = 25;
   }
   repeated List list = 1;
   int64 total = 2;
@@ -265,6 +278,16 @@ message SetSyncIntervalsRes {
   string message = 2;
 }
 
+message SetSyncExemptReq {
+  int64 userId = 1;
+  bool exempt = 2;
+}
+
+message SetSyncExemptRes {
+  int64 code = 1;
+  string message = 2;
+}
+
 message GetUserIdsByGroupReq {
   int64 groupId = 1;
 }
@@ -334,6 +357,8 @@ message UserSyncPolicy {
   bool isOrgStaff = 8;
   bool emailEnabled = 9;           // 个人日报偏好
   bool emailWeeklyEnabled = 10;    // 个人周报偏好
+  // 是否允许后台定时任务（非休眠或已豁免）
+  bool syncActive = 11;
 }
 
 message GetSyncPoliciesRes {
