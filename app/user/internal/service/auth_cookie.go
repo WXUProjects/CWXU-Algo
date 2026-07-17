@@ -19,7 +19,7 @@ func setSessionCookie(ctx context.Context, token string) {
 	cookie := (&http.Cookie{
 		Name: commonauth.SessionCookieName, Value: token, Path: "/",
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
-		MaxAge: int((2 * time.Hour).Seconds()), Expires: time.Now().Add(2 * time.Hour),
+		MaxAge: int(JWTAccessTTL.Seconds()), Expires: time.Now().Add(JWTAccessTTL),
 	}).String()
 	tr.ReplyHeader().Add("Set-Cookie", cookie)
 }

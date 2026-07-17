@@ -10,6 +10,10 @@ import (
 	"gorm.io/gorm"
 )
 
+// JWTAccessTTL 默认访问令牌有效期。登录 / refresh / 切组织均签发此时长；
+// 客户端在有效期内可调用 refresh 滚动续期。
+const JWTAccessTTL = 7 * 24 * time.Hour
+
 // IssueJWT 签发含组织上下文的 JWT
 func IssueJWT(db *gorm.DB, u *model.User) (string, error) {
 	orgID := u.CurrentOrgID
@@ -51,9 +55,9 @@ func IssueJWT(db *gorm.DB, u *model.User) (string, error) {
 		roleIdsJSON = []byte("[1]")
 	}
 
-	// 短期访问令牌；前端活跃时通过 refresh 从数据库重签，以同步权限变更。
+	// 默认可续期访问令牌；前端活跃时通过 refresh 从 DB 重签，滚动续期并同步权限。
 	now := time.Now()
-	expire := now.Add(2 * time.Hour)
+	expire := now.Add(JWTAccessTTL)
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"userId":      u.ID,
 		"username":    u.Username,
