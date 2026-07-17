@@ -801,6 +801,7 @@ func (s *OrgService) forceOffDailyEmailWithoutOrgGrant(changedOrgID uint) {
 			Count(&n)
 		if n == 0 {
 			_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("email_enabled", false)
+			s.invalidateUserProfileCache(uid)
 		}
 	}
 }
@@ -819,6 +820,7 @@ func (s *OrgService) forceOffWeeklyEmailWithoutOrgGrant(changedOrgID uint) {
 			Count(&n)
 		if n == 0 {
 			_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("email_weekly_enabled", false)
+			s.invalidateUserProfileCache(uid)
 		}
 	}
 }

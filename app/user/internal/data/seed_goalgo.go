@@ -200,18 +200,15 @@ func seedGoAlgoFramework(db *gorm.DB) {
 	// 删除历史虚拟「未分组」若存在 id=0 脏数据（一般无此行）
 	_ = db.Where("name = ? AND id = 0", "未分组").Delete(&model.Group{}).Error
 
-	// 7. 全站默认关闭个人日报/周报（迁移）
-	_ = db.Model(&model.User{}).Where("1 = 1").Updates(map[string]interface{}{
-		"email_enabled":        false,
-		"email_weekly_enabled": false,
-	}).Error
-	// 组织周报开关：新列默认 true（GORM AutoMigrate）；若列为 false 且从未设置过可保持
+	// 注意：个人日报/周报偏好（email_enabled / email_weekly_enabled）禁止在 seed 里全表清零。
+	// 曾有「一次性迁移默认关」误写成每次启动都 UPDATE，导致用户打开开关后部署/重启又被关。
+	// 新用户默认关由列 default:false 保证即可。
 
-	// 8. 姓名语义迁移：users.name → 全局昵称(=username)；旧真实姓名 → 唯一非公共域的组织内名称
+	// 7. 姓名语义迁移：users.name → 全局昵称(=username)；旧真实姓名 → 唯一非公共域的组织内名称
 	// 幂等：仅当 org_display_name 为空且 name≠username 时拷贝；之后 name 统一为 username
 	migrateNameToOrgDisplay(db, public.ID)
 
-	// 9. 公共域称呼 ≡ 全局昵称：空 org_display_name 回填 users.name
+	// 8. 公共域称呼 ≡ 全局昵称：空 org_display_name 回填 users.name
 	syncPublicOrgDisplayFromName(db, public.ID)
 
 	log.Infof("GoAlgo framework seed done public_org_id=%d users=%d fixed_groups=%d", public.ID, len(users), len(bad))

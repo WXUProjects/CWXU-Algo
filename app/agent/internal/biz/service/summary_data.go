@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"cwxu-algo/api/core/v1/statistic"
@@ -105,11 +106,55 @@ func (uc *SummaryUseCase) userProfile(userId int64) *profile2.GetByIdRes {
 	}
 	defer conn.Close()
 	p := profile2.NewProfileClient(conn)
+	// 注意：无 JWT 时 GetById 会剥离 email / emailEnabled 等私有字段，仅可取公开 name 等。
 	res, err := p.GetById(context.Background(), &profile2.GetByIdReq{UserId: userId})
 	if err != nil {
 		return nil
 	}
 	return res
+}
+
+// userSyncPolicy 服务间取定时/邮件策略（含个人开关与组织授权，不做隐私剥离）
+func (uc *SummaryUseCase) userSyncPolicy(userId int64) *profile2.UserSyncPolicy {
+	if userId <= 0 {
+		return nil
+	}
+	conn, err := uc.userRPC()
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	cli := profile2.NewProfileClient(conn)
+	res, err := cli.GetSyncPolicies(context.Background(), &profile2.GetSyncPoliciesReq{
+		UserIds: []int64{userId},
+	})
+	if err != nil || res == nil {
+		return nil
+	}
+	for _, p := range res.GetPolicies() {
+		if p != nil && p.GetUserId() == userId {
+			return p
+		}
+	}
+	return nil
+}
+
+// userContactEmail 服务间取联系邮箱（不做隐私剥离）
+func (uc *SummaryUseCase) userContactEmail(userId int64) string {
+	if userId <= 0 {
+		return ""
+	}
+	conn, err := uc.userRPC()
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	cli := profile2.NewProfileClient(conn)
+	res, err := cli.GetContactEmail(context.Background(), &profile2.GetContactEmailReq{UserId: userId})
+	if err != nil || res == nil {
+		return ""
+	}
+	return strings.TrimSpace(res.GetEmail())
 }
 
 func (uc *SummaryUseCase) checkRoleId(userId int64) int {
@@ -121,21 +166,22 @@ func (uc *SummaryUseCase) checkRoleId(userId int64) int {
 }
 
 // canSendDailyEmail 个人日报开 AND 组织授权日报
+// 必须用 GetSyncPolicies，不能用无鉴权 GetById（后者会把 emailEnabled/授权剥成 false）。
 func (uc *SummaryUseCase) canSendDailyEmail(userId int64) bool {
-	p := uc.userProfile(userId)
+	p := uc.userSyncPolicy(userId)
 	if p == nil {
 		return false
 	}
-	return p.GetEmailEnabled() && p.GetEmailAllowedByOrg()
+	return p.GetEmailEnabled() && p.GetEnableAiEmail()
 }
 
 // canSendWeeklyEmail 个人周报开 AND 组织 staff 周报授权
 func (uc *SummaryUseCase) canSendWeeklyEmail(userId int64) bool {
-	p := uc.userProfile(userId)
+	p := uc.userSyncPolicy(userId)
 	if p == nil {
 		return false
 	}
-	return p.GetEmailWeeklyEnabled() && p.GetEmailWeeklyAllowedByOrg()
+	return p.GetEmailWeeklyEnabled() && p.GetEnableAiWeeklyEmail()
 }
 
 func (uc *SummaryUseCase) checkEmailEnabled(userId int64) bool {
@@ -360,12 +406,16 @@ func (uc *SummaryUseCase) fetchLastSubmitMap(ctx context.Context, userIds []int6
 }
 
 func (uc *SummaryUseCase) loadDailyReportData(ctx context.Context, userId int64) (*DailyReportData, error) {
-	profile := uc.userProfile(userId)
-	if profile == nil {
-		return nil, fmt.Errorf("获取用户 %d 资料失败", userId)
-	}
-	if profile.Email == "" {
+	email := uc.userContactEmail(userId)
+	if email == "" {
 		return nil, fmt.Errorf("用户 %d 未绑定邮箱", userId)
+	}
+	name := ""
+	if profile := uc.userProfile(userId); profile != nil {
+		name = profile.Name
+	}
+	if name == "" {
+		name = fmt.Sprintf("用户%d", userId)
 	}
 
 	now := time.Now()
@@ -388,8 +438,8 @@ func (uc *SummaryUseCase) loadDailyReportData(ctx context.Context, userId int64)
 
 	return &DailyReportData{
 		UserID:           userId,
-		Name:             profile.Name,
-		Email:            profile.Email,
+		Name:             name,
+		Email:            email,
 		Yesterday:        yesterday.Format(dateLayout),
 		YesterdayCount:   yCount,
 		ConsecutiveZeros: consecutiveZeroFromEnd(days),
@@ -427,12 +477,16 @@ func (uc *SummaryUseCase) loadRecentReportData(ctx context.Context, userId int64
 }
 
 func (uc *SummaryUseCase) loadWeeklyReportData(ctx context.Context, coachUserId int64) (*WeeklyReportData, error) {
-	profile := uc.userProfile(coachUserId)
-	if profile == nil {
-		return nil, fmt.Errorf("获取教练 %d 资料失败", coachUserId)
-	}
-	if profile.Email == "" {
+	email := uc.userContactEmail(coachUserId)
+	if email == "" {
 		return nil, fmt.Errorf("教练 %d 未绑定邮箱", coachUserId)
+	}
+	name := ""
+	if profile := uc.userProfile(coachUserId); profile != nil {
+		name = profile.Name
+	}
+	if name == "" {
+		name = fmt.Sprintf("用户%d", coachUserId)
 	}
 
 	now := time.Now()
@@ -528,8 +582,8 @@ func (uc *SummaryUseCase) loadWeeklyReportData(ctx context.Context, coachUserId 
 
 	return &WeeklyReportData{
 		CoachUserID:     coachUserId,
-		CoachName:       profile.Name,
-		CoachEmail:      profile.Email,
+		CoachName:       name,
+		CoachEmail:      email,
 		WeekStart:       weekStart.Format(dateLayout),
 		WeekEnd:         weekEnd.Format(dateLayout),
 		PrevWeekStart:   prevStart.Format(dateLayout),
