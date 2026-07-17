@@ -354,13 +354,14 @@ func (d *ProfileDal) OrgDisplayNamesByUserIDs(ctx context.Context, orgID uint, u
 	return out, nil
 }
 
-func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keyword string) ([]model.User, int64, error) {
+func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keyword string, dormantOnly bool) ([]model.User, int64, error) {
 	kw := strings.TrimSpace(keyword)
 	q := d.db.WithContext(ctx).Model(&model.User{})
 	if kw != "" {
 		like := "%" + kw + "%"
 		q = q.Where("username ILIKE ? OR name ILIKE ?", like, like)
 	}
+	q = d.applyDormantOnlyFilter(ctx, q, "users", dormantOnly)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -379,6 +380,31 @@ func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keywo
 		return nil, 0, err
 	}
 	return list, total, nil
+}
+
+// applyDormantOnlyFilter 仅保留「不活跃且无豁免」= 后台已暂停同步 的用户。
+// 判定与 dormancy.IsDormant / GetSyncPolicies 对齐。
+func (d *ProfileDal) applyDormantOnlyFilter(ctx context.Context, q *gorm.DB, userTable string, dormantOnly bool) *gorm.DB {
+	if !dormantOnly || q == nil {
+		return q
+	}
+	days := d.GetInactiveDays(ctx)
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	idCol := userTable + ".id"
+	return q.Where(userTable+".is_site_admin = ? AND "+userTable+".sync_exempt = ?", false, false).
+		Where(userTable+".last_login_at IS NULL OR "+userTable+".last_login_at < ?", cutoff).
+		Where(`NOT EXISTS (
+			SELECT 1 FROM org_members m
+			JOIN orgs o ON o.id = m.org_id
+			WHERE m.user_id = `+idCol+` AND o.status = ?
+			  AND (
+				m.role IN (?, ?, ?)
+				OR o.force_sync = true
+				OR o.plan IN (?, ?)
+			  )
+		)`, model.OrgStatusActive,
+			model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin,
+			"team", "pro")
 }
 
 // OrgBrief 用户所属组织摘要（列表 Badge）
@@ -987,7 +1013,8 @@ func (d *ProfileDal) SetSyncExempt(ctx context.Context, userID int64, exempt boo
 // GetListByOrg 分页列出组织成员用户
 // total 与列表一致：仅统计仍存在于 users 表的成员（忽略孤儿 org_members）
 // keyword 非空时模糊匹配 username / name / org_display_name（ILIKE）
-func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pageNum int64, keyword string) ([]model.User, int64, error) {
+// dormantOnly 仅不活跃（已暂停同步）成员
+func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pageNum int64, keyword string, dormantOnly bool) ([]model.User, int64, error) {
 	kw := strings.TrimSpace(keyword)
 	countQ := d.db.WithContext(ctx).
 		Table("org_members AS m").
@@ -997,6 +1024,7 @@ func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pag
 		like := "%" + kw + "%"
 		countQ = countQ.Where("u.username ILIKE ? OR u.name ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
 	}
+	countQ = d.applyDormantOnlyFilter(ctx, countQ, "u", dormantOnly)
 	var total int64
 	if err := countQ.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -1013,6 +1041,7 @@ func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pag
 		like := "%" + kw + "%"
 		listQ = listQ.Where("u.username ILIKE ? OR u.name ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
 	}
+	listQ = d.applyDormantOnlyFilter(ctx, listQ, "u", dormantOnly)
 	var list []model.User
 	err := listQ.
 		Order("u.id").

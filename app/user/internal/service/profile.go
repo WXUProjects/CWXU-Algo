@@ -131,8 +131,9 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		useSite = auth.VerifySiteAdmin(ctx)
 	}
 	keyword := strings.TrimSpace(req.GetKeyword())
+	dormantOnly := req.GetDormantOnly()
 	if useSite {
-		pf, total, err = p.profileUseCase.GetList(ctx, pageSize, pageNum, keyword)
+		pf, total, err = p.profileUseCase.GetList(ctx, pageSize, pageNum, keyword, dormantOnly)
 	} else {
 		orgID := uint(0)
 		if pd := auth.GetCurrentUser(ctx); pd != nil {
@@ -141,7 +142,7 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		if orgID == 0 {
 			orgID, _ = p.profileDal.PublicOrgID(ctx)
 		}
-		pf, total, err = p.profileDal.GetListByOrg(ctx, orgID, pageSize, pageNum, keyword)
+		pf, total, err = p.profileDal.GetListByOrg(ctx, orgID, pageSize, pageNum, keyword, dormantOnly)
 	}
 	if err != nil {
 		return nil, InternalServer

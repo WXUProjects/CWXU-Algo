@@ -294,7 +294,9 @@ type GetListReq struct {
 	// scope: org=当前组织成员；site=全站（仅站点管理员）；空=兼容旧逻辑（站管全站/否则组织）
 	Scope string `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"`
 	// 模糊搜索：用户名 / 昵称；org 范围另含组织内名称（org_display_name）
-	Keyword       string `protobuf:"bytes,4,opt,name=keyword,proto3" json:"keyword,omitempty"`
+	Keyword string `protobuf:"bytes,4,opt,name=keyword,proto3" json:"keyword,omitempty"`
+	// true=仅不活跃（已暂停同步）用户
+	DormantOnly   bool `protobuf:"varint,5,opt,name=dormantOnly,proto3" json:"dormantOnly,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -355,6 +357,13 @@ func (x *GetListReq) GetKeyword() string {
 		return x.Keyword
 	}
 	return ""
+}
+
+func (x *GetListReq) GetDormantOnly() bool {
+	if x != nil {
+		return x.DormantOnly
+	}
+	return false
 }
 
 type GetListRes struct {

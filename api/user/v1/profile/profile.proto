@@ -166,6 +166,8 @@ message GetListReq {
   string scope = 3;
   // 模糊搜索：用户名 / 昵称；org 范围另含组织内名称（org_display_name）
   string keyword = 4;
+  // true=仅不活跃（已暂停同步）用户；与 dormant 判定一致（阈值 + 豁免）
+  bool dormantOnly = 5;
 }
 
 message GetListRes {
