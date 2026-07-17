@@ -505,18 +505,22 @@ func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*
 		emailOn = pf.EmailEnabled && dailyGrant
 		weeklyOn = pf.EmailWeeklyEnabled && weeklyGrant
 	}
-	// 当前组织视图：展示组织内名称（空则 username）
+	// 当前组织视图：在组织用 org_display_name（空则 username）；不在组织用公共域昵称
 	displayName := strings.TrimSpace(pf.Name)
+	if displayName == "" {
+		displayName = pf.Username
+	}
 	if pd := auth.GetCurrentUser(ctx); pd != nil && pd.OrgID > 0 {
 		if m, e := p.profileDal.OrgDisplayNamesByUserIDs(ctx, pd.OrgID, []uint{pf.ID}); e == nil {
-			if d := m[pf.ID]; d != "" {
-				displayName = d
-			} else if pf.Username != "" {
-				displayName = pf.Username
+			if d, inOrg := m[pf.ID]; inOrg {
+				if strings.TrimSpace(d) != "" {
+					displayName = strings.TrimSpace(d)
+				} else if pf.Username != "" {
+					displayName = pf.Username
+				}
 			}
+			// 不在当前组织：保持公共域昵称（users.name）
 		}
-	} else if displayName == "" {
-		displayName = pf.Username
 	}
 	reply := &profile.GetByIdRes{
 		UserId:                  uint64(pf.ID),

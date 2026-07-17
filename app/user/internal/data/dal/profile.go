@@ -104,7 +104,8 @@ func orgMembersCacheKey(orgID uint) string {
 }
 
 func displayCacheKey(orgID uint, userID int64) string {
-	return fmt.Sprintf("user:display:v1:o%d:u%d", orgID, userID)
+	// v2：不在组织时回退公共域昵称（不再强制 username）
+	return fmt.Sprintf("user:display:v2:o%d:u%d", orgID, userID)
 }
 
 func followingCacheKey(userID uint) string {
@@ -1165,7 +1166,10 @@ func (d *ProfileDal) GetByIds(ctx context.Context, userIds []int64) ([]UserProfi
 	return profiles, err
 }
 
-// GetByIdsForOrg 批量展示名：组织内名称 → username（不用全局昵称）
+// GetByIdsForOrg 批量展示名：
+// - 在当前组织：org_display_name（空则 username）
+// - 不在当前组织：公共域称呼 users.name（空则 username）
+// 注意：OrgDisplayNamesByUserIDs 仅返回成员；有 key 即在组织。
 func (d *ProfileDal) GetByIdsForOrg(ctx context.Context, orgID uint, userIds []int64) ([]UserProfile, error) {
 	profiles, err := d.GetByIds(ctx, userIds)
 	if err != nil || len(profiles) == 0 {
@@ -1182,9 +1186,16 @@ func (d *ProfileDal) GetByIdsForOrg(ctx context.Context, orgID uint, userIds []i
 	}
 	displayMap, _ := d.OrgDisplayNamesByUserIDs(ctx, orgID, uids)
 	for i := range profiles {
-		if dname := displayMap[profiles[i].ID]; dname != "" {
-			profiles[i].Name = dname
-		} else if profiles[i].Username != "" {
+		if dname, inOrg := displayMap[profiles[i].ID]; inOrg {
+			if dname != "" {
+				profiles[i].Name = dname
+			} else if profiles[i].Username != "" {
+				profiles[i].Name = profiles[i].Username
+			}
+			continue
+		}
+		// 不在当前组织：保留 users.name（公共域昵称）；空则 username
+		if strings.TrimSpace(profiles[i].Name) == "" && profiles[i].Username != "" {
 			profiles[i].Name = profiles[i].Username
 		}
 	}

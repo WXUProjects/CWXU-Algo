@@ -52,12 +52,13 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		if strings.Contains(operation, "paste/get") {
 			return false
 		}
-		// 社交：搜索/列表/计数公开（关注操作仍需登录）
+		// 社交：搜索/列表/计数/身份展示公开（关注操作仍需登录；JWT 可选，有则按当前域解析）
 		if strings.Contains(operation, "social/search") ||
 			strings.Contains(operation, "social/following") ||
 			strings.Contains(operation, "social/followers") ||
 			strings.Contains(operation, "social/counts") ||
 			strings.Contains(operation, "social/relation") ||
+			strings.Contains(operation, "social/identity") ||
 			strings.Contains(operation, "privacy/status") {
 			return false
 		}

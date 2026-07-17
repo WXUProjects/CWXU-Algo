@@ -32,18 +32,42 @@ func RegisterSocialRoutes(srv *khttp.Server, s *SocialService) {
 	r.GET("/v1/user/social/counts", s.handleCounts)
 	r.GET("/v1/user/social/relation", s.handleRelation)
 	r.GET("/v1/user/social/search", s.handleSearch)
+	r.GET("/v1/user/social/identity", s.handleIdentity)
 	r.GET("/v1/user/privacy/get", s.handlePrivacyGet)
 	r.POST("/v1/user/privacy/update", s.handlePrivacyUpdate)
 	r.GET("/v1/user/privacy/status", s.handlePrivacyStatus)
 }
 
 func socialUserJSON(u dal.SocialUser) map[string]interface{} {
-	return map[string]interface{}{
-		"userId":   u.UserID,
-		"username": u.Username,
-		"name":     u.Name,
-		"avatar":   u.Avatar,
+	shared := make([]map[string]interface{}, 0, len(u.SharedOrgs))
+	for _, a := range u.SharedOrgs {
+		shared = append(shared, map[string]interface{}{
+			"orgId":       a.OrgID,
+			"orgName":     a.OrgName,
+			"displayName": a.DisplayName,
+		})
 	}
+	return map[string]interface{}{
+		"userId":       u.UserID,
+		"username":     u.Username,
+		"name":         u.Name,
+		"avatar":       u.Avatar,
+		"inCurrentOrg": u.InCurrentOrg,
+		"sharedOrgs":   shared,
+	}
+}
+
+// viewerContext 从 JWT 取观众 userId / orgId
+func viewerContext(ctx khttp.Context) (viewerID, viewerOrgID uint) {
+	if pd := auth.GetCurrentUser(ctx); pd != nil {
+		return pd.UserID, pd.OrgID
+	}
+	return 0, 0
+}
+
+func (s *SocialService) enrichList(ctx khttp.Context, list []dal.SocialUser) []dal.SocialUser {
+	viewerID, viewerOrgID := viewerContext(ctx)
+	return s.social.EnrichDisplay(ctx, viewerID, viewerOrgID, list)
 }
 
 func (s *SocialService) handleFollow(ctx khttp.Context) error {
@@ -102,6 +126,7 @@ func (s *SocialService) handleFollowing(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加载失败"})
 		return nil
 	}
+	list = s.enrichList(ctx, list)
 	items := make([]map[string]interface{}, 0, len(list))
 	for _, u := range list {
 		items = append(items, socialUserJSON(u))
@@ -123,6 +148,7 @@ func (s *SocialService) handleFollowers(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加载失败"})
 		return nil
 	}
+	list = s.enrichList(ctx, list)
 	items := make([]map[string]interface{}, 0, len(list))
 	for _, u := range list {
 		items = append(items, socialUserJSON(u))
@@ -174,7 +200,8 @@ func (s *SocialService) handleSearch(ctx khttp.Context) error {
 	q := strings.TrimSpace(ctx.Query().Get("q"))
 	page, _ := strconv.Atoi(ctx.Query().Get("page"))
 	pageSize, _ := strconv.Atoi(ctx.Query().Get("pageSize"))
-	list, total, err := s.social.SearchUsers(ctx, q, page, pageSize)
+	viewerID, viewerOrgID := viewerContext(ctx)
+	list, total, err := s.social.SearchUsersInContext(ctx, q, page, pageSize, viewerID, viewerOrgID)
 	if err != nil {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "搜索失败"})
 		return nil
@@ -185,6 +212,41 @@ func (s *SocialService) handleSearch(ctx khttp.Context) error {
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "ok", "list": items, "total": total,
+	})
+	return nil
+}
+
+// handleIdentity 单用户域感知展示（资料页等复用）
+func (s *SocialService) handleIdentity(ctx khttp.Context) error {
+	uid, _, _ := socialListParams(ctx)
+	if uid == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "请指定用户"})
+		return nil
+	}
+	var u struct {
+		UserID   uint   `gorm:"column:user_id"`
+		Username string
+		Name     string
+		Avatar   string
+	}
+	err := s.dbData.DB.WithContext(ctx).Table("users").
+		Select("id AS user_id, username, name, avatar").
+		Where("id = ?", uid).
+		Take(&u).Error
+	if err != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "用户不存在"})
+		return nil
+	}
+	list := s.enrichList(ctx, []dal.SocialUser{{
+		UserID: u.UserID, Username: u.Username, Name: u.Name, Avatar: u.Avatar,
+	}})
+	if len(list) == 0 {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "用户不存在"})
+		return nil
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"success": true, "message": "ok",
+		"data": socialUserJSON(list[0]),
 	})
 	return nil
 }
