@@ -11,18 +11,21 @@ const (
 // 评论最大嵌套深度（0=顶层，最大为 MaxCommentDepth）
 const MaxCommentDepth = 3
 
-// ProblemComment 题目评论（全站可见，不做组织隔离；支持层级回复）
+// ProblemComment 题目/题解评论（全站可见，不做组织隔离；支持层级回复）
+// SolutionID=0 为题目讨论；>0 为挂在用户题解下的评论。
 type ProblemComment struct {
 	ID        uint      `gorm:"primaryKey"`
 	CreatedAt time.Time `gorm:"index"`
 	UpdatedAt time.Time
-	ProblemID uint   `gorm:"not null;index:idx_pc_problem_root,priority:1;comment:题目id"`
-	UserID    uint   `gorm:"not null;index;comment:作者"`
-	Content   string `gorm:"type:text;not null;comment:评论内容"`
+	ProblemID uint `gorm:"not null;index:idx_pc_problem_root,priority:1;comment:题目id"`
+	// SolutionID 所属用户题解；0=题目讨论
+	SolutionID uint   `gorm:"not null;default:0;index:idx_pc_solution_root,priority:1;comment:题解id 0=题目讨论"`
+	UserID     uint   `gorm:"not null;index;comment:作者"`
+	Content    string `gorm:"type:text;not null;comment:评论内容"`
 	// ParentID 直接父评论；0 表示顶层
 	ParentID uint `gorm:"not null;default:0;index;comment:父评论id"`
 	// RootID 所属根评论；顶层创建后 = 自身 id
-	RootID uint `gorm:"not null;default:0;index:idx_pc_problem_root,priority:2;comment:根评论id"`
+	RootID uint `gorm:"not null;default:0;index:idx_pc_problem_root,priority:2;index:idx_pc_solution_root,priority:2;comment:根评论id"`
 	// ReplyToUserID 被回复用户（展示「回复 @xxx」）
 	ReplyToUserID uint `gorm:"not null;default:0;comment:被回复用户"`
 	// Depth 层级：0 顶层
@@ -93,11 +96,12 @@ const (
 	ActivityTypeSolution = "solution"
 )
 
-// ActivityFeed 发现页动态（按 org_id 隔离；发布时取作者当前组织）
+// ActivityFeed 发现页动态。
+// 写入时带作者当前 org_id；列表时：公共域全站聚合（不区分 org），私有域仅本 org。
 type ActivityFeed struct {
 	ID        uint      `gorm:"primaryKey"`
 	CreatedAt time.Time `gorm:"index:idx_af_org_created,priority:2"`
-	// OrgID 作者发布时所属组织
+	// OrgID 作者发布时所属组织（公共域列表会跨 org 聚合）
 	OrgID uint `gorm:"not null;index:idx_af_org_created,priority:1;comment:组织id"`
 	// UserID 作者
 	UserID uint `gorm:"not null;index;comment:作者"`

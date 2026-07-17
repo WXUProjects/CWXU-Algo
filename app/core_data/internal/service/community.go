@@ -63,7 +63,7 @@ func RegisterCommunityRoutes(srv *khttp.Server, s *CommunityService) {
 	// 点赞 / 举报（评论 + 题解）
 	r.POST("/v1/core/problem/like", s.handleLikeToggle)
 	r.POST("/v1/core/problem/report", s.handleReport)
-	// 发现流（组织隔离）
+	// 发现流：公共域全站聚合；私有域按组织隔离
 	r.GET("/v1/core/activity/feed", s.handleActivityFeed)
 	// 资料页近期
 	r.GET("/v1/core/user/recent-comments", s.handleUserRecentComments)
@@ -74,13 +74,33 @@ func RegisterCommunityRoutes(srv *khttp.Server, s *CommunityService) {
 
 func (s *CommunityService) handleCommentList(ctx khttp.Context) error {
 	pid := queryUint(ctx, "problemId")
-	if pid == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "缺少题目"})
+	sid := queryUint(ctx, "solutionId")
+	// 题解评论：可只传 solutionId；题目讨论：传 problemId（且 solution_id=0）
+	if sid == 0 && pid == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "缺少题目或题解"})
 		return nil
 	}
+	if sid > 0 {
+		var sol model.ProblemUserSolution
+		if s.db.Select("id, problem_id").First(&sol, sid).Error != nil {
+			writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题解不存在"})
+			return nil
+		}
+		if pid == 0 {
+			pid = sol.ProblemID
+		} else if sol.ProblemID != pid {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "题解与题目不匹配"})
+			return nil
+		}
+	}
 	page, pageSize := pageParams(ctx, 1, 20, 50)
-	// 分页只计顶层评论
-	rootQ := s.db.Model(&model.ProblemComment{}).Where("problem_id = ? AND parent_id = 0", pid)
+	// 分页只计顶层评论；题目讨论与题解评论互不混入
+	rootQ := s.db.Model(&model.ProblemComment{}).Where("parent_id = 0")
+	if sid > 0 {
+		rootQ = rootQ.Where("solution_id = ?", sid)
+	} else {
+		rootQ = rootQ.Where("problem_id = ? AND solution_id = 0", pid)
+	}
 	var total int64
 	_ = rootQ.Count(&total).Error
 	var roots []model.ProblemComment
@@ -94,8 +114,13 @@ func (s *CommunityService) handleCommentList(ctx khttp.Context) error {
 	// 拉本页根下的全部回复
 	var replies []model.ProblemComment
 	if len(rootIDs) > 0 {
-		_ = s.db.Where("problem_id = ? AND parent_id > 0 AND root_id IN ?", pid, rootIDs).
-			Order("id asc").Find(&replies).Error
+		replyQ := s.db.Where("parent_id > 0 AND root_id IN ?", rootIDs)
+		if sid > 0 {
+			replyQ = replyQ.Where("solution_id = ?", sid)
+		} else {
+			replyQ = replyQ.Where("problem_id = ? AND solution_id = 0", pid)
+		}
+		_ = replyQ.Order("id asc").Find(&replies).Error
 	}
 
 	all := make([]model.ProblemComment, 0, len(roots)+len(replies))
@@ -178,11 +203,12 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 	}
 	var req struct {
 		ProblemID    uint   `json:"problemId"`
+		SolutionID   uint   `json:"solutionId"`   // 0=题目讨论；>0=题解评论
 		Content      string `json:"content"`
 		ParentID     uint   `json:"parentId"`     // 0=顶层；>0 回复某条
-		SyncToPublic bool   `json:"syncToPublic"` // 仅顶层：非公共域时可选同步公共域发现流
+		SyncToPublic bool   `json:"syncToPublic"` // 仅题目顶层：非公共域时可选同步公共域发现流
 	}
-	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ProblemID == 0 {
+	if err := readJSONBody(ctx.Request(), &req); err != nil {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
 		return nil
 	}
@@ -195,18 +221,37 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "评论过长"})
 		return nil
 	}
+
+	var sol model.ProblemUserSolution
+	if req.SolutionID > 0 {
+		if s.db.First(&sol, req.SolutionID).Error != nil {
+			writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题解不存在"})
+			return nil
+		}
+		if req.ProblemID == 0 {
+			req.ProblemID = sol.ProblemID
+		} else if sol.ProblemID != req.ProblemID {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "题解与题目不匹配"})
+			return nil
+		}
+	}
+	if req.ProblemID == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
+		return nil
+	}
 	if !s.problemExists(req.ProblemID) {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题目不存在"})
 		return nil
 	}
 
 	row := model.ProblemComment{
-		ProblemID: req.ProblemID,
-		UserID:    pd.UserID,
-		Content:   content,
-		ParentID:  0,
-		RootID:    0,
-		Depth:     0,
+		ProblemID:  req.ProblemID,
+		SolutionID: req.SolutionID,
+		UserID:     pd.UserID,
+		Content:    content,
+		ParentID:   0,
+		RootID:     0,
+		Depth:      0,
 	}
 
 	var parent model.ProblemComment
@@ -217,6 +262,10 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 		}
 		if parent.ProblemID != req.ProblemID {
 			writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "评论与题目不匹配"})
+			return nil
+		}
+		if parent.SolutionID != req.SolutionID {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "评论与题解不匹配"})
 			return nil
 		}
 		// 挂载点：父深度已达上限时，挂到其父节点（仍记录 replyTo 为用户点击的那条）
@@ -250,8 +299,8 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 		row.RootID = row.ID
 	}
 
-	// 仅顶层评论写发现流
-	if row.ParentID == 0 {
+	// 仅题目顶层评论写发现流（题解评论不进组织动态，避免刷屏）
+	if row.ParentID == 0 && row.SolutionID == 0 {
 		ex := excerpt(content, maxExcerptRunes)
 		if pd.OrgID > 0 {
 			_ = s.db.Create(&model.ActivityFeed{
@@ -280,11 +329,16 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 		}
 	}
 
-	// 回复通知（不通知自己）
+	actorName := pd.Name
+	if actorName == "" {
+		actorName = pd.Username
+	}
+
+	// 回复通知（不通知自己）；题解线程跳转用 solution
 	if row.ParentID > 0 && parent.UserID > 0 && parent.UserID != pd.UserID {
-		actorName := pd.Name
-		if actorName == "" {
-			actorName = pd.Username
+		refType, refID := "comment", row.ID
+		if row.SolutionID > 0 {
+			refType, refID = "solution", row.SolutionID
 		}
 		_ = notify.Create(s.udb, notify.Row{
 			UserID:    parent.UserID,
@@ -292,14 +346,32 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 			Title:     "有人回复了你",
 			Body:      actorName + " 回复了你的评论",
 			ActorID:   pd.UserID,
-			RefType:   "comment",
-			RefID:     row.ID,
+			RefType:   refType,
+			RefID:     refID,
 			ProblemID: req.ProblemID,
 		})
 	}
 
-	// @ 通知
-	s.emitMentions(ctx, pd.UserID, pd.Username, content, "comment", row.ID, req.ProblemID)
+	// 题解顶层评论：通知题解作者
+	if row.ParentID == 0 && row.SolutionID > 0 && sol.UserID > 0 && sol.UserID != pd.UserID {
+		_ = notify.Create(s.udb, notify.Row{
+			UserID:    sol.UserID,
+			Type:      notify.TypeCommentReply,
+			Title:     "有人评论了你的题解",
+			Body:      actorName + " 评论了你的题解",
+			ActorID:   pd.UserID,
+			RefType:   "solution",
+			RefID:     row.SolutionID,
+			ProblemID: req.ProblemID,
+		})
+	}
+
+	// @ 通知：题解下的评论跳到题解页
+	mentionRefType, mentionRefID := "comment", row.ID
+	if row.SolutionID > 0 {
+		mentionRefType, mentionRefID = "solution", row.SolutionID
+	}
+	s.emitMentions(ctx, pd.UserID, pd.Username, content, mentionRefType, mentionRefID, req.ProblemID)
 
 	users := s.batchUsers(ctx, []uint{row.UserID, row.ReplyToUserID})
 	item := s.commentToMap(row, users, map[uint]bool{})
@@ -570,6 +642,15 @@ func (s *CommunityService) handleSolutionDelete(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能删除自己的题解"})
 		return nil
 	}
+	// 级联清理题解下评论及其点赞/举报/发现流
+	var commentIDs []uint
+	_ = s.db.Model(&model.ProblemComment{}).Where("solution_id = ?", row.ID).Pluck("id", &commentIDs).Error
+	if len(commentIDs) > 0 {
+		_ = s.db.Where("id IN ?", commentIDs).Delete(&model.ProblemComment{}).Error
+		_ = s.db.Where("type = ? AND ref_id IN ?", model.ActivityTypeComment, commentIDs).Delete(&model.ActivityFeed{}).Error
+		_ = s.db.Where("target_type = ? AND target_id IN ?", model.CommunityTargetComment, commentIDs).Delete(&model.CommunityLike{}).Error
+		_ = s.db.Where("target_type = ? AND target_id IN ?", model.CommunityTargetComment, commentIDs).Delete(&model.CommunityReport{}).Error
+	}
 	_ = s.db.Delete(&row).Error
 	_ = s.db.Where("type = ? AND ref_id = ?", model.ActivityTypeSolution, row.ID).Delete(&model.ActivityFeed{}).Error
 	_ = s.db.Where("target_type = ? AND target_id = ?", model.CommunityTargetSolution, row.ID).Delete(&model.CommunityLike{}).Error
@@ -701,7 +782,9 @@ func (s *CommunityService) handleReport(ctx khttp.Context) error {
 	return nil
 }
 
-// ---------- activity feed (org-scoped) ----------
+// ---------- activity feed ----------
+// 公共域 / 未登录：全站聚合（评论+题解），不区分发布时所属组织；按 (type,ref_id) 去重。
+// 私有域：仅本组织条目。
 
 func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
@@ -713,22 +796,33 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 	if q := queryUint(ctx, "orgId"); q > 0 && pd != nil && auth.VerifySiteAdmin(ctx) {
 		orgID = q
 	}
-	if orgID == 0 {
-		writeJSON(ctx.Response(), 200, map[string]interface{}{
-			"success": true, "message": "ok", "list": []interface{}{}, "total": 0, "page": 1, "pageSize": 20,
-		})
-		return nil
-	}
 	page, pageSize := pageParams(ctx, 1, 20, 50)
 	typ := strings.TrimSpace(ctx.Query().Get("type")) // comment|solution|空=全部
-	q := s.db.Model(&model.ActivityFeed{}).Where("org_id = ?", orgID)
-	if typ == model.ActivityTypeComment || typ == model.ActivityTypeSolution {
-		q = q.Where("type = ?", typ)
-	}
+
+	// 公共域视图：orgId=0（访客）或当前组织即公共域 → 全站聚合
+	publicView := orgID == 0 || s.isPublicOrgID(ctx, orgID)
+
 	var total int64
-	_ = q.Count(&total).Error
 	var list []model.ActivityFeed
-	_ = q.Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
+	if publicView {
+		// 同一内容可能因 syncToPublic 写过多条 org 行：按 type+ref_id 取最大 id
+		idSub := s.db.Model(&model.ActivityFeed{}).Select("MAX(id)")
+		if typ == model.ActivityTypeComment || typ == model.ActivityTypeSolution {
+			idSub = idSub.Where("type = ?", typ)
+		}
+		idSub = idSub.Group("type, ref_id")
+		q := s.db.Model(&model.ActivityFeed{}).Where("id IN (?)", idSub)
+		_ = q.Count(&total).Error
+		_ = s.db.Model(&model.ActivityFeed{}).Where("id IN (?)", idSub).
+			Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
+	} else {
+		q := s.db.Model(&model.ActivityFeed{}).Where("org_id = ?", orgID)
+		if typ == model.ActivityTypeComment || typ == model.ActivityTypeSolution {
+			q = q.Where("type = ?", typ)
+		}
+		_ = q.Count(&total).Error
+		_ = q.Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
+	}
 
 	uids := make([]uint, 0, len(list))
 	pids := make([]uint, 0, len(list))
@@ -750,26 +844,35 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 		u := users[a.UserID]
 		p := probs[a.ProblemID]
 		items = append(items, map[string]interface{}{
-			"id":            a.ID,
-			"orgId":         a.OrgID,
-			"userId":        a.UserID,
-			"username":      u.username,
-			"name":          u.name,
-			"avatar":        u.avatar,
-			"type":          a.Type,
-			"refId":         a.RefID,
-			"problemId":     a.ProblemID,
-			"problemTitle":  p.title,
-			"platform":      p.platform,
-			"title":         a.Title,
-			"excerpt":       a.Excerpt,
-			"createdAt":     a.CreatedAt.Unix(),
+			"id":           a.ID,
+			"orgId":        a.OrgID,
+			"userId":       a.UserID,
+			"username":     u.username,
+			"name":         u.name,
+			"avatar":       u.avatar,
+			"type":         a.Type,
+			"refId":        a.RefID,
+			"problemId":    a.ProblemID,
+			"problemTitle": p.title,
+			"platform":     p.platform,
+			"title":        a.Title,
+			"excerpt":      a.Excerpt,
+			"createdAt":    a.CreatedAt.Unix(),
 		})
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "ok", "list": items, "total": total, "page": page, "pageSize": pageSize,
 	})
 	return nil
+}
+
+// isPublicOrgID 当前 org 是否为系统公共域。
+func (s *CommunityService) isPublicOrgID(ctx khttp.Context, orgID uint) bool {
+	if orgID == 0 {
+		return true
+	}
+	pub := s.resolvePublicOrgID(ctx)
+	return pub > 0 && pub == orgID
 }
 
 // ---------- profile recent ----------
@@ -846,19 +949,20 @@ func (s *CommunityService) handleUserRecentSolutions(ctx khttp.Context) error {
 func (s *CommunityService) commentToMap(c model.ProblemComment, users map[uint]userBrief, likedSet map[uint]bool) map[string]interface{} {
 	u := users[c.UserID]
 	m := map[string]interface{}{
-		"id":        c.ID,
-		"problemId": c.ProblemID,
-		"userId":    c.UserID,
-		"username":  u.username,
-		"name":      u.name,
-		"avatar":    u.avatar,
-		"content":   c.Content,
-		"parentId":  c.ParentID,
-		"rootId":    c.RootID,
-		"depth":     c.Depth,
-		"likeCount": c.LikeCount,
-		"liked":     likedSet[c.ID],
-		"createdAt": c.CreatedAt.Unix(),
+		"id":         c.ID,
+		"problemId":  c.ProblemID,
+		"solutionId": c.SolutionID,
+		"userId":     c.UserID,
+		"username":   u.username,
+		"name":       u.name,
+		"avatar":     u.avatar,
+		"content":    c.Content,
+		"parentId":   c.ParentID,
+		"rootId":     c.RootID,
+		"depth":      c.Depth,
+		"likeCount":  c.LikeCount,
+		"liked":      likedSet[c.ID],
+		"createdAt":  c.CreatedAt.Unix(),
 	}
 	if c.ReplyToUserID > 0 {
 		ru := users[c.ReplyToUserID]

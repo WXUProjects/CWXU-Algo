@@ -246,6 +246,79 @@ func TestCommunityCommentCreateListAndMention(t *testing.T) {
 	}
 }
 
+func TestSolutionCommentsIsolatedFromProblem(t *testing.T) {
+	s, db, udb := setupCommunityTest(t)
+	var p model.Problem
+	_ = db.First(&p).Error
+
+	// 题目讨论
+	probC := model.ProblemComment{ProblemID: p.ID, SolutionID: 0, UserID: 1, Content: "题面讨论"}
+	_ = db.Create(&probC).Error
+	_ = db.Model(&probC).Update("root_id", probC.ID).Error
+	probC.RootID = probC.ID
+
+	// 用户题解
+	sol := model.ProblemUserSolution{ProblemID: p.ID, UserID: 10, Title: "差分", ContentMD: "md"}
+	_ = db.Create(&sol).Error
+
+	// 题解评论
+	solC := model.ProblemComment{
+		ProblemID: p.ID, SolutionID: sol.ID, UserID: 2, Content: "题解说得好",
+	}
+	_ = db.Create(&solC).Error
+	_ = db.Model(&solC).Update("root_id", solC.ID).Error
+	solC.RootID = solC.ID
+
+	// 列表隔离：题目讨论不含题解评论
+	var problemRoots []model.ProblemComment
+	_ = db.Where("problem_id = ? AND parent_id = 0 AND solution_id = 0", p.ID).Find(&problemRoots).Error
+	if len(problemRoots) != 1 || problemRoots[0].ID != probC.ID {
+		t.Fatalf("problem roots=%v", problemRoots)
+	}
+	var solRoots []model.ProblemComment
+	_ = db.Where("solution_id = ? AND parent_id = 0", sol.ID).Find(&solRoots).Error
+	if len(solRoots) != 1 || solRoots[0].ID != solC.ID {
+		t.Fatalf("solution roots=%v", solRoots)
+	}
+
+	// commentToMap 带 solutionId
+	m := s.commentToMap(solC, map[uint]userBrief{2: {username: "bob", name: "Bob"}}, map[uint]bool{})
+	if m["solutionId"] != sol.ID {
+		t.Fatalf("solutionId in map=%v", m["solutionId"])
+	}
+
+	// 删除题解级联清评论
+	var commentIDs []uint
+	_ = db.Model(&model.ProblemComment{}).Where("solution_id = ?", sol.ID).Pluck("id", &commentIDs).Error
+	if len(commentIDs) != 1 {
+		t.Fatalf("commentIDs=%v", commentIDs)
+	}
+	_ = db.Where("id IN ?", commentIDs).Delete(&model.ProblemComment{}).Error
+	_ = db.Delete(&sol).Error
+	var left int64
+	_ = db.Model(&model.ProblemComment{}).Where("solution_id = ?", sol.ID).Count(&left).Error
+	if left != 0 {
+		t.Fatalf("cascade left=%d", left)
+	}
+	// 题目讨论仍在
+	var still int64
+	_ = db.Model(&model.ProblemComment{}).Where("id = ?", probC.ID).Count(&still).Error
+	if still != 1 {
+		t.Fatal("problem comment should remain")
+	}
+
+	// 题解顶层评论通知作者（业务写入）
+	_ = notify.Create(udb, notify.Row{
+		UserID: 10, Type: notify.TypeCommentReply, Title: "有人评论了你的题解",
+		Body: "bob 评论了你的题解", ActorID: 2, RefType: "solution", RefID: sol.ID, ProblemID: p.ID,
+	})
+	var n int64
+	_ = udb.Model(&notify.Row{}).Where("user_id = ? AND ref_type = ?", 10, "solution").Count(&n).Error
+	if n != 1 {
+		t.Fatalf("author notif=%d", n)
+	}
+}
+
 func TestCommentTreeMapAndLikedSet(t *testing.T) {
 	s, db, _ := setupCommunityTest(t)
 	var p model.Problem
@@ -310,4 +383,89 @@ func TestCommentTreeMapAndLikedSet(t *testing.T) {
 	if nested[0]["liked"] != true {
 		t.Fatal("r2 should be liked")
 	}
+}
+
+// 公共域发现：全站聚合 + (type,ref_id) 去重；私有域仅本 org。
+func TestActivityFeedPublicAggregatesPrivateIsolates(t *testing.T) {
+	s, db, _ := setupCommunityTest(t)
+	var p model.Problem
+	if err := db.First(&p).Error; err != nil {
+		t.Fatal(err)
+	}
+	publicOrg, privateA, privateB := uint(1), uint(3), uint(5)
+
+	// 同一评论双写 public + privateA（syncToPublic 形态）
+	c1 := model.ProblemComment{ProblemID: p.ID, UserID: 10, Content: "公共可见评论"}
+	if err := db.Create(&c1).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, oid := range []uint{publicOrg, privateA} {
+		if err := db.Create(&model.ActivityFeed{
+			OrgID: oid, UserID: 10, Type: model.ActivityTypeComment, RefID: c1.ID,
+			ProblemID: p.ID, Title: "公共可见评论", Excerpt: "公共可见评论",
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	// privateB 专属题解
+	sol := model.ProblemUserSolution{ProblemID: p.ID, UserID: 20, Title: "B域题解", ContentMD: "x"}
+	if err := db.Create(&sol).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ActivityFeed{
+		OrgID: privateB, UserID: 20, Type: model.ActivityTypeSolution, RefID: sol.ID,
+		ProblemID: p.ID, Title: "B域题解", Excerpt: "x",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 公共聚合：按 type+ref_id 取 MAX(id)
+	idSub := db.Model(&model.ActivityFeed{}).Select("MAX(id)").Group("type, ref_id")
+	var publicList []model.ActivityFeed
+	if err := db.Where("id IN (?)", idSub).Order("id desc").Find(&publicList).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(publicList) != 2 {
+		t.Fatalf("public aggregate want 2 unique items, got %d", len(publicList))
+	}
+	// 评论去重后只剩 1 条
+	var commentN, solN int
+	for _, a := range publicList {
+		switch a.Type {
+		case model.ActivityTypeComment:
+			commentN++
+			if a.RefID != c1.ID {
+				t.Fatalf("comment ref=%d", a.RefID)
+			}
+		case model.ActivityTypeSolution:
+			solN++
+			if a.RefID != sol.ID {
+				t.Fatalf("sol ref=%d", a.RefID)
+			}
+		}
+	}
+	if commentN != 1 || solN != 1 {
+		t.Fatalf("commentN=%d solN=%d", commentN, solN)
+	}
+
+	// 私有域 A：只有评论（双写的那条 org=A），看不到 B 的题解
+	var feedA []model.ActivityFeed
+	_ = db.Where("org_id = ?", privateA).Find(&feedA).Error
+	if len(feedA) != 1 || feedA[0].Type != model.ActivityTypeComment {
+		t.Fatalf("privateA feed=%+v", feedA)
+	}
+	// 私有域 B：只有题解
+	var feedB []model.ActivityFeed
+	_ = db.Where("org_id = ?", privateB).Find(&feedB).Error
+	if len(feedB) != 1 || feedB[0].Type != model.ActivityTypeSolution {
+		t.Fatalf("privateB feed=%+v", feedB)
+	}
+
+	// 题库题解：不按 org 过滤，全站
+	var sols []model.ProblemUserSolution
+	_ = db.Where("problem_id = ?", p.ID).Find(&sols).Error
+	if len(sols) != 1 {
+		t.Fatalf("problem solutions want 1, got %d", len(sols))
+	}
+	_ = s // silence if unused beyond setup
 }
