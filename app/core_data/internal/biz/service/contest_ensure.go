@@ -29,16 +29,30 @@ func (uc *ProblemUseCase) EnsureContestProblemsOnce(platform, contestID string) 
 		return "", fmt.Errorf("empty platform/contestId")
 	}
 
-	// 已完成则直接返回
+	// 已 done / 正在 running：直接返回（每场成功只跑一次，不因多用户重复打 OJ）
+	// failed 允许再试一次（网络/OJ 抖动）；用 CAS 从 failed→running 抢占
 	var existing model.ContestProblemEnsure
 	err = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).First(&existing).Error
 	if err == nil {
 		if existing.Status == model.ContestEnsureDone || existing.Status == model.ContestEnsureRunning {
 			return existing.Status, nil
 		}
-		// failed：不自动重试（保证「只执行一次」）；调用方仍可读已有目录
 		if existing.Status == model.ContestEnsureFailed {
-			return existing.Status, nil
+			res := uc.data.DB.Model(&model.ContestProblemEnsure{}).
+				Where("id = ? AND status = ?", existing.ID, model.ContestEnsureFailed).
+				Updates(map[string]interface{}{
+					"status":    model.ContestEnsureRunning,
+					"error_msg": "",
+				})
+			if res.Error != nil {
+				return "", res.Error
+			}
+			if res.RowsAffected == 0 {
+				_ = uc.data.DB.Where("id = ?", existing.ID).First(&existing).Error
+				return existing.Status, nil
+			}
+			// 本 goroutine 重试
+			goto runEnsure
 		}
 	} else if err != gorm.ErrRecordNotFound {
 		return "", err
@@ -59,6 +73,8 @@ func (uc *ProblemUseCase) EnsureContestProblemsOnce(platform, contestID string) 
 		_ = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).First(&existing).Error
 		return existing.Status, nil
 	}
+
+runEnsure:
 
 	// 本 goroutine 执行发现
 	if err := uc.runContestEnsure(platform, contestID); err != nil {

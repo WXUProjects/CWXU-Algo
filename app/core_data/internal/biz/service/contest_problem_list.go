@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -78,7 +79,15 @@ func listCFContestProblems(contestID string) ([]ContestProblemSpec, error) {
 		isGym = true
 		cid = cid[3:]
 	}
-	// CF API：正式赛用正 contestId；gym 用负数
+	// 1) API contest.standings
+	if specs, err := listCFContestProblemsAPI(cid, isGym); err == nil && len(specs) > 0 {
+		return specs, nil
+	}
+	// 2) HTML 题目列表页兜底（API 被墙/限流时）
+	return listCFContestProblemsHTML(cid, isGym)
+}
+
+func listCFContestProblemsAPI(cid string, isGym bool) ([]ContestProblemSpec, error) {
 	apiID := cid
 	if isGym {
 		if !strings.HasPrefix(apiID, "-") {
@@ -111,7 +120,7 @@ func listCFContestProblems(contestID string) ([]ContestProblemSpec, error) {
 		return nil, fmt.Errorf("cf standings: %s", firstNonEmpty(out.Comment, out.Status))
 	}
 	specs := make([]ContestProblemSpec, 0, len(out.Result.Problems))
-	for i, p := range out.Result.Problems {
+	for _, p := range out.Result.Problems {
 		idx := strings.TrimSpace(p.Index)
 		if idx == "" {
 			continue
@@ -125,7 +134,7 @@ func listCFContestProblems(contestID string) ([]ContestProblemSpec, error) {
 			ext = "gym" + gid + idx
 			problemURL = fmt.Sprintf("https://codeforces.com/gym/%s/problem/%s", gid, idx)
 		} else {
-			cidStr := contestID
+			cidStr := cid
 			if p.ContestID > 0 {
 				cidStr = strconv.Itoa(p.ContestID)
 			}
@@ -139,8 +148,66 @@ func listCFContestProblems(contestID string) ([]ContestProblemSpec, error) {
 			URL:        problemURL,
 			Platform:   spider.CodeForces,
 		})
-		_ = i
 	}
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("cf standings empty")
+	}
+	return specs, nil
+}
+
+var reCFProblemLink = regexp.MustCompile(`(?i)/(?:contest|gym)/(\d+)/problem/([A-Za-z0-9]+)`)
+
+func listCFContestProblemsHTML(cid string, isGym bool) ([]ContestProblemSpec, error) {
+	kind := "contest"
+	if isGym {
+		kind = "gym"
+	}
+	// 题目列表页
+	url := fmt.Sprintf("https://codeforces.com/%s/%s", kind, cid)
+	body, code, err := contestHTTPGet(url)
+	if err != nil {
+		return nil, err
+	}
+	if code != 200 {
+		return nil, fmt.Errorf("cf html status %d", code)
+	}
+	html := string(body)
+	if strings.Contains(html, "Just a moment") || strings.Contains(html, "cf-browser-verification") {
+		return nil, fmt.Errorf("cf html cloudflare blocked")
+	}
+	seen := map[string]struct{}{}
+	var specs []ContestProblemSpec
+	for _, m := range reCFProblemLink.FindAllStringSubmatch(html, -1) {
+		if m[1] != cid {
+			continue
+		}
+		idx := m[2]
+		if _, ok := seen[idx]; ok {
+			continue
+		}
+		seen[idx] = struct{}{}
+		var ext, problemURL string
+		if isGym {
+			ext = "gym" + cid + idx
+			problemURL = fmt.Sprintf("https://codeforces.com/gym/%s/problem/%s", cid, idx)
+		} else {
+			ext = cid + idx
+			problemURL = fmt.Sprintf("https://codeforces.com/contest/%s/problem/%s", cid, idx)
+		}
+		specs = append(specs, ContestProblemSpec{
+			Label:      idx,
+			ExternalID: ext,
+			Title:      idx,
+			URL:        problemURL,
+			Platform:   spider.CodeForces,
+		})
+	}
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("cf: no problems for %s/%s", kind, cid)
+	}
+	sort.SliceStable(specs, func(i, j int) bool {
+		return labelSortKey(specs[i].Label) < labelSortKey(specs[j].Label)
+	})
 	return specs, nil
 }
 
