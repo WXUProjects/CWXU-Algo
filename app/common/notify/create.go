@@ -22,6 +22,8 @@ const (
 	TypeBlogCommentReply  = "blog_comment_reply"
 	TypeSolutionLike      = "solution_like"
 	TypeCommentLike       = "comment_like"
+	TypeBlogReport        = "blog_report"
+	TypeCommunityReport   = "community_report"
 )
 
 // Row 与 user.notifications 表对齐（避免 core 依赖 user 包）

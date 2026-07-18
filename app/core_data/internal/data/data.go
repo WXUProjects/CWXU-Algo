@@ -3,6 +3,7 @@ package data
 import (
 	"os"
 	"strings"
+	"time"
 
 	"cwxu-algo/app/common/conf"
 	gorm2 "cwxu-algo/app/common/data/gorm"
@@ -125,9 +126,11 @@ func migrateModels(db *gorm.DB) {
 		&model.ActivityFeed{},
 		&model.CommunityLike{},
 		&model.CommunityReport{},
+		&model.CommunityViewUV{},
 		&model.Problemset{},
 		&model.ProblemsetItem{},
 		&model.ProblemsetLike{},
+		&schemaPatch{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
@@ -146,6 +149,37 @@ func migrateModels(db *gorm.DB) {
 	backfillProblemTagsIfEmpty(db)
 	backfillUserProblemStatusIfEmpty(db)
 	backfillUserTagACIfEmpty(db)
+	// one-shot: zero solution view counts for UV migration
+	zeroSolutionViewsOnce(db)
+}
+
+// schemaPatch one-shot migration markers (core DB).
+type schemaPatch struct {
+	Key       string    `gorm:"primaryKey;size:64"`
+	AppliedAt time.Time `gorm:"not null"`
+}
+
+func (schemaPatch) TableName() string { return "schema_patches" }
+
+func zeroSolutionViewsOnce(db *gorm.DB) {
+	if db == nil {
+		return
+	}
+	const key = "solution_uv_zero_v1"
+	var n int64
+	_ = db.Model(&schemaPatch{}).Where("key = ?", key).Count(&n).Error
+	if n > 0 {
+		return
+	}
+	_ = db.Exec(`UPDATE problem_user_solutions SET view_count = 0 WHERE view_count IS NOT NULL OR view_count IS NULL`).Error
+	// also recompute comment_count from problem_comments when column exists
+	_ = db.Exec(`
+UPDATE problem_user_solutions s
+SET comment_count = (
+  SELECT COUNT(*) FROM problem_comments c WHERE c.solution_id = s.id
+)
+`).Error
+	_ = db.Create(&schemaPatch{Key: key, AppliedAt: time.Now()}).Error
 }
 
 // prepareDailyUserStatsPlatform 旧 PK (user_id,day) → 新 PK (user_id,day,platform)

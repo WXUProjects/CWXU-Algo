@@ -16,6 +16,7 @@ import (
 
 	"cwxu-algo/app/common/blogsync"
 	_const "cwxu-algo/app/common/const"
+	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/biz/blogaccess"
 	"cwxu-algo/app/user/internal/data"
@@ -38,11 +39,12 @@ const (
 
 // BlogService personal blog articles, comments, likes, categories, theme flags.
 type BlogService struct {
-	db *gorm.DB
+	db     *gorm.DB
+	coreDB *gorm.DB // optional: algo_core for shared solution UV / likes
 }
 
 func NewBlogService(d *data.Data) *BlogService {
-	return &BlogService{db: d.DB}
+	return &BlogService{db: d.DB, coreDB: d.CoreDB}
 }
 
 // RegisterBlogRoutes registers blog HTTP routes.
@@ -91,6 +93,9 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 	r.GET("/v1/user/blog/admin/authors", bs.handleAdminAuthors)
 	r.GET("/v1/user/blog/admin/articles", bs.handleAdminArticles)
 	r.POST("/v1/user/blog/admin/moderate", bs.handleAdminModerate)
+
+	// 举报
+	r.POST("/v1/user/blog/report", bs.handleReport)
 }
 
 // ---------- helpers ----------
@@ -289,6 +294,13 @@ func (s *BlogService) articleToMap(a *model.BlogArticle, author *model.User, d b
 	if a.SourceSolutionID != nil && *a.SourceSolutionID > 0 {
 		m["sourceSolutionId"] = *a.SourceSolutionID
 	}
+	if a.SourceProblemID != nil && *a.SourceProblemID > 0 {
+		m["sourceProblemId"] = *a.SourceProblemID
+	}
+	// editor helper: whether stored summary is system default (do not backfill)
+	if includeBody {
+		m["summaryIsDefault"] = blogaccess.IsDefaultSummary(a.Summary, a.Content)
+	}
 	if a.PublishedAt != nil {
 		m["publishedAt"] = a.PublishedAt.Unix()
 	} else {
@@ -464,10 +476,17 @@ func (s *BlogService) handleGetArticle(ctx khttp.Context) error {
 		return nil
 	}
 
-	// increment view when body is visible
+	// UV view when body is visible (solution-linked shares UV with 题解)
 	if d.CanSeeBody {
-		_ = s.db.Model(&a).UpdateColumn("view_count", gorm.Expr("view_count + 1")).Error
-		a.ViewCount++
+		visitorKey := blogVisitorKey(ctx, viewer)
+		if a.SourceSolutionID != nil && *a.SourceSolutionID > 0 {
+			s.recordLinkedSolutionUV(*a.SourceSolutionID, a.ID, visitorKey)
+			_ = s.db.Select("view_count", "like_count", "comment_count").First(&a, a.ID).Error
+		} else if s.recordBlogArticleUV(a.ID, visitorKey) {
+			a.ViewCount++
+		} else {
+			_ = s.db.Select("view_count").First(&a, a.ID).Error
+		}
 	}
 
 	var author model.User
@@ -516,8 +535,12 @@ func (s *BlogService) handleUnlock(ctx khttp.Context) error {
 	}, viewer, true)
 	var author model.User
 	_ = s.db.Select("id", "username", "name", "avatar").First(&author, a.UserID).Error
-	_ = s.db.Model(&a).UpdateColumn("view_count", gorm.Expr("view_count + 1")).Error
-	a.ViewCount++
+	visitorKey := blogVisitorKey(ctx, viewer)
+	if s.recordBlogArticleUV(a.ID, visitorKey) {
+		a.ViewCount++
+	} else {
+		_ = s.db.Select("view_count").First(&a, a.ID).Error
+	}
 	m := s.articleToMap(&a, &author, d, viewer, true)
 	m["unlockToken"] = token
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
@@ -531,14 +554,16 @@ func (s *BlogService) handleUnlock(ctx khttp.Context) error {
 // ---------- CRUD ----------
 
 type blogArticleWriteReq struct {
-	ID                uint   `json:"id"`
-	Title             string `json:"title"`
-	Slug              string `json:"slug"`
-	Summary           string `json:"summary"`
-	Content           string `json:"content"`
-	CoverURL          string `json:"coverUrl"`
-	Visibility        string `json:"visibility"`
-	Password          string `json:"password"`
+	ID         uint   `json:"id"`
+	Title      string `json:"title"`
+	Slug       string `json:"slug"`
+	Summary    string `json:"summary"`
+	Content    string `json:"content"`
+	CoverURL   string `json:"coverUrl"`
+	Visibility string `json:"visibility"`
+	Password   string `json:"password"`
+	// Recommend / SyncToMainProfile / OrgIDs are ignored on write (auto-surface).
+	// Kept in JSON for backward compatibility with older clients.
 	Recommend         bool   `json:"recommend"`
 	SyncToMainProfile bool   `json:"syncToMainProfile"`
 	CategoryID        *uint  `json:"categoryId"`
@@ -577,7 +602,7 @@ func (s *BlogService) handleCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
 		return nil
 	}
-	_ = s.replaceOrgSync(a.ID, req.OrgIDs)
+	_ = s.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility)
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 		Visibility:  a.Visibility,
 		OwnerID:     a.UserID,
@@ -637,6 +662,9 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 		strings.TrimSpace(req.Password) == "" {
 		a.PasswordHash = existing.PasswordHash
 	}
+	// preserve solution link
+	a.SourceSolutionID = existing.SourceSolutionID
+	a.SourceProblemID = existing.SourceProblemID
 	if err := s.db.Save(a).Error; err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "短链已被占用，请换一个"})
@@ -645,9 +673,7 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
 		return nil
 	}
-	if req.OrgIDs != nil {
-		_ = s.replaceOrgSync(a.ID, req.OrgIDs)
-	}
+	_ = s.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility)
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 		Visibility:  a.Visibility,
 		OwnerID:     a.UserID,
@@ -678,10 +704,11 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 	if len(content) > maxBlogContent {
 		return nil, "正文过大，最大 512KB"
 	}
-	// 摘要与题解同步一致：不自动从正文截取，空着留给作者手填
-	summary := strings.TrimSpace(req.Summary)
+	// 摘要：空 → 从正文生成默认简述；作者手填则保留
+	summary := blogaccess.ResolveSummaryForSave(req.Summary, content)
 	if utf8.RuneCountInString(summary) > maxBlogSummary {
-		return nil, "摘要过长"
+		runes := []rune(summary)
+		summary = string(runes[:maxBlogSummary])
 	}
 	cover := strings.TrimSpace(req.CoverURL)
 	if len(cover) > maxBlogCover {
@@ -768,12 +795,8 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 		}
 	}
 
-	// recommend only meaningful for public
-	recommend := req.Recommend
-	if vis != blogaccess.VisibilityPublic {
-		recommend = false
-	}
-
+	// auto-surface: public non-password → recommend + main profile; else off
+	auto := blogaccess.AutoSurface(vis)
 	return &model.BlogArticle{
 		UserID:            userID,
 		Slug:              slug,
@@ -783,10 +806,114 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 		CoverURL:          cover,
 		Visibility:        vis,
 		PasswordHash:      pwHash,
-		Recommend:         recommend,
-		SyncToMainProfile: req.SyncToMainProfile,
+		Recommend:         auto,
+		SyncToMainProfile: auto,
 		CategoryID:        req.CategoryID,
 	}, ""
+}
+
+// applyAutoOrgSurface syncs article to all orgs the author belongs to when public.
+// Non-public clears org surfaces.
+func (s *BlogService) applyAutoOrgSurface(articleID, userID uint, visibility string) error {
+	if !blogaccess.AutoSurface(visibility) {
+		return s.db.Where("article_id = ?", articleID).Delete(&model.BlogArticleOrg{}).Error
+	}
+	var orgIDs []uint
+	_ = s.db.Model(&model.OrgMember{}).Where("user_id = ?", userID).Pluck("org_id", &orgIDs).Error
+	if len(orgIDs) == 0 {
+		// at least public domain
+		if pub := s.publicOrgID(); pub > 0 {
+			orgIDs = []uint{pub}
+		}
+	}
+	return s.replaceOrgSync(articleID, orgIDs)
+}
+
+func blogVisitorKey(ctx khttp.Context, viewerID uint) string {
+	if viewerID > 0 {
+		return fmt.Sprintf("u:%d", viewerID)
+	}
+	// cookie / header visitor id
+	if c, err := ctx.Request().Cookie("goalgo_vid"); err == nil && c != nil {
+		v := strings.TrimSpace(c.Value)
+		if v != "" && len(v) <= 64 {
+			return "v:" + v
+		}
+	}
+	if h := strings.TrimSpace(ctx.Request().Header.Get("X-Visitor-Id")); h != "" && len(h) <= 64 {
+		return "v:" + h
+	}
+	// fallback: IP + UA hash (best-effort anonymous UV)
+	ip := ctx.Request().Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = ctx.Request().RemoteAddr
+	}
+	ua := ctx.Request().UserAgent()
+	sum := sha256.Sum256([]byte(ip + "|" + ua))
+	return "a:" + hex.EncodeToString(sum[:8])
+}
+
+// recordBlogArticleUV returns true if this is a new unique view (counter incremented).
+func (s *BlogService) recordBlogArticleUV(articleID uint, visitorKey string) bool {
+	if articleID == 0 || visitorKey == "" {
+		return false
+	}
+	row := model.BlogArticleViewUV{ArticleID: articleID, VisitorKey: visitorKey}
+	if err := s.db.Create(&row).Error; err != nil {
+		// unique conflict → already counted
+		return false
+	}
+	_ = s.db.Model(&model.BlogArticle{}).Where("id = ?", articleID).
+		UpdateColumn("view_count", gorm.Expr("view_count + 1")).Error
+	return true
+}
+
+// recordLinkedSolutionUV shares UV with the main-site solution (core DB) and mirrors count.
+func (s *BlogService) recordLinkedSolutionUV(solutionID, articleID uint, visitorKey string) {
+	if solutionID == 0 || visitorKey == "" {
+		return
+	}
+	// try core community_view_uvs
+	if s.coreDB != nil {
+		err := s.coreDB.Exec(
+			`INSERT INTO community_view_uvs (created_at, target_type, target_id, visitor_key)
+			 VALUES (NOW(), 'solution', ?, ?)
+			 ON CONFLICT DO NOTHING`,
+			solutionID, visitorKey,
+		).Error
+		// also try without ON CONFLICT for drivers that differ — unique fail is fine
+		_ = err
+		// increment if row exists for this visitor was just inserted: compare counts
+		var n int64
+		_ = s.coreDB.Table("community_view_uvs").
+			Where("target_type = ? AND target_id = ? AND visitor_key = ?", "solution", solutionID, visitorKey).
+			Count(&n).Error
+		if n == 1 {
+			// may be first insert this process; still bump once using a check on blog uv table
+		}
+		// Use blog UV table as secondary uniqueness for this article
+		if s.recordBlogArticleUV(articleID, visitorKey) {
+			_ = s.coreDB.Exec(
+				`UPDATE problem_user_solutions SET view_count = view_count + 1 WHERE id = ?`,
+				solutionID,
+			).Error
+			var vc int
+			_ = s.coreDB.Table("problem_user_solutions").Select("view_count").Where("id = ?", solutionID).Scan(&vc).Error
+			if vc > 0 {
+				_ = s.db.Model(&model.BlogArticle{}).Where("id = ?", articleID).UpdateColumn("view_count", vc).Error
+			}
+		} else {
+			// already counted: align blog counter to solution
+			var vc int
+			_ = s.coreDB.Table("problem_user_solutions").Select("view_count").Where("id = ?", solutionID).Scan(&vc).Error
+			if vc >= 0 {
+				_ = s.db.Model(&model.BlogArticle{}).Where("id = ?", articleID).UpdateColumn("view_count", vc).Error
+			}
+		}
+		return
+	}
+	// no core DB: pure blog UV
+	_ = s.recordBlogArticleUV(articleID, visitorKey)
 }
 
 func (s *BlogService) handleDelete(ctx khttp.Context) error {
@@ -870,9 +997,28 @@ func (s *BlogService) handleMine(ctx khttp.Context) error {
 func (s *BlogService) handleRecommend(ctx khttp.Context) error {
 	page, pageSize := parsePage(ctx.Request())
 	viewer := blogViewerID(ctx)
+	// public non-password articles only (auto-surface; recommend flag kept in sync)
 	q := s.db.Model(&model.BlogArticle{}).
-		Where("visibility = ? AND recommend = ?", blogaccess.VisibilityPublic, true).
+		Where("visibility = ?", blogaccess.VisibilityPublic).
 		Where("(moderation_status = ? OR moderation_status = '' OR moderation_status IS NULL)", model.BlogModerationApproved)
+
+	// optional org filter: display follows current domain
+	orgID, _ := strconv.ParseUint(strings.TrimSpace(ctx.Request().URL.Query().Get("orgId")), 10, 64)
+	if orgID > 0 {
+		// public system org → all public articles; private org → only synced rows
+		var o model.Org
+		if s.db.Select("id", "is_system").First(&o, uint(orgID)).Error == nil && !o.IsSystem {
+			q = q.Where(
+				"id IN (SELECT article_id FROM blog_article_orgs WHERE org_id = ?)",
+				uint(orgID),
+			)
+		}
+	}
+	// exclude solution-mirrored articles when excludeSolutions=1 (discover dedupe)
+	if strings.TrimSpace(ctx.Request().URL.Query().Get("excludeSolutions")) == "1" {
+		q = q.Where("source_solution_id IS NULL OR source_solution_id = 0")
+	}
+
 	var total int64
 	_ = q.Count(&total).Error
 	var list []model.BlogArticle
@@ -911,12 +1057,10 @@ func (s *BlogService) handlePlaza(ctx khttp.Context) error {
 		sort = "latest"
 	}
 
+	// all public articles (auto-surface); sort=recommend is alias of latest
 	q := s.db.Model(&model.BlogArticle{}).
 		Where("visibility = ?", blogaccess.VisibilityPublic).
 		Where("(moderation_status = ? OR moderation_status = '' OR moderation_status IS NULL)", model.BlogModerationApproved)
-	if sort == "recommend" {
-		q = q.Where("recommend = ?", true)
-	}
 	if keyword != "" {
 		like := "%" + keyword + "%"
 		q = q.Where("title ILIKE ? OR summary ILIKE ?", like, like)
@@ -1591,6 +1735,115 @@ func (s *BlogService) handleLikeToggle(ctx khttp.Context) error {
 		"data": map[string]interface{}{"liked": liked, "likeCount": likeCount},
 	})
 	return nil
+}
+
+// ---------- report ----------
+
+func (s *BlogService) handleReport(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
+		return nil
+	}
+	var body struct {
+		ArticleID uint   `json:"articleId"`
+		Reason    string `json:"reason"`
+	}
+	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ArticleID == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
+		return nil
+	}
+	reason := strings.TrimSpace(strings.ReplaceAll(body.Reason, "\r\n", "\n"))
+	if reason == "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请填写举报原因"})
+		return nil
+	}
+	if utf8.RuneCountInString(reason) > 500 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "举报原因过长"})
+		return nil
+	}
+	var a model.BlogArticle
+	if err := s.db.First(&a, body.ArticleID).Error; err != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
+		return nil
+	}
+	if a.UserID == pd.UserID {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "不能举报自己的文章"})
+		return nil
+	}
+	var existing model.BlogReport
+	if s.db.Where("user_id = ? AND article_id = ?", pd.UserID, body.ArticleID).First(&existing).Error == nil {
+		writeJSON(ctx.Response(), 200, map[string]interface{}{
+			"code": 0, "message": "你已举报过该文章，我们会尽快处理",
+			"data": map[string]interface{}{"id": existing.ID, "alreadyReported": true},
+		})
+		return nil
+	}
+	row := model.BlogReport{
+		UserID:    pd.UserID,
+		ArticleID: body.ArticleID,
+		Reason:    reason,
+		Status:    "pending",
+	}
+	if err := s.db.Create(&row).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "提交失败，请稍后重试"})
+		return nil
+	}
+	s.notifyAdminsBlogReport(pd, &a, reason, row.ID)
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "已收到举报，我们会尽快处理",
+		"data": map[string]interface{}{"id": row.ID, "alreadyReported": false},
+	})
+	return nil
+}
+
+// notifyAdminsBlogReport 站内通知全部站管 + 尝试发邮件
+func (s *BlogService) notifyAdminsBlogReport(pd *auth.JwtPayload, a *model.BlogArticle, reason string, reportID uint) {
+	if a == nil || pd == nil {
+		return
+	}
+	actorName := pd.Name
+	if actorName == "" {
+		actorName = pd.Username
+	}
+	var author model.User
+	_ = s.db.Select("id", "username", "name").First(&author, a.UserID).Error
+	var admins []model.User
+	_ = s.db.Select("id", "email", "username", "name").Where("is_site_admin = ?", true).Find(&admins).Error
+	title := "博客文章举报"
+	bodyText := fmt.Sprintf("%s 举报了文章《%s》（作者 @%s）：%s",
+		actorName, a.Title, author.Username, reason)
+	payload := mustJSON(map[string]interface{}{
+		"articleId": a.ID, "slug": a.Slug, "authorUsername": author.Username,
+		"reportId": reportID, "reason": reason,
+	})
+	for _, adm := range admins {
+		if adm.ID == 0 || adm.ID == pd.UserID {
+			continue
+		}
+		_ = CreateNotification(s.db, model.Notification{
+			UserID:  adm.ID,
+			Type:    model.NotifTypeBlogReport,
+			Title:   title,
+			Body:    bodyText,
+			ActorID: pd.UserID,
+			RefType: "blog_article",
+			RefID:   a.ID,
+			Payload: payload,
+		})
+		// email best-effort
+		email := strings.TrimSpace(adm.Email)
+		if email == "" {
+			continue
+		}
+		if rt, err := sitesettings.LoadFromDB(s.db); err == nil && rt != nil {
+			if sender := rt.MailSender(); sender != nil && sender.Configured() {
+				_ = sender.Send(email, "[GoAlgo] "+title,
+					fmt.Sprintf("<p>%s</p><p>文章 id=%d slug=%s</p><p>原因：%s</p>",
+						bodyText, a.ID, a.Slug, reason))
+			}
+		}
+	}
 }
 
 // ---------- theme ----------

@@ -2,6 +2,7 @@ package blogaccess
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -151,5 +152,59 @@ func TestValidVisibility(t *testing.T) {
 	}
 	if ValidVisibility("nope") {
 		t.Fatal("invalid")
+	}
+}
+
+func TestAutoSurface(t *testing.T) {
+	if !AutoSurface("public") {
+		t.Fatal("public should surface")
+	}
+	if AutoSurface("private") || AutoSurface("password") {
+		t.Fatal("private/password must not surface")
+	}
+}
+
+func TestDefaultSummary(t *testing.T) {
+	sample := `$N$ 最大能到 $10^{500}$，普通的遍历必超时，只能用数位 DP。我们在按位枚举填数时，需要维护状态来判断题目给的三个条件。
+条件一是判断 3 的倍数，利用特征只需记录当前各数位之和对 3 的余数（` + "`rem`" + `）。
+条件二和三涉及具体出现了哪些数字，用一个二进制状态掩码（` + "`mask`" + `）来存数字集合最方便。用更多填充文字确保超过默认上限。` + strings.Repeat("填充", 80)
+	got := DefaultSummary(sample)
+	if got == "" {
+		t.Fatal("expected non-empty default summary")
+	}
+	if !strings.Contains(got, "数位 DP") {
+		t.Fatalf("expected content-derived brief, got %q", got)
+	}
+	if len([]rune(got)) > DefaultSummaryMaxRunes+2 {
+		t.Fatalf("too long: %d", len([]rune(got)))
+	}
+	// fenced code stripped
+	withCode := "前言\n```go\nfmt.Println(1)\n```\n后记"
+	s2 := DefaultSummary(withCode)
+	if strings.Contains(s2, "Println") {
+		t.Fatalf("code block should be stripped: %q", s2)
+	}
+	if !strings.Contains(s2, "前言") || !strings.Contains(s2, "后记") {
+		t.Fatalf("kept prose: %q", s2)
+	}
+}
+
+func TestIsDefaultSummaryAndResolve(t *testing.T) {
+	content := "普通的遍历必超时，只能用数位 DP。我们在按位枚举填数时需要维护状态。"
+	def := DefaultSummary(content)
+	if !IsDefaultSummary(def, content) {
+		t.Fatal("generated must count as default")
+	}
+	if !IsDefaultSummary("", content) {
+		t.Fatal("empty is default (editor empty)")
+	}
+	if IsDefaultSummary("我手写的摘要", content) {
+		t.Fatal("custom must not be default")
+	}
+	if ResolveSummaryForSave("", content) != def {
+		t.Fatal("empty save regenerates")
+	}
+	if ResolveSummaryForSave("  自定义  ", content) != "自定义" {
+		t.Fatal("custom kept")
 	}
 }

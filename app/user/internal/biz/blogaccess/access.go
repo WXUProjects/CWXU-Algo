@@ -2,7 +2,11 @@
 // Keep free of HTTP / DB so unit tests can drive the real policy path.
 package blogaccess
 
-import "strings"
+import (
+	"strings"
+
+	"cwxu-algo/app/common/blogtext"
+)
 
 // Visibility values stored on articles.
 const (
@@ -148,4 +152,26 @@ func ThemeEnabled(globalAll bool, perUser *bool) bool {
 		return *perUser
 	}
 	return globalAll
+}
+
+// AutoSurface reports whether a public non-password article should auto-appear
+// on discovery recommend, plaza, and author-org surfaces.
+func AutoSurface(visibility string) bool {
+	return blogtext.AutoSurface(visibility)
+}
+
+// DefaultSummaryMaxRunes mirrors blogtext.
+const DefaultSummaryMaxRunes = blogtext.DefaultSummaryMaxRunes
+
+// DefaultSummary builds a content-derived brief for list cards.
+func DefaultSummary(content string) string { return blogtext.DefaultSummary(content) }
+
+// IsDefaultSummary reports whether summary matches the system default for content.
+func IsDefaultSummary(summary, content string) bool {
+	return blogtext.IsDefaultSummary(summary, content)
+}
+
+// ResolveSummaryForSave: empty → regenerate default; non-empty custom kept.
+func ResolveSummaryForSave(userSummary, content string) string {
+	return blogtext.ResolveSummaryForSave(userSummary, content)
 }

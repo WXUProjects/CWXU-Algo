@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -14,6 +17,7 @@ import (
 	"cwxu-algo/app/common/blogsync"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/notify"
+	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -299,6 +303,15 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 		_ = s.db.Model(&row).Update("root_id", row.ID).Error
 		row.RootID = row.ID
 	}
+	// 题解评论：同步 comment_count → 题解 + 镜像博客
+	if row.SolutionID > 0 {
+		_ = s.db.Model(&model.ProblemUserSolution{}).Where("id = ?", row.SolutionID).
+			UpdateColumn("comment_count", gorm.Expr("comment_count + 1")).Error
+		var sol model.ProblemUserSolution
+		if s.db.Select("id", "blog_article_id", "like_count", "view_count", "comment_count").First(&sol, row.SolutionID).Error == nil {
+			s.mirrorSolutionCountersToBlog(&sol)
+		}
+	}
 
 	// 仅题目顶层评论写发现流（题解评论不进组织动态，避免刷屏）
 	if row.ParentID == 0 && row.SolutionID == 0 {
@@ -455,11 +468,13 @@ func (s *CommunityService) handleSolutionList(ctx khttp.Context) error {
 			"avatar":    u.avatar,
 			"title":     sol.Title,
 			// 列表不回全文，减轻体积
-			"excerpt":   excerpt(sol.ContentMD, maxExcerptRunes),
-			"likeCount": sol.LikeCount,
-			"liked":     likedSet[sol.ID],
-			"createdAt": sol.CreatedAt.Unix(),
-			"updatedAt": sol.UpdatedAt.Unix(),
+			"excerpt":      excerpt(sol.ContentMD, maxExcerptRunes),
+			"likeCount":    sol.LikeCount,
+			"viewCount":    sol.ViewCount,
+			"commentCount": sol.CommentCount,
+			"liked":        likedSet[sol.ID],
+			"createdAt":    sol.CreatedAt.Unix(),
+			"updatedAt":    sol.UpdatedAt.Unix(),
 		}
 		if slug, ok := s.blogSlugFor(sol); ok && u.username != "" {
 			item["blogArticleId"] = sol.BlogArticleID
@@ -499,6 +514,14 @@ func (s *CommunityService) handleSolutionGet(ctx khttp.Context) error {
 			Count(&n).Error
 		liked = n > 0
 	}
+	// UV view (shared with mirrored blog)
+	if s.recordSolutionUV(ctx, sol.ID, viewerID) {
+		sol.ViewCount++
+		s.mirrorSolutionCountersToBlog(&sol)
+	} else {
+		_ = s.db.Select("view_count", "like_count", "comment_count", "blog_article_id").First(&sol, sol.ID).Error
+	}
+
 	// 旧题解 / 博客镜像丢失：懒同步（有 userDB 时）
 	slug, hasBlog := s.blogSlugFor(sol)
 	if !hasBlog && s.udb != nil {
@@ -514,7 +537,8 @@ func (s *CommunityService) handleSolutionGet(ctx khttp.Context) error {
 		"id": sol.ID, "problemId": sol.ProblemID, "userId": sol.UserID,
 		"username": u.username, "name": u.name, "avatar": u.avatar,
 		"title": sol.Title, "contentMd": sol.ContentMD,
-		"likeCount": sol.LikeCount, "liked": liked,
+		"likeCount": sol.LikeCount, "viewCount": sol.ViewCount,
+		"commentCount": sol.CommentCount, "liked": liked,
 		"createdAt": sol.CreatedAt.Unix(), "updatedAt": sol.UpdatedAt.Unix(),
 	}
 	if hasBlog && slug != "" && u.username != "" {
@@ -814,6 +838,7 @@ func (s *CommunityService) handleReport(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "提交失败，请稍后重试"})
 		return nil
 	}
+	s.notifyAdminsCommunityReport(pd, tt, req.TargetID, reason, row.ID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "已收到举报，我们会尽快处理",
 		"data": map[string]interface{}{"id": row.ID, "alreadyReported": false},
@@ -988,7 +1013,9 @@ func (s *CommunityService) syncSolutionToBlog(sol *model.ProblemUserSolution) {
 	if s == nil || sol == nil || sol.ID == 0 || s.udb == nil {
 		return
 	}
-	aid, _, err := blogsync.UpsertFromSolution(s.udb, sol.UserID, sol.ID, sol.BlogArticleID, sol.Title, sol.ContentMD)
+	aid, _, err := blogsync.UpsertFromSolutionWithProblem(
+		s.udb, sol.UserID, sol.ID, sol.ProblemID, sol.BlogArticleID, sol.Title, sol.ContentMD,
+	)
 	if err != nil {
 		log.Warnf("blogsync solution=%d: %v", sol.ID, err)
 		return
@@ -996,6 +1023,126 @@ func (s *CommunityService) syncSolutionToBlog(sol *model.ProblemUserSolution) {
 	if aid > 0 && aid != sol.BlogArticleID {
 		sol.BlogArticleID = aid
 		_ = s.db.Model(sol).Update("blog_article_id", aid).Error
+	}
+	// keep counters aligned after create/update
+	s.mirrorSolutionCountersToBlog(sol)
+}
+
+// mirrorSolutionCountersToBlog copies like/view/comment counts to mirrored blog article.
+func (s *CommunityService) mirrorSolutionCountersToBlog(sol *model.ProblemUserSolution) {
+	if s == nil || sol == nil || s.udb == nil {
+		return
+	}
+	aid := sol.BlogArticleID
+	if aid == 0 {
+		if id, _, ok := blogsync.LookupBySolution(s.udb, sol.ID); ok {
+			aid = id
+			if sol.BlogArticleID == 0 && id > 0 {
+				sol.BlogArticleID = id
+				_ = s.db.Model(&model.ProblemUserSolution{}).Where("id = ?", sol.ID).Update("blog_article_id", id).Error
+			}
+		}
+	}
+	if aid == 0 {
+		return
+	}
+	_ = s.udb.Table("blog_articles").Where("id = ?", aid).Updates(map[string]interface{}{
+		"like_count":    sol.LikeCount,
+		"view_count":    sol.ViewCount,
+		"comment_count": sol.CommentCount,
+	}).Error
+}
+
+// recordSolutionUV returns true if this visitor is new for the solution.
+func (s *CommunityService) recordSolutionUV(ctx khttp.Context, solutionID, viewerID uint) bool {
+	if solutionID == 0 {
+		return false
+	}
+	key := communityVisitorKey(ctx, viewerID)
+	row := model.CommunityViewUV{
+		TargetType: model.CommunityTargetSolution,
+		TargetID:   solutionID,
+		VisitorKey: key,
+	}
+	if err := s.db.Create(&row).Error; err != nil {
+		return false
+	}
+	_ = s.db.Model(&model.ProblemUserSolution{}).Where("id = ?", solutionID).
+		UpdateColumn("view_count", gorm.Expr("view_count + 1")).Error
+	return true
+}
+
+func communityVisitorKey(ctx khttp.Context, viewerID uint) string {
+	if viewerID > 0 {
+		return fmt.Sprintf("u:%d", viewerID)
+	}
+	if c, err := ctx.Request().Cookie("goalgo_vid"); err == nil && c != nil {
+		v := strings.TrimSpace(c.Value)
+		if v != "" && len(v) <= 64 {
+			return "v:" + v
+		}
+	}
+	if h := strings.TrimSpace(ctx.Request().Header.Get("X-Visitor-Id")); h != "" && len(h) <= 64 {
+		return "v:" + h
+	}
+	ip := ctx.Request().Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = ctx.Request().RemoteAddr
+	}
+	ua := ctx.Request().UserAgent()
+	sum := sha256.Sum256([]byte(ip + "|" + ua))
+	return "a:" + hex.EncodeToString(sum[:8])
+}
+
+// notifyAdminsCommunityReport 站内通知站管 + 邮件
+func (s *CommunityService) notifyAdminsCommunityReport(pd *auth.JwtPayload, tt string, targetID uint, reason string, reportID uint) {
+	if pd == nil || s.udb == nil {
+		return
+	}
+	actorName := pd.Name
+	if actorName == "" {
+		actorName = pd.Username
+	}
+	label := "内容"
+	switch tt {
+	case model.CommunityTargetSolution:
+		label = "题解"
+	case model.CommunityTargetComment:
+		label = "评论"
+	}
+	title := "社区内容举报"
+	body := fmt.Sprintf("%s 举报了%s #%d：%s", actorName, label, targetID, reason)
+	// site admins from user DB
+	type adminRow struct {
+		ID    uint
+		Email string
+	}
+	var admins []adminRow
+	_ = s.udb.Table("users").Select("id, email").Where("is_site_admin = ?", true).Find(&admins).Error
+	for _, adm := range admins {
+		if adm.ID == 0 || adm.ID == pd.UserID {
+			continue
+		}
+		_ = notify.Create(s.udb, notify.Row{
+			UserID:  adm.ID,
+			Type:    notify.TypeCommunityReport,
+			Title:   title,
+			Body:    body,
+			ActorID: pd.UserID,
+			RefType: tt,
+			RefID:   targetID,
+			Payload: fmt.Sprintf(`{"reportId":%d,"reason":%q}`, reportID, reason),
+		})
+		email := strings.TrimSpace(adm.Email)
+		if email == "" {
+			continue
+		}
+		if rt, err := sitesettings.LoadFromDB(s.udb); err == nil && rt != nil {
+			if sender := rt.MailSender(); sender != nil && sender.Configured() {
+				_ = sender.Send(email, "[GoAlgo] "+title,
+					fmt.Sprintf("<p>%s</p><p>类型=%s id=%d</p>", body, tt, targetID))
+			}
+		}
 	}
 }
 
@@ -1180,6 +1327,11 @@ func (s *CommunityService) adjustLikeCount(tt string, id uint, delta int) {
 		} else {
 			_ = s.db.Model(&model.ProblemUserSolution{}).Where("id = ? AND like_count > 0", id).
 				UpdateColumn("like_count", gorm.Expr("like_count + ?", delta)).Error
+		}
+		// mirror to blog article
+		var sol model.ProblemUserSolution
+		if s.db.Select("id", "blog_article_id", "like_count", "view_count", "comment_count").First(&sol, id).Error == nil {
+			s.mirrorSolutionCountersToBlog(&sol)
 		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"cwxu-algo/app/common/blogtext"
 	"gorm.io/gorm"
 )
 
@@ -53,6 +54,7 @@ type Article struct {
 	PublishedAt       *time.Time `gorm:"column:published_at"`
 	// SourceSolutionID 主站题解 id；>0 表示由题解同步生成
 	SourceSolutionID *uint `gorm:"column:source_solution_id"`
+	SourceProblemID  *uint `gorm:"column:source_problem_id"`
 }
 
 func (Article) TableName() string { return "blog_articles" }
@@ -97,9 +99,14 @@ func EnsureDefaultCategory(db *gorm.DB, userID uint) (uint, error) {
 
 // UpsertFromSolution 创建或更新题解对应的博客文章。
 // articleID 为题解侧缓存的 blog_article_id（0 表示未知）。
-// 摘要不自动生成：新建留空，更新不覆盖（留给作者在博客编辑里自己填）。
+// 公开题解自动 recommend + 同步作者组织；摘要：仅当空或仍是系统默认时按正文重生成。
 // 返回 articleID、slug。
 func UpsertFromSolution(db *gorm.DB, userID, solutionID, articleID uint, title, content string) (uint, string, error) {
+	return UpsertFromSolutionWithProblem(db, userID, solutionID, 0, articleID, title, content)
+}
+
+// UpsertFromSolutionWithProblem same as UpsertFromSolution but stores source problem id.
+func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, articleID uint, title, content string) (uint, string, error) {
 	if db == nil || userID == 0 || solutionID == 0 {
 		return 0, "", fmt.Errorf("blogsync: missing args")
 	}
@@ -118,43 +125,50 @@ func UpsertFromSolution(db *gorm.DB, userID, solutionID, articleID uint, title, 
 	}
 	catPtr := &catID
 	sid := solutionID
+	var pid *uint
+	if problemID > 0 {
+		pid = &problemID
+	}
 	slug := solutionSlug(solutionID)
+	defSum := blogtext.DefaultSummary(content)
 
-	// 1) 按 articleID（不写 summary，避免冲掉作者手填摘要）
+	applyUpdate := func(a *Article) (uint, string, error) {
+		updates := map[string]interface{}{
+			"title":                title,
+			"content":              content,
+			"category_id":          catPtr,
+			"visibility":           visPublic,
+			"recommend":            true,
+			"sync_to_main_profile": true,
+			"source_solution_id":   &sid,
+		}
+		if pid != nil {
+			updates["source_problem_id"] = pid
+		}
+		// regenerate summary only if empty or still system-default for old content
+		if blogtext.IsDefaultSummary(a.Summary, a.Content) || strings.TrimSpace(a.Summary) == "" {
+			updates["summary"] = defSum
+		}
+		_ = db.Model(a).Updates(updates).Error
+		_ = autoSurfaceOrgs(db, a.ID, userID)
+		return a.ID, a.Slug, nil
+	}
+
+	// 1) 按 articleID
 	if articleID > 0 {
 		var a Article
 		if db.Where("id = ? AND user_id = ?", articleID, userID).First(&a).Error == nil {
-			_ = db.Model(&a).Updates(map[string]interface{}{
-				"title":              title,
-				"content":            content,
-				"category_id":        catPtr,
-				"visibility":         visPublic,
-				"source_solution_id": &sid,
-			}).Error
-			return a.ID, a.Slug, nil
+			return applyUpdate(&a)
 		}
 	}
 	// 2) 按 source_solution_id
 	var existing Article
 	if db.Where("source_solution_id = ?", solutionID).First(&existing).Error == nil {
-		_ = db.Model(&existing).Updates(map[string]interface{}{
-			"title":       title,
-			"content":     content,
-			"category_id": catPtr,
-			"visibility":  visPublic,
-		}).Error
-		return existing.ID, existing.Slug, nil
+		return applyUpdate(&existing)
 	}
 	// 3) 按固定 slug solution-{id}
 	if db.Where("user_id = ? AND slug = ?", userID, slug).First(&existing).Error == nil {
-		_ = db.Model(&existing).Updates(map[string]interface{}{
-			"title":              title,
-			"content":            content,
-			"category_id":        catPtr,
-			"visibility":         visPublic,
-			"source_solution_id": &sid,
-		}).Error
-		return existing.ID, existing.Slug, nil
+		return applyUpdate(&existing)
 	}
 
 	now := time.Now()
@@ -162,26 +176,76 @@ func UpsertFromSolution(db *gorm.DB, userID, solutionID, articleID uint, title, 
 		UserID:            userID,
 		Slug:              slug,
 		Title:             title,
-		Summary:           "", // 摘要留给作者手填，不从正文截
+		Summary:           defSum,
 		Content:           content,
 		Visibility:        visPublic,
-		Recommend:         false,
-		SyncToMainProfile: false,
+		Recommend:         true,
+		SyncToMainProfile: true,
 		CategoryID:        catPtr,
 		PublishedAt:       &now,
 		SourceSolutionID:  &sid,
+		SourceProblemID:   pid,
 	}
 	if err := db.Create(&a).Error; err != nil {
 		// 并发冲突：再读一次
 		if db.Where("source_solution_id = ?", solutionID).First(&existing).Error == nil {
-			return existing.ID, existing.Slug, nil
+			return applyUpdate(&existing)
 		}
 		if db.Where("user_id = ? AND slug = ?", userID, slug).First(&existing).Error == nil {
-			return existing.ID, existing.Slug, nil
+			return applyUpdate(&existing)
 		}
 		return 0, "", err
 	}
+	_ = autoSurfaceOrgs(db, a.ID, userID)
 	return a.ID, a.Slug, nil
+}
+
+// autoSurfaceOrgs writes blog_article_orgs for all author memberships (+ public domain rule).
+func autoSurfaceOrgs(db *gorm.DB, articleID, userID uint) error {
+	if db == nil || articleID == 0 || userID == 0 {
+		return nil
+	}
+	var orgIDs []uint
+	_ = db.Table("org_members").Where("user_id = ?", userID).Pluck("org_id", &orgIDs).Error
+	// ensure public domain
+	var pubID uint
+	_ = db.Table("orgs").Select("id").Where("is_system = ?", true).Limit(1).Scan(&pubID).Error
+	// expand: any private org also includes public domain
+	seen := map[uint]struct{}{}
+	var expanded []uint
+	hasPrivate := false
+	for _, id := range orgIDs {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		expanded = append(expanded, id)
+		if pubID == 0 || id != pubID {
+			hasPrivate = true
+		}
+	}
+	if hasPrivate && pubID > 0 {
+		if _, ok := seen[pubID]; !ok {
+			expanded = append([]uint{pubID}, expanded...)
+		}
+	}
+	if len(expanded) == 0 && pubID > 0 {
+		expanded = []uint{pubID}
+	}
+	_ = db.Where("article_id = ?", articleID).Delete(&articleOrg{}).Error
+	for _, oid := range expanded {
+		_ = db.Exec(
+			`INSERT INTO blog_article_orgs (created_at, article_id, org_id)
+			 SELECT NOW(), ?, ? WHERE NOT EXISTS (
+			   SELECT 1 FROM blog_article_orgs WHERE article_id = ? AND org_id = ?
+			 )`,
+			articleID, oid, articleID, oid,
+		).Error
+	}
+	return nil
 }
 
 // DeleteBySolution 删除题解对应的博客文章（及组织同步行；评论/点赞由 FK 或残留可接受，尽量清）。

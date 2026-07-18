@@ -14,6 +14,8 @@ const (
 	NotifTypeBlogCommentReply    = "blog_comment_reply"
 	NotifTypeSolutionLike        = "solution_like"
 	NotifTypeCommentLike         = "comment_like"
+	NotifTypeBlogReport          = "blog_report"
+	NotifTypeCommunityReport     = "community_report"
 )
 
 // Notification 站内信（按接收用户存储）

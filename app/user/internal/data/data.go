@@ -118,6 +118,9 @@ func migrateModels(db *gorm.DB) {
 		&model.BlogArticleOrg{},
 		&model.BlogComment{},
 		&model.BlogLike{},
+		&model.BlogArticleViewUV{},
+		&model.BlogReport{},
+		&model.SchemaPatch{},
 		&model.BlogThemeFlag{},
 		&model.BlogSiteConfig{},
 	)
@@ -130,6 +133,7 @@ func migrateModels(db *gorm.DB) {
 	ensureSiteInactiveDays(db)
 	backfillBlogModerationApproved(db)
 	backfillBlogActivationForExistingAuthors(db)
+	backfillBlogAutoSurfaceAndZeroViews(db)
 }
 
 // backfillBlogModerationApproved 旧文章默认视为已通过审核
@@ -168,6 +172,65 @@ func backfillBlogActivationForExistingAuthors(db *gorm.DB) {
 		GROUP BY a.user_id
 		ON CONFLICT (user_id) DO NOTHING
 	`).Error
+}
+
+const patchBlogAutoSurfaceUV = "blog_auto_surface_uv_v1"
+
+// backfillBlogAutoSurfaceAndZeroViews:
+// 1) 公开文章自动 recommend + sync_to_main_profile（可重复）
+// 2) 为公开文补全作者所属组织的发现同步（可重复）
+// 3) 浏览量按 UV 重计：历史 view_count 清零（一次性）
+func backfillBlogAutoSurfaceAndZeroViews(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasTable(&model.BlogArticle{}) {
+		return
+	}
+	// auto-surface flags for public (idempotent)
+	_ = db.Exec(`
+UPDATE blog_articles
+SET recommend = true, sync_to_main_profile = true
+WHERE visibility = 'public'
+`).Error
+	_ = db.Exec(`
+UPDATE blog_articles
+SET recommend = false
+WHERE visibility <> 'public'
+`).Error
+	// ensure public articles have org sync rows for all author memberships
+	_ = db.Exec(`
+INSERT INTO blog_article_orgs (created_at, article_id, org_id)
+SELECT NOW(), a.id, m.org_id
+FROM blog_articles a
+JOIN org_members m ON m.user_id = a.user_id
+WHERE a.visibility = 'public'
+  AND NOT EXISTS (
+    SELECT 1 FROM blog_article_orgs o
+    WHERE o.article_id = a.id AND o.org_id = m.org_id
+  )
+`).Error
+	// private org sync also implies public domain
+	_ = db.Exec(`
+INSERT INTO blog_article_orgs (created_at, article_id, org_id)
+SELECT NOW(), o.article_id, pub.id
+FROM blog_article_orgs o
+JOIN orgs priv ON priv.id = o.org_id AND priv.is_system = false
+CROSS JOIN orgs pub ON pub.is_system = true
+WHERE NOT EXISTS (
+  SELECT 1 FROM blog_article_orgs x
+  WHERE x.article_id = o.article_id AND x.org_id = pub.id
+)
+`).Error
+
+	// one-shot zero views for UV migration
+	if !db.Migrator().HasTable(&model.SchemaPatch{}) {
+		return
+	}
+	var n int64
+	_ = db.Model(&model.SchemaPatch{}).Where("key = ?", patchBlogAutoSurfaceUV).Count(&n).Error
+	if n > 0 {
+		return
+	}
+	_ = db.Exec(`UPDATE blog_articles SET view_count = 0`).Error
+	_ = db.Create(&model.SchemaPatch{Key: patchBlogAutoSurfaceUV, AppliedAt: time.Now()}).Error
 }
 
 // backfillLastLoginAt 避免上线瞬间全员被判休眠

@@ -49,8 +49,11 @@ func TestUpsertFromSolution(t *testing.T) {
 	}
 	var created Article
 	_ = db.First(&created, aid).Error
-	if created.Summary != "" {
-		t.Fatalf("solution sync must not auto-fill summary, got %q", created.Summary)
+	if created.Summary == "" {
+		t.Fatalf("solution sync should auto-fill default summary")
+	}
+	if !created.Recommend {
+		t.Fatal("public solution mirror should auto recommend")
 	}
 
 	// 作者手填摘要后，题解再更新不应覆盖

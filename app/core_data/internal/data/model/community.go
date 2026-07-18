@@ -47,11 +47,26 @@ type ProblemUserSolution struct {
 	UserID    uint   `gorm:"not null;index;comment:作者"`
 	Title     string `gorm:"size:200;not null;comment:题解标题"`
 	ContentMD string `gorm:"type:text;not null;comment:Markdown 正文"`
-	// LikeCount 冗余点赞数
+	// LikeCount 冗余点赞数（与镜像博客共享）
 	LikeCount int `gorm:"not null;default:0;comment:点赞数"`
+	// ViewCount UV 浏览量（与镜像博客共享；迁移后清零）
+	ViewCount int `gorm:"not null;default:0;comment:阅读数UV"`
+	// CommentCount 题解下评论数（与镜像博客共享）
+	CommentCount int `gorm:"not null;default:0;comment:评论数"`
 	// BlogArticleID 同步到个人博客后的文章 id（algo_user.blog_articles）；0=未同步
 	BlogArticleID uint `gorm:"not null;default:0;index;comment:博客文章id"`
 }
+
+// CommunityViewUV one unique visitor per target (solution / comment not used).
+type CommunityViewUV struct {
+	ID         uint `gorm:"primaryKey"`
+	CreatedAt  time.Time
+	TargetType string `gorm:"size:16;not null;uniqueIndex:idx_cv_uv,priority:1;comment:solution"`
+	TargetID   uint   `gorm:"not null;uniqueIndex:idx_cv_uv,priority:2;comment:目标id"`
+	VisitorKey string `gorm:"size:64;not null;uniqueIndex:idx_cv_uv,priority:3;comment:访客键"`
+}
+
+func (CommunityViewUV) TableName() string { return "community_view_uvs" }
 
 func (ProblemUserSolution) TableName() string {
 	return "problem_user_solutions"

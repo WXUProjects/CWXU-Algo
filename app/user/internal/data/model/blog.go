@@ -37,9 +37,12 @@ type BlogArticle struct {
 	// SourceSolutionID: when set, this article was synced from a main-site problem solution.
 	// Unique so one solution maps to at most one blog post.
 	SourceSolutionID *uint `gorm:"uniqueIndex:idx_blog_source_solution;comment:主站题解id"`
+	// SourceProblemID: problem of the linked solution (for UI routing / shared comments).
+	SourceProblemID *uint `gorm:"index;comment:主站题目id"`
 
 	// Denormalized counters for owner analytics.
-	ViewCount    int `gorm:"not null;default:0;comment:阅读数"`
+	// ViewCount is UV (unique visitors) after migration; historical PV zeroed on migrate.
+	ViewCount    int `gorm:"not null;default:0;comment:阅读数UV"`
 	LikeCount    int `gorm:"not null;default:0;comment:点赞数"`
 	CommentCount int `gorm:"not null;default:0;comment:评论数"`
 
@@ -101,6 +104,37 @@ type BlogLike struct {
 }
 
 func (BlogLike) TableName() string { return "blog_likes" }
+
+// BlogArticleViewUV records one unique visitor per article (login user or visitor key).
+// Linked solution↔blog shares one logical UV stream via solution-side table; pure blogs use this.
+type BlogArticleViewUV struct {
+	ID         uint `gorm:"primaryKey"`
+	CreatedAt  time.Time
+	ArticleID  uint   `gorm:"not null;uniqueIndex:idx_blog_uv_art_vis,priority:1;comment:文章"`
+	VisitorKey string `gorm:"size:64;not null;uniqueIndex:idx_blog_uv_art_vis,priority:2;comment:访客键"`
+}
+
+func (BlogArticleViewUV) TableName() string { return "blog_article_view_uvs" }
+
+// BlogReport is a user report on a blog article (for site admin review).
+type BlogReport struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UserID    uint   `gorm:"not null;uniqueIndex:idx_blog_report_user_art,priority:1;comment:举报人"`
+	ArticleID uint   `gorm:"not null;uniqueIndex:idx_blog_report_user_art,priority:2;index;comment:文章"`
+	Reason    string `gorm:"size:500;not null;comment:原因"`
+	Status    string `gorm:"size:16;not null;default:pending;index;comment:pending|resolved|dismissed"`
+}
+
+func (BlogReport) TableName() string { return "blog_reports" }
+
+// SchemaPatch records one-shot data migrations (idempotent keys).
+type SchemaPatch struct {
+	Key       string    `gorm:"primaryKey;size:64"`
+	AppliedAt time.Time `gorm:"not null"`
+}
+
+func (SchemaPatch) TableName() string { return "schema_patches" }
 
 // BlogThemeFlag stores custom-theme enablement (legacy admin switch).
 // UserID=0 row holds the global "all users" flag (Enabled=true means open for everyone).
