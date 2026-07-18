@@ -64,7 +64,8 @@ func NewWhiteListMatcher() selector.MatchFunc {
 			strings.Contains(operation, "problem/solution/get") ||
 			strings.Contains(operation, "activity/feed") ||
 			strings.Contains(operation, "user/recent-comments") ||
-			strings.Contains(operation, "user/recent-solutions") {
+			strings.Contains(operation, "user/recent-solutions") ||
+			strings.Contains(operation, "contest/problems") {
 			return false
 		}
 		if _, ok := whiteList[operation]; ok {
@@ -111,5 +112,6 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 	contest_calendar.RegisterContestCalendarHTTPServer(srv, contestCalendarService)
 	service.RegisterCommunityRoutes(srv, communityService)
 	service.RegisterProblemsetRoutes(srv, problemsetService)
+	service.RegisterContestExtraRoutes(srv, contestLogService)
 	return srv
 }

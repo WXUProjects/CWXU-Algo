@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"cwxu-algo/api/core/v1/contest_log"
@@ -10,6 +13,7 @@ import (
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/common/utils/auth"
+	bizservice "cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -18,6 +22,7 @@ import (
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/redis/go-redis/v9"
 	grpc2 "google.golang.org/grpc"
 	"gorm.io/gorm"
@@ -29,6 +34,7 @@ type ContestLogService struct {
 	db    *gorm.DB
 	rdb   *redis.Client
 	reg   *registry.Registrar
+	prob  *bizservice.ProblemUseCase
 }
 
 func (c ContestLogService) userRPC() (*grpc2.ClientConn, error) {
@@ -339,11 +345,98 @@ func (c ContestLogService) GetUserContestHistory(ctx context.Context, req *conte
 	}, nil
 }
 
-func NewContestLogService(sbDal *dal.SpiderDal, data *data.Data, reg *discovery.Register) *ContestLogService {
+func NewContestLogService(sbDal *dal.SpiderDal, data *data.Data, reg *discovery.Register, prob *bizservice.ProblemUseCase) *ContestLogService {
 	return &ContestLogService{
 		sbDal: sbDal,
 		db:    data.DB,
 		rdb:   data.RDB,
 		reg:   &reg.Reg,
+		prob:  prob,
 	}
+}
+
+// RegisterContestExtraRoutes 比赛题目目录（手写 HTTP，触发每场一次 ensure）。
+func RegisterContestExtraRoutes(srv *khttp.Server, s *ContestLogService) {
+	if srv == nil || s == nil {
+		return
+	}
+	r := srv.Route("/")
+	r.GET("/v1/core/contest/problems", s.handleContestProblems)
+}
+
+// handleContestProblems GET ?id= 或 ?contestId=（contest_logs 行 id）
+// 返回题目 Tab 列表；后台 ensure 每场只跑一次。
+func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
+	idStr := strings.TrimSpace(ctx.Query().Get("id"))
+	if idStr == "" {
+		idStr = strings.TrimSpace(ctx.Query().Get("contestId"))
+	}
+	id, _ := strconv.ParseUint(idStr, 10, 64)
+	if id == 0 {
+		writeContestJSON(ctx, 400, map[string]interface{}{"success": false, "message": "缺少比赛 id"})
+		return nil
+	}
+	var cl model.ContestLog
+	if c.db.First(&cl, uint(id)).Error != nil {
+		writeContestJSON(ctx, 404, map[string]interface{}{"success": false, "message": "比赛不存在"})
+		return nil
+	}
+
+	// 异步 ensure（每场一次）；已 done/running 则立即返回目录
+	ensureStatus := ""
+	if c.prob != nil {
+		// 先读状态；未开始则后台启动
+		var en model.ContestProblemEnsure
+		_ = c.db.Where("platform = ? AND contest_id = ?", cl.Platform, cl.ContestId).First(&en).Error
+		ensureStatus = en.Status
+		if en.ID == 0 {
+			// 同步抢占并执行（列表通常很快；爬取异步）
+			st, err := c.prob.EnsureContestProblemsOnce(cl.Platform, cl.ContestId)
+			if err != nil {
+				log.Warnf("ensure contest problems: %v", err)
+			}
+			ensureStatus = st
+		} else if en.Status == model.ContestEnsureRunning {
+			ensureStatus = model.ContestEnsureRunning
+		} else {
+			ensureStatus = en.Status
+		}
+	}
+
+	list := []map[string]interface{}{}
+	if c.prob != nil {
+		items, st, err := c.prob.ListContestProblems(cl.Platform, cl.ContestId)
+		if err == nil {
+			list = items
+			if st != "" {
+				ensureStatus = st
+			}
+		}
+	}
+
+	writeContestJSON(ctx, 200, map[string]interface{}{
+		"success": true,
+		"message": "ok",
+		"data": map[string]interface{}{
+			"contest": map[string]interface{}{
+				"id":          cl.ID,
+				"platform":    cl.Platform,
+				"contestId":   cl.ContestId,
+				"contestName": cl.ContestName,
+				"contestUrl":  cl.ContestUrl,
+				"totalCount":  cl.TotalCount,
+				"time":        cl.Time.Unix(),
+			},
+			"ensureStatus": ensureStatus,
+			"list":         list,
+		},
+	})
+	return nil
+}
+
+func writeContestJSON(ctx khttp.Context, status int, v interface{}) {
+	w := ctx.Response()
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }

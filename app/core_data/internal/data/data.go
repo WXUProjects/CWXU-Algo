@@ -108,6 +108,8 @@ func migrateModels(db *gorm.DB) {
 		&model.SubmitLog{},
 		&model.Platform{},
 		&model.ContestLog{},
+		&model.ContestProblemEnsure{},
+		&model.ContestProblem{},
 		&model.Bulletin{},
 		&model.Problem{},
 		&model.ProblemEditRequest{},
