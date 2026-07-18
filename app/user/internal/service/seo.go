@@ -534,7 +534,10 @@ func (s *SEOService) handleHTML(ctx khttp.Context) error {
 	p := s.resolvePage(req, path)
 	w := ctx.Response()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=120")
+	// Never cache SEO HTML: CDN must not serve bot page to real users.
+	w.Header().Set("Cache-Control", "private, no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Vary", "User-Agent")
 	w.Header().Set("X-Robots-Tag", "all")
 	w.WriteHeader(200)
 	_, _ = w.Write([]byte(renderSEOHTML(p)))
@@ -557,6 +560,7 @@ func renderSEOHTML(p seoPage) string {
 	b.WriteString("<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n")
 	b.WriteString("<meta charset=\"UTF-8\" />\n")
 	b.WriteString("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, viewport-fit=cover\" />\n")
+	b.WriteString("<meta name=\"theme-color\" content=\"#0f172a\" />\n")
 	b.WriteString("<title>")
 	b.WriteString(title)
 	b.WriteString("</title>\n")
@@ -607,17 +611,65 @@ func renderSEOHTML(p seoPage) string {
 		b.WriteString(img)
 		b.WriteString("\" />\n")
 	}
-	// Bootstrap SPA assets from live index.html (keeps hashed bundles in sync)
+	// Loading shell styles (formal; no bare text flash)
+	b.WriteString(`<style>
+html,body{margin:0;min-height:100%;background:#f8fafc;color:#0f172a;
+  font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.seo-shell{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:2rem 1.25rem;box-sizing:border-box}
+.seo-card{width:100%;max-width:28rem;background:#fff;border:1px solid #e2e8f0;border-radius:1rem;
+  box-shadow:0 10px 40px -12px rgba(15,23,42,.12);padding:1.75rem 1.5rem;text-align:center}
+.seo-brand{display:inline-flex;align-items:center;gap:.5rem;margin-bottom:1.25rem;color:#64748b;font-size:.8125rem;font-weight:500;letter-spacing:.02em}
+.seo-brand img{width:1.25rem;height:1.25rem;border-radius:.25rem;object-fit:cover}
+.seo-spin{width:2rem;height:2rem;margin:0 auto 1rem;border:2.5px solid #e2e8f0;border-top-color:#0f172a;
+  border-radius:50%;animation:seo-rot .7s linear infinite}
+@keyframes seo-rot{to{transform:rotate(360deg)}}
+.seo-title{margin:0 0 .5rem;font-size:1.125rem;font-weight:600;line-height:1.4;color:#0f172a;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.seo-meta{margin:0 0 1rem;font-size:.875rem;line-height:1.55;color:#64748b;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.seo-hint{margin:0;font-size:.75rem;color:#94a3b8}
+.seo-actions{margin-top:1.25rem;display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap}
+.seo-btn{display:inline-flex;align-items:center;justify-content:center;padding:.5rem 1rem;border-radius:.5rem;
+  font-size:.875rem;font-weight:500;text-decoration:none;border:1px solid #e2e8f0;color:#0f172a;background:#fff}
+.seo-btn-primary{background:#0f172a;color:#fff;border-color:#0f172a}
+.seo-noscript{max-width:40rem;margin:2rem auto;padding:0 1rem}
+.seo-noscript h1{font-size:1.25rem;margin:0 0 .75rem}
+.seo-noscript p{color:#475569;line-height:1.6}
+@media (prefers-color-scheme:dark){
+  html,body{background:#0b1220;color:#e2e8f0}
+  .seo-card{background:#111827;border-color:#1f2937;box-shadow:0 10px 40px -12px rgba(0,0,0,.45)}
+  .seo-brand,.seo-meta{color:#94a3b8}
+  .seo-title{color:#f1f5f9}
+  .seo-hint{color:#64748b}
+  .seo-spin{border-color:#1f2937;border-top-color:#e2e8f0}
+  .seo-btn{background:#111827;border-color:#334155;color:#e2e8f0}
+  .seo-btn-primary{background:#e2e8f0;color:#0f172a;border-color:#e2e8f0}
+}
+</style>
+`)
+	// Boot SPA ASAP; if boot fails, show manual entry (no plain dump)
 	b.WriteString(`<script>
 (function(){
+  var booted=false,failT=null;
+  function showFail(){
+    var el=document.getElementById("seo-fail");
+    if(el)el.hidden=false;
+    var h=document.getElementById("seo-hint");
+    if(h)h.textContent="加载较慢，可点击下方进入完整页面";
+  }
   function boot(){
-    fetch("/index.html",{credentials:"same-origin",cache:"no-cache"})
-      .then(function(r){return r.text()})
+    if(booted)return;
+    booted=true;
+    failT=setTimeout(showFail,8000);
+    fetch("/index.html",{credentials:"same-origin",cache:"no-store"})
+      .then(function(r){if(!r.ok)throw new Error("index");return r.text()})
       .then(function(html){
         var doc=new DOMParser().parseFromString(html,"text/html");
         var head=document.head;
         doc.querySelectorAll('link[rel="stylesheet"],link[rel="modulepreload"]').forEach(function(n){
-          if(n.getAttribute("href")&&!document.querySelector('link[href="'+n.getAttribute("href")+'"]')){
+          var href=n.getAttribute("href");
+          if(href&&!document.querySelector('link[href="'+href+'"]')){
             head.appendChild(n.cloneNode(true));
           }
         });
@@ -634,7 +686,8 @@ func renderSEOHTML(p seoPage) string {
           head.appendChild(el);
         }
         next(0);
-      }).catch(function(){});
+      })
+      .catch(function(){showFail()});
   }
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot);
   else boot();
@@ -642,23 +695,56 @@ func renderSEOHTML(p seoPage) string {
 </script>
 `)
 	b.WriteString("</head>\n<body>\n")
+	// #root: React mounts here and replaces shell
 	b.WriteString("<div id=\"root\">\n")
-	b.WriteString("<main style=\"max-width:720px;margin:2rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.6;color:#111\">\n")
-	b.WriteString("<h1>")
+	b.WriteString("<div class=\"seo-shell\" data-seo-shell=\"1\">\n")
+	b.WriteString("<div class=\"seo-card\">\n")
+	b.WriteString("<div class=\"seo-brand\">")
+	if img != "" {
+		b.WriteString("<img src=\"")
+		b.WriteString(img)
+		b.WriteString("\" alt=\"\" width=\"20\" height=\"20\" />")
+	}
+	b.WriteString("<span>")
+	b.WriteString(site)
+	b.WriteString("</span></div>\n")
+	b.WriteString("<div class=\"seo-spin\" aria-hidden=\"true\"></div>\n")
+	b.WriteString("<h1 class=\"seo-title\">")
 	b.WriteString(bodyTitle)
 	b.WriteString("</h1>\n")
 	if author != "" {
-		b.WriteString("<p style=\"color:#666\">")
+		b.WriteString("<p class=\"seo-meta\">")
+		b.WriteString(author)
+		b.WriteString("</p>\n")
+	}
+	if bodyText != "" {
+		b.WriteString("<p class=\"seo-meta\">")
+		b.WriteString(bodyText)
+		b.WriteString("</p>\n")
+	}
+	b.WriteString("<p class=\"seo-hint\" id=\"seo-hint\">正在进入完整页面…</p>\n")
+	b.WriteString("<div class=\"seo-actions\" id=\"seo-fail\" hidden>\n")
+	b.WriteString("<a class=\"seo-btn seo-btn-primary\" href=\"")
+	b.WriteString(pageURL)
+	b.WriteString("\">进入完整页面</a>\n")
+	b.WriteString("<a class=\"seo-btn\" href=\"/\">返回首页</a>\n")
+	b.WriteString("</div>\n")
+	b.WriteString("</div>\n</div>\n")
+	// noscript for pure crawlers without JS
+	b.WriteString("<noscript>\n<div class=\"seo-noscript\">\n<h1>")
+	b.WriteString(bodyTitle)
+	b.WriteString("</h1>\n")
+	if author != "" {
+		b.WriteString("<p>")
 		b.WriteString(author)
 		b.WriteString("</p>\n")
 	}
 	b.WriteString("<p>")
 	b.WriteString(bodyText)
-	b.WriteString("</p>\n")
-	b.WriteString("<p><a href=\"")
+	b.WriteString("</p>\n<p><a href=\"")
 	b.WriteString(pageURL)
-	b.WriteString("\">打开完整页面</a></p>\n")
-	b.WriteString("</main>\n</div>\n</body>\n</html>\n")
+	b.WriteString("\">打开页面</a></p>\n</div>\n</noscript>\n")
+	b.WriteString("</div>\n</body>\n</html>\n")
 	return b.String()
 }
 
