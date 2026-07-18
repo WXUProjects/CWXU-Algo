@@ -33,6 +33,7 @@ func (uc *ProblemUseCase) EnsureContestProblemsOnce(platform, contestID string) 
 	// failed 允许再试一次（网络/OJ 抖动）；用 CAS 从 failed→running 抢占
 	var existing model.ContestProblemEnsure
 	err = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).First(&existing).Error
+	claimed := false
 	if err == nil {
 		if existing.Status == model.ContestEnsureDone || existing.Status == model.ContestEnsureRunning {
 			return existing.Status, nil
@@ -51,30 +52,28 @@ func (uc *ProblemUseCase) EnsureContestProblemsOnce(platform, contestID string) 
 				_ = uc.data.DB.Where("id = ?", existing.ID).First(&existing).Error
 				return existing.Status, nil
 			}
-			// 本 goroutine 重试
-			goto runEnsure
+			claimed = true
 		}
 	} else if err != gorm.ErrRecordNotFound {
 		return "", err
 	}
 
-	// 抢占：插入 running；冲突则别人在做
-	row := model.ContestProblemEnsure{
-		Platform:  platform,
-		ContestID: contestID,
-		Status:    model.ContestEnsureRunning,
+	if !claimed {
+		// 抢占：插入 running；冲突则别人在做
+		row := model.ContestProblemEnsure{
+			Platform:  platform,
+			ContestID: contestID,
+			Status:    model.ContestEnsureRunning,
+		}
+		res := uc.data.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+		if res.Error != nil {
+			return "", res.Error
+		}
+		if res.RowsAffected == 0 {
+			_ = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).First(&existing).Error
+			return existing.Status, nil
+		}
 	}
-	res := uc.data.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
-	if res.Error != nil {
-		return "", res.Error
-	}
-	if res.RowsAffected == 0 {
-		// 并发：读当前状态
-		_ = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).First(&existing).Error
-		return existing.Status, nil
-	}
-
-runEnsure:
 
 	// 本 goroutine 执行发现
 	if err := uc.runContestEnsure(platform, contestID); err != nil {
