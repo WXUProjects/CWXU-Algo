@@ -16,6 +16,12 @@ const (
 	TypeOrgJoinRejected     = "org_join_rejected"
 	TypeMention             = "mention"
 	TypeCommentReply        = "comment_reply"
+	// 博客 / 题解互动
+	TypeBlogArticleLike   = "blog_article_like"
+	TypeBlogComment       = "blog_comment"
+	TypeBlogCommentReply  = "blog_comment_reply"
+	TypeSolutionLike      = "solution_like"
+	TypeCommentLike       = "comment_like"
 )
 
 // Row 与 user.notifications 表对齐（避免 core 依赖 user 包）

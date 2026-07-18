@@ -742,6 +742,7 @@ func (s *CommunityService) handleLikeToggle(ctx khttp.Context) error {
 		} else {
 			s.adjustLikeCount(tt, req.TargetID, 1)
 			liked = true
+			s.notifyCommunityLike(pd, tt, req.TargetID)
 		}
 	}
 	count := s.readLikeCount(tt, req.TargetID)
@@ -1106,6 +1107,57 @@ func (s *CommunityService) communityTargetOwner(tt string, id uint) uint {
 		}
 	}
 	return 0
+}
+
+// notifyCommunityLike 点赞同步主站通知（取消不通知）
+func (s *CommunityService) notifyCommunityLike(pd *auth.JwtPayload, tt string, targetID uint) {
+	if pd == nil || s.udb == nil || targetID == 0 {
+		return
+	}
+	ownerID := s.communityTargetOwner(tt, targetID)
+	if ownerID == 0 || ownerID == pd.UserID {
+		return
+	}
+	actorName := pd.Name
+	if actorName == "" {
+		actorName = pd.Username
+	}
+	switch tt {
+	case model.CommunityTargetSolution:
+		var sol model.ProblemUserSolution
+		if s.db.Select("id", "problem_id", "title").First(&sol, targetID).Error != nil {
+			return
+		}
+		title := sol.Title
+		if title == "" {
+			title = "题解"
+		}
+		_ = notify.Create(s.udb, notify.Row{
+			UserID:    ownerID,
+			Type:      notify.TypeSolutionLike,
+			Title:     "有人赞了你的题解",
+			Body:      actorName + " 赞了题解《" + title + "》",
+			ActorID:   pd.UserID,
+			RefType:   "solution",
+			RefID:     sol.ID,
+			ProblemID: sol.ProblemID,
+		})
+	case model.CommunityTargetComment:
+		var c model.ProblemComment
+		if s.db.Select("id", "problem_id", "solution_id").First(&c, targetID).Error != nil {
+			return
+		}
+		_ = notify.Create(s.udb, notify.Row{
+			UserID:    ownerID,
+			Type:      notify.TypeCommentLike,
+			Title:     "有人赞了你的评论",
+			Body:      actorName + " 赞了你的评论",
+			ActorID:   pd.UserID,
+			RefType:   "comment",
+			RefID:     c.ID,
+			ProblemID: c.ProblemID,
+		})
+	}
 }
 
 func (s *CommunityService) adjustLikeCount(tt string, id uint, delta int) {

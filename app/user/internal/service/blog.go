@@ -79,6 +79,18 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 	r.POST("/v1/user/blog/theme/config", bs.handleThemeConfigSave)
 	// Site-admin theme enable (legacy custom-theme capability)
 	r.POST("/v1/user/blog/theme/enable", bs.handleThemeEnable)
+
+	// 开通协议 / 激活 / 邮件通知偏好
+	r.GET("/v1/user/blog/agreement", bs.handleAgreementGet)
+	r.GET("/v1/user/blog/activation/status", bs.handleActivationStatus)
+	r.POST("/v1/user/blog/activate", bs.handleActivate)
+	r.POST("/v1/user/blog/notify-pref", bs.handleNotifyPref)
+
+	// 站管：博客管理
+	r.GET("/v1/user/blog/admin/overview", bs.handleAdminOverview)
+	r.GET("/v1/user/blog/admin/authors", bs.handleAdminAuthors)
+	r.GET("/v1/user/blog/admin/articles", bs.handleAdminArticles)
+	r.POST("/v1/user/blog/admin/moderate", bs.handleAdminModerate)
 }
 
 // ---------- helpers ----------
@@ -263,9 +275,16 @@ func (s *BlogService) articleToMap(a *model.BlogArticle, author *model.User, d b
 		"liked":             s.likedBy(a.ID, viewerID),
 		"requiresPassword":  d.RequiresPassword,
 		"canSeeBody":        d.CanSeeBody,
+		"moderationStatus":  normalizeModeration(a.ModerationStatus),
 		"createdAt":         a.CreatedAt.Unix(),
 		"updatedAt":         a.UpdatedAt.Unix(),
 		"orgIds":            s.loadOrgIDs(a.ID),
+	}
+	if a.ModerationNote != "" && (viewerID == a.UserID || viewerID > 0) {
+		// 作者可见备注；列表对非作者不强制
+		if viewerID == a.UserID {
+			m["moderationNote"] = a.ModerationNote
+		}
 	}
 	if a.SourceSolutionID != nil && *a.SourceSolutionID > 0 {
 		m["sourceSolutionId"] = *a.SourceSolutionID
@@ -327,9 +346,10 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 	keyword := strings.TrimSpace(ctx.Request().URL.Query().Get("keyword"))
 
 	q := s.db.Model(&model.BlogArticle{}).Where("user_id = ?", u.ID)
-	// non-owner: only public + password (meta); never private
+	// non-owner: only public + password (meta); never private；且须审核通过
 	if viewer != u.ID {
-		q = q.Where("visibility IN ?", []string{blogaccess.VisibilityPublic, blogaccess.VisibilityPassword})
+		q = q.Where("visibility IN ?", []string{blogaccess.VisibilityPublic, blogaccess.VisibilityPassword}).
+			Where("(moderation_status = ? OR moderation_status = '' OR moderation_status IS NULL)", model.BlogModerationApproved)
 	}
 	if categoryID > 0 {
 		q = q.Where("category_id = ?", categoryID)
@@ -438,6 +458,11 @@ func (s *BlogService) handleGetArticle(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在或无权查看"})
 		return nil
 	}
+	// 未通过审核：仅作者/站管可见
+	if !moderationVisibleToPublic(a.ModerationStatus) && viewer != a.UserID && !blogIsSiteAdmin(ctx) {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在或无权查看"})
+		return nil
+	}
 
 	// increment view when body is visible
 	if d.CanSeeBody {
@@ -528,6 +553,9 @@ func (s *BlogService) handleCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
 		return nil
 	}
+	if !s.requireActivated(ctx, pd.UserID) {
+		return nil
+	}
 	var req blogArticleWriteReq
 	if err := json.NewDecoder(ctx.Request().Body).Decode(&req); err != nil {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
@@ -540,6 +568,7 @@ func (s *BlogService) handleCreate(ctx khttp.Context) error {
 	}
 	now := time.Now()
 	a.PublishedAt = &now
+	a.ModerationStatus = model.BlogModerationApproved
 	if err := s.db.Create(a).Error; err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "短链已被占用，请换一个"})
@@ -584,6 +613,9 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "只能管理自己的文章"})
 		return nil
 	}
+	if existing.UserID == pd.UserID && !pd.IsSiteAdmin && !s.requireActivated(ctx, pd.UserID) {
+		return nil
+	}
 	a, msg := s.buildArticleFromReq(existing.UserID, existing.ID, &req, false)
 	if msg != "" {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
@@ -596,6 +628,10 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 	a.LikeCount = existing.LikeCount
 	a.CommentCount = existing.CommentCount
 	a.PublishedAt = existing.PublishedAt
+	a.ModerationStatus = existing.ModerationStatus
+	a.ModerationNote = existing.ModerationNote
+	a.ModeratedAt = existing.ModeratedAt
+	a.ModeratedBy = existing.ModeratedBy
 	if a.PasswordHash == "" && !req.ClearPassword && existing.PasswordHash != "" &&
 		blogaccess.NormalizeVisibility(a.Visibility) == blogaccess.VisibilityPassword &&
 		strings.TrimSpace(req.Password) == "" {
@@ -835,7 +871,8 @@ func (s *BlogService) handleRecommend(ctx khttp.Context) error {
 	page, pageSize := parsePage(ctx.Request())
 	viewer := blogViewerID(ctx)
 	q := s.db.Model(&model.BlogArticle{}).
-		Where("visibility = ? AND recommend = ?", blogaccess.VisibilityPublic, true)
+		Where("visibility = ? AND recommend = ?", blogaccess.VisibilityPublic, true).
+		Where("(moderation_status = ? OR moderation_status = '' OR moderation_status IS NULL)", model.BlogModerationApproved)
 	var total int64
 	_ = q.Count(&total).Error
 	var list []model.BlogArticle
@@ -875,7 +912,8 @@ func (s *BlogService) handlePlaza(ctx khttp.Context) error {
 	}
 
 	q := s.db.Model(&model.BlogArticle{}).
-		Where("visibility = ?", blogaccess.VisibilityPublic)
+		Where("visibility = ?", blogaccess.VisibilityPublic).
+		Where("(moderation_status = ? OR moderation_status = '' OR moderation_status IS NULL)", model.BlogModerationApproved)
 	if sort == "recommend" {
 		q = q.Where("recommend = ?", true)
 	}
@@ -1395,6 +1433,48 @@ func (s *BlogService) handleCommentCreate(ctx khttp.Context) error {
 	}
 	_ = s.db.Model(&model.BlogArticle{}).Where("id = ?", a.ID).
 		UpdateColumn("comment_count", gorm.Expr("comment_count + 1")).Error
+
+	// 站内通知：文章作者 / 父评论作者
+	actorName := pd.Name
+	if actorName == "" {
+		actorName = pd.Username
+	}
+	var authorU model.User
+	_ = s.db.Select("id", "username").First(&authorU, a.UserID).Error
+	payload := mustJSON(map[string]interface{}{
+		"blogUsername": authorU.Username,
+		"blogSlug":     a.Slug,
+		"articleId":    a.ID,
+		"articleTitle": a.Title,
+		"commentId":    c.ID,
+	})
+	if body.ParentID > 0 {
+		var parent model.BlogComment
+		if s.db.First(&parent, body.ParentID).Error == nil && parent.UserID > 0 && parent.UserID != pd.UserID {
+			_ = CreateNotification(s.db, model.Notification{
+				UserID:  parent.UserID,
+				Type:    model.NotifTypeBlogCommentReply,
+				Title:   "有人回复了你的博客评论",
+				Body:    actorName + " 回复了你在《" + a.Title + "》下的评论",
+				ActorID: pd.UserID,
+				RefType: "blog_comment",
+				RefID:   c.ID,
+				Payload: payload,
+			})
+		}
+	} else if a.UserID > 0 && a.UserID != pd.UserID {
+		_ = CreateNotification(s.db, model.Notification{
+			UserID:  a.UserID,
+			Type:    model.NotifTypeBlogComment,
+			Title:   "有人评论了你的博客文章",
+			Body:    actorName + " 评论了《" + a.Title + "》",
+			ActorID: pd.UserID,
+			RefType: "blog_article",
+			RefID:   a.ID,
+			Payload: payload,
+		})
+	}
+
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "success",
 		"data": map[string]interface{}{
@@ -1479,6 +1559,30 @@ func (s *BlogService) handleLikeToggle(ctx khttp.Context) error {
 		_ = s.db.Model(&model.BlogArticle{}).Where("id = ?", body.ArticleID).
 			UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error
 		liked = true
+		// 点赞同步主站通知（取消不通知）
+		if a.UserID > 0 && a.UserID != pd.UserID {
+			actorName := pd.Name
+			if actorName == "" {
+				actorName = pd.Username
+			}
+			var authorU model.User
+			_ = s.db.Select("username").First(&authorU, a.UserID).Error
+			_ = CreateNotification(s.db, model.Notification{
+				UserID:  a.UserID,
+				Type:    model.NotifTypeBlogArticleLike,
+				Title:   "有人赞了你的博客文章",
+				Body:    actorName + " 赞了《" + a.Title + "》",
+				ActorID: pd.UserID,
+				RefType: "blog_article",
+				RefID:   a.ID,
+				Payload: mustJSON(map[string]interface{}{
+					"blogUsername": authorU.Username,
+					"blogSlug":     a.Slug,
+					"articleId":    a.ID,
+					"articleTitle": a.Title,
+				}),
+			})
+		}
 	}
 	var likeCount int
 	_ = s.db.Model(&model.BlogArticle{}).Select("like_count").Where("id = ?", body.ArticleID).Scan(&likeCount).Error
@@ -1623,6 +1727,9 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
 		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
+		return nil
+	}
+	if !s.requireActivated(ctx, pd.UserID) {
 		return nil
 	}
 	var body struct {

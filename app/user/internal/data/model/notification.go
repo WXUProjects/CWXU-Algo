@@ -9,6 +9,11 @@ const (
 	NotifTypeOrgJoinApproved     = "org_join_approved"
 	NotifTypeOrgJoinRejected     = "org_join_rejected"
 	NotifTypeMention             = "mention"
+	NotifTypeBlogArticleLike     = "blog_article_like"
+	NotifTypeBlogComment         = "blog_comment"
+	NotifTypeBlogCommentReply    = "blog_comment_reply"
+	NotifTypeSolutionLike        = "solution_like"
+	NotifTypeCommentLike         = "comment_like"
 )
 
 // Notification 站内信（按接收用户存储）

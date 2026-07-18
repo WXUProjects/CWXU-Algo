@@ -43,6 +43,12 @@ type BlogArticle struct {
 	LikeCount    int `gorm:"not null;default:0;comment:点赞数"`
 	CommentCount int `gorm:"not null;default:0;comment:评论数"`
 
+	// ModerationStatus: approved | pending | rejected（站管审核公开文）
+	ModerationStatus string `gorm:"size:16;not null;default:approved;index;comment:审核状态"`
+	ModerationNote   string `gorm:"size:500;comment:审核备注"`
+	ModeratedAt      *time.Time
+	ModeratedBy      uint `gorm:"default:0;comment:审核人"`
+
 	PublishedAt *time.Time `gorm:"index:idx_blog_user_created,priority:2;comment:发布时间"`
 }
 
@@ -110,9 +116,23 @@ type BlogThemeFlag struct {
 
 func (BlogThemeFlag) TableName() string { return "blog_theme_flags" }
 
+// Blog activation / agreement / moderation constants.
+const (
+	BlogAgreementVersionCurrent = "v1-cn-2026"
+	BlogModerationApproved      = "approved"
+	BlogModerationPending       = "pending"
+	BlogModerationRejected      = "rejected"
+	// Email notify strategy（默认 off）
+	BlogEmailNotifyOff       = "off"
+	BlogEmailNotifyImmediate = "immediate"
+	BlogEmailNotifyDigest    = "digest_daily"
+	BlogEmailNotifyRandom    = "random"
+)
+
 // BlogSiteConfig is per-author blog shell settings (theme + social links).
 // ThemeID: chirpy (default) | simple | mizuki
 // SocialLinks: JSON array of {type,url,label?}
+// Activation: AgreementAcceptedAt 非空表示已签署开通协议并激活博客。
 type BlogSiteConfig struct {
 	ID        uint `gorm:"primaryKey"`
 	CreatedAt time.Time
@@ -122,6 +142,15 @@ type BlogSiteConfig struct {
 	Subtitle  string `gorm:"size:200;comment:侧栏副标题"`
 	// SocialLinks JSON: [{"type":"github","url":"https://...","label":"GitHub"},...]
 	SocialLinks string `gorm:"type:text;comment:侧栏社交链接JSON"`
+
+	// 开通协议
+	ActivatedAt         *time.Time `gorm:"index;comment:开通时间"`
+	AgreementVersion    string     `gorm:"size:32;comment:协议版本"`
+	AgreementAcceptedAt *time.Time `gorm:"comment:协议签署时间"`
+
+	// 互动邮件通知（默认关）
+	EmailNotifyEnabled  bool   `gorm:"not null;default:false;comment:互动邮件通知"`
+	EmailNotifyStrategy string `gorm:"size:32;not null;default:off;comment:off|immediate|digest_daily|random"`
 }
 
 func (BlogSiteConfig) TableName() string { return "blog_site_configs" }

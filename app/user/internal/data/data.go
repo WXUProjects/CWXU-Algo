@@ -128,6 +128,46 @@ func migrateModels(db *gorm.DB) {
 	seedGoAlgoFramework(db)
 	backfillLastLoginAt(db)
 	ensureSiteInactiveDays(db)
+	backfillBlogModerationApproved(db)
+	backfillBlogActivationForExistingAuthors(db)
+}
+
+// backfillBlogModerationApproved 旧文章默认视为已通过审核
+func backfillBlogModerationApproved(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasColumn(&model.BlogArticle{}, "moderation_status") {
+		return
+	}
+	_ = db.Exec(`
+		UPDATE blog_articles
+		SET moderation_status = 'approved'
+		WHERE moderation_status IS NULL OR moderation_status = ''
+	`).Error
+}
+
+// backfillBlogActivationForExistingAuthors 已有文章/主题配置的用户视为已开通（免二次签署）
+func backfillBlogActivationForExistingAuthors(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasTable(&model.BlogSiteConfig{}) {
+		return
+	}
+	// 已有 site_config 但未签协议
+	_ = db.Exec(`
+		UPDATE blog_site_configs
+		SET agreement_version = COALESCE(NULLIF(agreement_version, ''), 'v1-cn-2026-legacy'),
+		    agreement_accepted_at = COALESCE(agreement_accepted_at, created_at, NOW()),
+		    activated_at = COALESCE(activated_at, created_at, NOW())
+		WHERE agreement_accepted_at IS NULL
+	`).Error
+	// 有文章但无 site_config 的作者
+	_ = db.Exec(`
+		INSERT INTO blog_site_configs (created_at, updated_at, user_id, theme_id, subtitle, social_links,
+			activated_at, agreement_version, agreement_accepted_at, email_notify_enabled, email_notify_strategy)
+		SELECT NOW(), NOW(), a.user_id, 'chirpy', '', '[]',
+			MIN(a.created_at), 'v1-cn-2026-legacy', MIN(a.created_at), false, 'off'
+		FROM blog_articles a
+		WHERE NOT EXISTS (SELECT 1 FROM blog_site_configs c WHERE c.user_id = a.user_id)
+		GROUP BY a.user_id
+		ON CONFLICT (user_id) DO NOTHING
+	`).Error
 }
 
 // backfillLastLoginAt 避免上线瞬间全员被判休眠

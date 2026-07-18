@@ -68,6 +68,8 @@ var publicExact = map[string]struct{}{
 	"/api/user/blog/comment/list":  {},
 	"/v1/user/blog/theme/status":   {},
 	"/api/user/blog/theme/status":  {},
+	"/v1/user/blog/agreement":      {},
+	"/api/user/blog/agreement":     {},
 	"/v1/user/site/config":             {},
 	"/api/user/site/config":            {},
 	"/v1/user/site/visit-ping":         {},
