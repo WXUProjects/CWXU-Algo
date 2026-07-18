@@ -62,25 +62,36 @@ func publicOrigin(req *http.Request) string {
 	if v := strings.TrimSpace(os.Getenv("CWXU_PUBLIC_ORIGIN")); v != "" {
 		return strings.TrimRight(v, "/")
 	}
+	// Production default: always absolute HTTPS site origin (share crawlers require https images).
 	if req != nil {
-		if xf := strings.TrimSpace(req.Header.Get("X-Forwarded-Proto")); xf != "" {
-			host := strings.TrimSpace(req.Header.Get("X-Forwarded-Host"))
-			if host == "" {
-				host = req.Host
+		host := strings.TrimSpace(req.Header.Get("X-Forwarded-Host"))
+		if host == "" {
+			host = strings.TrimSpace(req.Host)
+		}
+		// Strip port for public site URL
+		if i := strings.IndexByte(host, ':'); i > 0 && !strings.Contains(host, "]") {
+			h := host[:i]
+			if h == "algo.zhiyuansofts.cn" || strings.HasSuffix(h, ".zhiyuansofts.cn") {
+				return "https://" + h
 			}
-			if host != "" {
+		}
+		if host == "algo.zhiyuansofts.cn" || strings.HasSuffix(host, ".zhiyuansofts.cn") {
+			return "https://" + host
+		}
+		if xf := strings.TrimSpace(req.Header.Get("X-Forwarded-Proto")); xf != "" && host != "" {
+			// Prefer https when proto missing or internal http hop
+			if xf == "https" || xf == "http" {
+				if xf == "http" && (host == "algo.zhiyuansofts.cn" || strings.Contains(host, "zhiyuansofts")) {
+					return "https://" + host
+				}
 				return xf + "://" + host
 			}
 		}
-		if req.Host != "" && !strings.Contains(req.Host, "localhost") && !strings.HasPrefix(req.Host, "127.") {
-			scheme := "https"
-			if req.TLS == nil && req.Header.Get("X-Forwarded-Proto") == "http" {
-				scheme = "http"
-			}
+		if host != "" && !strings.Contains(host, "localhost") && !strings.HasPrefix(host, "127.") {
 			if req.TLS != nil {
-				scheme = "https"
+				return "https://" + host
 			}
-			return scheme + "://" + req.Host
+			return "https://" + host
 		}
 	}
 	return defaultPublicOrigin
