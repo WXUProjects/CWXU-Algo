@@ -164,7 +164,7 @@ const (
 )
 
 // BlogSiteConfig is per-author blog shell settings (theme + social links).
-// ThemeID: chirpy (default) | simple | mizuki
+// ThemeID: mizuki (default) | chirpy | simple
 // SocialLinks: JSON array of {type,url,label?}
 // Activation: AgreementAcceptedAt 非空表示已签署开通协议并激活博客。
 type BlogSiteConfig struct {
@@ -172,7 +172,7 @@ type BlogSiteConfig struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	UserID    uint   `gorm:"not null;uniqueIndex;comment:作者"`
-	ThemeID   string `gorm:"size:32;not null;default:chirpy;comment:主题 chirpy|simple|mizuki"`
+	ThemeID   string `gorm:"size:32;not null;default:mizuki;comment:主题 mizuki|chirpy|simple"`
 	Subtitle  string `gorm:"size:200;comment:侧栏副标题"`
 	// SocialLinks JSON: [{"type":"github","url":"https://...","label":"GitHub"},...]
 	SocialLinks string `gorm:"type:text;comment:侧栏社交链接JSON"`

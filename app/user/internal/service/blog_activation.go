@@ -213,7 +213,7 @@ func (s *BlogService) handleActivate(ctx khttp.Context) error {
 	if err != nil {
 		cfg = model.BlogSiteConfig{
 			UserID:              pd.UserID,
-			ThemeID:             blogThemeChirpy,
+			ThemeID:             blogThemeMizuki,
 			SocialLinks:         "[]",
 			EmailNotifyStrategy: model.BlogEmailNotifyOff,
 		}

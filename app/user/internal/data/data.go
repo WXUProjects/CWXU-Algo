@@ -165,7 +165,7 @@ func backfillBlogActivationForExistingAuthors(db *gorm.DB) {
 	_ = db.Exec(`
 		INSERT INTO blog_site_configs (created_at, updated_at, user_id, theme_id, subtitle, social_links,
 			activated_at, agreement_version, agreement_accepted_at, email_notify_enabled, email_notify_strategy)
-		SELECT NOW(), NOW(), a.user_id, 'chirpy', '', '[]',
+		SELECT NOW(), NOW(), a.user_id, 'mizuki', '', '[]',
 			MIN(a.created_at), 'v1-cn-2026-legacy', MIN(a.created_at), false, 'off'
 		FROM blog_articles a
 		WHERE NOT EXISTS (SELECT 1 FROM blog_site_configs c WHERE c.user_id = a.user_id)

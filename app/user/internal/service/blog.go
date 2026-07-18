@@ -399,6 +399,14 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 	// theme status for blog shell
 	themeOn := s.themeEnabledFor(u.ID)
 	siteCfg := s.loadSiteConfig(u.ID)
+	activated := s.isBlogActivated(u.ID)
+	isOwner := viewer == u.ID
+
+	// 未开通：对访客不暴露文章列表（壳层前端据此提示「此用户未开通博客」）
+	if !activated && !isOwner {
+		out = []map[string]interface{}{}
+		total = 0
+	}
 
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code":    0,
@@ -418,7 +426,8 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 			"themeId":      siteCfg.ThemeID,
 			"subtitle":     siteCfg.Subtitle,
 			"socialLinks":  siteCfg.SocialLinks,
-			"isOwner":      viewer == u.ID,
+			"isOwner":      isOwner,
+			"activated":    activated,
 		},
 	})
 	return nil
@@ -1871,12 +1880,14 @@ type blogSiteConfigView struct {
 
 func normalizeThemeID(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case blogThemeChirpy:
+		return blogThemeChirpy
 	case blogThemeSimple:
 		return blogThemeSimple
 	case blogThemeMizuki:
 		return blogThemeMizuki
 	default:
-		return blogThemeChirpy
+		return blogThemeMizuki
 	}
 }
 
@@ -1913,7 +1924,7 @@ func parseSocialLinksJSON(raw string) []blogSocialLink {
 
 func (s *BlogService) loadSiteConfig(userID uint) blogSiteConfigView {
 	view := blogSiteConfigView{
-		ThemeID:     blogThemeChirpy,
+		ThemeID:     blogThemeMizuki,
 		Subtitle:    "",
 		SocialLinks: []blogSocialLink{},
 	}
