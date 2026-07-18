@@ -222,7 +222,8 @@ func (s *BulletinService) Delete(ctx context.Context, req *bulletin.DeleteBullet
 	}, nil
 }
 
-// Get 获取公告详情（公开）
+// Get 获取公告详情
+// 站点公告公开；组织公告仅站点管理员或当前 JWT 组织匹配时可看（与 List 隔离一致）
 func (s *BulletinService) Get(ctx context.Context, req *bulletin.GetBulletinReq) (*bulletin.GetBulletinRes, error) {
 	m, err := s.bulletinDal.GetById(req.Id)
 	if err != nil {
@@ -233,6 +234,22 @@ func (s *BulletinService) Get(ctx context.Context, req *bulletin.GetBulletinReq)
 			}, nil
 		}
 		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
+	}
+
+	scope := m.Scope
+	if scope == "" {
+		scope = model.BulletinScopeSite
+	}
+	if scope == model.BulletinScopeOrg {
+		if !auth.VerifySiteAdmin(ctx) {
+			u := auth.GetCurrentUser(ctx)
+			if u == nil || m.OrgID == nil || u.OrgID != *m.OrgID {
+				return &bulletin.GetBulletinRes{
+					Code:    2,
+					Message: "公告不存在",
+				}, nil
+			}
+		}
 	}
 
 	return &bulletin.GetBulletinRes{

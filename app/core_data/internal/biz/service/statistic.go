@@ -9,7 +9,6 @@ import (
 	"cwxu-algo/api/core/v1/statistic"
 	data2 "cwxu-algo/app/common/data"
 	"cwxu-algo/app/common/discovery"
-	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data/dal"
 
 	"github.com/go-kratos/kratos/v2/errors"
@@ -34,9 +33,9 @@ func NewStatisticUseCase(dal *dal.StatisticDal, rdb *redis.Client, reg *discover
 	return &StatisticUseCase{dal: dal, rdb: rdb, reg: r}
 }
 
-// resolveMembers 当前组织成员；siteWide=true 且站管时返回 nil（全站不限制）
+// resolveMembers 当前组织成员；siteWide=true 时返回 nil（全站不限制，公开聚合）
 func (uc *StatisticUseCase) resolveMembers(ctx context.Context, siteWide bool) (memberIDs []int64, orgID uint) {
-	if siteWide && auth.VerifySiteAdmin(ctx) {
+	if siteWide {
 		return nil, 0
 	}
 	ids, resolvedOrgID, _, err := fetchOrgMemberIDs(ctx, uc.reg, 0)
@@ -47,7 +46,7 @@ func (uc *StatisticUseCase) resolveMembers(ctx context.Context, siteWide bool) (
 	return ids, resolvedOrgID
 }
 
-// userId 约定：个人>0；0=组织热力；-1=组织时段；-2=全站时段/热力（仅站管）
+// userId 约定：个人>0；0=组织热力；-1=组织时段；-2=全站时段/热力（公开聚合，无需站管）
 func isSiteWideUserId(userId int64) bool {
 	return userId == -2
 }
@@ -104,10 +103,8 @@ func (uc *StatisticUseCase) Heatmap(ctx context.Context, req *statistic.HeatmapR
 		userVer := uc.redisVer(ctx, fmt.Sprintf("statistic:user:%d:ver", req.UserId))
 		cacheKey = fmt.Sprintf("statistic:heatmap:u%d:%s:%s:%t:v%s", req.UserId, startDate, endDate, req.IsAc, userVer)
 	} else if req.UserId == 0 || isSiteWideUserId(req.UserId) {
+		// -2=全站公开聚合；0=当前组织热力
 		siteWide := isSiteWideUserId(req.UserId)
-		if siteWide && !auth.VerifySiteAdmin(ctx) {
-			return nil, errors.Forbidden("权限不足", "仅站点管理员可查看全站统计")
-		}
 		var resolvedOrgID uint
 		memberIDs, resolvedOrgID = uc.resolveMembers(ctx, siteWide)
 		queryUserId = 0 // 聚合查询
@@ -243,10 +240,8 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 		// 热度：供爬虫后自主预热决策
 		TouchUserHeat(ctx, uc.rdb, req.UserId)
 	} else if req.UserId == -1 || isSiteWideUserId(req.UserId) {
+		// -2=全站公开聚合；-1=当前组织时段
 		siteWide := isSiteWideUserId(req.UserId)
-		if siteWide && !auth.VerifySiteAdmin(ctx) {
-			return nil, errors.Forbidden("权限不足", "仅站点管理员可查看全站统计")
-		}
 		var resolvedOrgID uint
 		memberIDs, resolvedOrgID = uc.resolveMembers(ctx, siteWide)
 		queryUserId = -1
