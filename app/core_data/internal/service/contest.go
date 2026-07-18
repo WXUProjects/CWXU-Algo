@@ -239,11 +239,24 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 	// 批量获取用户信息，一次 RPC 替代原来的 N 次 GetById
 	nameMap := c.fetchUserNames(ctx, userClient, logs)
 
-	items := make([]*contest_log.RankingItem, 0, len(logs))
+	// 站内榜：有官方 rank 用官方；整页全是 0（未出分/爬失败）则按 AC 排序后模拟 1..n
+	allZeroRank := true
 	for _, v := range logs {
+		if v.Rank > 0 {
+			allZeroRank = false
+			break
+		}
+	}
+
+	items := make([]*contest_log.RankingItem, 0, len(logs))
+	for i, v := range logs {
 		u := nameMap[v.UserID]
+		rank := int64(v.Rank)
+		if rank <= 0 && allZeroRank {
+			rank = req.Offset + int64(i) + 1
+		}
 		items = append(items, &contest_log.RankingItem{
-			Rank:       int64(v.Rank),
+			Rank:       rank,
 			UserId:     v.UserID,
 			Name:       u.Name,
 			Avatar:     u.Avatar,

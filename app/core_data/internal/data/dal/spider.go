@@ -263,7 +263,16 @@ func (s *SpiderDal) GetContestRanking(ctx context.Context, contestId string, pla
 	if userIds != nil && len(userIds) == 0 {
 		return []model.ContestLog{}, 0, nil
 	}
-	q := s.db.WithContext(ctx).Model(&model.ContestLog{}).Where("contest_id = ? and platform = ?", contestId, platform)
+	q := s.db.WithContext(ctx).Model(&model.ContestLog{}).Where("contest_id = ?", contestId)
+	// 历史爬虫曾写入 "Codeforces"，新逻辑统一 "CodeForces"，两边都认
+	switch platform {
+	case "Codeforces", "CodeForces":
+		q = q.Where("platform IN ?", []string{"Codeforces", "CodeForces"})
+	default:
+		if platform != "" {
+			q = q.Where("platform = ?", platform)
+		}
+	}
 
 	if len(userIds) > 0 {
 		q = q.Where("user_id IN ?", userIds)
@@ -273,7 +282,9 @@ func (s *SpiderDal) GetContestRanking(ctx context.Context, contestId string, pla
 		return nil, 0, err
 	}
 
-	if err := q.Order("rank ASC").Offset(int(offset)).Limit(int(limit)).Find(&contestLogs).Error; err != nil {
+	// 有官方排名按 rank 升序；rank=0（未出分/爬取失败）沉底并按 AC 降序，便于站内模拟排名
+	if err := q.Order("(CASE WHEN rank > 0 THEN 0 ELSE 1 END) ASC, rank ASC, ac_count DESC, id ASC").
+		Offset(int(offset)).Limit(int(limit)).Find(&contestLogs).Error; err != nil {
 		return nil, 0, err
 	}
 

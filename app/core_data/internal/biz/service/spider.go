@@ -236,10 +236,26 @@ func (uc *SpiderUseCase) fetchAndSaveContest(userId int64, plat model.Platform, 
 		return false, nil
 	}
 
+	// 冲突时更新：旧逻辑 DoNothing 会把 rank=0 / 爬失败的脏数据永久锁死（CF HTML 被 Cloudflare 拦时常中招）
 	err = uc.data.DB.
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "contest_id"}, {Name: "user_id"}},
-			DoNothing: true,
+			Columns: []clause.Column{{Name: "contest_id"}, {Name: "user_id"}},
+			DoUpdates: clause.Assignments(map[string]interface{}{
+				// 有真实排名才覆盖；否则保留旧值（站内榜可对 rank=0 按 AC 模拟）
+				"rank": gorm.Expr("CASE WHEN EXCLUDED.rank > 0 THEN EXCLUDED.rank ELSE contest_logs.rank END"),
+				"ac_count": gorm.Expr("GREATEST(contest_logs.ac_count, EXCLUDED.ac_count)"),
+				"total_count": gorm.Expr("GREATEST(contest_logs.total_count, EXCLUDED.total_count)"),
+				"contest_name": gorm.Expr(
+					"CASE WHEN EXCLUDED.contest_name <> '' THEN EXCLUDED.contest_name ELSE contest_logs.contest_name END",
+				),
+				"contest_url": gorm.Expr(
+					"CASE WHEN EXCLUDED.contest_url <> '' THEN EXCLUDED.contest_url ELSE contest_logs.contest_url END",
+				),
+				"time": gorm.Expr(
+					"CASE WHEN EXCLUDED.time > TIMESTAMP '1970-01-02' THEN EXCLUDED.time ELSE contest_logs.time END",
+				),
+				"platform": gorm.Expr("EXCLUDED.platform"),
+			}),
 		}).
 		CreateInBatches(&tmp, submitInsertBatchSize).Error
 	return true, err

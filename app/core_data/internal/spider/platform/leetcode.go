@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -465,6 +467,172 @@ func (p NewLeetCode) FetchRating(username string) (int, bool, error) {
 		return 0, false, nil
 	}
 	return int(pr.Data.UserContestRanking.Rating + 0.5), true, nil
+}
+
+// lcContestHistoryItem 公开 GraphQL userContestRankingHistory 单条（仅映射用字段）
+type lcContestHistoryItem struct {
+	Attended      bool `json:"attended"`
+	Ranking       int  `json:"ranking"`
+	Score         int  `json:"score"`
+	TotalProblems int  `json:"totalProblems"`
+	Contest       *struct {
+		Title     string `json:"title"`
+		TitleCn   string `json:"titleCn"`
+		StartTime int64  `json:"startTime"`
+	} `json:"contest"`
+}
+
+type lcContestHistoryResp struct {
+	Data struct {
+		// null：用户不存在 / 从未参赛
+		UserContestRankingHistory []lcContestHistoryItem `json:"userContestRankingHistory"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
+// leetCodeContestSlug 从中文/英文周赛标题推导 titleSlug（ContestNode 无 titleSlug 字段）
+// 例：第 365 场周赛 → weekly-contest-365；第 160 场双周赛 → biweekly-contest-160
+func leetCodeContestSlug(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+	// 双周赛须先匹配（含「周赛」子串）
+	reBiCN := regexp.MustCompile(`第\s*(\d+)\s*场双周赛`)
+	if m := reBiCN.FindStringSubmatch(title); len(m) == 2 {
+		return "biweekly-contest-" + m[1]
+	}
+	reWkCN := regexp.MustCompile(`第\s*(\d+)\s*场周赛`)
+	if m := reWkCN.FindStringSubmatch(title); len(m) == 2 {
+		return "weekly-contest-" + m[1]
+	}
+	reBiEN := regexp.MustCompile(`(?i)Biweekly\s+Contest\s+(\d+)`)
+	if m := reBiEN.FindStringSubmatch(title); len(m) == 2 {
+		return "biweekly-contest-" + m[1]
+	}
+	reWkEN := regexp.MustCompile(`(?i)Weekly\s+Contest\s+(\d+)`)
+	if m := reWkEN.FindStringSubmatch(title); len(m) == 2 {
+		return "weekly-contest-" + m[1]
+	}
+	return ""
+}
+
+// mapLeetCodeContestHistory 将 GraphQL history 映射为 ContestLog（纯函数，便于 fixture 单测）
+// 仅保留 attended=true；needAll=false 时只保留 startTime 最新的 lcContestRecentLimit 条。
+func mapLeetCodeContestHistory(userId int64, items []lcContestHistoryItem, needAll bool) []model.ContestLog {
+	const lcContestRecentLimit = 10
+	out := make([]model.ContestLog, 0, len(items))
+	for _, it := range items {
+		if !it.Attended || it.Contest == nil {
+			continue
+		}
+		title := strings.TrimSpace(it.Contest.TitleCn)
+		if title == "" {
+			title = strings.TrimSpace(it.Contest.Title)
+		}
+		if title == "" {
+			continue
+		}
+		slug := leetCodeContestSlug(it.Contest.Title)
+		if slug == "" {
+			slug = leetCodeContestSlug(it.Contest.TitleCn)
+		}
+		contestID := slug
+		contestURL := ""
+		if contestID == "" {
+			// 特殊赛名无法推导 slug：用 startTime 保证 (user_id, contest_id) 稳定
+			if it.Contest.StartTime <= 0 {
+				continue
+			}
+			contestID = fmt.Sprintf("lc-%d", it.Contest.StartTime)
+		} else {
+			contestURL = "https://leetcode.cn/contest/" + contestID + "/"
+		}
+		var t time.Time
+		if it.Contest.StartTime > 0 {
+			t = time.Unix(it.Contest.StartTime, 0)
+		}
+		out = append(out, model.ContestLog{
+			Platform:    spider.LeetCode,
+			UserID:      userId,
+			ContestId:   contestID,
+			ContestName: title,
+			ContestUrl:  contestURL,
+			Rank:        it.Ranking,
+			// totalProblems 为场次题数；接口无「过题数」仅有 score（分），AcCount 置 0
+			TotalCount: it.TotalProblems,
+			AcCount:    0,
+			Time:       t,
+		})
+	}
+	// 按开始时间降序，便于增量只取最近
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Time.After(out[j].Time)
+	})
+	if !needAll && len(out) > lcContestRecentLimit {
+		out = out[:lcContestRecentLimit]
+	}
+	return out
+}
+
+// FetchContestLog 力扣竞赛参赛历史 → contest_logs（公开 noj-go GraphQL）
+// 未参赛 / history 为 null → 空切片、无错误。
+func (p NewLeetCode) FetchContestLog(userId int64, username string, needAll bool) ([]model.ContestLog, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, fmt.Errorf("leetcode username 为空")
+	}
+	payload := map[string]interface{}{
+		"query": `query userContestRankingHistory($userSlug: String!) {
+			userContestRankingHistory(userSlug: $userSlug) {
+				attended
+				ranking
+				score
+				totalProblems
+				contest {
+					title
+					titleCn
+					startTime
+				}
+			}
+		}`,
+		"variables": map[string]string{"userSlug": username},
+	}
+	b, _ := json.Marshal(payload)
+	req, err := http.NewRequest(http.MethodPost, lcGraphQLNoj, bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	setLCHeaders(req, username)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := ojhttp.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("leetcode contest history 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("leetcode contest history 读 body 失败: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("leetcode contest history 状态码 %d: %s", resp.StatusCode, string(body))
+	}
+
+	var pr lcContestHistoryResp
+	if err := json.Unmarshal(body, &pr); err != nil {
+		return nil, fmt.Errorf("leetcode contest history 解析失败: %w", err)
+	}
+	if len(pr.Errors) > 0 {
+		return nil, fmt.Errorf("leetcode contest history graphql: %s", pr.Errors[0].Message)
+	}
+	// null / 空：从未参赛或用户不可见 → 成功空结果
+	if pr.Data.UserContestRankingHistory == nil {
+		return []model.ContestLog{}, nil
+	}
+	return mapLeetCodeContestHistory(userId, pr.Data.UserContestRankingHistory, needAll), nil
 }
 
 func init() {

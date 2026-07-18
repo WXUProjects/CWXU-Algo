@@ -106,31 +106,115 @@ func (p NewAtCoder) Name() string {
 	return spider.AtCoder
 }
 
-// FetchRating 从 AtCoder 官方 rating 历史取最新 NewRating
-func (p NewAtCoder) FetchRating(username string) (int, bool, error) {
+// atcoderHistoryEntry AtCoder 官方 /users/{handle}/history/json 单条
+type atcoderHistoryEntry struct {
+	IsRated           bool   `json:"IsRated"`
+	Place             int    `json:"Place"`
+	OldRating         int    `json:"OldRating"`
+	NewRating         int    `json:"NewRating"`
+	ContestScreenName string `json:"ContestScreenName"`
+	ContestName       string `json:"ContestName"`
+	ContestNameEn     string `json:"ContestNameEn"`
+	EndTime           string `json:"EndTime"`
+}
+
+const atcoderContestScreenSuffix = ".contest.atcoder.jp"
+
+// normalizeAtCoderContestID 将 ContestScreenName 规范为稳定 contest id
+// 旧式如 agc004.contest.atcoder.jp → agc004；新式短名原样保留。
+func normalizeAtCoderContestID(screenName string) string {
+	screenName = strings.TrimSpace(screenName)
+	if strings.HasSuffix(screenName, atcoderContestScreenSuffix) {
+		return strings.TrimSuffix(screenName, atcoderContestScreenSuffix)
+	}
+	return screenName
+}
+
+func parseAtCoderHistoryJSON(body []byte) ([]atcoderHistoryEntry, error) {
+	var hist []atcoderHistoryEntry
+	if err := json.Unmarshal(body, &hist); err != nil {
+		return nil, fmt.Errorf("atcoder history 解析失败: %w", err)
+	}
+	return hist, nil
+}
+
+func fetchAtCoderHistory(username string) ([]atcoderHistoryEntry, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
-		return 0, false, fmt.Errorf("atcoder username 为空")
+		return nil, fmt.Errorf("atcoder username 为空")
 	}
 	url := fmt.Sprintf("https://atcoder.jp/users/%s/history/json", username)
 	resp, err := ojhttp.Get(url)
 	if err != nil {
-		return 0, false, fmt.Errorf("atcoder rating 请求失败: %w", err)
+		return nil, fmt.Errorf("atcoder history 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, false, err
+		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return 0, false, fmt.Errorf("atcoder rating 状态码 %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("atcoder history 状态码 %d: %s", resp.StatusCode, string(body))
 	}
-	var hist []struct {
-		IsRated   bool `json:"IsRated"`
-		NewRating int  `json:"NewRating"`
+	return parseAtCoderHistoryJSON(body)
+}
+
+// contestLogsFromAtCoderHistory 将 history JSON 映射为 ContestLog。
+// needAll=false 时只保留时间最新的一场（API 多为时间升序，取末条）。
+func contestLogsFromAtCoderHistory(userId int64, hist []atcoderHistoryEntry, needAll bool) []model.ContestLog {
+	if len(hist) == 0 {
+		return nil
 	}
-	if err := json.Unmarshal(body, &hist); err != nil {
-		return 0, false, fmt.Errorf("atcoder rating 解析失败: %w", err)
+	entries := hist
+	if !needAll {
+		entries = hist[len(hist)-1:]
+	}
+	out := make([]model.ContestLog, 0, len(entries))
+	for _, h := range entries {
+		id := normalizeAtCoderContestID(h.ContestScreenName)
+		if id == "" {
+			continue
+		}
+		name := strings.TrimSpace(h.ContestName)
+		if name == "" {
+			name = strings.TrimSpace(h.ContestNameEn)
+		}
+		var t time.Time
+		if h.EndTime != "" {
+			if parsed, err := time.Parse(time.RFC3339, h.EndTime); err == nil {
+				t = parsed
+			}
+		}
+		out = append(out, model.ContestLog{
+			Platform:    spider.AtCoder,
+			UserID:      userId,
+			ContestId:   id,
+			ContestName: name,
+			ContestUrl:  "https://atcoder.jp/contests/" + id,
+			Rank:        h.Place,
+			// history/json 无过题数/总题数
+			TotalCount: 0,
+			AcCount:    0,
+			Time:       t,
+		})
+	}
+	return out
+}
+
+// FetchContestLog 从 AtCoder 官方参赛历史拉取比赛记录（SubmitContestFetcher）
+func (p NewAtCoder) FetchContestLog(userId int64, username string, needAll bool) ([]model.ContestLog, error) {
+	hist, err := fetchAtCoderHistory(username)
+	if err != nil {
+		return nil, err
+	}
+	return contestLogsFromAtCoderHistory(userId, hist, needAll), nil
+}
+
+// FetchRating 从 AtCoder 官方 rating 历史取最新 NewRating
+func (p NewAtCoder) FetchRating(username string) (int, bool, error) {
+	hist, err := fetchAtCoderHistory(username)
+	if err != nil {
+		return 0, false, err
 	}
 	if len(hist) == 0 {
 		return 0, false, nil

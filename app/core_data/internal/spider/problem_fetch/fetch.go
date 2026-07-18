@@ -22,13 +22,15 @@ type FetchedContent struct {
 	ContentMD string
 }
 
-// Fetch 按平台爬取题面 Markdown
+// Fetch 按平台爬取题面 Markdown。
+// 六大 OJ（CodeForces / AtCoder / LuoGu / NowCoder / QOJ / LeetCode）均支持：
+// 提交识别入库 + 链接加题识别 + 题面爬取。
 func Fetch(platform, externalID, problemURL string) (*FetchedContent, error) {
 	switch platform {
 	case "CodeForces":
 		return fetchCodeforces(externalID, problemURL)
 	case "AtCoder":
-		return fetchAtCoder(problemURL)
+		return fetchAtCoderWithID(problemURL, externalID)
 	case "LuoGu":
 		return fetchLuoGu(externalID, problemURL)
 	case "QOJ":
@@ -299,12 +301,16 @@ func isNowCoderWAF(html string) bool {
 
 func fetchCodeforces(externalID, problemURL string) (*FetchedContent, error) {
 	if problemURL == "" {
-		contest, index := splitCF(externalID)
+		contest, index, isGym := splitCF(externalID)
 		if contest == "" || index == "" {
 			return nil, fmt.Errorf("无法解析 CF external_id: %s", externalID)
 		}
-		// problemset 路径有时比 contest 路径更稳定
-		problemURL = fmt.Sprintf("https://codeforces.com/problemset/problem/%s/%s", contest, index)
+		if isGym {
+			problemURL = fmt.Sprintf("https://codeforces.com/gym/%s/problem/%s", contest, index)
+		} else {
+			// problemset 路径有时比 contest 路径更稳定
+			problemURL = fmt.Sprintf("https://codeforces.com/problemset/problem/%s/%s", contest, index)
+		}
 	}
 	resp, err := httpGet(problemURL)
 	if err != nil {
@@ -466,18 +472,56 @@ func selectionToMD(s *goquery.Selection) string {
 	return strings.TrimSpace(b.String())
 }
 
-func splitCF(externalID string) (contest, index string) {
-	for i := 0; i < len(externalID); i++ {
-		if (externalID[i] >= 'A' && externalID[i] <= 'Z') || (externalID[i] >= 'a' && externalID[i] <= 'z') {
-			return externalID[:i], externalID[i:]
+// splitCF 解析 external_id：
+//   - 正式赛 "1791A" → contest=1791 index=A isGym=false
+//   - Gym "gym102861A" / "gym102861A1" → contest=102861 index=A isGym=true
+//   - 负号兼容 "-102861A"（旧数据）→ gym
+func splitCF(externalID string) (contest, index string, isGym bool) {
+	id := strings.TrimSpace(externalID)
+	if id == "" {
+		return "", "", false
+	}
+	lower := strings.ToLower(id)
+	if strings.HasPrefix(lower, "gym") {
+		isGym = true
+		id = id[3:]
+	} else if strings.HasPrefix(id, "-") {
+		isGym = true
+		id = strings.TrimPrefix(id, "-")
+	}
+	for i := 0; i < len(id); i++ {
+		if (id[i] >= 'A' && id[i] <= 'Z') || (id[i] >= 'a' && id[i] <= 'z') {
+			return id[:i], id[i:], isGym
 		}
 	}
-	return "", ""
+	return "", "", isGym
+}
+
+// atCoderURLFromExternalID 无完整 URL 时由 task id 还原题面地址。
+func atCoderURLFromExternalID(externalID string) string {
+	task := strings.TrimSpace(externalID)
+	if task == "" {
+		return ""
+	}
+	if i := strings.LastIndex(task, "_"); i > 0 {
+		contest := task[:i]
+		if contest != "" {
+			return fmt.Sprintf("https://atcoder.jp/contests/%s/tasks/%s", contest, task)
+		}
+	}
+	return "https://atcoder.jp/tasks/" + task
 }
 
 func fetchAtCoder(problemURL string) (*FetchedContent, error) {
+	return fetchAtCoderWithID(problemURL, "")
+}
+
+func fetchAtCoderWithID(problemURL, externalID string) (*FetchedContent, error) {
 	if problemURL == "" {
-		return nil, fmt.Errorf("AtCoder 缺少 URL")
+		problemURL = atCoderURLFromExternalID(externalID)
+	}
+	if problemURL == "" {
+		return nil, fmt.Errorf("AtCoder 缺少 URL 与 external_id")
 	}
 	resp, err := httpGet(problemURL)
 	if err != nil {

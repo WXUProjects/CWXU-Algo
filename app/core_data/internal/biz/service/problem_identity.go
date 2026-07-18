@@ -18,14 +18,18 @@ type ParsedProblem struct {
 }
 
 var (
-	reCFProblem           = regexp.MustCompile(`^([A-Za-z0-9]+)\s*-\s*(.+)$`)
-	reLuoGuPID            = regexp.MustCompile(`^([A-Z]\d+)\s+(.+)$`)
-	reAtCoderTask         = regexp.MustCompile(`^[a-z0-9_]+$`)
-	reQOJNum              = regexp.MustCompile(`#?\s*(\d+)`)
-	reDigits                 = regexp.MustCompile(`^\d+$`)
-	reNowCoderProblemURL     = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/acm/problem/(\d+)`)
-	reNowCoderPracticeURL    = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/practice/([0-9a-fA-F-]{32,36})`)
-	reNowCoderUUID           = regexp.MustCompile(`(?i)^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$|^[0-9a-f]{32}$`)
+	reCFProblem = regexp.MustCompile(`^([A-Za-z0-9]+)\s*-\s*(.+)$`)
+	// 洛谷题号：P1001 / B2001 / CF1A / AT_abc123_a / SP1 / UVA100 …
+	reLuoGuPID    = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_]*)\s+(.+)$`)
+	reLuoGuBare   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+	reAtCoderTask = regexp.MustCompile(`^[a-z0-9_]+$`)
+	reQOJNum      = regexp.MustCompile(`#?\s*(\d+)`)
+	reDigits      = regexp.MustCompile(`^\d+$`)
+	// CF API：gym 提交的 contestId 为负数
+	reCFNegativeContest = regexp.MustCompile(`^-\d+$`)
+	reNowCoderProblemURL  = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/acm/problem/(\d+)`)
+	reNowCoderPracticeURL = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/practice/([0-9a-fA-F-]{32,36})`)
+	reNowCoderUUID        = regexp.MustCompile(`(?i)^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$|^[0-9a-f]{32}$`)
 	// 力扣 titleSlug：小写字母/数字/连字符
 	reLeetCodeSlug = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 )
@@ -69,32 +73,48 @@ func ParseProblemIdentity(platform, contest, problem string) (*ParsedProblem, er
 func parseCodeforces(contest, problem string) (*ParsedProblem, error) {
 	// Problem 形如 "C-Name" 或 "C1-Name"
 	m := reCFProblem.FindStringSubmatch(problem)
-	if m == nil {
+	var index, title string
+	if m != nil {
+		index, title = m[1], strings.TrimSpace(m[2])
+	} else {
 		// 尝试仅 index
 		parts := strings.SplitN(problem, " ", 2)
-		index := strings.TrimSpace(parts[0])
-		title := problem
+		index = strings.TrimSpace(parts[0])
+		title = problem
 		if len(parts) > 1 {
 			title = strings.TrimSpace(parts[1])
 		}
-		if index == "" || contest == "" {
-			return nil, fmt.Errorf("cf parse fail: %s %s", contest, problem)
+	}
+	if index == "" || contest == "" {
+		return nil, fmt.Errorf("cf parse fail: %s %s", contest, problem)
+	}
+	// CF API：gym 的 contestId 为负数 → 归一为 gym{id}{index}
+	if reCFNegativeContest.MatchString(contest) {
+		gymID := strings.TrimPrefix(contest, "-")
+		return &ParsedProblem{
+			Platform:   spider.CodeForces,
+			ExternalID: "gym" + gymID + index,
+			Title:      title,
+			URL:        fmt.Sprintf("https://codeforces.com/gym/%s/problem/%s", gymID, index),
+		}, nil
+	}
+	// 已带 gym 前缀的 contest 字段（兼容）
+	if strings.HasPrefix(strings.ToLower(contest), "gym") {
+		gymID := contest[3:]
+		if gymID == "" {
+			return nil, fmt.Errorf("cf gym missing id")
 		}
 		return &ParsedProblem{
 			Platform:   spider.CodeForces,
-			ExternalID: contest + index,
+			ExternalID: "gym" + gymID + index,
 			Title:      title,
-			URL:        fmt.Sprintf("https://codeforces.com/contest/%s/problem/%s", contest, index),
+			URL:        fmt.Sprintf("https://codeforces.com/gym/%s/problem/%s", gymID, index),
 		}, nil
-	}
-	index, name := m[1], strings.TrimSpace(m[2])
-	if contest == "" {
-		return nil, fmt.Errorf("cf missing contest")
 	}
 	return &ParsedProblem{
 		Platform:   spider.CodeForces,
 		ExternalID: contest + index,
-		Title:      name,
+		Title:      title,
 		URL:        fmt.Sprintf("https://codeforces.com/contest/%s/problem/%s", contest, index),
 	}, nil
 }
@@ -108,10 +128,7 @@ func parseAtCoder(contest, problem string) (*ParsedProblem, error) {
 	if pid == "" {
 		return nil, fmt.Errorf("atcoder empty problem")
 	}
-	url := ""
-	if contest != "" {
-		url = fmt.Sprintf("https://atcoder.jp/contests/%s/tasks/%s", contest, pid)
-	}
+	url := atCoderTaskURLWithContest(contest, pid)
 	return &ParsedProblem{
 		Platform:   spider.AtCoder,
 		ExternalID: pid,
@@ -121,7 +138,7 @@ func parseAtCoder(contest, problem string) (*ParsedProblem, error) {
 }
 
 func parseLuoGu(problem string) (*ParsedProblem, error) {
-	// "P1001 标题" 或 "P1001"
+	// "P1001 标题" / "CF1A 标题" / "AT_abc123_a 标题" 或纯题号
 	m := reLuoGuPID.FindStringSubmatch(problem)
 	var pid, title string
 	if m != nil {
@@ -138,12 +155,58 @@ func parseLuoGu(problem string) (*ParsedProblem, error) {
 			title = pid
 		}
 	}
+	if !reLuoGuBare.MatchString(pid) {
+		return nil, fmt.Errorf("luogu invalid pid: %q", pid)
+	}
+	pid = normalizeLuoGuPID(pid)
+	if title == "" {
+		title = pid
+	}
 	return &ParsedProblem{
 		Platform:   spider.LuoGu,
 		ExternalID: pid,
 		Title:      title,
 		URL:        "https://www.luogu.com.cn/problem/" + pid,
 	}, nil
+}
+
+// normalizeLuoGuPID 统一洛谷题号大小写（AT_ 后段保持原样风格：小写 task id）。
+func normalizeLuoGuPID(pid string) string {
+	pid = strings.TrimSpace(pid)
+	if pid == "" {
+		return pid
+	}
+	// AT_xxx：前缀 AT_ 大写，其余保持
+	if len(pid) > 3 && strings.EqualFold(pid[:3], "AT_") {
+		return "AT_" + pid[3:]
+	}
+	// 纯字母前缀 + 数字/字母：常见 P/B/T/SP/CF/UVA → 整体大写
+	return strings.ToUpper(pid)
+}
+
+// atCoderTaskURL 仅 task id 时尽量还原 contest URL（abc123_a → contests/abc123/tasks/abc123_a）。
+func atCoderTaskURL(taskID string) string {
+	return atCoderTaskURLWithContest("", taskID)
+}
+
+func atCoderTaskURLWithContest(contest, taskID string) string {
+	taskID = strings.TrimSpace(taskID)
+	contest = strings.TrimSpace(contest)
+	if taskID == "" {
+		return ""
+	}
+	if contest != "" {
+		return fmt.Sprintf("https://atcoder.jp/contests/%s/tasks/%s", contest, taskID)
+	}
+	// 从 task id 推断 contest：最后一个 _ 前为 contest（abc123_a / arc111_b / ahc001_a）
+	if i := strings.LastIndex(taskID, "_"); i > 0 {
+		c := taskID[:i]
+		if reAtCoderTask.MatchString(c) {
+			return fmt.Sprintf("https://atcoder.jp/contests/%s/tasks/%s", c, taskID)
+		}
+	}
+	// 兜底：/tasks/{id}（站内会跳转）
+	return "https://atcoder.jp/tasks/" + taskID
 }
 
 func parseNowCoder(contest, problem string) (*ParsedProblem, error) {
