@@ -72,6 +72,13 @@ var publicExact = map[string]struct{}{
 	"/api/user/site/config":            {},
 	"/v1/user/site/visit-ping":         {},
 	"/api/user/site/visit-ping":        {},
+	// SEO (public HTML meta for crawlers / share previews)
+	"/v1/user/seo/html":         {},
+	"/api/user/seo/html":        {},
+	"/v1/user/seo/meta":         {},
+	"/api/user/seo/meta":        {},
+	"/v1/user/seo/sitemap.xml":  {},
+	"/api/user/seo/sitemap.xml": {},
 	// Social 公开读（关注/取关仍需 JWT）
 	"/v1/user/social/following": {},
 	"/v1/user/social/followers": {},

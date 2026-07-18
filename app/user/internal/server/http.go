@@ -64,6 +64,12 @@ func NewWhiteListMatcher() selector.MatchFunc {
 			strings.Contains(operation, "blog/theme/status") {
 			return false
 		}
+		// SEO HTML / sitemap 公开
+		if strings.Contains(operation, "seo/html") ||
+			strings.Contains(operation, "seo/meta") ||
+			strings.Contains(operation, "seo/sitemap") {
+			return false
+		}
 		// 社交：搜索/列表/计数/身份展示公开（关注操作仍需登录；JWT 可选，有则按当前域解析）
 		if strings.Contains(operation, "social/search") ||
 			strings.Contains(operation, "social/following") ||
@@ -99,6 +105,7 @@ func NewHTTPServer(
 	socialService *service.SocialService,
 	notificationService *service.NotificationService,
 	blogService *service.BlogService,
+	seoService *service.SEOService,
 	logger log.Logger,
 
 ) *http.Server {
@@ -139,6 +146,7 @@ func NewHTTPServer(
 	service.RegisterSocialRoutes(srv, socialService)
 	service.RegisterNotificationRoutes(srv, notificationService)
 	service.RegisterBlogRoutes(srv, blogService)
+	service.RegisterSEORoutes(srv, seoService)
 	service.RegisterBackupRoutes(srv, d)
 	return srv
 }

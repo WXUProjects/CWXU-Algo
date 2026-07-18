@@ -1,0 +1,33 @@
+# GoAlgo SEO — paste into frontend static server{}
+# Requires: GET /api/user/seo/html?path=... and sitemap.xml
+# Replace 127.0.0.1:8000 with your API gateway.
+
+location = /sitemap.xml {
+  proxy_pass http://127.0.0.1:8000/api/user/seo/sitemap.xml;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+}
+
+# Blog admin stays SPA
+location ~ ^/blog/[^/]+/manage {
+  try_files $uri $uri/ /index.html;
+}
+
+# All /blog/* readers get SEO HTML (then SPA bootstraps from /index.html assets)
+location ~ ^/blog/ {
+  proxy_pass http://127.0.0.1:8000/api/user/seo/html?path=$request_uri;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Original-URI $request_uri;
+}
+
+# Optional: problem detail / profile / plaza
+location ~ ^/(question-bank/detail/|profile|blog-plaza) {
+  proxy_pass http://127.0.0.1:8000/api/user/seo/html?path=$request_uri;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Original-URI $request_uri;
+}
