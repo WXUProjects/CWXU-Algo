@@ -60,3 +60,13 @@ type ProblemsetLike struct {
 }
 
 func (ProblemsetLike) TableName() string { return "problemset_likes" }
+
+// ProblemsetFavorite 题单收藏（书签；与点赞分离）
+type ProblemsetFavorite struct {
+	ID           uint      `gorm:"primaryKey"`
+	CreatedAt    time.Time `gorm:"index"`
+	UserID       uint      `gorm:"not null;uniqueIndex:idx_psf_user_set,priority:1;comment:用户"`
+	ProblemsetID uint      `gorm:"not null;uniqueIndex:idx_psf_user_set,priority:2;index;comment:题单"`
+}
+
+func (ProblemsetFavorite) TableName() string { return "problemset_favorites" }

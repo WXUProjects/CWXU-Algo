@@ -64,8 +64,11 @@ func RegisterProblemsetRoutes(srv *khttp.Server, s *ProblemsetService) {
 	r.POST("/v1/core/problemset/delete", s.handleDelete)
 	r.POST("/v1/core/problemset/unlock", s.handleUnlock)
 	r.POST("/v1/core/problemset/add", s.handleAdd)
+	r.POST("/v1/core/problemset/add-manual", s.handleAddManual)
 	r.POST("/v1/core/problemset/remove", s.handleRemove)
 	r.POST("/v1/core/problemset/like", s.handleLike)
+	r.POST("/v1/core/problemset/favorite", s.handleFavorite)
+	r.GET("/v1/core/problemset/favorites", s.handleFavorites)
 }
 
 // ---------- visibility helpers（可单测）----------
@@ -180,14 +183,16 @@ func (s *ProblemsetService) handleMine(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加载失败"})
 		return nil
 	}
-	liked := s.likedMap(uid, idsOfSets(list))
+	setIDs := idsOfSets(list)
+	liked := s.likedMap(uid, setIDs)
+	favorited := s.favoritedMap(uid, setIDs)
 	// 可选 problemId：标注本题是否已在各题单中（题目页「添加到题单」用）
 	checkPID := queryUint(ctx, "problemId")
 	contains := map[uint]bool{}
 	if checkPID > 0 && len(list) > 0 {
 		var hitIDs []uint
 		_ = s.db.Model(&model.ProblemsetItem{}).
-			Where("problem_id = ? AND problemset_id IN ?", checkPID, idsOfSets(list)).
+			Where("problem_id = ? AND problemset_id IN ?", checkPID, setIDs).
 			Pluck("problemset_id", &hitIDs).Error
 		for _, id := range hitIDs {
 			contains[id] = true
@@ -195,7 +200,7 @@ func (s *ProblemsetService) handleMine(ctx khttp.Context) error {
 	}
 	items := make([]map[string]interface{}, 0, len(list))
 	for i := range list {
-		b := s.toBrief(&list[i], uid, liked[list[i].ID], false)
+		b := s.toBrief(&list[i], uid, liked[list[i].ID], favorited[list[i].ID], false)
 		if checkPID > 0 {
 			b["containsProblem"] = contains[list[i].ID]
 		}
@@ -236,11 +241,13 @@ func (s *ProblemsetService) handleSquare(ctx khttp.Context) error {
 		}
 	}
 	uid := s.viewerID(ctx)
-	liked := s.likedMap(uid, idsOfSets(list))
+	setIDs := idsOfSets(list)
+	liked := s.likedMap(uid, setIDs)
+	favorited := s.favoritedMap(uid, setIDs)
 	ownerNames := s.batchOwnerNames(ctx, list)
 	items := make([]map[string]interface{}, 0, len(list))
 	for i := range list {
-		b := s.toBrief(&list[i], uid, liked[list[i].ID], false)
+		b := s.toBrief(&list[i], uid, liked[list[i].ID], favorited[list[i].ID], false)
 		b["ownerName"] = ownerNames[list[i].OwnerID]
 		items = append(items, b)
 	}
@@ -318,8 +325,9 @@ func (s *ProblemsetService) handleGet(ctx khttp.Context) error {
 		outItems = append(outItems, row)
 	}
 	liked := s.likedMap(uid, []uint{ps.ID})
+	favorited := s.favoritedMap(uid, []uint{ps.ID})
 	ownerNames := s.batchOwnerNames(ctx, []model.Problemset{ps})
-	data := s.toBrief(&ps, uid, liked[ps.ID], true)
+	data := s.toBrief(&ps, uid, liked[ps.ID], favorited[ps.ID], true)
 	data["description"] = ps.Description
 	data["items"] = outItems
 	data["ownerName"] = ownerNames[ps.OwnerID]
@@ -354,11 +362,13 @@ func (s *ProblemsetService) handleByProblem(ctx khttp.Context) error {
 		Limit(20).
 		Find(&list).Error
 	uid := s.viewerID(ctx)
-	liked := s.likedMap(uid, idsOfSets(list))
+	listIDs := idsOfSets(list)
+	liked := s.likedMap(uid, listIDs)
+	favorited := s.favoritedMap(uid, listIDs)
 	ownerNames := s.batchOwnerNames(ctx, list)
 	items := make([]map[string]interface{}, 0, len(list))
 	for i := range list {
-		b := s.toBrief(&list[i], uid, liked[list[i].ID], false)
+		b := s.toBrief(&list[i], uid, liked[list[i].ID], favorited[list[i].ID], false)
 		b["ownerName"] = ownerNames[list[i].OwnerID]
 		items = append(items, b)
 	}
@@ -424,7 +434,7 @@ func (s *ProblemsetService) handleCreate(ctx khttp.Context) error {
 		return nil
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true, "message": "ok", "data": s.toBrief(&row, uid, false, true),
+		"success": true, "message": "ok", "data": s.toBrief(&row, uid, false, false, true),
 	})
 	return nil
 }
@@ -509,8 +519,9 @@ func (s *ProblemsetService) handleUpdate(ctx khttp.Context) error {
 		_ = s.db.First(&ps, ps.ID)
 	}
 	liked := s.likedMap(uid, []uint{ps.ID})
+	favorited := s.favoritedMap(uid, []uint{ps.ID})
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true, "message": "ok", "data": s.toBrief(&ps, uid, liked[ps.ID], true),
+		"success": true, "message": "ok", "data": s.toBrief(&ps, uid, liked[ps.ID], favorited[ps.ID], true),
 	})
 	return nil
 }
@@ -615,17 +626,19 @@ func (s *ProblemsetService) handleAdd(ctx khttp.Context) error {
 			return nil
 		}
 		problemID = p.ID
-		if strings.TrimSpace(p.ContentMD) == "" && s.uc != nil {
-			if err := s.uc.ForceEnqueueFetchOnly(p.ID); err != nil {
+		if s.uc != nil {
+			needFetch := strings.TrimSpace(p.ContentMD) == ""
+			if err := s.uc.ForceEnqueueFetch(p.ID, uid); err != nil {
 				log.Warnf("problemset add force fetch id=%d: %v", p.ID, err)
-			} else {
+			} else if needFetch {
 				fetchTriggered = true
 			}
 		}
 	} else if u := strings.TrimSpace(req.URL); u != "" {
 		parsed, err := biz.ParseProblemURL(u)
 		if err != nil {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{
+			// 200 + success=false：前端 axios 可拿到 code，引导手动加题
+			writeJSON(ctx.Response(), 200, map[string]interface{}{
 				"success": false, "message": "无法识别该题目链接", "code": "URL_PARSE_FAILED",
 			})
 			return nil
@@ -650,7 +663,7 @@ func (s *ProblemsetService) handleAdd(ctx khttp.Context) error {
 			}
 			problemID = existing.ID
 		} else {
-			p, err := s.uc.UpsertProblemFromParsed(parsed)
+			p, err := s.uc.UpsertProblemFromParsedForUser(parsed, uid)
 			if err != nil || p == nil {
 				writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "题目处理失败"})
 				return nil
@@ -663,28 +676,9 @@ func (s *ProblemsetService) handleAdd(ctx khttp.Context) error {
 		return nil
 	}
 
-	// 已存在则幂等成功
-	var n int64
-	_ = s.db.Model(&model.ProblemsetItem{}).
-		Where("problemset_id = ? AND problem_id = ?", ps.ID, problemID).
-		Count(&n).Error
-	if n == 0 {
-		// sort_order = max+1
-		var maxSort int
-		_ = s.db.Model(&model.ProblemsetItem{}).
-			Where("problemset_id = ?", ps.ID).
-			Select("COALESCE(MAX(sort_order),0)").Scan(&maxSort).Error
-		item := model.ProblemsetItem{
-			ProblemsetID: ps.ID,
-			ProblemID:    problemID,
-			SortOrder:    maxSort + 1,
-		}
-		if err := s.db.Create(&item).Error; err != nil {
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加入失败"})
-			return nil
-		}
-		_ = s.db.Model(&model.Problemset{}).Where("id = ?", ps.ID).
-			UpdateColumn("item_count", gorm.Expr("item_count + 1")).Error
+	if err := s.linkProblemToSet(ps.ID, problemID); err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加入失败"})
+		return nil
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "ok",
@@ -692,6 +686,83 @@ func (s *ProblemsetService) handleAdd(ctx khttp.Context) error {
 			"problemId": problemID, "fetchTriggered": fetchTriggered,
 		},
 	})
+	return nil
+}
+
+// handleAddManual 链接无法识别时：用户手动建题并加入题单（无需审核）
+func (s *ProblemsetService) handleAddManual(ctx khttp.Context) error {
+	uid := s.viewerID(ctx)
+	if uid == 0 {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
+		return nil
+	}
+	var req struct {
+		ProblemsetID uint     `json:"problemsetId"`
+		Title        string   `json:"title"`
+		ContentMD    string   `json:"contentMd"`
+		Tags         []string `json:"tags"`
+		SourceURL    string   `json:"sourceUrl"`
+	}
+	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ProblemsetID == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
+		return nil
+	}
+	var ps model.Problemset
+	if err := s.db.First(&ps, req.ProblemsetID).Error; err != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题单不存在"})
+		return nil
+	}
+	if ps.OwnerID != uid {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能向自己的题单加题"})
+		return nil
+	}
+	if s.uc == nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "服务未就绪"})
+		return nil
+	}
+	p, err := s.uc.CreateManualProblem(uid, req.Title, req.ContentMD, req.SourceURL, req.Tags)
+	if err != nil || p == nil {
+		msg := "创建题目失败"
+		if err != nil {
+			msg = err.Error()
+		}
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": msg})
+		return nil
+	}
+	if err := s.linkProblemToSet(ps.ID, p.ID); err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加入题单失败"})
+		return nil
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"success": true, "message": "ok",
+		"data": map[string]interface{}{"problemId": p.ID, "fetchTriggered": false},
+	})
+	return nil
+}
+
+// linkProblemToSet 幂等将题目加入题单
+func (s *ProblemsetService) linkProblemToSet(setID, problemID uint) error {
+	var n int64
+	_ = s.db.Model(&model.ProblemsetItem{}).
+		Where("problemset_id = ? AND problem_id = ?", setID, problemID).
+		Count(&n).Error
+	if n > 0 {
+		return nil
+	}
+	var maxSort int
+	_ = s.db.Model(&model.ProblemsetItem{}).
+		Where("problemset_id = ?", setID).
+		Select("COALESCE(MAX(sort_order),0)").Scan(&maxSort).Error
+	item := model.ProblemsetItem{
+		ProblemsetID: setID,
+		ProblemID:    problemID,
+		SortOrder:    maxSort + 1,
+	}
+	if err := s.db.Create(&item).Error; err != nil {
+		return err
+	}
+	_ = s.db.Model(&model.Problemset{}).Where("id = ?", setID).
+		UpdateColumn("item_count", gorm.Expr("item_count + 1")).Error
 	return nil
 }
 
@@ -785,9 +856,101 @@ func (s *ProblemsetService) handleLike(ctx khttp.Context) error {
 	return nil
 }
 
+// handleFavorite 切换收藏（与点赞分离；仅公有自定义题单）
+func (s *ProblemsetService) handleFavorite(ctx khttp.Context) error {
+	uid := s.viewerID(ctx)
+	if uid == 0 {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
+		return nil
+	}
+	var req struct {
+		ID uint `json:"id"`
+	}
+	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ID == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
+		return nil
+	}
+	var ps model.Problemset
+	if err := s.db.First(&ps, req.ID).Error; err != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题单不存在"})
+		return nil
+	}
+	// 仅公有自定义题单可收藏（广场场景）；系统题单不可
+	if !IsPublicProblemset(&ps) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "仅公开题单可收藏"})
+		return nil
+	}
+	var existing model.ProblemsetFavorite
+	err := s.db.Where("user_id = ? AND problemset_id = ?", uid, ps.ID).First(&existing).Error
+	favorited := false
+	if err == gorm.ErrRecordNotFound {
+		if err := s.db.Create(&model.ProblemsetFavorite{UserID: uid, ProblemsetID: ps.ID}).Error; err != nil {
+			writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "收藏失败"})
+			return nil
+		}
+		favorited = true
+	} else if err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "收藏失败"})
+		return nil
+	} else {
+		_ = s.db.Delete(&existing).Error
+		favorited = false
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"success": true, "message": "ok",
+		"data": map[string]interface{}{"favorited": favorited},
+	})
+	return nil
+}
+
+// handleFavorites 我收藏的题单（排除自己的）
+func (s *ProblemsetService) handleFavorites(ctx khttp.Context) error {
+	uid := s.viewerID(ctx)
+	if uid == 0 {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
+		return nil
+	}
+	page, pageSize := pageParams(ctx, 1, 20, 50)
+	// 收藏表 join 题单：他人 + 仍 public custom
+	var total int64
+	base := s.db.Table("problemset_favorites AS f").
+		Joins("INNER JOIN problemsets AS p ON p.id = f.problemset_id").
+		Where("f.user_id = ?", uid).
+		Where("p.owner_id <> ?", uid).
+		Where("p.visibility = ? AND p.kind = ?", model.ProblemsetVisPublic, model.ProblemsetKindCustom)
+	_ = base.Count(&total).Error
+	var list []model.Problemset
+	if err := s.db.Table("problemsets AS p").
+		Select("p.*").
+		Joins("INNER JOIN problemset_favorites AS f ON f.problemset_id = p.id").
+		Where("f.user_id = ?", uid).
+		Where("p.owner_id <> ?", uid).
+		Where("p.visibility = ? AND p.kind = ?", model.ProblemsetVisPublic, model.ProblemsetKindCustom).
+		Order("f.created_at DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).
+		Find(&list).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加载失败"})
+		return nil
+	}
+	setIDs := idsOfSets(list)
+	liked := s.likedMap(uid, setIDs)
+	ownerNames := s.batchOwnerNames(ctx, list)
+	items := make([]map[string]interface{}, 0, len(list))
+	for i := range list {
+		b := s.toBrief(&list[i], uid, liked[list[i].ID], true, false)
+		b["ownerName"] = ownerNames[list[i].OwnerID]
+		items = append(items, b)
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"success": true, "message": "ok", "data": items,
+		"total": total, "page": page, "pageSize": pageSize,
+	})
+	return nil
+}
+
 // ---------- serializers / helpers ----------
 
-func (s *ProblemsetService) toBrief(ps *model.Problemset, viewerID uint, liked, withDesc bool) map[string]interface{} {
+func (s *ProblemsetService) toBrief(ps *model.Problemset, viewerID uint, liked, favorited, withDesc bool) map[string]interface{} {
 	m := map[string]interface{}{
 		"id":          ps.ID,
 		"ownerId":     ps.OwnerID,
@@ -797,6 +960,7 @@ func (s *ProblemsetService) toBrief(ps *model.Problemset, viewerID uint, liked, 
 		"likeCount":   ps.LikeCount,
 		"itemCount":   ps.ItemCount,
 		"liked":       liked,
+		"favorited":   favorited,
 		"isOwner":     viewerID > 0 && viewerID == ps.OwnerID,
 		"createdAt":   ps.CreatedAt.Unix(),
 		"updatedAt":   ps.UpdatedAt.Unix(),
@@ -822,6 +986,19 @@ func (s *ProblemsetService) likedMap(userID uint, setIDs []uint) map[uint]bool {
 		return out
 	}
 	var rows []model.ProblemsetLike
+	_ = s.db.Where("user_id = ? AND problemset_id IN ?", userID, setIDs).Find(&rows).Error
+	for _, r := range rows {
+		out[r.ProblemsetID] = true
+	}
+	return out
+}
+
+func (s *ProblemsetService) favoritedMap(userID uint, setIDs []uint) map[uint]bool {
+	out := map[uint]bool{}
+	if userID == 0 || len(setIDs) == 0 {
+		return out
+	}
+	var rows []model.ProblemsetFavorite
 	_ = s.db.Where("user_id = ? AND problemset_id IN ?", userID, setIDs).Find(&rows).Error
 	for _, r := range rows {
 		out[r.ProblemsetID] = true

@@ -130,6 +130,7 @@ func migrateModels(db *gorm.DB) {
 		&model.Problemset{},
 		&model.ProblemsetItem{},
 		&model.ProblemsetLike{},
+		&model.ProblemsetFavorite{},
 		&schemaPatch{},
 	)
 	if err != nil {

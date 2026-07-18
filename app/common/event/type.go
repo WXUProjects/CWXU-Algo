@@ -25,12 +25,16 @@ type ProblemFetchEvent struct {
 	Force bool `json:"force,omitempty"`
 	// SkipAnalyze 爬取成功后不入 AI 分析队列
 	SkipAnalyze bool `json:"skip_analyze,omitempty"`
+	// ActorUserID 主动触发者（题单加题等）；SkipAnalyze=false 时按该用户 AI 资格入队，绕过 submitter/6 月窗
+	ActorUserID uint `json:"actor_user_id,omitempty"`
 }
 
 // ProblemAnalyzeEvent AI 打标任务（problem_analyze 队列，并发 3）
 // 仅在题面 content_md 已落库后投递
 type ProblemAnalyzeEvent struct {
 	ProblemID uint `json:"problem_id"`
+	// Force 用户主动触发（题单加题/手动入库）：跳过 6 月窗与 submitter AI 资格检查
+	Force bool `json:"force,omitempty"`
 }
 
 // UserProfileEvent 用户题库画像预计算（user_profile 队列）

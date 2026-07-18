@@ -1,11 +1,15 @@
-# GoAlgo SEO — paste into frontend static server{}
-# Requires: GET /api/user/seo/html?path=... and sitemap.xml
-# Replace 127.0.0.1:8000 with your API gateway.
+# GoAlgo SEO — 首版策略：公开分享页一律 SEO HTML（不靠 UA）
+# Requires backend: GET /v1/user/seo/html（X-Original-URI）+ /v1/user/seo/sitemap.xml
+# Replace 127.0.0.1:8080 with your API gateway.
+
+location = /robots.txt {
+  try_files /robots.txt =404;
+}
 
 location = /sitemap.xml {
-  proxy_pass http://127.0.0.1:8000/api/user/seo/sitemap.xml;
+  proxy_pass http://127.0.0.1:8080/v1/user/seo/sitemap.xml;
   proxy_set_header Host $host;
-  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Proto https;
   proxy_set_header X-Forwarded-Host $host;
 }
 
@@ -14,20 +18,63 @@ location ~ ^/blog/[^/]+/manage {
   try_files $uri $uri/ /index.html;
 }
 
-# All /blog/* readers get SEO HTML (then SPA bootstraps from /index.html assets)
+location ~ ^/problemset/[^/]+/add-problem {
+  try_files $uri $uri/ /index.html;
+}
+
+# 一律 SEO（path 用 X-Original-URI，勿塞进 ?path= 以免 query 被截断）
 location ~ ^/blog/ {
-  proxy_pass http://127.0.0.1:8000/api/user/seo/html?path=$request_uri;
+  proxy_pass http://127.0.0.1:8080/v1/user/seo/html;
   proxy_set_header Host $host;
-  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Proto https;
   proxy_set_header X-Forwarded-Host $host;
   proxy_set_header X-Original-URI $request_uri;
 }
 
-# Optional: problem detail / profile / plaza
-location ~ ^/(question-bank/detail/|profile|blog-plaza) {
-  proxy_pass http://127.0.0.1:8000/api/user/seo/html?path=$request_uri;
+location ~ ^/question-bank/detail/ {
+  proxy_pass http://127.0.0.1:8080/v1/user/seo/html;
   proxy_set_header Host $host;
-  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Proto https;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Original-URI $request_uri;
+}
+
+location ~ ^/problemset {
+  proxy_pass http://127.0.0.1:8080/v1/user/seo/html;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto https;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Original-URI $request_uri;
+}
+
+location ~ ^/profile {
+  proxy_pass http://127.0.0.1:8080/v1/user/seo/html;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto https;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Original-URI $request_uri;
+}
+
+location = /blog-plaza {
+  proxy_pass http://127.0.0.1:8080/v1/user/seo/html;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto https;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Original-URI $request_uri;
+}
+
+location ~ ^/p/[A-Za-z0-9]+$ {
+  proxy_pass http://127.0.0.1:8080/v1/user/seo/html;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto https;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Original-URI $request_uri;
+}
+
+location = /tools/paste {
+  proxy_pass http://127.0.0.1:8080/v1/user/seo/html;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto https;
   proxy_set_header X-Forwarded-Host $host;
   proxy_set_header X-Original-URI $request_uri;
 }

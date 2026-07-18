@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	data2 "cwxu-algo/app/common/data"
 	"cwxu-algo/app/common/discovery"
@@ -322,12 +324,17 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		}
 		return nil
 	}
-	// 已有题面：不再爬取；入 AI 由 enqueueAnalyze 统一闸门（窗口 + AI 资格）
+	// 已有题面：不再爬取；入 AI（主动路径按 actor，否则窗口 + submitter 闸门）
 	if strings.TrimSpace(p.ContentMD) != "" || p.Status == model.ProblemStatusTagging {
 		if p.Status != model.ProblemStatusCompleted {
 			_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
-			if !ev.SkipAnalyze && !pipelineControl.IsAnalyzePaused() {
-				return uc.enqueueAnalyze(p.ID)
+			if !ev.SkipAnalyze {
+				if ev.ActorUserID > 0 {
+					return uc.enqueueAnalyzeForUser(p.ID, ev.ActorUserID)
+				}
+				if !pipelineControl.IsAnalyzePaused() {
+					return uc.enqueueAnalyze(p.ID)
+				}
 			}
 		}
 		return nil
@@ -384,19 +391,31 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	}
 	uc.BumpProblemDetailVer(p.ID)
 	uc.progressMoveStatus(p.Status, model.ProblemStatusTagging)
-	// 爬取成功后：近 6 月 + 有组织用户提交才进 AI（闸门在 enqueueAnalyzePrio）
-	// SkipAnalyze：题单加题等场景仅爬取、不分析
+	// 爬取成功后入 AI：
+	// - SkipAnalyze：仅爬不分析
+	// - ActorUserID>0：用户主动场景，按操作者 AI 资格（绕过 submitter/6 月窗）
+	// - 否则：走 enqueueAnalyzePrio（近 6 月 + AI 资格提交者）
 	if ev.SkipAnalyze {
-		log.Infof("ProcessFetch skip analyze (forced fetch-only) id=%d", p.ID)
+		log.Infof("ProcessFetch skip analyze (fetch-only) id=%d", p.ID)
 		return nil
+	}
+	if ev.ActorUserID > 0 {
+		return uc.enqueueAnalyzeForUser(p.ID, ev.ActorUserID)
 	}
 	// 分析暂停时仍入队（暂停不清队列，恢复后继续）；高优先级延续当前已出队的爬取任务
 	return uc.enqueueAnalyzePrio(p.ID, mqPriorityIncremental)
 }
 
 // ForceEnqueueFetchOnly 强制入队题面爬取，忽略用户资格，且不触发 AI 分析。
-// 用于题单加题等用户主动场景。ContentMD 已有时 no-op。
+// 兼容旧调用；新代码请用 ForceEnqueueFetch(problemID, actorUID)。
 func (uc *ProblemUseCase) ForceEnqueueFetchOnly(problemID uint) error {
+	return uc.ForceEnqueueFetch(problemID, 0)
+}
+
+// ForceEnqueueFetch 强制入队题面爬取（忽略爬取资格）。
+// actorUID>0 且具备 AI 资格时，爬取成功后按操作者入 AI；否则仅爬取。
+// ContentMD 已有时：若可分析则直接 enqueueAnalyzeForUser，否则 no-op。
+func (uc *ProblemUseCase) ForceEnqueueFetch(problemID uint, actorUID uint) error {
 	if uc == nil || problemID == 0 {
 		return nil
 	}
@@ -404,7 +423,11 @@ func (uc *ProblemUseCase) ForceEnqueueFetchOnly(problemID uint) error {
 	if err := uc.data.DB.First(&p, problemID).Error; err != nil {
 		return err
 	}
+	// 已有题面：尝试按操作者 AI 资格分析
 	if strings.TrimSpace(p.ContentMD) != "" {
+		if actorUID > 0 && len(nonEmptyTags(p.Tags)) == 0 {
+			return uc.enqueueAnalyzeForUser(problemID, actorUID)
+		}
 		return nil
 	}
 	if p.Status == model.ProblemStatusCompleted || p.Status == model.ProblemStatusSkipped {
@@ -415,17 +438,17 @@ func (uc *ProblemUseCase) ForceEnqueueFetchOnly(problemID uint) error {
 	}
 	// 若永久失败标记在 FAILED 上，仍允许用户主动再试一次：重置为 PENDING
 	if p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg) {
-		// 主动加题：允许再试
 		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
 			"status":    model.ProblemStatusPending,
 			"error_msg": "",
 		}).Error
 		p.Status = model.ProblemStatusPending
 	}
-	return uc.enqueueFetchForced(p.ID, p.Platform, p.ExternalID, p.URL, true)
+	skipAnalyze := actorUID == 0 || !uc.userHasAIEligibility(actorUID)
+	return uc.enqueueFetchForced(p.ID, p.Platform, p.ExternalID, p.URL, skipAnalyze, actorUID)
 }
 
-func (uc *ProblemUseCase) enqueueFetchForced(id uint, platform, externalID, url string, skipAnalyze bool) error {
+func (uc *ProblemUseCase) enqueueFetchForced(id uint, platform, externalID, url string, skipAnalyze bool, actorUID uint) error {
 	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
 	}
@@ -436,6 +459,7 @@ func (uc *ProblemUseCase) enqueueFetchForced(id uint, platform, externalID, url 
 		URL:         url,
 		Force:       true,
 		SkipAnalyze: skipAnalyze,
+		ActorUserID: actorUID,
 	})
 	if err := uc.declareProblemQueue("problem_fetch"); err != nil {
 		return err
@@ -448,8 +472,126 @@ func (uc *ProblemUseCase) enqueueFetchForced(id uint, platform, externalID, url 
 	})
 }
 
-// UpsertProblemFromParsed 按 platform+external_id 幂等入库；缺题面时强制仅爬取
+// enqueueAnalyzeForUser 用户主动场景入 AI：仅校验操作者 AI 资格，不校验 submitter/6 月窗。
+// 标签非空或题面为空时跳过。
+func (uc *ProblemUseCase) enqueueAnalyzeForUser(problemID uint, actorUID uint) error {
+	if uc == nil || problemID == 0 {
+		return nil
+	}
+	if actorUID == 0 || !uc.userHasAIEligibility(actorUID) {
+		log.Debugf("enqueueAnalyzeForUser skip no AI eligibility actor=%d id=%d", actorUID, problemID)
+		return nil
+	}
+	if uc.mq == nil {
+		return fmt.Errorf("mq not ready")
+	}
+	var p model.Problem
+	if err := uc.data.DB.First(&p, problemID).Error; err != nil {
+		return err
+	}
+	if len(nonEmptyTags(p.Tags)) > 0 {
+		if strings.TrimSpace(p.ContentMD) != "" && p.Status != model.ProblemStatusCompleted {
+			_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+				"status":    model.ProblemStatusCompleted,
+				"error_msg": "",
+			}).Error
+		}
+		return nil
+	}
+	if strings.TrimSpace(p.ContentMD) == "" {
+		return nil
+	}
+	if p.Status == model.ProblemStatusCompleted || p.Status == model.ProblemStatusSkipped {
+		return nil
+	}
+	if pipelineControl.IsAnalyzePaused() {
+		// 暂停时仍入队，恢复后继续
+		log.Debugf("enqueueAnalyzeForUser analyze paused, still enqueue id=%d", problemID)
+	}
+	_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+		"status":    model.ProblemStatusTagging,
+		"error_msg": "",
+	}).Error
+	body, _ := json.Marshal(event.ProblemAnalyzeEvent{ProblemID: problemID, Force: true})
+	if err := uc.declareProblemQueue("problem_analyze"); err != nil {
+		return err
+	}
+	return uc.mq.Publish("", "problem_analyze", false, false, amqp.Publishing{
+		ContentType:  "application/json",
+		Body:         body,
+		DeliveryMode: amqp.Persistent,
+		Priority:     mqPriorityIncremental,
+	})
+}
+
+// CreateManualProblem 用户自主加题（无需审核）。platform=Manual。
+// 有题面无标签且 actor 有 AI 资格时入分析队列。
+func (uc *ProblemUseCase) CreateManualProblem(actorUID uint, title, contentMD, sourceURL string, tags []string) (*model.Problem, error) {
+	if uc == nil {
+		return nil, fmt.Errorf("usecase nil")
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil, fmt.Errorf("请填写题目标题")
+	}
+	if utf8.RuneCountInString(title) > 200 {
+		return nil, fmt.Errorf("标题过长")
+	}
+	contentMD = strings.TrimSpace(contentMD)
+	if len(contentMD) > 200_000 {
+		return nil, fmt.Errorf("题面过长")
+	}
+	tags = normalizeEditTags(tags)
+	sourceURL = strings.TrimSpace(sourceURL)
+	if len(sourceURL) > 1024 {
+		sourceURL = sourceURL[:1024]
+	}
+	extID := "m_" + strings.ReplaceAll(uuidNew(), "-", "")
+	hasContent := contentMD != ""
+	hasTags := len(tags) > 0
+	status := model.ProblemStatusCompleted
+	if hasContent && !hasTags {
+		status = model.ProblemStatusTagging
+	}
+	p := model.Problem{
+		Platform:   "Manual",
+		ExternalID: extID,
+		Title:      title,
+		URL:        sourceURL,
+		ContentMD:  contentMD,
+		Tags:       model.StringArray(tags),
+		Status:     status,
+	}
+	if err := uc.data.DB.Create(&p).Error; err != nil {
+		return nil, err
+	}
+	if hasContent && !hasTags && actorUID > 0 {
+		if err := uc.enqueueAnalyzeForUser(p.ID, actorUID); err != nil {
+			log.Warnf("CreateManualProblem enqueue analyze id=%d: %v", p.ID, err)
+		}
+	}
+	return &p, nil
+}
+
+// uuidNew 生成无连字符前的标准 UUID 字符串（失败时用随机 hex）
+func uuidNew() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	// RFC 4122 version 4
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// UpsertProblemFromParsed 按 platform+external_id 幂等入库；缺题面时强制爬取（默认不 AI，兼容旧调用）
 func (uc *ProblemUseCase) UpsertProblemFromParsed(parsed *ParsedProblem) (*model.Problem, error) {
+	return uc.UpsertProblemFromParsedForUser(parsed, 0)
+}
+
+// UpsertProblemFromParsedForUser 同 UpsertProblemFromParsed，actorUID 用于条件 AI
+func (uc *ProblemUseCase) UpsertProblemFromParsedForUser(parsed *ParsedProblem, actorUID uint) (*model.Problem, error) {
 	if uc == nil || parsed == nil || parsed.Platform == "" || parsed.ExternalID == "" {
 		return nil, fmt.Errorf("invalid parsed problem")
 	}
@@ -490,9 +632,9 @@ func (uc *ProblemUseCase) UpsertProblemFromParsed(parsed *ParsedProblem) (*model
 			existing.URL = parsed.URL
 		}
 	}
-	if !parsed.SkipFetch && strings.TrimSpace(existing.ContentMD) == "" {
-		if err := uc.ForceEnqueueFetchOnly(existing.ID); err != nil {
-			log.Warnf("ForceEnqueueFetchOnly id=%d: %v", existing.ID, err)
+	if !parsed.SkipFetch {
+		if err := uc.ForceEnqueueFetch(existing.ID, actorUID); err != nil {
+			log.Warnf("ForceEnqueueFetch id=%d: %v", existing.ID, err)
 		}
 	}
 	return &existing, nil
@@ -548,25 +690,28 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 		return uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL)
 	}
 
-	// 近 6 个月：以 submit_logs 最近提交为准（与看板「待分析近6月」同一口径）
-	if !uc.withinAnalyzeWindow(&p) {
-		// 超窗：不再占「待分析」名额；静默 Ack 会让人以为在跑 AI
-		log.Warnf("ProcessAnalyze out-of-window id=%d last=%v → SKIPPED_ANALYZE", p.ID, p.LastSubmittedAt)
-		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
-			"status":    model.ProblemStatusTagging, // 仍保留有题面待分析语义
-			"error_msg": "超出6个月分析窗口(以submit_logs最近提交为准)，已跳过",
-		}).Error
-		// 返回 error 会 requeue；此处 Ack 丢弃，靠重置/新提交再入队
-		return nil
-	}
-	// 无 AI 资格用户近窗提交：不跑题面 AI（题面已爬取可保留）
-	if !uc.problemHasAISubmitter(p.ID) {
-		log.Infof("ProcessAnalyze skip no AI-eligible submitters id=%d", p.ID)
-		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
-			"status":    model.ProblemStatusTagging,
-			"error_msg": "无题面AI资格用户提交，已跳过题面AI",
-		}).Error
-		return nil
+	// 用户主动（Force）：已在入队侧校验操作者 AI 资格，跳过 6 月窗与 submitter 检查
+	if !ev.Force {
+		// 近 6 个月：以 submit_logs 最近提交为准（与看板「待分析近6月」同一口径）
+		if !uc.withinAnalyzeWindow(&p) {
+			// 超窗：不再占「待分析」名额；静默 Ack 会让人以为在跑 AI
+			log.Warnf("ProcessAnalyze out-of-window id=%d last=%v → SKIPPED_ANALYZE", p.ID, p.LastSubmittedAt)
+			_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+				"status":    model.ProblemStatusTagging, // 仍保留有题面待分析语义
+				"error_msg": "超出6个月分析窗口(以submit_logs最近提交为准)，已跳过",
+			}).Error
+			// 返回 error 会 requeue；此处 Ack 丢弃，靠重置/新提交再入队
+			return nil
+		}
+		// 无 AI 资格用户近窗提交：不跑题面 AI（题面已爬取可保留）
+		if !uc.problemHasAISubmitter(p.ID) {
+			log.Infof("ProcessAnalyze skip no AI-eligible submitters id=%d", p.ID)
+			_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+				"status":    model.ProblemStatusTagging,
+				"error_msg": "无题面AI资格用户提交，已跳过题面AI",
+			}).Error
+			return nil
+		}
 	}
 
 	if uc.tagger == nil || !uc.tagger.Ready() {

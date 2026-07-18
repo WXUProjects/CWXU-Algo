@@ -234,7 +234,24 @@ func (s *SEOService) resolvePage(req *http.Request, path string) seoPage {
 		return page
 	}
 
-	// /question-bank/detail/:id
+	// /question-bank/detail/:id/solution/:solutionId  (题解，先于题面匹配)
+	if m := regexp.MustCompile(`^/question-bank/detail/(\d+)/solution/(\d+)$`).FindStringSubmatch(pathOnly); len(m) == 3 {
+		pid, _ := strconv.ParseUint(m[1], 10, 64)
+		sid, _ := strconv.ParseUint(m[2], 10, 64)
+		if pid > 0 && sid > 0 {
+			if p, ok := s.metaSolution(origin, siteTitle, defaultImg, uint(pid), uint(sid)); ok {
+				return p
+			}
+		}
+		page.Title = "题解 - " + siteTitle
+		page.Description = "在 " + siteTitle + " 查看这道题的题解分享。"
+		page.BodyTitle = page.Title
+		page.BodyText = page.Description
+		page.URL = absURL(origin, pathOnly)
+		return page
+	}
+
+	// /question-bank/detail/:id  (题面)
 	if m := regexp.MustCompile(`^/question-bank/detail/(\d+)$`).FindStringSubmatch(pathOnly); len(m) == 2 {
 		if id, err := strconv.ParseUint(m[1], 10, 64); err == nil {
 			if p, ok := s.metaProblem(origin, siteTitle, defaultImg, uint(id)); ok {
@@ -243,7 +260,30 @@ func (s *SEOService) resolvePage(req *http.Request, path string) seoPage {
 		}
 	}
 
-	// /profile?id= or /profile
+	// /problemset/:id  (题单)
+	if m := regexp.MustCompile(`^/problemset/(\d+)$`).FindStringSubmatch(pathOnly); len(m) == 2 {
+		if id, err := strconv.ParseUint(m[1], 10, 64); err == nil {
+			if p, ok := s.metaProblemset(origin, siteTitle, defaultImg, uint(id)); ok {
+				return p
+			}
+		}
+		page.Title = "题单 - " + siteTitle
+		page.Description = "在 " + siteTitle + " 浏览算法题单。"
+		page.BodyTitle = page.Title
+		page.BodyText = page.Description
+		page.URL = absURL(origin, pathOnly)
+		return page
+	}
+	if pathOnly == "/problemset" {
+		page.Title = "题单广场 - " + siteTitle
+		page.Description = "浏览社区公开题单，系统化刷题 · " + siteTitle
+		page.BodyTitle = page.Title
+		page.BodyText = page.Description
+		page.URL = absURL(origin, "/problemset")
+		return page
+	}
+
+	// /profile?id= or /profile/:username or /profile
 	if pathOnly == "/profile" {
 		if idStr := strings.TrimSpace(q.Get("id")); idStr != "" {
 			if id, err := strconv.ParseUint(idStr, 10, 64); err == nil {
@@ -253,7 +293,24 @@ func (s *SEOService) resolvePage(req *http.Request, path string) seoPage {
 			}
 		}
 		page.Title = "个人资料 - " + siteTitle
+		page.Description = "查看选手训练数据与资料 · " + siteTitle
+		page.BodyTitle = page.Title
+		page.BodyText = page.Description
 		page.URL = absURL(origin, "/profile")
+		return page
+	}
+	if m := regexp.MustCompile(`^/profile/([^/]+)$`).FindStringSubmatch(pathOnly); len(m) == 2 {
+		uname := m[1]
+		if id, err := strconv.ParseUint(uname, 10, 64); err == nil {
+			if p, ok := s.metaProfile(origin, siteTitle, defaultImg, uint(id), ""); ok {
+				return p
+			}
+		}
+		if p, ok := s.metaProfile(origin, siteTitle, defaultImg, 0, uname); ok {
+			return p
+		}
+		page.Title = "个人资料 - " + siteTitle
+		page.URL = absURL(origin, pathOnly)
 		return page
 	}
 
@@ -263,7 +320,7 @@ func (s *SEOService) resolvePage(req *http.Request, path string) seoPage {
 			return p
 		}
 		page.Title = "粘贴板 - " + siteTitle
-		page.Description = "内容不存在或已过期。"
+		page.Description = "内容不存在或已过期 · " + siteTitle
 		page.BodyTitle = page.Title
 		page.BodyText = page.Description
 		page.URL = absURL(origin, pathOnly)
@@ -273,7 +330,7 @@ func (s *SEOService) resolvePage(req *http.Request, path string) seoPage {
 	// /tools/paste
 	if pathOnly == "/tools/paste" {
 		page.Title = "粘贴板 - " + siteTitle
-		page.Description = "发布与分享代码、文本片段。"
+		page.Description = "在 " + siteTitle + " 发布与分享代码、文本片段。"
 		page.BodyTitle = page.Title
 		page.BodyText = page.Description
 		page.URL = absURL(origin, "/tools/paste")
@@ -330,12 +387,14 @@ func (s *SEOService) metaBlogArticle(origin, siteTitle, defaultImg, username, sl
 	if desc == "" {
 		desc = authorName + " 的文章 · " + siteTitle
 	}
-	img := absURL(origin, firstNonEmpty(a.CoverURL, u.Avatar, defaultImg))
+	// 博文分享图：优先博主头像（保留 GoAlgo siteName）
+	img := absURL(origin, firstNonEmpty(u.Avatar, a.CoverURL, defaultImg))
 	path := fmt.Sprintf("/blog/%s/%s", u.Username, a.Slug)
 	title := a.Title
 	if authorName != "" {
-		title = a.Title + " - " + authorName
+		title = a.Title + " · " + authorName
 	}
+	title = title + " - " + siteTitle
 	return seoPage{
 		Title:       title,
 		Description: desc,
@@ -363,7 +422,8 @@ func (s *SEOService) metaBlogHome(origin, siteTitle, defaultImg, username, _ str
 	if err := s.data.DB.Where("user_id = ?", u.ID).First(&cfg).Error; err == nil {
 		subtitle = strings.TrimSpace(cfg.Subtitle)
 	}
-	desc := clipDesc(firstNonEmpty(subtitle, authorName+" 的算法博客 · "+siteTitle), maxSEODescRunes)
+	// 个人博客分享图：博客身份图（作者头像代表博客）
+	desc := clipDesc(firstNonEmpty(subtitle, authorName+" 的算法博客，分享题解与训练笔记 · "+siteTitle), maxSEODescRunes)
 	img := absURL(origin, firstNonEmpty(u.Avatar, defaultImg))
 	path := "/blog/" + u.Username
 	return seoPage{
@@ -415,13 +475,36 @@ func (s *SEOService) metaProfile(origin, siteTitle, defaultImg string, id uint, 
 
 // core problem row (read-only from CoreDB when available)
 type seoProblemRow struct {
-	ID       uint   `gorm:"column:id"`
-	Title    string `gorm:"column:title"`
-	Platform string `gorm:"column:platform"`
-	Diff     string `gorm:"column:difficulty"`
+	ID        uint   `gorm:"column:id"`
+	Title     string `gorm:"column:title"`
+	Platform  string `gorm:"column:platform"`
+	Diff      string `gorm:"column:difficulty"`
+	ContentMD string `gorm:"column:content_md"`
 }
 
 func (seoProblemRow) TableName() string { return "problems" }
+
+type seoSolutionRow struct {
+	ID        uint   `gorm:"column:id"`
+	ProblemID uint   `gorm:"column:problem_id"`
+	UserID    uint   `gorm:"column:user_id"`
+	Title     string `gorm:"column:title"`
+	ContentMD string `gorm:"column:content_md"`
+}
+
+func (seoSolutionRow) TableName() string { return "problem_user_solutions" }
+
+type seoProblemsetRow struct {
+	ID          uint   `gorm:"column:id"`
+	OwnerID     uint   `gorm:"column:owner_id"`
+	Title       string `gorm:"column:title"`
+	Description string `gorm:"column:description"`
+	Visibility  string `gorm:"column:visibility"`
+	ItemCount   int    `gorm:"column:item_count"`
+	LikeCount   int    `gorm:"column:like_count"`
+}
+
+func (seoProblemsetRow) TableName() string { return "problemsets" }
 
 func (s *SEOService) metaPaste(origin, siteTitle, defaultImg, slug string) (seoPage, bool) {
 	if s.data == nil || s.data.DB == nil || slug == "" {
@@ -452,6 +535,11 @@ func (s *SEOService) metaPaste(origin, siteTitle, defaultImg, slug string) (seoP
 		desc = lang + " · " + desc
 	}
 	path := "/p/" + p.Slug
+	if desc == "" {
+		desc = "在 " + siteTitle + " 粘贴板查看这段分享"
+	} else if !strings.Contains(desc, siteTitle) {
+		desc = clipDesc(desc+" · "+siteTitle, maxSEODescRunes)
+	}
 	return seoPage{
 		Title:       title + " - " + siteTitle,
 		Description: desc,
@@ -469,7 +557,7 @@ func (s *SEOService) metaProblem(origin, siteTitle, defaultImg string, id uint) 
 		return seoPage{}, false
 	}
 	var p seoProblemRow
-	if err := s.data.CoreDB.Select("id", "title", "platform", "difficulty").First(&p, id).Error; err != nil {
+	if err := s.data.CoreDB.Select("id", "title", "platform", "difficulty", "content_md").First(&p, id).Error; err != nil {
 		return seoPage{}, false
 	}
 	title := strings.TrimSpace(p.Title)
@@ -483,8 +571,15 @@ func (s *SEOService) metaProblem(origin, siteTitle, defaultImg string, id uint) 
 	if d := strings.TrimSpace(p.Diff); d != "" {
 		parts = append(parts, "难度 "+d)
 	}
-	parts = append(parts, siteTitle)
-	desc := strings.Join(parts, " · ")
+	bodyClip := clipDesc(p.ContentMD, 120)
+	var desc string
+	if bodyClip != "" {
+		desc = strings.Join(append(parts, bodyClip), " · ")
+	} else {
+		parts = append(parts, "题面详情 · "+siteTitle)
+		desc = strings.Join(parts, " · ")
+	}
+	desc = clipDesc(desc+" · "+siteTitle, maxSEODescRunes)
 	path := fmt.Sprintf("/question-bank/detail/%d", p.ID)
 	return seoPage{
 		Title:       title + " - " + siteTitle,
@@ -498,13 +593,160 @@ func (s *SEOService) metaProblem(origin, siteTitle, defaultImg string, id uint) 
 	}, true
 }
 
+func (s *SEOService) metaSolution(origin, siteTitle, defaultImg string, problemID, solutionID uint) (seoPage, bool) {
+	if s.data == nil || s.data.CoreDB == nil || solutionID == 0 {
+		return seoPage{}, false
+	}
+	var sol seoSolutionRow
+	if err := s.data.CoreDB.Select("id", "problem_id", "user_id", "title", "content_md").
+		Where("id = ?", solutionID).First(&sol).Error; err != nil {
+		return seoPage{}, false
+	}
+	if problemID > 0 && sol.ProblemID != 0 && sol.ProblemID != problemID {
+		// path problem id mismatch — still allow if solution exists
+	}
+	pid := sol.ProblemID
+	if pid == 0 {
+		pid = problemID
+	}
+	problemTitle := ""
+	if pid > 0 {
+		var pr seoProblemRow
+		if err := s.data.CoreDB.Select("id", "title").First(&pr, pid).Error; err == nil {
+			problemTitle = strings.TrimSpace(pr.Title)
+		}
+	}
+	authorName := ""
+	authorAvatar := ""
+	if s.data.DB != nil && sol.UserID > 0 {
+		var u model.User
+		if err := s.data.DB.Select("id", "username", "name", "avatar").First(&u, sol.UserID).Error; err == nil {
+			authorName = firstNonEmpty(u.Name, u.Username)
+			authorAvatar = strings.TrimSpace(u.Avatar)
+		}
+	}
+	title := strings.TrimSpace(sol.Title)
+	if title == "" {
+		title = "题解"
+		if problemTitle != "" {
+			title = problemTitle + " 的题解"
+		}
+	}
+	desc := clipDesc(sol.ContentMD, maxSEODescRunes)
+	if desc == "" {
+		if authorName != "" && problemTitle != "" {
+			desc = authorName + " 分享的「" + problemTitle + "」题解 · " + siteTitle
+		} else {
+			desc = "在 " + siteTitle + " 查看这道题的题解"
+		}
+	} else if authorName != "" {
+		desc = clipDesc(authorName+" · "+desc+" · "+siteTitle, maxSEODescRunes)
+	} else {
+		desc = clipDesc(desc+" · "+siteTitle, maxSEODescRunes)
+	}
+	displayTitle := title
+	if authorName != "" {
+		displayTitle = title + " · " + authorName
+	}
+	path := fmt.Sprintf("/question-bank/detail/%d/solution/%d", pid, sol.ID)
+	return seoPage{
+		Title:       displayTitle + " - " + siteTitle,
+		Description: desc,
+		Image:       absURL(origin, firstNonEmpty(authorAvatar, defaultImg)),
+		URL:         absURL(origin, path),
+		Type:        "article",
+		SiteName:    siteTitle,
+		BodyTitle:   title,
+		BodyText:    desc,
+		Author:      authorName,
+	}, true
+}
+
+func (s *SEOService) metaProblemset(origin, siteTitle, defaultImg string, id uint) (seoPage, bool) {
+	if s.data == nil || s.data.CoreDB == nil || id == 0 {
+		return seoPage{}, false
+	}
+	var ps seoProblemsetRow
+	if err := s.data.CoreDB.Select("id", "owner_id", "title", "description", "visibility", "item_count", "like_count").
+		First(&ps, id).Error; err != nil {
+		return seoPage{}, false
+	}
+	vis := strings.TrimSpace(ps.Visibility)
+	// 私有题单不暴露详情；密码题单可露标题
+	if vis == "private" {
+		return seoPage{}, false
+	}
+	ownerName := ""
+	ownerAvatar := ""
+	if s.data.DB != nil && ps.OwnerID > 0 {
+		var u model.User
+		if err := s.data.DB.Select("id", "username", "name", "avatar").First(&u, ps.OwnerID).Error; err == nil {
+			ownerName = firstNonEmpty(u.Name, u.Username)
+			ownerAvatar = strings.TrimSpace(u.Avatar)
+		}
+	}
+	title := strings.TrimSpace(ps.Title)
+	if title == "" {
+		title = fmt.Sprintf("题单 #%d", ps.ID)
+	}
+	var desc string
+	if vis == "password" {
+		desc = "加密题单"
+		if ownerName != "" {
+			desc = ownerName + " 的加密题单"
+		}
+		desc = desc + " · 需密码访问 · " + siteTitle
+	} else {
+		desc = clipDesc(ps.Description, maxSEODescRunes)
+		if desc == "" {
+			parts := []string{}
+			if ownerName != "" {
+				parts = append(parts, ownerName+" 创建")
+			}
+			if ps.ItemCount > 0 {
+				parts = append(parts, fmt.Sprintf("%d 道题", ps.ItemCount))
+			}
+			parts = append(parts, "公开题单 · "+siteTitle)
+			desc = strings.Join(parts, " · ")
+		} else {
+			desc = clipDesc(desc+" · "+siteTitle, maxSEODescRunes)
+		}
+	}
+	path := fmt.Sprintf("/problemset/%d", ps.ID)
+	return seoPage{
+		Title:       title + " - " + siteTitle,
+		Description: desc,
+		Image:       absURL(origin, firstNonEmpty(ownerAvatar, defaultImg)),
+		URL:         absURL(origin, path),
+		Type:        "website",
+		SiteName:    siteTitle,
+		BodyTitle:   title,
+		BodyText:    desc,
+		Author:      ownerName,
+	}, true
+}
+
+// seoPathFromRequest prefers X-Original-URI (nginx) so query strings like
+// /profile?id=2 are not broken by putting unescaped path into ?path=.
+func seoPathFromRequest(req *http.Request) string {
+	if req == nil {
+		return "/"
+	}
+	if v := strings.TrimSpace(req.Header.Get("X-Original-URI")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(req.URL.Query().Get("path")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(req.URL.Query().Get("url")); v != "" {
+		return v
+	}
+	return "/"
+}
+
 func (s *SEOService) handleMetaJSON(ctx khttp.Context) error {
 	req := ctx.Request()
-	path := req.URL.Query().Get("path")
-	if path == "" {
-		path = req.URL.Query().Get("url")
-	}
-	p := s.resolvePage(req, path)
+	p := s.resolvePage(req, seoPathFromRequest(req))
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code":    0,
 		"message": "success",
@@ -523,15 +765,7 @@ func (s *SEOService) handleMetaJSON(ctx khttp.Context) error {
 
 func (s *SEOService) handleHTML(ctx khttp.Context) error {
 	req := ctx.Request()
-	path := req.URL.Query().Get("path")
-	if path == "" {
-		// allow path from header when nginx proxies original URI
-		path = req.Header.Get("X-Original-URI")
-	}
-	if path == "" {
-		path = req.URL.Query().Get("url")
-	}
-	p := s.resolvePage(req, path)
+	p := s.resolvePage(req, seoPathFromRequest(req))
 	w := ctx.Response()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// Never cache SEO HTML: CDN must not serve bot page to real users.

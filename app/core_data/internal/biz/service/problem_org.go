@@ -25,6 +25,21 @@ func (uc *ProblemUseCase) problemHasAISubmitter(problemID uint) bool {
 	return uc.problemHasPipelineSubmitter(problemID, "ai")
 }
 
+// userHasAIEligibility 指定用户是否具备题面 AI 资格（默认非公共域组织 + 个人覆盖）
+func (uc *ProblemUseCase) userHasAIEligibility(userID uint) bool {
+	if userID == 0 {
+		return false
+	}
+	users, ok := uc.pipelineUserIDs("ai")
+	if !ok {
+		// 名单不可用时保守放行，与 problemHasPipelineSubmitter 一致
+		log.Warnf("userHasAIEligibility: list unavailable, allow user=%d", userID)
+		return true
+	}
+	_, yes := users[int64(userID)]
+	return yes
+}
+
 // problemHasOrgSubmitter 兼容旧调用：等价于 AI 资格（题面 AI 闸门）
 func (uc *ProblemUseCase) problemHasOrgSubmitter(problemID uint) bool {
 	return uc.problemHasAISubmitter(problemID)
