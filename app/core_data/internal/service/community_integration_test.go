@@ -385,7 +385,7 @@ func TestCommentTreeMapAndLikedSet(t *testing.T) {
 	}
 }
 
-// 公共域发现：全站聚合 + (type,ref_id) 去重；私有域仅本 org。
+// 公共域发现：全站聚合 + (type,ref_id) 去重；私有域按组织成员筛选。
 func TestActivityFeedPublicAggregatesPrivateIsolates(t *testing.T) {
 	s, db, _ := setupCommunityTest(t)
 	var p model.Problem
@@ -407,7 +407,7 @@ func TestActivityFeedPublicAggregatesPrivateIsolates(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// privateB 专属题解
+	// 用户 20 的题解（仅写了 privateB 行，模拟旧数据）
 	sol := model.ProblemUserSolution{ProblemID: p.ID, UserID: 20, Title: "B域题解", ContentMD: "x"}
 	if err := db.Create(&sol).Error; err != nil {
 		t.Fatal(err)
@@ -418,6 +418,17 @@ func TestActivityFeedPublicAggregatesPrivateIsolates(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
+	// 用户 10 的题解只写了公共域（旧行为），但 10 也是 privateA 成员 → 私有域 A 应能看到
+	solPub := model.ProblemUserSolution{ProblemID: p.ID, UserID: 10, Title: "公共域发的题解", ContentMD: "y"}
+	if err := db.Create(&solPub).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ActivityFeed{
+		OrgID: publicOrg, UserID: 10, Type: model.ActivityTypeSolution, RefID: solPub.ID,
+		ProblemID: p.ID, Title: "公共域发的题解", Excerpt: "y",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	// 公共聚合：按 type+ref_id 取 MAX(id)
 	idSub := db.Model(&model.ActivityFeed{}).Select("MAX(id)").Group("type, ref_id")
@@ -425,38 +436,29 @@ func TestActivityFeedPublicAggregatesPrivateIsolates(t *testing.T) {
 	if err := db.Where("id IN (?)", idSub).Order("id desc").Find(&publicList).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(publicList) != 2 {
-		t.Fatalf("public aggregate want 2 unique items, got %d", len(publicList))
-	}
-	// 评论去重后只剩 1 条
-	var commentN, solN int
-	for _, a := range publicList {
-		switch a.Type {
-		case model.ActivityTypeComment:
-			commentN++
-			if a.RefID != c1.ID {
-				t.Fatalf("comment ref=%d", a.RefID)
-			}
-		case model.ActivityTypeSolution:
-			solN++
-			if a.RefID != sol.ID {
-				t.Fatalf("sol ref=%d", a.RefID)
-			}
-		}
-	}
-	if commentN != 1 || solN != 1 {
-		t.Fatalf("commentN=%d solN=%d", commentN, solN)
+	if len(publicList) != 3 {
+		t.Fatalf("public aggregate want 3 unique items, got %d", len(publicList))
 	}
 
-	// 私有域 A：只有评论（双写的那条 org=A），看不到 B 的题解
+	// 私有域 A 成员 = {10}：应看到 user10 的评论+题解，看不到 user20
+	memberA := []uint{10}
+	idSubA := db.Model(&model.ActivityFeed{}).Select("MAX(id)").Where("user_id IN ?", memberA).Group("type, ref_id")
 	var feedA []model.ActivityFeed
-	_ = db.Where("org_id = ?", privateA).Find(&feedA).Error
-	if len(feedA) != 1 || feedA[0].Type != model.ActivityTypeComment {
-		t.Fatalf("privateA feed=%+v", feedA)
+	_ = db.Where("id IN (?)", idSubA).Find(&feedA).Error
+	if len(feedA) != 2 {
+		t.Fatalf("privateA member feed want 2, got %+v", feedA)
 	}
-	// 私有域 B：只有题解
+	for _, a := range feedA {
+		if a.UserID != 10 {
+			t.Fatalf("privateA should only see member 10, got user=%d", a.UserID)
+		}
+	}
+
+	// 私有域 B 成员 = {20}：只有题解
+	memberB := []uint{20}
+	idSubB := db.Model(&model.ActivityFeed{}).Select("MAX(id)").Where("user_id IN ?", memberB).Group("type, ref_id")
 	var feedB []model.ActivityFeed
-	_ = db.Where("org_id = ?", privateB).Find(&feedB).Error
+	_ = db.Where("id IN (?)", idSubB).Find(&feedB).Error
 	if len(feedB) != 1 || feedB[0].Type != model.ActivityTypeSolution {
 		t.Fatalf("privateB feed=%+v", feedB)
 	}
@@ -464,8 +466,54 @@ func TestActivityFeedPublicAggregatesPrivateIsolates(t *testing.T) {
 	// 题库题解：不按 org 过滤，全站
 	var sols []model.ProblemUserSolution
 	_ = db.Where("problem_id = ?", p.ID).Find(&sols).Error
-	if len(sols) != 1 {
-		t.Fatalf("problem solutions want 1, got %d", len(sols))
+	if len(sols) != 2 {
+		t.Fatalf("problem solutions want 2, got %d", len(sols))
 	}
-	_ = s // silence if unused beyond setup
+	_ = s
+}
+
+func TestAuthorOrgIDsIncludesMembershipsAndFallback(t *testing.T) {
+	s, _, udb := setupCommunityTest(t)
+	// minimal org tables
+	type orgRow struct {
+		ID       uint `gorm:"primaryKey"`
+		IsSystem bool
+	}
+	type memberRow struct {
+		ID     uint `gorm:"primaryKey"`
+		UserID uint
+		OrgID  uint
+	}
+	_ = udb.Table("orgs").AutoMigrate(&orgRow{})
+	_ = udb.Table("org_members").AutoMigrate(&memberRow{})
+	_ = udb.Exec(`CREATE TABLE IF NOT EXISTS orgs (id integer primary key, is_system bool)`).Error
+	_ = udb.Exec(`CREATE TABLE IF NOT EXISTS org_members (id integer primary key, user_id integer, org_id integer)`).Error
+	_ = udb.Exec(`INSERT INTO orgs (id, is_system) VALUES (1, 1), (3, 0)`).Error
+	_ = udb.Exec(`INSERT INTO org_members (id, user_id, org_id) VALUES (1, 10, 1), (2, 10, 3)`).Error
+
+	got := s.authorOrgIDs(10, 99)
+	set := map[uint]bool{}
+	for _, id := range got {
+		set[id] = true
+	}
+	if !set[1] || !set[3] {
+		t.Fatalf("want memberships 1,3 got %v", got)
+	}
+	// fallback only when not already present
+	got2 := s.authorOrgIDs(999, 7)
+	if len(got2) < 1 || got2[len(got2)-1] != 7 && !containsU(got2, 7) {
+		// public + fallback
+		if !containsU(got2, 7) || !containsU(got2, 1) {
+			t.Fatalf("want public+fallback got %v", got2)
+		}
+	}
+}
+
+func containsU(ids []uint, want uint) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
 }

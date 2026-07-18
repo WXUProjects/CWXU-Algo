@@ -1011,14 +1011,14 @@ func (s *BlogService) handleRecommend(ctx khttp.Context) error {
 		Where("visibility = ?", blogaccess.VisibilityPublic).
 		Where("(moderation_status = ? OR moderation_status = '' OR moderation_status IS NULL)", model.BlogModerationApproved)
 
-	// optional org filter: display follows current domain
+	// optional org filter: 公共域/缺省 → 全站公开文；私有域 → 仅该组织成员的文章
+	// （作者所属各域均可见自己的公开文；私有域看不到非成员的公共域内容）
 	orgID, _ := strconv.ParseUint(strings.TrimSpace(ctx.Request().URL.Query().Get("orgId")), 10, 64)
 	if orgID > 0 {
-		// public system org → all public articles; private org → only synced rows
 		var o model.Org
 		if s.db.Select("id", "is_system").First(&o, uint(orgID)).Error == nil && !o.IsSystem {
 			q = q.Where(
-				"id IN (SELECT article_id FROM blog_article_orgs WHERE org_id = ?)",
+				"user_id IN (SELECT user_id FROM org_members WHERE org_id = ?)",
 				uint(orgID),
 			)
 		}

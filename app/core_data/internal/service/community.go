@@ -601,15 +601,17 @@ func (s *CommunityService) handleSolutionCreate(ctx khttp.Context) error {
 	}
 	// 同步到个人博客默认分类（失败不阻断发布）
 	s.syncSolutionToBlog(&row)
-	if pd.OrgID > 0 {
+	// 题解发现流：写入作者所属全部组织（含公共域 + 各私有域），便于各域可见
+	ex := excerpt(content, maxExcerptRunes)
+	for _, oid := range s.authorOrgIDs(pd.UserID, pd.OrgID) {
 		_ = s.db.Create(&model.ActivityFeed{
-			OrgID:     pd.OrgID,
+			OrgID:     oid,
 			UserID:    pd.UserID,
 			Type:      model.ActivityTypeSolution,
 			RefID:     row.ID,
 			ProblemID: req.ProblemID,
 			Title:     title,
-			Excerpt:   excerpt(content, maxExcerptRunes),
+			Excerpt:   ex,
 		}).Error
 	}
 	s.emitMentions(ctx, pd.UserID, pd.Username, title+"\n"+content, "solution", row.ID, req.ProblemID)
@@ -848,7 +850,8 @@ func (s *CommunityService) handleReport(ctx khttp.Context) error {
 
 // ---------- activity feed ----------
 // 公共域 / 未登录：全站聚合（评论+题解），不区分发布时所属组织；按 (type,ref_id) 去重。
-// 私有域：仅本组织条目。
+// 私有域：仅该组织成员产生的内容（按作者 membership 筛选；同内容多 org 行去重）。
+// 题解创建时写入作者所属全部组织，保证各域都能看到。
 
 func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
@@ -869,7 +872,7 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 	var total int64
 	var list []model.ActivityFeed
 	if publicView {
-		// 同一内容可能因 syncToPublic 写过多条 org 行：按 type+ref_id 取最大 id
+		// 同一内容可能因多 org 行写过多条：按 type+ref_id 取最大 id
 		idSub := s.db.Model(&model.ActivityFeed{}).Select("MAX(id)")
 		if typ == model.ActivityTypeComment || typ == model.ActivityTypeSolution {
 			idSub = idSub.Where("type = ?", typ)
@@ -880,12 +883,23 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 		_ = s.db.Model(&model.ActivityFeed{}).Where("id IN (?)", idSub).
 			Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
 	} else {
-		q := s.db.Model(&model.ActivityFeed{}).Where("org_id = ?", orgID)
-		if typ == model.ActivityTypeComment || typ == model.ActivityTypeSolution {
-			q = q.Where("type = ?", typ)
+		// 私有域：只看本组织成员的内容（看不到纯公共域外人）；按 type+ref_id 去重
+		memberUIDs := s.privateOrgMemberUIDs(ctx, orgID)
+		if len(memberUIDs) == 0 {
+			writeJSON(ctx.Response(), 200, map[string]interface{}{
+				"success": true, "message": "ok", "list": []interface{}{}, "total": 0, "page": page, "pageSize": pageSize,
+			})
+			return nil
 		}
+		idSub := s.db.Model(&model.ActivityFeed{}).Select("MAX(id)").Where("user_id IN ?", memberUIDs)
+		if typ == model.ActivityTypeComment || typ == model.ActivityTypeSolution {
+			idSub = idSub.Where("type = ?", typ)
+		}
+		idSub = idSub.Group("type, ref_id")
+		q := s.db.Model(&model.ActivityFeed{}).Where("id IN (?)", idSub)
 		_ = q.Count(&total).Error
-		_ = q.Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
+		_ = s.db.Model(&model.ActivityFeed{}).Where("id IN (?)", idSub).
+			Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
 	}
 
 	uids := make([]uint, 0, len(list))
@@ -937,6 +951,60 @@ func (s *CommunityService) isPublicOrgID(ctx khttp.Context, orgID uint) bool {
 	}
 	pub := s.resolvePublicOrgID(ctx)
 	return pub > 0 && pub == orgID
+}
+
+// authorOrgIDs 作者所属全部组织 id（org_members + 当前 JWT 组织 + 公共域兜底）。
+// 用于题解发现流多域写入。
+func (s *CommunityService) authorOrgIDs(userID, fallbackOrgID uint) []uint {
+	seen := map[uint]struct{}{}
+	var out []uint
+	add := func(id uint) {
+		if id == 0 {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	if s.udb != nil && userID > 0 {
+		var ids []uint
+		_ = s.udb.Table("org_members").Where("user_id = ?", userID).Pluck("org_id", &ids).Error
+		for _, id := range ids {
+			add(id)
+		}
+		var pubID uint
+		_ = s.udb.Table("orgs").Select("id").Where("is_system = ?", true).Limit(1).Scan(&pubID).Error
+		add(pubID)
+	}
+	add(fallbackOrgID)
+	return out
+}
+
+// privateOrgMemberUIDs 私有域成员 userId 列表（RPC）；失败时回落空（fail-closed）。
+func (s *CommunityService) privateOrgMemberUIDs(ctx khttp.Context, orgID uint) []uint {
+	if orgID == 0 {
+		return nil
+	}
+	ids, _, _, err := ResolveOrgMemberIDs(ctx, s.reg, orgID, false)
+	if err != nil {
+		log.Warnf("private org members org=%d: %v", orgID, err)
+		// RPC 失败：若有 user 库，本地查 org_members 兜底
+		if s.udb != nil {
+			var local []uint
+			_ = s.udb.Table("org_members").Where("org_id = ?", orgID).Pluck("user_id", &local).Error
+			return local
+		}
+		return nil
+	}
+	out := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			out = append(out, uint(id))
+		}
+	}
+	return out
 }
 
 // ---------- profile recent ----------

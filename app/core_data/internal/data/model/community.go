@@ -114,11 +114,12 @@ const (
 )
 
 // ActivityFeed 发现页动态。
-// 写入时带作者当前 org_id；列表时：公共域全站聚合（不区分 org），私有域仅本 org。
+// 题解写入作者所属全部组织；评论写当前组织（可选双写公共域）。
+// 列表：公共域全站聚合；私有域按组织成员筛选（不看纯公共域外人）。
 type ActivityFeed struct {
 	ID        uint      `gorm:"primaryKey"`
 	CreatedAt time.Time `gorm:"index:idx_af_org_created,priority:2"`
-	// OrgID 作者发布时所属组织（公共域列表会跨 org 聚合）
+	// OrgID 内容同步到的组织（题解可多行；公共域列表跨 org 聚合去重）
 	OrgID uint `gorm:"not null;index:idx_af_org_created,priority:1;comment:组织id"`
 	// UserID 作者
 	UserID uint `gorm:"not null;index;comment:作者"`
