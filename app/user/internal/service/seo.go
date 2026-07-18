@@ -257,6 +257,29 @@ func (s *SEOService) resolvePage(req *http.Request, path string) seoPage {
 		return page
 	}
 
+	// /p/:slug paste
+	if m := regexp.MustCompile(`^/p/([A-Za-z0-9]+)$`).FindStringSubmatch(pathOnly); len(m) == 2 {
+		if p, ok := s.metaPaste(origin, siteTitle, defaultImg, m[1]); ok {
+			return p
+		}
+		page.Title = "粘贴板 - " + siteTitle
+		page.Description = "内容不存在或已过期。"
+		page.BodyTitle = page.Title
+		page.BodyText = page.Description
+		page.URL = absURL(origin, pathOnly)
+		return page
+	}
+
+	// /tools/paste
+	if pathOnly == "/tools/paste" {
+		page.Title = "粘贴板 - " + siteTitle
+		page.Description = "发布与分享代码、文本片段。"
+		page.BodyTitle = page.Title
+		page.BodyText = page.Description
+		page.URL = absURL(origin, "/tools/paste")
+		return page
+	}
+
 	// home & defaults
 	if pathOnly == "/" {
 		page.Title = siteTitle
@@ -399,6 +422,47 @@ type seoProblemRow struct {
 }
 
 func (seoProblemRow) TableName() string { return "problems" }
+
+func (s *SEOService) metaPaste(origin, siteTitle, defaultImg, slug string) (seoPage, bool) {
+	if s.data == nil || s.data.DB == nil || slug == "" {
+		return seoPage{}, false
+	}
+	var p model.Paste
+	if err := s.data.DB.Where("slug = ?", slug).First(&p).Error; err != nil {
+		return seoPage{}, false
+	}
+	if p.ExpireAt != nil && p.ExpireAt.Before(time.Now()) {
+		return seoPage{}, false
+	}
+	title := strings.TrimSpace(p.Title)
+	if title == "" {
+		lang := strings.TrimSpace(p.Language)
+		if lang == "" || lang == "text" {
+			title = "粘贴板分享"
+		} else {
+			title = lang + " 代码片段"
+		}
+	}
+	desc := clipDesc(p.Content, maxSEODescRunes)
+	if desc == "" {
+		desc = "在 " + siteTitle + " 查看这段分享内容"
+	}
+	lang := strings.TrimSpace(p.Language)
+	if lang != "" && lang != "text" {
+		desc = lang + " · " + desc
+	}
+	path := "/p/" + p.Slug
+	return seoPage{
+		Title:       title + " - " + siteTitle,
+		Description: desc,
+		Image:       defaultImg,
+		URL:         absURL(origin, path),
+		Type:        "article",
+		SiteName:    siteTitle,
+		BodyTitle:   title,
+		BodyText:    desc,
+	}, true
+}
 
 func (s *SEOService) metaProblem(origin, siteTitle, defaultImg string, id uint) (seoPage, bool) {
 	if s.data == nil || s.data.CoreDB == nil {
