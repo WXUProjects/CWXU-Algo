@@ -716,7 +716,7 @@ func fetchNowCoder(externalID, problemURL string, fallbackURLs ...string) (*Fetc
 		}
 	}
 
-	// 候选 URL：题库页优先（稳定），比赛页作刚结束时的回退
+	// 候选 URL：有比赛页时优先比赛路径（赛后题库常无权限），再题库规范链接
 	var candidates []string
 	seen := map[string]struct{}{}
 	add := func(u string) {
@@ -731,18 +731,27 @@ func fetchNowCoder(externalID, problemURL string, fallbackURLs ...string) (*Fetc
 		candidates = append(candidates, u)
 	}
 
-	// 若调用方给的就是比赛页，先试比赛页（赛中/赛后立刻有题面）
+	// 1) 所有比赛页候选（primary + fallbacks）
 	if isNowCoderContestURL(problemURL) {
 		add(problemURL)
 	}
+	for _, u := range fallbackURLs {
+		if isNowCoderContestURL(u) {
+			add(u)
+		}
+	}
+	// 2) 题库页
 	if bank := NowCoderBankProblemURL(id); bank != "" {
 		add(bank)
 	}
 	if problemURL != "" && !isNowCoderContestURL(problemURL) {
 		add(problemURL)
 	}
+	// 3) 其余 fallback（非比赛）
 	for _, u := range fallbackURLs {
-		add(u)
+		if !isNowCoderContestURL(u) {
+			add(u)
+		}
 	}
 	if len(candidates) == 0 {
 		if id == "" {

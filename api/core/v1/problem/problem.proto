@@ -91,6 +91,13 @@ service Problem {
       body: "*"
     };
   }
+  // 清空近期失败：近 6 月 FAILED → FAILED_PERM，停止自动退避重试
+  rpc ClearRecentFailed (ClearRecentFailedReq) returns (ClearRecentFailedRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/clear-recent-failed"
+      body: "*"
+    };
+  }
   // 暂停/恢复 AI 分析（仅停消费，不清空队列）
   rpc ToggleAnalyze (TogglePipelineReq) returns (TogglePipelineRes) {
     option (google.api.http) = {
@@ -488,6 +495,15 @@ message RetryFailedRes {
   int64 enqueued = 4;
   // 升为 FAILED_PERM（黑名单）的数量
   int64 blacklisted = 5;
+}
+
+message ClearRecentFailedReq {}
+
+message ClearRecentFailedRes {
+  int64 code = 1;
+  string message = 2;
+  // 停止自动重试的题目数（FAILED → FAILED_PERM）
+  int64 cleared = 3;
 }
 
 // pause=true 暂停（保留队列）；pause=false 恢复；未设置时按当前状态翻转

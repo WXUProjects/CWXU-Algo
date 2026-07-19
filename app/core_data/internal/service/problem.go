@@ -643,6 +643,27 @@ func (s *ProblemService) Resume(ctx context.Context, req *problem.ResumeReq) (*p
 	return &problem.ResumeRes{Code: 0, Message: "AI 分析已恢复"}, nil
 }
 
+func (s *ProblemService) ClearRecentFailed(ctx context.Context, req *problem.ClearRecentFailedReq) (*problem.ClearRecentFailedRes, error) {
+	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+		return &problem.ClearRecentFailedRes{Code: 1, Message: "仅管理员可操作"}, nil
+	}
+	cleared, err := s.uc.ClearRecentFailed()
+	if err != nil {
+		return &problem.ClearRecentFailedRes{Code: 1, Message: "清空失败，请稍后重试"}, nil
+	}
+	msg := "已停止这些题目的自动重试"
+	if cleared == 0 {
+		msg = "没有需要清空的近期失败"
+	} else {
+		msg = fmt.Sprintf("已停止 %d 道题的自动重试，它们不再出现在近期失败列表", cleared)
+	}
+	return &problem.ClearRecentFailedRes{
+		Code:    0,
+		Message: msg,
+		Cleared: cleared,
+	}, nil
+}
+
 func (s *ProblemService) RetryFailed(ctx context.Context, req *problem.RetryFailedReq) (*problem.RetryFailedRes, error) {
 	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
 		return &problem.RetryFailedRes{Code: 1, Message: "仅管理员可操作"}, nil

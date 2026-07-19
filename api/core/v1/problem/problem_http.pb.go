@@ -21,6 +21,7 @@ const _ = http.SupportPackageIsVersion1
 
 const OperationProblemAdminUpdate = "/api.core.v1.problem.Problem/AdminUpdate"
 const OperationProblemBackfill = "/api.core.v1.problem.Problem/Backfill"
+const OperationProblemClearRecentFailed = "/api.core.v1.problem.Problem/ClearRecentFailed"
 const OperationProblemEmergencyStop = "/api.core.v1.problem.Problem/EmergencyStop"
 const OperationProblemFollowingStatus = "/api.core.v1.problem.Problem/FollowingStatus"
 const OperationProblemGet = "/api.core.v1.problem.Problem/Get"
@@ -46,6 +47,8 @@ type ProblemHTTPServer interface {
 	// AdminUpdate 站点管理员：直接修改标签/题面（无需审核）
 	AdminUpdate(context.Context, *AdminUpdateProblemReq) (*AdminUpdateProblemRes, error)
 	Backfill(context.Context, *BackfillReq) (*BackfillRes, error)
+	// ClearRecentFailed 清空近期失败：近 6 月 FAILED → FAILED_PERM，停止自动退避重试
+	ClearRecentFailed(context.Context, *ClearRecentFailedReq) (*ClearRecentFailedRes, error)
 	// EmergencyStop 紧急停止：暂停 AI 并清空分析队列（兼容）
 	EmergencyStop(context.Context, *EmergencyStopReq) (*EmergencyStopRes, error)
 	// FollowingStatus 关注用户对本题状态（不受组织域限制；需登录）
@@ -99,6 +102,7 @@ func RegisterProblemHTTPServer(s *http.Server, srv ProblemHTTPServer) {
 	r.POST("/v1/core/problem/reset-all", _Problem_ResetAll0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/resume", _Problem_Resume0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/retry-failed", _Problem_RetryFailed0_HTTP_Handler(srv))
+	r.POST("/v1/core/problem/clear-recent-failed", _Problem_ClearRecentFailed0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/toggle-analyze", _Problem_ToggleAnalyze0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/toggle-fetch", _Problem_ToggleFetch0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/reset-queues", _Problem_ResetQueues0_HTTP_Handler(srv))
@@ -390,6 +394,28 @@ func _Problem_RetryFailed0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Con
 	}
 }
 
+func _Problem_ClearRecentFailed0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ClearRecentFailedReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemClearRecentFailed)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ClearRecentFailed(ctx, req.(*ClearRecentFailedReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ClearRecentFailedRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 func _Problem_ToggleAnalyze0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in TogglePipelineReq
@@ -564,6 +590,8 @@ type ProblemHTTPClient interface {
 	// AdminUpdate 站点管理员：直接修改标签/题面（无需审核）
 	AdminUpdate(ctx context.Context, req *AdminUpdateProblemReq, opts ...http.CallOption) (rsp *AdminUpdateProblemRes, err error)
 	Backfill(ctx context.Context, req *BackfillReq, opts ...http.CallOption) (rsp *BackfillRes, err error)
+	// ClearRecentFailed 清空近期失败：近 6 月 FAILED → FAILED_PERM，停止自动退避重试
+	ClearRecentFailed(ctx context.Context, req *ClearRecentFailedReq, opts ...http.CallOption) (rsp *ClearRecentFailedRes, err error)
 	// EmergencyStop 紧急停止：暂停 AI 并清空分析队列（兼容）
 	EmergencyStop(ctx context.Context, req *EmergencyStopReq, opts ...http.CallOption) (rsp *EmergencyStopRes, err error)
 	// FollowingStatus 关注用户对本题状态（不受组织域限制；需登录）
@@ -628,6 +656,20 @@ func (c *ProblemHTTPClientImpl) Backfill(ctx context.Context, in *BackfillReq, o
 	pattern := "/v1/core/problem/backfill"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProblemBackfill))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ClearRecentFailed 清空近期失败：近 6 月 FAILED → FAILED_PERM，停止自动退避重试
+func (c *ProblemHTTPClientImpl) ClearRecentFailed(ctx context.Context, in *ClearRecentFailedReq, opts ...http.CallOption) (*ClearRecentFailedRes, error) {
+	var out ClearRecentFailedRes
+	pattern := "/v1/core/problem/clear-recent-failed"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemClearRecentFailed))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

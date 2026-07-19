@@ -546,6 +546,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.BackfillRes'
+    /v1/core/problem/clear-recent-failed:
+        post:
+            tags:
+                - Problem
+            description: 清空近期失败：近 6 月 FAILED → FAILED_PERM，停止自动退避重试
+            operationId: Problem_ClearRecentFailed
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.ClearRecentFailedReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ClearRecentFailedRes'
     /v1/core/problem/edit-requests:
         get:
             tags:
@@ -2772,6 +2791,19 @@ components:
                     type: string
                 enqueuedAnalyze:
                     type: string
+        api.core.v1.problem.ClearRecentFailedReq:
+            type: object
+            properties: {}
+        api.core.v1.problem.ClearRecentFailedRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                cleared:
+                    type: string
+                    description: 停止自动重试的题目数（FAILED → FAILED_PERM）
         api.core.v1.problem.EmergencyStopReq:
             type: object
             properties: {}

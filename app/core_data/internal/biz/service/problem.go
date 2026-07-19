@@ -1093,6 +1093,34 @@ func (uc *ProblemUseCase) ResetQueues() (purgedFetch, purgedAnalyze, enqueuedFet
 	return
 }
 
+// ClearRecentFailed 清空近期失败：近 6 月有提交且状态为 FAILED 的题 → FAILED_PERM，
+// 停止 scheduleFetchRetry / 消费者自动退避重试。管理员仍可用「重试永久失败」手动再试。
+func (uc *ProblemUseCase) ClearRecentFailed() (cleared int64, err error) {
+	if uc == nil || uc.data == nil || uc.data.DB == nil {
+		return 0, fmt.Errorf("usecase not ready")
+	}
+	cutoff := time.Now().Add(-backfillWindow)
+	recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
+	res := uc.data.DB.Model(&model.Problem{}).
+		Where("status = ?", model.ProblemStatusFailed).
+		Where(recentClause, recentArgs...).
+		Updates(map[string]interface{}{
+			"status":           model.ProblemStatusFailedPerm,
+			"error_msg":        "已停止自动重试（管理员清空近期失败）",
+			"fetch_fail_since": nil,
+		})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	cleared = res.RowsAffected
+	if cleared > 0 {
+		log.Infof("ClearRecentFailed: %d FAILED → FAILED_PERM (auto-retry stopped)", cleared)
+		// 进度计数可能缓存，尽量失效
+		go uc.rebuildProgressCounters()
+	}
+	return cleared, nil
+}
+
 // RetryFailed 重试错误队列。
 // includePermanent=false：仅 FAILED；并解除误标的 WAF/登录墙/DOM 类 FAILED_PERM
 // includePermanent=true：近 6 月 FAILED_PERM 中非硬永久错误也重置入队（管理员「重试永久失败」）

@@ -21,6 +21,15 @@ import (
 // AI 分析不强制：爬完后走标准闸门（有资格用户提交才分析）。
 // 调用方可同步等待列表写入；爬取异步。
 func (uc *ProblemUseCase) EnsureContestProblemsOnce(platform, contestID string) (status string, err error) {
+	return uc.ensureContestProblems(platform, contestID, false)
+}
+
+// EnsureContestProblemsForce 忽略 done 节流，强制重跑目录 + 无题面强制爬（牛客走比赛路径）。
+func (uc *ProblemUseCase) EnsureContestProblemsForce(platform, contestID string) (status string, err error) {
+	return uc.ensureContestProblems(platform, contestID, true)
+}
+
+func (uc *ProblemUseCase) ensureContestProblems(platform, contestID string, force bool) (status string, err error) {
 	if uc == nil || uc.data == nil || uc.data.DB == nil {
 		return "", fmt.Errorf("usecase not ready")
 	}
@@ -30,7 +39,8 @@ func (uc *ProblemUseCase) EnsureContestProblemsOnce(platform, contestID string) 
 		return "", fmt.Errorf("empty platform/contestId")
 	}
 
-	// 已 done：直接返回（每场成功只跑一次，不因多用户重复打 OJ）
+	// 已 done：默认直接返回（每场成功只跑一次，不因多用户重复打 OJ）
+	// force=true：重置为 running 再跑
 	// running 超过 5 分钟视为僵尸，允许抢占
 	// failed：距上次完成不足 10 分钟则节流，避免前端/爬虫打爆 OJ
 	const (
@@ -41,7 +51,26 @@ func (uc *ProblemUseCase) EnsureContestProblemsOnce(platform, contestID string) 
 	err = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).First(&existing).Error
 	claimed := false
 	if err == nil {
-		if existing.Status == model.ContestEnsureDone {
+		if existing.Status == model.ContestEnsureDone && !force {
+			return existing.Status, nil
+		}
+		if force && (existing.Status == model.ContestEnsureDone || existing.Status == model.ContestEnsureFailed) {
+			res := uc.data.DB.Model(&model.ContestProblemEnsure{}).
+				Where("id = ?", existing.ID).
+				Updates(map[string]interface{}{
+					"status":     model.ContestEnsureRunning,
+					"error_msg":  "",
+					"ensured_at": nil,
+					"updated_at": time.Now(),
+				})
+			if res.Error != nil {
+				return "", res.Error
+			}
+			if res.RowsAffected == 0 {
+				return model.ContestEnsureRunning, nil
+			}
+			claimed = true
+		} else if existing.Status == model.ContestEnsureDone {
 			return existing.Status, nil
 		}
 		if existing.Status == model.ContestEnsureRunning {
@@ -105,7 +134,7 @@ func (uc *ProblemUseCase) EnsureContestProblemsOnce(platform, contestID string) 
 
 	// 本 goroutine 执行发现
 	if err := uc.runContestEnsure(platform, contestID); err != nil {
-		log.Warnf("EnsureContestProblemsOnce %s/%s: %v", platform, contestID, err)
+		log.Warnf("ensureContestProblems force=%v %s/%s: %v", force, platform, contestID, err)
 		_ = uc.data.DB.Model(&model.ContestProblemEnsure{}).
 			Where("platform = ? AND contest_id = ?", platform, contestID).
 			Updates(map[string]interface{}{
@@ -379,12 +408,28 @@ func (uc *ProblemUseCase) ForceEnqueueFetchContest(problemID uint, contestFallba
 			fb = append(fb, u)
 		}
 	}
+	// 牛客：比赛页作主 URL（优先抓），题库页作 fallback
+	primary := p.URL
+	fallbacks := fb
+	if len(fb) > 0 && problem_fetch.IsNowCoderContestURL(fb[0]) {
+		primary = fb[0]
+		fallbacks = nil
+		if bank := problem_fetch.NowCoderBankProblemURL(p.ExternalID); bank != "" {
+			fallbacks = []string{bank}
+		}
+		// 其余 fallback 附后
+		for _, u := range fb[1:] {
+			if u != "" && u != primary {
+				fallbacks = append(fallbacks, u)
+			}
+		}
+	}
 	body, _ := json.Marshal(event.ProblemFetchEvent{
 		ProblemID:    p.ID,
 		Platform:     p.Platform,
 		ExternalID:   p.ExternalID,
-		URL:          p.URL,
-		FallbackURLs: fb,
+		URL:          primary,
+		FallbackURLs: fallbacks,
 		Force:        true,  // 忽略用户爬取资格
 		SkipAnalyze:  false, // 爬完走 enqueueAnalyze（submitter AI 闸门）
 		ActorUserID:  0,
