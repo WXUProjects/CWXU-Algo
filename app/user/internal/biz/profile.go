@@ -16,8 +16,8 @@ func NewProfileUseCase(profileDal *dal.ProfileDal) *ProfileUseCase {
 	}
 }
 
-func (uc *ProfileUseCase) GetList(ctx context.Context, pageSize, pageNum int64, keyword string, dormantOnly bool) ([]model.User, int64, error) {
-	return uc.profileDal.GetList(ctx, pageSize, pageNum, keyword, dormantOnly)
+func (uc *ProfileUseCase) GetList(ctx context.Context, pageSize, pageNum int64, keyword string, dormantOnly bool, inactiveDays int) ([]model.User, int64, error) {
+	return uc.profileDal.GetList(ctx, pageSize, pageNum, keyword, dormantOnly, inactiveDays)
 }
 
 func (uc *ProfileUseCase) GetUserIdsByGroup(ctx context.Context, groupId int64) ([]int64, error) {

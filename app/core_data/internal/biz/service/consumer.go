@@ -14,8 +14,8 @@ import (
 	"github.com/streadway/amqp"
 )
 
-// spiderConcurrency 爬虫并发；Qos=prefetch 与 worker 数一致，由 MQ 背压
-const spiderConcurrency = 4
+// defaultSpiderConcurrency 默认 4；可用 CWXU_SPIDER_CONCURRENCY 覆盖（1–32）
+const defaultSpiderConcurrency = 4
 
 type Consumer struct {
 	mq         *event.RabbitMQ
@@ -39,11 +39,12 @@ func (c *Consumer) Stop() {
 }
 
 func (c *Consumer) Consume() {
-	log.Infof("spider consumer 循环启动")
+	conc := mqconsume.ConcurrencyFromEnv("CWXU_SPIDER_CONCURRENCY", defaultSpiderConcurrency)
+	log.Infof("spider consumer 循环启动 concurrency=%d", conc)
 	_ = mqconsume.Run(c.mq, mqconsume.Options{
 		Name:             "spider",
 		Queue:            "spider",
-		Concurrency:      spiderConcurrency,
+		Concurrency:      conc,
 		MaxRetry:         3,
 		DeclareOnMissing: true,
 		Stop:             c.stopCh,

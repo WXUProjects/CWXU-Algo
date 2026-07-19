@@ -53,6 +53,34 @@ func queryBoolTrue(ctx context.Context, keys ...string) bool {
 	return false
 }
 
+// queryInt32 从 HTTP query 解析正整数；失败返回 0。
+func queryInt32(ctx context.Context, keys ...string) int32 {
+	if ctx == nil {
+		return 0
+	}
+	tr, ok := transport.FromServerContext(ctx)
+	if !ok {
+		return 0
+	}
+	ht, ok := tr.(*khttp.Transport)
+	if !ok || ht.Request() == nil {
+		return 0
+	}
+	q := ht.Request().URL.Query()
+	for _, k := range keys {
+		raw := strings.TrimSpace(q.Get(k))
+		if raw == "" {
+			continue
+		}
+		n, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil || n <= 0 {
+			continue
+		}
+		return int32(n)
+	}
+	return 0
+}
+
 // 与 auth 包校验规则一致
 var profileEmailRe = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 
@@ -159,8 +187,17 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 	keyword := strings.TrimSpace(req.GetKeyword())
 	// BindQuery 对手写 proto 字段/bool 偶发丢参；再从 URL 兜底解析
 	dormantOnly := req.GetDormantOnly() || queryBoolTrue(ctx, "dormantOnly", "dormant")
+	inactiveDays := int(req.GetInactiveDays())
+	if inactiveDays <= 0 {
+		inactiveDays = int(queryInt32(ctx, "inactiveDays", "inactive_days"))
+	}
+	// inactiveDays 优先于 dormantOnly（自定义「最近 N 天未登录」）
+	if inactiveDays > 0 {
+		dormantOnly = false
+		inactiveDays = dormancy.ClampInactiveDays(inactiveDays)
+	}
 	if useSite {
-		pf, total, err = p.profileUseCase.GetList(ctx, pageSize, pageNum, keyword, dormantOnly)
+		pf, total, err = p.profileUseCase.GetList(ctx, pageSize, pageNum, keyword, dormantOnly, inactiveDays)
 	} else {
 		orgID := uint(0)
 		if pd := auth.GetCurrentUser(ctx); pd != nil {
@@ -169,7 +206,7 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		if orgID == 0 {
 			orgID, _ = p.profileDal.PublicOrgID(ctx)
 		}
-		pf, total, err = p.profileDal.GetListByOrg(ctx, orgID, pageSize, pageNum, keyword, dormantOnly)
+		pf, total, err = p.profileDal.GetListByOrg(ctx, orgID, pageSize, pageNum, keyword, dormantOnly, inactiveDays)
 	}
 	if err != nil {
 		return nil, InternalServer
@@ -653,6 +690,83 @@ func (p *ProfileService) ClearDormant(ctx context.Context, req *profile.ClearDor
 		Code:    0,
 		Message: fmt.Sprintf("已解除 %d 人的不活跃状态", n),
 		Updated: int32(n),
+	}, nil
+}
+
+// ForceDormant 站点管理员：批量冻结不活跃（回拨最近活跃；豁免用户跳过；登录/解除后仍按原规则）
+func (p *ProfileService) ForceDormant(ctx context.Context, req *profile.ForceDormantReq) (*profile.ForceDormantRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "仅站点管理员可操作")
+	}
+	if req == nil {
+		return nil, errors.BadRequest("参数错误", "请求无效")
+	}
+	const maxBatch = 200
+	var targetIDs []int64
+	var requested int
+	if len(req.UserIds) > 0 {
+		// 勾选模式
+		seen := make(map[int64]struct{}, len(req.UserIds))
+		for _, id := range req.UserIds {
+			if id <= 0 {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			targetIDs = append(targetIDs, id)
+		}
+		requested = len(targetIDs)
+		if requested == 0 {
+			return nil, errors.BadRequest("参数错误", "请选择至少一个用户")
+		}
+		if requested > maxBatch {
+			return nil, errors.BadRequest("参数错误", fmt.Sprintf("单次最多 %d 人", maxBatch))
+		}
+	} else {
+		// 一键模式：最近 N 天未登录且可冻结
+		days := int(req.GetInactiveDays())
+		if days <= 0 {
+			return nil, errors.BadRequest("参数错误", "请填写未登录天数，或勾选要冻结的用户")
+		}
+		days = dormancy.ClampInactiveDays(days)
+		ids, err := p.profileDal.ListFreezableInactiveUserIDs(ctx, days, maxBatch)
+		if err != nil {
+			return nil, errors.InternalServer("内部错误", err.Error())
+		}
+		targetIDs = ids
+		requested = len(targetIDs)
+		if requested == 0 {
+			return &profile.ForceDormantRes{
+				Code:    0,
+				Message: fmt.Sprintf("没有符合「最近 %d 天未登录」且可冻结的用户", days),
+				Updated: 0,
+				Skipped: 0,
+			}, nil
+		}
+	}
+
+	// 回拨到「超过站点阈值 1 天」，进入休眠；之后仍走 IsDormant / 登录唤醒 / 解除不活跃
+	siteDays := p.profileDal.GetInactiveDays(ctx)
+	at := time.Now().Add(-time.Duration(siteDays+1) * 24 * time.Hour)
+	n, err := p.profileDal.ForceDormantBatch(ctx, targetIDs, at)
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	skipped := int32(requested) - int32(n)
+	if skipped < 0 {
+		skipped = 0
+	}
+	msg := fmt.Sprintf("已冻结 %d 人", n)
+	if skipped > 0 {
+		msg = fmt.Sprintf("已冻结 %d 人，跳过 %d 人（始终同步、组织永不冻结、教练/队长或付费组织等不受影响）", n, skipped)
+	}
+	return &profile.ForceDormantRes{
+		Code:    0,
+		Message: msg,
+		Updated: int32(n),
+		Skipped: skipped,
 	}, nil
 }
 

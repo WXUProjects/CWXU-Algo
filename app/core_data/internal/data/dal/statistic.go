@@ -334,7 +334,8 @@ func (d *StatisticDal) GetRankByRange(ctx context.Context, startTime, endTime ti
 }
 
 // GetRankByRangeScoped memberIDs 非 nil 时限制组织成员
-// scoreType=submit：日汇总 SUM(submit_cnt)；scoreType=ac：仍 DISTINCT 题（语义）
+// scoreType=submit：日汇总 SUM(submit_cnt)
+// scoreType=ac：过题数（窗内 DISTINCT 题）；全时段走 user_ac_problems 生涯表，与 period.ac.total 一致
 func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endTime time.Time, scoreType string, groupId int64, page, pageSize int64, memberIDs []int64) ([]RankItem, int64, error) {
 	if page <= 0 {
 		page = 1
@@ -356,6 +357,8 @@ func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endT
 	}
 
 	offset := (page - 1) * pageSize
+	// group_id 在预聚合表中不存在
+	_ = groupId
 
 	// 提交排行：走日汇总
 	if scoreType != "ac" {
@@ -371,8 +374,6 @@ func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endT
 		if memberIDs != nil {
 			base = base.Where("user_id IN ?", memberIDs)
 		}
-		// group_id 在日汇总中不存在：忽略（原 submit_logs 也未必有可靠 group_id）
-		_ = groupId
 
 		var total int64
 		countSub := base.Select("user_id").Group("user_id")
@@ -397,14 +398,26 @@ func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endT
 		return items, total, nil
 	}
 
-	// AC 去重排行：user_ac_problem_days（窗内 AC 过的题数）
+	// 过题榜（scoreType=ac）：按题去重，不是 AC 提交次数
+	// 全时段：user_ac_problems 生涯表（与 period.ac.total 一致，避免 days 表回填不全/慢查询）
+	// 时段：user_ac_problem_days 窗内 COUNT(DISTINCT problem_key)
 	startDay := time.Date(startTime.Year(), startTime.Month(), startTime.Day(), 0, 0, 0, 0, startTime.Location())
 	endDay := endTime.Add(-time.Nanosecond)
 	endDay = time.Date(endDay.Year(), endDay.Month(), endDay.Day(), 0, 0, 0, 0, endDay.Location())
-	// 全时段：start 为零值时不限制下界
-	base := d.db.WithContext(ctx).Table("user_ac_problem_days")
-	if !startTime.IsZero() {
-		base = base.Where("day >= ?::date AND day <= ?::date", startDay.Format("2006-01-02"), endDay.Format("2006-01-02"))
+
+	// 前端「全部时间」下界 2020-01-01；或 start 为零 → 生涯榜
+	allTimeCutoff := time.Date(2020, 1, 2, 0, 0, 0, 0, startTime.Location())
+	useLifetime := startTime.IsZero() || !startTime.After(allTimeCutoff)
+
+	var base *gorm.DB
+	var scoreSelect string
+	if useLifetime {
+		base = d.db.WithContext(ctx).Table("user_ac_problems")
+		scoreSelect = "user_id, COUNT(*) AS score"
+	} else {
+		base = d.db.WithContext(ctx).Table("user_ac_problem_days").
+			Where("day >= ?::date AND day <= ?::date", startDay.Format("2006-01-02"), endDay.Format("2006-01-02"))
+		scoreSelect = "user_id, COUNT(DISTINCT problem_key) AS score"
 	}
 	if memberIDs != nil {
 		base = base.Where("user_id IN ?", memberIDs)
@@ -417,7 +430,7 @@ func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endT
 	}
 
 	var results []RankQueryResult
-	err := base.Select("user_id, COUNT(DISTINCT problem_key) AS score").
+	err := base.Select(scoreSelect).
 		Group("user_id").
 		Order("score DESC").
 		Offset(int(offset)).

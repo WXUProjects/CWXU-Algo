@@ -60,33 +60,31 @@ func AggregateSubmitDeltas(logs []model.SubmitLog) []DailyDelta {
 	return out
 }
 
-// ApplyDailyDeltas 原子累加日汇总（按 user+day+platform）
+// ApplyDailyDeltas 原子累加日汇总（按 user+day+platform）；分批 CreateInBatches 降大包 round-trip
 func ApplyDailyDeltas(ctx context.Context, db *gorm.DB, deltas []DailyDelta) error {
 	if len(deltas) == 0 || db == nil {
 		return nil
 	}
+	rows := make([]model.DailyUserStat, 0, len(deltas))
 	for _, d := range deltas {
-		row := model.DailyUserStat{
+		rows = append(rows, model.DailyUserStat{
 			UserID:    d.UserID,
 			Day:       d.Day,
 			Platform:  d.Platform,
 			SubmitCnt: d.SubmitCnt,
 			AcCnt:     d.AcCnt,
-		}
-		err := db.WithContext(ctx).
-			Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "user_id"}, {Name: "day"}, {Name: "platform"}},
-				DoUpdates: clause.Assignments(map[string]interface{}{
-					"submit_cnt": gorm.Expr("daily_user_stats.submit_cnt + EXCLUDED.submit_cnt"),
-					"ac_cnt":     gorm.Expr("daily_user_stats.ac_cnt + EXCLUDED.ac_cnt"),
-				}),
-			}).
-			Create(&row).Error
-		if err != nil {
-			return err
-		}
+		})
 	}
-	return nil
+	const batch = 100
+	return db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "user_id"}, {Name: "day"}, {Name: "platform"}},
+			DoUpdates: clause.Assignments(map[string]interface{}{
+				"submit_cnt": gorm.Expr("daily_user_stats.submit_cnt + EXCLUDED.submit_cnt"),
+				"ac_cnt":     gorm.Expr("daily_user_stats.ac_cnt + EXCLUDED.ac_cnt"),
+			}),
+		}).
+		CreateInBatches(&rows, batch).Error
 }
 
 // FilterNewSubmitLogs 入库前去重（submit_logs.submit_id 唯一约束为真相）：

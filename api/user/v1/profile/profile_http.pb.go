@@ -22,6 +22,7 @@ const _ = http.SupportPackageIsVersion1
 const OperationProfileClearDormant = "/api.user.v1.Profile/ClearDormant"
 const OperationProfileDelete = "/api.user.v1.Profile/Delete"
 const OperationProfileFilterPublicFeedUserIds = "/api.user.v1.Profile/FilterPublicFeedUserIds"
+const OperationProfileForceDormant = "/api.user.v1.Profile/ForceDormant"
 const OperationProfileGetById = "/api.user.v1.Profile/GetById"
 const OperationProfileGetByIds = "/api.user.v1.Profile/GetByIds"
 const OperationProfileGetByName = "/api.user.v1.Profile/GetByName"
@@ -47,6 +48,8 @@ type ProfileHTTPServer interface {
 	Delete(context.Context, *DeleteReq) (*DeleteRes, error)
 	// FilterPublicFeedUserIds 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
 	FilterPublicFeedUserIds(context.Context, *FilterPublicFeedUserIdsReq) (*FilterPublicFeedUserIdsRes, error)
+	// ForceDormant 站点管理员：批量冻结不活跃（把最近活跃回拨到超过站点阈值；仍走豁免规则，登录/解除后恢复）
+	ForceDormant(context.Context, *ForceDormantReq) (*ForceDormantRes, error)
 	GetById(context.Context, *GetByIdReq) (*GetByIdRes, error)
 	GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error)
 	GetByName(context.Context, *GetByNameReq) (*GetByNameRes, error)
@@ -88,6 +91,7 @@ func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r.POST("/v1/user/profile/set-sync-intervals", _Profile_SetSyncIntervals0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-sync-exempt", _Profile_SetSyncExempt0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/clear-dormant", _Profile_ClearDormant0_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/force-dormant", _Profile_ForceDormant0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-group", _Profile_GetUserIdsByGroup0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-org", _Profile_GetUserIdsByOrg0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/staff-org-ids", _Profile_GetStaffOrgIds0_HTTP_Handler(srv))
@@ -311,6 +315,28 @@ func _Profile_ClearDormant0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Co
 	}
 }
 
+func _Profile_ForceDormant0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ForceDormantReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileForceDormant)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ForceDormant(ctx, req.(*ForceDormantReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ForceDormantRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 func _Profile_GetUserIdsByGroup0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in GetUserIdsByGroupReq
@@ -520,6 +546,8 @@ type ProfileHTTPClient interface {
 	Delete(ctx context.Context, req *DeleteReq, opts ...http.CallOption) (rsp *DeleteRes, err error)
 	// FilterPublicFeedUserIds 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
 	FilterPublicFeedUserIds(ctx context.Context, req *FilterPublicFeedUserIdsReq, opts ...http.CallOption) (rsp *FilterPublicFeedUserIdsRes, err error)
+	// ForceDormant 站点管理员：批量冻结不活跃（把最近活跃回拨到超过站点阈值；仍走豁免规则，登录/解除后恢复）
+	ForceDormant(ctx context.Context, req *ForceDormantReq, opts ...http.CallOption) (rsp *ForceDormantRes, err error)
 	GetById(ctx context.Context, req *GetByIdReq, opts ...http.CallOption) (rsp *GetByIdRes, err error)
 	GetByIds(ctx context.Context, req *GetByIdsReq, opts ...http.CallOption) (rsp *GetByIdsRes, err error)
 	GetByName(ctx context.Context, req *GetByNameReq, opts ...http.CallOption) (rsp *GetByNameRes, err error)
@@ -591,6 +619,20 @@ func (c *ProfileHTTPClientImpl) FilterPublicFeedUserIds(ctx context.Context, in 
 	pattern := "/v1/user/profile/filter-public-feed-user-ids"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProfileFilterPublicFeedUserIds))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ForceDormant 站点管理员：批量冻结不活跃（把最近活跃回拨到超过站点阈值；仍走豁免规则，登录/解除后恢复）
+func (c *ProfileHTTPClientImpl) ForceDormant(ctx context.Context, in *ForceDormantReq, opts ...http.CallOption) (*ForceDormantRes, error) {
+	var out ForceDormantRes
+	pattern := "/v1/user/profile/force-dormant"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProfileForceDormant))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

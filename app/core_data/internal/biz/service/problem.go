@@ -1692,8 +1692,8 @@ func (uc *ProblemUseCase) queueStats() []struct {
 		conc int64
 		stat string
 	}{
-		{"problem_fetch", problemFetchConcurrency, model.ProblemStatusPending},
-		{"problem_analyze", problemAnalyzeConcurrency, model.ProblemStatusTagging},
+		{"problem_fetch", int64(problemFetchConcurrency), model.ProblemStatusPending},
+		{"problem_analyze", int64(problemAnalyzeConcurrency), model.ProblemStatusTagging},
 	} {
 		var msgs, consumers int64
 		inspected := false

@@ -2,7 +2,9 @@ package mqconsume
 
 import (
 	"encoding/json"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +31,26 @@ type Options struct {
 	ShouldRequeue func(err error) bool
 	// Stop 可选：关闭时退出循环。
 	Stop <-chan struct{}
+}
+
+// ConcurrencyFromEnv 读取正整数环境变量；空/非法时返回 def（def≤0 时回落为 1）。
+// 用于 2c4g 默认低并发，强机可用 CWXU_*_CONCURRENCY 覆盖。
+func ConcurrencyFromEnv(key string, def int) int {
+	if def <= 0 {
+		def = 1
+	}
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return def
+	}
+	if n > 32 {
+		return 32
+	}
+	return n
 }
 
 // Run 阻塞直到 channel 关闭或 Stop。每次消息在有限 worker 池中处理。

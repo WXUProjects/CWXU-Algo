@@ -194,12 +194,12 @@ func (t *SpiderTask) ClearInflight(userId int64, platform string) {
 	_ = t.rdb.Del(context.Background(), InflightKey(userId, platform)).Err()
 }
 
-// MarkLastOK 记录该用户最近一次爬虫成功时间（unix 秒，无 TTL）
+// MarkLastOK 记录该用户最近一次爬虫成功时间（unix 秒，TTL 90 天防 key 膨胀）
 func (t *SpiderTask) MarkLastOK(userId int64) {
 	if t.rdb == nil || userId <= 0 {
 		return
 	}
-	_ = t.rdb.Set(context.Background(), LastOKKey(userId), time.Now().Unix(), 0).Err()
+	_ = t.rdb.Set(context.Background(), LastOKKey(userId), time.Now().Unix(), 90*24*time.Hour).Err()
 }
 
 // GetLastOK 读取最近成功同步时间（unix 秒；无记录返回 0）
@@ -266,6 +266,7 @@ func CurrentGeneration(rdb *redis.Client, userId int64, platform string) int64 {
 }
 
 // DoBatchPlatform 仅入队指定平台（如 LeetCode 回填）；force 时清 pending/inflight 去重以免刚 update-all 被跳过。
+// 一次性全部入队（MQ 可扛）；ctx 取消时提前结束。
 func (t *SpiderTask) DoBatchPlatform(ctx context.Context, platform string, needAll, force bool) (users, published int) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -304,7 +305,7 @@ func (t *SpiderTask) DoBatchPlatform(ctx context.Context, platform string, needA
 }
 
 // DoBatch 为给定用户的每个绑定平台各入队一条消息（一次 Publish = 一个平台）。
-// batchSize / interval 保留兼容，已忽略。
+// batchSize / interval 保留兼容，已忽略：按调用方要求一次灌满 MQ。
 // ctx 取消时提前结束（进程停机）。
 func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool, _ int, _ time.Duration) {
 	if ctx == nil {

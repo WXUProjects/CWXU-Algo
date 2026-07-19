@@ -1643,6 +1643,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.GetFollowingIdsRes'
+    /v1/user/profile/force-dormant:
+        post:
+            tags:
+                - Profile
+            description: 站点管理员：批量冻结不活跃（把最近活跃回拨到超过站点阈值；仍走豁免规则，登录/解除后恢复）
+            operationId: Profile_ForceDormant
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.ForceDormantReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ForceDormantRes'
     /v1/user/profile/get-by-id:
         get:
             tags:
@@ -1774,9 +1793,17 @@ paths:
                     type: string
                 - name: dormantOnly
                   in: query
-                  description: true=仅不活跃（已暂停同步）用户；与 dormant 判定一致（阈值 + 豁免）
+                  description: true=仅不活跃（已暂停同步）用户；与 dormant 判定一致（站点阈值 + 豁免）
                   schema:
                     type: boolean
+                - name: inactiveDays
+                  in: query
+                  description: |-
+                    >0 时按「最近 N 天未登录」筛选（夹取 1–365）；与 dormantOnly 互斥时以本字段为准
+                     同样排除豁免用户（站管 / 始终同步 / staff / 永不冻结组织 / 付费套餐），便于筛选后冻结
+                  schema:
+                    type: integer
+                    format: int32
             responses:
                 "200":
                     description: OK
@@ -3839,6 +3866,37 @@ components:
                     type: array
                     items:
                         type: string
+        api.user.v1.ForceDormantReq:
+            type: object
+            properties:
+                userIds:
+                    type: array
+                    items:
+                        type: string
+                inactiveDays:
+                    type: integer
+                    description: 一键模式：最近多少天未登录（1–365）；与 userIds 二选一，userIds 优先
+                    format: int32
+            description: |-
+                ForceDormantReq 批量冻结不活跃用户：回拨 last_login_at 使超过站点阈值后进入休眠
+                 - userIds 非空：只处理勾选用户（仍跳过豁免）
+                 - userIds 空且 inactiveDays>0：处理「最近 N 天未登录且可冻结」的全部用户
+                 豁免（站管 / sync_exempt / staff / force_sync / paid）一律跳过；登录或解除不活跃后仍按原规则
+        api.user.v1.ForceDormantRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                updated:
+                    type: integer
+                    description: 实际冻结人数
+                    format: int32
+                skipped:
+                    type: integer
+                    description: 因豁免等原因跳过的人数
+                    format: int32
         api.user.v1.GetByIdRes:
             type: object
             properties:

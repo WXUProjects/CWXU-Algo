@@ -29,6 +29,7 @@ const (
 	Profile_SetSyncIntervals_FullMethodName        = "/api.user.v1.Profile/SetSyncIntervals"
 	Profile_SetSyncExempt_FullMethodName           = "/api.user.v1.Profile/SetSyncExempt"
 	Profile_ClearDormant_FullMethodName            = "/api.user.v1.Profile/ClearDormant"
+	Profile_ForceDormant_FullMethodName            = "/api.user.v1.Profile/ForceDormant"
 	Profile_GetUserIdsByGroup_FullMethodName       = "/api.user.v1.Profile/GetUserIdsByGroup"
 	Profile_GetUserIdsByOrg_FullMethodName         = "/api.user.v1.Profile/GetUserIdsByOrg"
 	Profile_GetStaffOrgIds_FullMethodName          = "/api.user.v1.Profile/GetStaffOrgIds"
@@ -60,6 +61,8 @@ type ProfileClient interface {
 	SetSyncExempt(ctx context.Context, in *SetSyncExemptReq, opts ...grpc.CallOption) (*SetSyncExemptRes, error)
 	// 站点管理员：批量解除不活跃（仅刷新 last_login_at 为当前时间；超时后仍会再休眠）
 	ClearDormant(ctx context.Context, in *ClearDormantReq, opts ...grpc.CallOption) (*ClearDormantRes, error)
+	// 站点管理员：批量冻结不活跃（把最近活跃回拨到超过站点阈值；仍走豁免规则，登录/解除后恢复）
+	ForceDormant(ctx context.Context, in *ForceDormantReq, opts ...grpc.CallOption) (*ForceDormantRes, error)
 	GetUserIdsByGroup(ctx context.Context, in *GetUserIdsByGroupReq, opts ...grpc.CallOption) (*GetUserIdsByGroupRes, error)
 	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(ctx context.Context, in *GetUserIdsByOrgReq, opts ...grpc.CallOption) (*GetUserIdsByOrgRes, error)
@@ -185,6 +188,16 @@ func (c *profileClient) ClearDormant(ctx context.Context, in *ClearDormantReq, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ClearDormantRes)
 	err := c.cc.Invoke(ctx, Profile_ClearDormant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *profileClient) ForceDormant(ctx context.Context, in *ForceDormantReq, opts ...grpc.CallOption) (*ForceDormantRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ForceDormantRes)
+	err := c.cc.Invoke(ctx, Profile_ForceDormant_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -319,6 +332,8 @@ type ProfileServer interface {
 	SetSyncExempt(context.Context, *SetSyncExemptReq) (*SetSyncExemptRes, error)
 	// 站点管理员：批量解除不活跃（仅刷新 last_login_at 为当前时间；超时后仍会再休眠）
 	ClearDormant(context.Context, *ClearDormantReq) (*ClearDormantRes, error)
+	// 站点管理员：批量冻结不活跃（把最近活跃回拨到超过站点阈值；仍走豁免规则，登录/解除后恢复）
+	ForceDormant(context.Context, *ForceDormantReq) (*ForceDormantRes, error)
 	GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error)
 	// 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error)
@@ -379,6 +394,9 @@ func (UnimplementedProfileServer) SetSyncExempt(context.Context, *SetSyncExemptR
 }
 func (UnimplementedProfileServer) ClearDormant(context.Context, *ClearDormantReq) (*ClearDormantRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClearDormant not implemented")
+}
+func (UnimplementedProfileServer) ForceDormant(context.Context, *ForceDormantReq) (*ForceDormantRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method ForceDormant not implemented")
 }
 func (UnimplementedProfileServer) GetUserIdsByGroup(context.Context, *GetUserIdsByGroupReq) (*GetUserIdsByGroupRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUserIdsByGroup not implemented")
@@ -610,6 +628,24 @@ func _Profile_ClearDormant_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProfileServer).ClearDormant(ctx, req.(*ClearDormantReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Profile_ForceDormant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ForceDormantReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).ForceDormant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_ForceDormant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).ForceDormant(ctx, req.(*ForceDormantReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -858,6 +894,10 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ClearDormant",
 			Handler:    _Profile_ClearDormant_Handler,
+		},
+		{
+			MethodName: "ForceDormant",
+			Handler:    _Profile_ForceDormant_Handler,
 		},
 		{
 			MethodName: "GetUserIdsByGroup",

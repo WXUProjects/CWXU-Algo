@@ -15,10 +15,16 @@ import (
 )
 
 const (
-	// 题面爬取 / AI 分析并发（用户要求各 4；QoS + 信号量共同限制）
-	problemFetchConcurrency   = 4
-	problemAnalyzeConcurrency = 4
-	problemMaxRetry           = 5
+	// 默认各 4；可用 CWXU_PROBLEM_FETCH_CONCURRENCY / CWXU_PROBLEM_ANALYZE_CONCURRENCY 覆盖
+	defaultProblemFetchConcurrency   = 4
+	defaultProblemAnalyzeConcurrency = 4
+	problemMaxRetry                  = 5
+)
+
+// 进程内解析一次，供 consumer 与 progress 面板共用
+var (
+	problemFetchConcurrency   = mqconsume.ConcurrencyFromEnv("CWXU_PROBLEM_FETCH_CONCURRENCY", defaultProblemFetchConcurrency)
+	problemAnalyzeConcurrency = mqconsume.ConcurrencyFromEnv("CWXU_PROBLEM_ANALYZE_CONCURRENCY", defaultProblemAnalyzeConcurrency)
 )
 
 func retryCount(h amqp.Table) int {

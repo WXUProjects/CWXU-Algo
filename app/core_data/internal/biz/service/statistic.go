@@ -166,6 +166,11 @@ func (uc *StatisticUseCase) Rank(ctx context.Context, req *statistic.RankReq) (*
 	}
 
 	memberIDs, orgID := uc.resolveMembers(ctx, false)
+	// 公共域 / 未登录回落公共域：全站聚合（nil），避免对全体成员做巨型 IN，
+	// 也避免 resolve 失败时空列表导致「无法加载」。私有域仍按成员隔离。
+	if isPublicOrgID(ctx, uc.reg, orgID) {
+		memberIDs = nil
+	}
 
 	// TopN 首页快照：page=1、无 group、pageSize≤50
 	useSnap := req.Page <= 1 && groupId < 0 && req.PageSize > 0 && req.PageSize <= 50 && uc.rdb != nil
@@ -173,12 +178,15 @@ func (uc *StatisticUseCase) Rank(ctx context.Context, req *statistic.RankReq) (*
 	snapKey := ""
 	if useSnap {
 		scope := "org"
-		if orgID == 0 {
+		if memberIDs == nil {
+			scope = "all"
+		} else if orgID == 0 {
 			scope = "all"
 		} else {
 			scope = fmt.Sprintf("org%d", orgID)
 		}
-		snapKey = fmt.Sprintf("rank:snap:s1:%s:%s:%s_%s:v%s:ps%d",
+		// schema s2：全时段过题改走 user_ac_problems；公共域 site-wide
+		snapKey = fmt.Sprintf("rank:snap:s2:%s:%s:%s_%s:v%s:ps%d",
 			scope, scoreType, req.StartDate, req.EndDate, globalVer, req.PageSize)
 		if b, e := uc.rdb.Get(ctx, snapKey).Bytes(); e == nil && len(b) > 0 {
 			var cached statistic.RankResp

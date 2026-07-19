@@ -54,7 +54,7 @@ func TestContestLogsFromAtCoderHistory_Fixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	all := contestLogsFromAtCoderHistory(42, hist, true)
+	all := contestLogsFromAtCoderHistory(42, hist, true, map[string]int{"agc004": 5, "abc100": 3})
 	if len(all) != 2 {
 		t.Fatalf("needAll=true got %d logs", len(all))
 	}
@@ -77,6 +77,9 @@ func TestContestLogsFromAtCoderHistory_Fixture(t *testing.T) {
 	if first.Rank != 2 {
 		t.Errorf("rank=%d", first.Rank)
 	}
+	if first.AcCount != 5 {
+		t.Errorf("acCount=%d want 5", first.AcCount)
+	}
 	if first.Time.IsZero() {
 		t.Error("time empty")
 	}
@@ -87,12 +90,35 @@ func TestContestLogsFromAtCoderHistory_Fixture(t *testing.T) {
 		t.Errorf("time date=%v-%v-%v", y, m, d)
 	}
 
-	latestOnly := contestLogsFromAtCoderHistory(42, hist, false)
+	latestOnly := contestLogsFromAtCoderHistory(42, hist, false, nil)
 	if len(latestOnly) != 1 {
 		t.Fatalf("needAll=false got %d", len(latestOnly))
 	}
 	if latestOnly[0].ContestId != "abc100" || latestOnly[0].Rank != 1 {
 		t.Errorf("latest=%+v", latestOnly[0])
+	}
+	if latestOnly[0].AcCount != 0 {
+		t.Errorf("nil ac map should keep 0, got %d", latestOnly[0].AcCount)
+	}
+}
+
+func TestFetchAtCoderContestAC_FiltersPracticeAndDedups(t *testing.T) {
+	// contest ends at 1000; practice after end excluded; WA ignored; same problem dedup
+	endBy := map[string]int64{"abc467": 1000}
+	subs := []atcJson{
+		{ContestID: "abc467", ProblemID: "abc467_a", Result: "AC", EpochSecond: 900},
+		{ContestID: "abc467", ProblemID: "abc467_a", Result: "AC", EpochSecond: 950}, // dup
+		{ContestID: "abc467", ProblemID: "abc467_b", Result: "WA", EpochSecond: 960},
+		{ContestID: "abc467", ProblemID: "abc467_b", Result: "AC", EpochSecond: 980},
+		{ContestID: "abc467", ProblemID: "abc467_c", Result: "AC", EpochSecond: 1001}, // practice
+		{ContestID: "arc100", ProblemID: "arc100_a", Result: "AC", EpochSecond: 2000}, // no end bound
+	}
+	ac := fetchAtCoderContestAC(subs, endBy)
+	if ac["abc467"] != 2 {
+		t.Fatalf("abc467 ac=%d want 2 (a,b; practice c excluded)", ac["abc467"])
+	}
+	if ac["arc100"] != 1 {
+		t.Fatalf("arc100 ac=%d want 1", ac["arc100"])
 	}
 }
 
@@ -114,7 +140,7 @@ func TestFetchContestLog_LiveTourist(t *testing.T) {
 	if len(logs) == 0 {
 		t.Fatal("tourist should have non-empty contest history")
 	}
-	var ok int
+	var ok, withAC int
 	for _, l := range logs {
 		if l.Platform != spider.AtCoder {
 			t.Fatalf("platform=%q", l.Platform)
@@ -134,12 +160,20 @@ func TestFetchContestLog_LiveTourist(t *testing.T) {
 		if l.Time.IsZero() {
 			t.Fatalf("time empty: %+v", l)
 		}
+		if l.AcCount > 0 {
+			withAC++
+		}
 		ok++
 	}
-	t.Logf("AtCoder tourist contests=%d first=%s rank=%d last=%s rank=%d",
-		len(logs), logs[0].ContestId, logs[0].Rank, logs[len(logs)-1].ContestId, logs[len(logs)-1].Rank)
+	t.Logf("AtCoder tourist contests=%d withAC=%d first=%s rank=%d ac=%d last=%s rank=%d ac=%d",
+		len(logs), withAC, logs[0].ContestId, logs[0].Rank, logs[0].AcCount,
+		logs[len(logs)-1].ContestId, logs[len(logs)-1].Rank, logs[len(logs)-1].AcCount)
 	if ok < 1 {
 		t.Fatal("no valid contests")
+	}
+	// tourist 全量应能从提交统计出至少若干场 AC（代理/网络失败时 AcCount 全 0 可接受）
+	if withAC == 0 {
+		t.Log("warning: no contest has AcCount>0 (submission API may be down)")
 	}
 
 	// needAll=false → single latest
@@ -152,5 +186,20 @@ func TestFetchContestLog_LiveTourist(t *testing.T) {
 	}
 	if one[0].ContestId != logs[len(logs)-1].ContestId {
 		t.Errorf("latest id=%q want %q", one[0].ContestId, logs[len(logs)-1].ContestId)
+	}
+}
+
+func TestFetchContestLog_LiveCubberLatest(t *testing.T) {
+	logs, err := NewAtCoder{}.FetchContestLog(1, "Cubber", false)
+	if err != nil {
+		t.Skipf("network/API: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("want 1 got %d", len(logs))
+	}
+	l := logs[0]
+	t.Logf("Cubber latest %s rank=%d ac=%d", l.ContestId, l.Rank, l.AcCount)
+	if l.ContestId == "abc467" && l.AcCount < 1 {
+		t.Fatalf("abc467 ac=%d want >0", l.AcCount)
 	}
 }

@@ -79,7 +79,7 @@ func (s SpiderService) UpdateAll(ctx context.Context, _ *spider.UpdateAllReq) (*
 		return nil, InternalError
 	}
 
-	// 一次全部入队 MQ；并发消费由 spider consumer Qos=4 控制
+	// 一次全部入队 MQ；并发消费由 spider consumer 控制
 	go s.spider.DoBatch(context.Background(), userIds, true, 0, 0)
 
 	return &spider.UpdateAllRes{

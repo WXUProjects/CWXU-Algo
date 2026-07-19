@@ -49,8 +49,7 @@ func fetchLog(url string) ([]atcJson, error) {
 }
 
 func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) (res []model.SubmitLog, err error) {
-	// 比如这里的needAll 如果为true 那么second就为0，表示从头到尾所有数据
-	// 如果为false 那么就获取最近一天的数据
+	// needAll=true：from_second=0 全量；false：最近 60 小时
 	t := time.Unix(0, 0)
 	if needAll == false {
 		t = time.Now().Add(-60 * (1 * time.Hour))
@@ -77,16 +76,29 @@ func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) 
 		}
 		res = append(res, tmp)
 	}
-	for len(atc) == 500 {
+	// 分页：每页最多 500；用 last epoch 推进，并防重复页空转
+	const maxPages = 200
+	seenLast := map[int64]struct{}{}
+	for page := 0; len(atc) == 500 && page < maxPages; page++ {
+		lastEpoch := atc[len(atc)-1].EpochSecond
+		if _, dup := seenLast[lastEpoch]; dup {
+			break
+		}
+		seenLast[lastEpoch] = struct{}{}
 		url := fmt.Sprintf(
 			"https://atc.luckysan.top/atcoder/atcoder-api/v3/user/submissions?user=%s&from_second=%d",
-			username, atc[len(atc)-1].EpochSecond,
+			username, lastEpoch,
 		)
 		atc, err = fetchLog(url)
 		if err != nil {
 			return nil, err
 		}
-		for _, v := range atc {
+		// 跳过与上一页末条同 epoch 的首条重复（API 常 inclusive）
+		start := 0
+		if len(atc) > 0 && atc[0].EpochSecond == lastEpoch && len(res) > 0 {
+			start = 1
+		}
+		for _, v := range atc[start:] {
 			tmp := model.SubmitLog{
 				UserID:   userId,
 				Platform: "AtCoder",
@@ -161,7 +173,8 @@ func fetchAtCoderHistory(username string) ([]atcoderHistoryEntry, error) {
 
 // contestLogsFromAtCoderHistory 将 history JSON 映射为 ContestLog。
 // needAll=false 时只保留时间最新的一场（API 多为时间升序，取末条）。
-func contestLogsFromAtCoderHistory(userId int64, hist []atcoderHistoryEntry, needAll bool) []model.ContestLog {
+// acByContest 为各 contest_id 的正式参赛过题数（可 nil）。
+func contestLogsFromAtCoderHistory(userId int64, hist []atcoderHistoryEntry, needAll bool, acByContest map[string]int) []model.ContestLog {
 	if len(hist) == 0 {
 		return nil
 	}
@@ -185,6 +198,10 @@ func contestLogsFromAtCoderHistory(userId int64, hist []atcoderHistoryEntry, nee
 				t = parsed
 			}
 		}
+		ac := 0
+		if acByContest != nil {
+			ac = acByContest[id]
+		}
 		out = append(out, model.ContestLog{
 			Platform:    spider.AtCoder,
 			UserID:      userId,
@@ -192,22 +209,111 @@ func contestLogsFromAtCoderHistory(userId int64, hist []atcoderHistoryEntry, nee
 			ContestName: name,
 			ContestUrl:  "https://atcoder.jp/contests/" + id,
 			Rank:        h.Place,
-			// history/json 无过题数/总题数
+			// history/json 无过题数；AC 由提交 API 统计（见 fetchAtCoderContestAC）
 			TotalCount: 0,
-			AcCount:    0,
+			AcCount:    ac,
 			Time:       t,
 		})
 	}
 	return out
 }
 
-// FetchContestLog 从 AtCoder 官方参赛历史拉取比赛记录（SubmitContestFetcher）
+// atcoderHistoryEndUnix 从 history 解析各 contest 结束时间（unix 秒），用于过滤赛后练习提交。
+func atcoderHistoryEndUnix(hist []atcoderHistoryEntry) map[string]int64 {
+	out := make(map[string]int64, len(hist))
+	for _, h := range hist {
+		id := normalizeAtCoderContestID(h.ContestScreenName)
+		if id == "" || h.EndTime == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339, h.EndTime)
+		if err != nil {
+			continue
+		}
+		out[id] = parsed.Unix()
+	}
+	return out
+}
+
+// fetchAtCoderSubmissions 拉取用户提交（kenkoooo 兼容 API，经代理）；needAll=false 时仅最近 60h。
+func fetchAtCoderSubmissions(username string, needAll bool) ([]atcJson, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, fmt.Errorf("atcoder username 为空")
+	}
+	from := int64(0)
+	if !needAll {
+		from = time.Now().Add(-60 * time.Hour).Unix()
+	}
+	var all []atcJson
+	url := fmt.Sprintf(
+		"https://atc.luckysan.top/atcoder/atcoder-api/v3/user/submissions?user=%s&from_second=%d",
+		username, from,
+	)
+	for {
+		page, err := fetchLog(url)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if len(page) < 500 {
+			break
+		}
+		// 下一页从末条 epoch 继续（API 按时间升序，同秒可能重复，调用方按 problem 去重）
+		nextFrom := page[len(page)-1].EpochSecond
+		url = fmt.Sprintf(
+			"https://atc.luckysan.top/atcoder/atcoder-api/v3/user/submissions?user=%s&from_second=%d",
+			username, nextFrom,
+		)
+	}
+	return all, nil
+}
+
+// fetchAtCoderContestAC 按 contest_id 统计正式参赛 unique AC。
+// endByContest 有结束时间时只计 epoch_second <= 结束时间的提交，排除赛后练习/虚拟。
+func fetchAtCoderContestAC(subs []atcJson, endByContest map[string]int64) map[string]int {
+	acProblems := map[string]map[string]struct{}{}
+	for _, s := range subs {
+		cid := strings.TrimSpace(s.ContestID)
+		pid := strings.TrimSpace(s.ProblemID)
+		if cid == "" || pid == "" {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(s.Result), "AC") {
+			continue
+		}
+		if end, ok := endByContest[cid]; ok && end > 0 && s.EpochSecond > end {
+			continue
+		}
+		set := acProblems[cid]
+		if set == nil {
+			set = map[string]struct{}{}
+			acProblems[cid] = set
+		}
+		set[pid] = struct{}{}
+	}
+	out := make(map[string]int, len(acProblems))
+	for cid, set := range acProblems {
+		out[cid] = len(set)
+	}
+	return out
+}
+
+// FetchContestLog 从 AtCoder 官方参赛历史拉取比赛记录，并用提交 API 补过题数（SubmitContestFetcher）。
+//
+//  1. /users/{handle}/history/json → 排名 / 比赛名 / 结束时间
+//  2. kenkoooo user/submissions → 按 contest_id 统计赛时 unique AC
 func (p NewAtCoder) FetchContestLog(userId int64, username string, needAll bool) ([]model.ContestLog, error) {
 	hist, err := fetchAtCoderHistory(username)
 	if err != nil {
 		return nil, err
 	}
-	return contestLogsFromAtCoderHistory(userId, hist, needAll), nil
+	var acByContest map[string]int
+	// 提交拉取失败不阻断榜单（仍有 rank）；AC 保持 0，下次全量可 GREATEST 补上
+	if subs, sErr := fetchAtCoderSubmissions(username, needAll); sErr == nil {
+		acByContest = fetchAtCoderContestAC(subs, atcoderHistoryEndUnix(hist))
+	}
+	return contestLogsFromAtCoderHistory(userId, hist, needAll, acByContest), nil
 }
 
 // FetchRating 从 AtCoder 官方 rating 历史取最新 NewRating

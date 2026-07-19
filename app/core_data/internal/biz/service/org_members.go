@@ -36,6 +36,25 @@ func fetchOrgMemberIDs(ctx context.Context, reg *registry.Registrar, orgID uint)
 	return ids, uint(res.GetOrgId()), false, nil
 }
 
+// isPublicOrgID orgID=0 或等于公共域 id 时视为公共域（全站聚合）
+func isPublicOrgID(ctx context.Context, reg *registry.Registrar, orgID uint) bool {
+	if orgID == 0 {
+		return true
+	}
+	if reg == nil {
+		return true
+	}
+	client, err := userrpc.ProfileClient(reg)
+	if err != nil {
+		return true
+	}
+	pub, err := client.GetUserIdsByOrg(ctx, &profile.GetUserIdsByOrgReq{OrgId: 0})
+	if err != nil {
+		return true
+	}
+	return uint(pub.GetOrgId()) == orgID
+}
+
 // fetchDisplayNames 批量取当前组织（或指定 org）内展示名
 func fetchDisplayNames(ctx context.Context, reg *registry.Registrar, userIDs []int64) map[int64]string {
 	out := map[int64]string{}

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -165,7 +164,8 @@ func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []mo
 	pageSize := 50
 	limit := 150
 	if needAll {
-		limit = math.MaxInt
+		// 硬顶：约 1 万条，避免无界翻页占满 worker
+		limit = 10000
 	}
 
 	doReq := func(page int) (*Resp, error) {
@@ -254,8 +254,9 @@ func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []mo
 		return result
 	}
 
-	// ===== 后续分页 =====
+	// ===== 后续分页（页间短歇，降风控）=====
 	for page := 2; page <= totalPage; page++ {
+		time.Sleep(200 * time.Millisecond)
 		r, err := doReq(page)
 		if err != nil {
 			break
@@ -291,9 +292,13 @@ func (nc NewNowCoder) FetchSubmitLog(userId int64, username string, needAll bool
 	var subs []Submission
 	subs = append(subs, analysisSubs(doc)...)
 	if needAll {
-		// 再获取其他页的数据
+		// 再获取其他页；硬顶 100 页（1 万条）+ 页间短歇
 		totPage := (totalS + 99) / 100
+		if totPage > 100 {
+			totPage = 100
+		}
 		for i := 2; i <= totPage; i++ {
+			time.Sleep(200 * time.Millisecond)
 			url := fmt.Sprintf(
 				"https://ac.nowcoder.com/acm/contest/profile/%s/practice-coding?pageSize=100&page=%d",
 				username, i,

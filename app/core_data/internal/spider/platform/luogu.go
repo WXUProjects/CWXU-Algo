@@ -246,7 +246,17 @@ func (lg *NewLuoGu) FetchSubmitLog(userId int64, username string, needAll bool) 
 	}
 	subs = inj.CurrentData.Records.Result
 	if needAll {
-		for i := 2; i <= inj.CurrentData.Records.Count/inj.CurrentData.Records.PerPage+1; i++ {
+		// 页间短歇 + 硬顶 200 页，避免无界翻页触发风控 / 占满 worker
+		perPage := inj.CurrentData.Records.PerPage
+		if perPage <= 0 {
+			perPage = 20
+		}
+		totPage := inj.CurrentData.Records.Count/perPage + 1
+		if totPage > 200 {
+			totPage = 200
+		}
+		for i := 2; i <= totPage; i++ {
+			time.Sleep(300 * time.Millisecond)
 			req, _ := http.NewRequest("GET", baseUrl+fmt.Sprint(i), nil)
 			resp, err := client.Do(req)
 			if err != nil {

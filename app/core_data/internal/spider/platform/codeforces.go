@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -31,6 +32,33 @@ type cfJson struct {
 	ProgrammingLanguage string `json:"programmingLanguage"`
 	Verdict             string `json:"verdict"`
 	CreationTimeSeconds int64  `json:"creationTimeSeconds"`
+	Author              struct {
+		ParticipantType string `json:"participantType"`
+	} `json:"author"`
+}
+
+const (
+	cfStatusPageSize    = 1000
+	cfStatusMaxPagesAll = 100 // needAll 硬顶 10 万条，避免 1e6 单包
+	cfStatusPageGap     = 200 * time.Millisecond
+)
+
+// 短缓存：同用户一次 LoadData 内 submit+contest 复用同一份 user.status
+type cfStatusCacheEntry struct {
+	at   time.Time
+	subs []cfJson
+}
+
+var (
+	cfStatusCacheMu sync.Mutex
+	cfStatusCache   = map[string]cfStatusCacheEntry{}
+)
+
+func cfStatusCacheKey(username string, needAll bool) string {
+	if needAll {
+		return strings.ToLower(strings.TrimSpace(username)) + ":all"
+	}
+	return strings.ToLower(strings.TrimSpace(username)) + ":incr"
 }
 
 type cfRatingEntry struct {
@@ -43,18 +71,6 @@ type cfRatingEntry struct {
 	NewRating               int    `json:"newRating"`
 }
 
-type cfStatusForContest struct {
-	ContestID int    `json:"contestId"`
-	Verdict   string `json:"verdict"`
-	Author    struct {
-		ParticipantType string `json:"participantType"`
-	} `json:"author"`
-	Problem struct {
-		Index string `json:"index"`
-	} `json:"problem"`
-	CreationTimeSeconds int64 `json:"creationTimeSeconds"`
-}
-
 type cfContestListEntry struct {
 	ID               int    `json:"id"`
 	Name             string `json:"name"`
@@ -64,43 +80,13 @@ type cfContestListEntry struct {
 }
 
 func (p NewCodeforces) FetchSubmitLog(userId int64, username string, needAll bool) (res []model.SubmitLog, err error) {
-	need := 1000
-	if needAll == true {
-		need = 1000000
-	}
-	handle := username
-	last_commit := 1
-	url := fmt.Sprintf(
-		"https://codeforces.com/api/user.status?handle=%s&from=%d&count=%d",
-		handle, last_commit, need,
-	)
-	resp, err := ojhttp.Get(url)
+	subs, err := fetchCFUserStatusPaged(username, needAll)
 	if err != nil {
-		return nil, fmt.Errorf("发起http请求失败: %s", err.Error())
+		return nil, err
 	}
-	defer resp.Body.Close()
-	// 校验状态码
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("请求响应码错误 %d, %s", resp.StatusCode, string(body))
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("解析body错误: %s", err.Error())
-	}
-
-	var cfResp CFResponse
-	err = json.Unmarshal(body, &cfResp)
-	if err != nil {
-		return nil, fmt.Errorf("解析json错误：%s", err.Error())
-	}
-
-	if cfResp.Status != "OK" {
-		return nil, fmt.Errorf("API status error: %s", cfResp.Status)
-	}
-
-	for _, sub := range cfResp.Result {
-		t := model.SubmitLog{
+	res = make([]model.SubmitLog, 0, len(subs))
+	for _, sub := range subs {
+		res = append(res, model.SubmitLog{
 			UserID:   userId,
 			Platform: spider.CodeForces,
 			SubmitID: strconv.Itoa(sub.ID),
@@ -110,10 +96,78 @@ func (p NewCodeforces) FetchSubmitLog(userId int64, username string, needAll boo
 			// CF 评测中可能省略 verdict → 空串；归一化后写入，避免 UI 显示空白
 			Status: NormalizeCodeforcesVerdict(sub.Verdict),
 			Time:   time.Unix(sub.CreationTimeSeconds, 0),
-		}
-		res = append(res, t)
+		})
 	}
 	return res, nil
+}
+
+// fetchCFUserStatusPaged 分页拉取 user.status；短缓存供 submit/contest 复用。
+// needAll=false：仅第 1 页（最多 1000）；needAll=true：分页直至不足一页或达硬顶。
+func fetchCFUserStatusPaged(username string, needAll bool) ([]cfJson, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, fmt.Errorf("codeforces handle 为空")
+	}
+	key := cfStatusCacheKey(username, needAll)
+	cfStatusCacheMu.Lock()
+	if e, ok := cfStatusCache[key]; ok && time.Since(e.at) < 2*time.Minute {
+		out := e.subs
+		cfStatusCacheMu.Unlock()
+		return out, nil
+	}
+	cfStatusCacheMu.Unlock()
+
+	maxPages := 1
+	if needAll {
+		maxPages = cfStatusMaxPagesAll
+	}
+	all := make([]cfJson, 0, cfStatusPageSize)
+	for page := 0; page < maxPages; page++ {
+		from := page*cfStatusPageSize + 1
+		url := fmt.Sprintf(
+			"https://codeforces.com/api/user.status?handle=%s&from=%d&count=%d",
+			username, from, cfStatusPageSize,
+		)
+		resp, err := ojhttp.Get(url)
+		if err != nil {
+			return nil, fmt.Errorf("发起http请求失败: %s", err.Error())
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("解析body错误: %s", err.Error())
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("请求响应码错误 %d, %s", resp.StatusCode, string(body))
+		}
+		var cfResp CFResponse
+		if err := json.Unmarshal(body, &cfResp); err != nil {
+			return nil, fmt.Errorf("解析json错误：%s", err.Error())
+		}
+		if cfResp.Status != "OK" {
+			return nil, fmt.Errorf("API status error: %s", cfResp.Status)
+		}
+		all = append(all, cfResp.Result...)
+		if len(cfResp.Result) < cfStatusPageSize {
+			break
+		}
+		if page+1 < maxPages {
+			time.Sleep(cfStatusPageGap)
+		}
+	}
+
+	cfStatusCacheMu.Lock()
+	cfStatusCache[key] = cfStatusCacheEntry{at: time.Now(), subs: all}
+	// 简单防膨胀：超过 64 条清掉过期项
+	if len(cfStatusCache) > 64 {
+		for k, e := range cfStatusCache {
+			if time.Since(e.at) > 2*time.Minute {
+				delete(cfStatusCache, k)
+			}
+		}
+	}
+	cfStatusCacheMu.Unlock()
+	return all, nil
 }
 
 // FetchContestLog 拉取 Codeforces 比赛记录。
@@ -284,43 +338,17 @@ func fetchCFUserRating(username string) ([]cfRatingEntry, error) {
 }
 
 // fetchCFContestACFromStatus 从 user.status 统计正式参赛过题数与最早提交时间。
+// 复用 fetchCFUserStatusPaged 缓存，避免与 FetchSubmitLog 重复拉 1e6。
 // 返回：acByContest[contestId]=unique OK 数；participateTime[contestId]=最早提交 unix。
 func fetchCFContestACFromStatus(username string, needAll bool) (map[int]int, map[int]int64, error) {
-	need := 2000
-	if needAll {
-		need = 1000000
-	}
-	url := fmt.Sprintf(
-		"https://codeforces.com/api/user.status?handle=%s&from=1&count=%d",
-		username, need,
-	)
-	resp, err := ojhttp.Get(url)
-	if err != nil {
-		return nil, nil, fmt.Errorf("codeforces user.status 请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	subs, err := fetchCFUserStatusPaged(username, needAll)
 	if err != nil {
 		return nil, nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("codeforces user.status 状态码 %d: %s", resp.StatusCode, string(body))
-	}
-	var out struct {
-		Status  string               `json:"status"`
-		Comment string               `json:"comment"`
-		Result  []cfStatusForContest `json:"result"`
-	}
-	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, nil, fmt.Errorf("codeforces user.status 解析失败: %w", err)
-	}
-	if out.Status != "OK" {
-		return nil, nil, fmt.Errorf("codeforces user.status API: %s %s", out.Status, out.Comment)
 	}
 
 	acProblems := map[int]map[string]struct{}{}
 	participateTime := map[int]int64{}
-	for _, s := range out.Result {
+	for _, s := range subs {
 		if s.ContestID <= 0 {
 			continue
 		}

@@ -319,7 +319,9 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 			uc.fetchAndSaveRating(plat)
 			log.Infof("Spider: %s %s 成功 new_rows=%d", plat.Platform, plat.Username, rows)
 			if anyChange && uc.problem != nil {
-				uc.problem.BindSubmitsAfterSpider(userId)
+				// 异步绑定，避免在 spider worker 内串行 resolve 拖垮队列
+				uid := userId
+				go uc.problem.BindSubmitsAfterSpider(uid)
 			}
 			return anyChange, nil
 		}

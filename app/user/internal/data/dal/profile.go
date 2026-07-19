@@ -355,7 +355,7 @@ func (d *ProfileDal) OrgDisplayNamesByUserIDs(ctx context.Context, orgID uint, u
 	return out, nil
 }
 
-func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keyword string, dormantOnly bool) ([]model.User, int64, error) {
+func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keyword string, dormantOnly bool, inactiveDays int) ([]model.User, int64, error) {
 	kw := strings.TrimSpace(keyword)
 	q := d.db.WithContext(ctx).Model(&model.User{})
 	if kw != "" {
@@ -370,7 +370,7 @@ func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keywo
 			q = q.Where("username ILIKE ? OR name ILIKE ?", like, like)
 		}
 	}
-	q = d.applyDormantOnlyFilter(ctx, q, "users", dormantOnly)
+	q = d.applyInactiveListFilter(ctx, q, "users", dormantOnly, inactiveDays)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -391,15 +391,29 @@ func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keywo
 	return list, total, nil
 }
 
-// applyDormantOnlyFilter 列表「不活跃 / 已暂停同步」筛选，与 dormancy.IsDormant 对齐：
-//  1) last_login 为空或超过 inactive_days（OR 必须括号，防 AND/OR 拆坏条件）
+// applyInactiveListFilter 列表「不活跃 / 最近 N 天未登录」筛选，与 dormancy.IsDormant 豁免规则对齐：
+//  1) last_login 为空或早于 cutoff（OR 必须括号，防 AND/OR 拆坏条件）
 //  2) 无任何豁免：站管 / 站管「始终同步」/ 组织 staff / 组织 force_sync（永不冻结）/ team·pro 套餐
+// inactiveDays>0 时用自定义天数；否则 dormantOnly 用站点阈值；两者都不开则不过滤。
 // 豁免用户即使很久未登录也**不**出现在本筛选中、后台也不暂停同步。
-func (d *ProfileDal) applyDormantOnlyFilter(ctx context.Context, q *gorm.DB, userTable string, dormantOnly bool) *gorm.DB {
-	if !dormantOnly || q == nil {
+func (d *ProfileDal) applyInactiveListFilter(ctx context.Context, q *gorm.DB, userTable string, dormantOnly bool, inactiveDays int) *gorm.DB {
+	if q == nil {
 		return q
 	}
-	days := d.GetInactiveDays(ctx)
+	days := 0
+	if inactiveDays > 0 {
+		days = dormancy.ClampInactiveDays(inactiveDays)
+	} else if dormantOnly {
+		days = d.GetInactiveDays(ctx)
+	} else {
+		return q
+	}
+	return d.applyFreezableInactiveFilter(q, userTable, days)
+}
+
+// applyFreezableInactiveFilter 最近 days 天未登录且无豁免（可冻结候选）
+func (d *ProfileDal) applyFreezableInactiveFilter(q *gorm.DB, userTable string, days int) *gorm.DB {
+	days = dormancy.ClampInactiveDays(days)
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 	loginCol := userTable + ".last_login_at"
 	idCol := userTable + ".id"
@@ -1019,6 +1033,17 @@ func (d *ProfileDal) TouchLastLogin(ctx context.Context, userID uint, at time.Ti
 
 // TouchLastLoginBatch 批量刷新最近活跃时间，返回实际更新行数
 func (d *ProfileDal) TouchLastLoginBatch(ctx context.Context, userIDs []int64, at time.Time) (int64, error) {
+	ids := dedupePositiveIDs(userIDs)
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res := d.db.WithContext(ctx).Model(&model.User{}).
+		Where("id IN ?", ids).
+		Update("last_login_at", at)
+	return res.RowsAffected, res.Error
+}
+
+func dedupePositiveIDs(userIDs []int64) []int64 {
 	ids := make([]int64, 0, len(userIDs))
 	seen := make(map[int64]struct{}, len(userIDs))
 	for _, id := range userIDs {
@@ -1031,11 +1056,69 @@ func (d *ProfileDal) TouchLastLoginBatch(ctx context.Context, userIDs []int64, a
 		seen[id] = struct{}{}
 		ids = append(ids, id)
 	}
+	return ids
+}
+
+// FilterFreezableUserIDs 在给定 ids 中保留「无豁免、可按休眠规则冻结」的用户（不限 last_login）
+func (d *ProfileDal) FilterFreezableUserIDs(ctx context.Context, userIDs []int64) ([]int64, error) {
+	ids := dedupePositiveIDs(userIDs)
 	if len(ids) == 0 {
+		return nil, nil
+	}
+	q := d.db.WithContext(ctx).Model(&model.User{}).
+		Select("id").
+		Where("id IN ?", ids).
+		Where("is_site_admin = ?", false).
+		Where("sync_exempt = ?", false).
+		Where(`NOT EXISTS (
+			SELECT 1 FROM org_members m
+			JOIN orgs o ON o.id = m.org_id
+			WHERE m.user_id = users.id AND o.status = ?
+			  AND (
+				m.role IN (?, ?, ?)
+				OR o.force_sync = true
+				OR o.plan IN (?, ?)
+			  )
+		)`, model.OrgStatusActive,
+			model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin,
+			"team", "pro")
+	var out []int64
+	if err := q.Pluck("id", &out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListFreezableInactiveUserIDs 全站：最近 inactiveDays 天未登录且无豁免的用户 id
+func (d *ProfileDal) ListFreezableInactiveUserIDs(ctx context.Context, inactiveDays int, limit int) ([]int64, error) {
+	days := dormancy.ClampInactiveDays(inactiveDays)
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 2000 {
+		limit = 2000
+	}
+	q := d.db.WithContext(ctx).Model(&model.User{}).Select("id")
+	q = d.applyFreezableInactiveFilter(q, "users", days)
+	var out []int64
+	if err := q.Order("id").Limit(limit).Pluck("id", &out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ForceDormantBatch 将可冻结用户的 last_login 回拨到超过站点阈值，进入休眠（非永久）
+// 返回实际更新数。at 一般取 now - (siteInactiveDays+1) 天。
+func (d *ProfileDal) ForceDormantBatch(ctx context.Context, userIDs []int64, at time.Time) (int64, error) {
+	freezable, err := d.FilterFreezableUserIDs(ctx, userIDs)
+	if err != nil {
+		return 0, err
+	}
+	if len(freezable) == 0 {
 		return 0, nil
 	}
 	res := d.db.WithContext(ctx).Model(&model.User{}).
-		Where("id IN ?", ids).
+		Where("id IN ?", freezable).
 		Update("last_login_at", at)
 	return res.RowsAffected, res.Error
 }
@@ -1050,8 +1133,8 @@ func (d *ProfileDal) SetSyncExempt(ctx context.Context, userID int64, exempt boo
 // GetListByOrg 分页列出组织成员用户
 // total 与列表一致：仅统计仍存在于 users 表的成员（忽略孤儿 org_members）
 // keyword 非空时模糊匹配 username / name / org_display_name（ILIKE）
-// dormantOnly 仅不活跃（已暂停同步）成员
-func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pageNum int64, keyword string, dormantOnly bool) ([]model.User, int64, error) {
+// dormantOnly / inactiveDays 见 applyInactiveListFilter
+func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pageNum int64, keyword string, dormantOnly bool, inactiveDays int) ([]model.User, int64, error) {
 	kw := strings.TrimSpace(keyword)
 	countQ := d.db.WithContext(ctx).
 		Table("org_members AS m").
@@ -1061,7 +1144,7 @@ func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pag
 		like := "%" + kw + "%"
 		countQ = countQ.Where("u.username ILIKE ? OR u.name ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
 	}
-	countQ = d.applyDormantOnlyFilter(ctx, countQ, "u", dormantOnly)
+	countQ = d.applyInactiveListFilter(ctx, countQ, "u", dormantOnly, inactiveDays)
 	var total int64
 	if err := countQ.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -1078,7 +1161,7 @@ func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pag
 		like := "%" + kw + "%"
 		listQ = listQ.Where("u.username ILIKE ? OR u.name ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
 	}
-	listQ = d.applyDormantOnlyFilter(ctx, listQ, "u", dormantOnly)
+	listQ = d.applyInactiveListFilter(ctx, listQ, "u", dormantOnly, inactiveDays)
 	var list []model.User
 	err := listQ.
 		Order("u.id").
