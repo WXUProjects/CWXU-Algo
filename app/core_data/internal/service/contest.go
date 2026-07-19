@@ -481,7 +481,8 @@ func RegisterContestExtraRoutes(srv *khttp.Server, s *ContestLogService) {
 }
 
 // handleContestProblems GET ?id= 或 ?contestId=（contest_logs 行 id）
-// 返回题目 Tab 列表；后台 ensure 每场只跑一次。
+// force=1：管理员强制重跑 ensure（牛客会优先走比赛页抓题面）
+// 返回题目 Tab 列表；默认每场 ensure 只成功跑一次。
 func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 	idStr := strings.TrimSpace(ctx.Query().Get("id"))
 	if idStr == "" {
@@ -490,6 +491,12 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 	id, _ := strconv.ParseUint(idStr, 10, 64)
 	if id == 0 {
 		writeContestJSON(ctx, 400, map[string]interface{}{"success": false, "message": "缺少比赛 id"})
+		return nil
+	}
+	forceQ := strings.TrimSpace(ctx.Query().Get("force"))
+	force := forceQ == "1" || strings.EqualFold(forceQ, "true")
+	if force && !auth.VerifyAdmin(ctx) && !auth.VerifySiteAdmin(ctx) {
+		writeContestJSON(ctx, 403, map[string]interface{}{"success": false, "message": "仅管理员可强制 ensure"})
 		return nil
 	}
 	var cl model.ContestLog
@@ -512,16 +519,23 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 		}
 		// 已有目录：不再触发；done 不再触发；running 由 Ensure 内部处理超时抢占
 		// failed：允许重试，但由 EnsureContestProblemsOnce 内部节流（ensured_at）
-		needEnsure := len(list) == 0 && ensureStatus != model.ContestEnsureDone
-		if needEnsure && ensureStatus != model.ContestEnsureRunning {
+		// force=1：管理员强制重跑（忽略 done）
+		needEnsure := force || (len(list) == 0 && ensureStatus != model.ContestEnsureDone)
+		if needEnsure && (force || ensureStatus != model.ContestEnsureRunning) {
 			plat, cid := cl.Platform, cl.ContestId
 			go func() {
-				if _, e := c.prob.EnsureContestProblemsOnce(plat, cid); e != nil {
-					log.Warnf("ensure contest problems async %s/%s: %v", plat, cid, e)
+				var e error
+				if force {
+					_, e = c.prob.EnsureContestProblemsForce(plat, cid)
+				} else {
+					_, e = c.prob.EnsureContestProblemsOnce(plat, cid)
+				}
+				if e != nil {
+					log.Warnf("ensure contest problems async force=%v %s/%s: %v", force, plat, cid, e)
 				}
 			}()
-			// 仅「从未 ensure」时对外显示 running；failed 保持 failed 让前端停轮询
-			if ensureStatus == "" {
+			// 仅「从未 ensure」或强制时对外显示 running；failed 保持 failed 让前端停轮询
+			if force || ensureStatus == "" {
 				ensureStatus = model.ContestEnsureRunning
 			}
 		}
@@ -535,6 +549,7 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 			"ensureStatus": ensureStatus,
 			"ensureError":  ensureError,
 			"list":         list,
+			"force":        force,
 		},
 	})
 	return nil

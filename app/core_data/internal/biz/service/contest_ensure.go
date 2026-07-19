@@ -51,10 +51,8 @@ func (uc *ProblemUseCase) ensureContestProblems(platform, contestID string, forc
 	err = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).First(&existing).Error
 	claimed := false
 	if err == nil {
-		if existing.Status == model.ContestEnsureDone && !force {
-			return existing.Status, nil
-		}
-		if force && (existing.Status == model.ContestEnsureDone || existing.Status == model.ContestEnsureFailed) {
+		if force {
+			// 管理员强制：无论 done/failed/running 一律抢占重跑
 			res := uc.data.DB.Model(&model.ContestProblemEnsure{}).
 				Where("id = ?", existing.ID).
 				Updates(map[string]interface{}{
@@ -66,14 +64,10 @@ func (uc *ProblemUseCase) ensureContestProblems(platform, contestID string, forc
 			if res.Error != nil {
 				return "", res.Error
 			}
-			if res.RowsAffected == 0 {
-				return model.ContestEnsureRunning, nil
-			}
 			claimed = true
 		} else if existing.Status == model.ContestEnsureDone {
 			return existing.Status, nil
-		}
-		if existing.Status == model.ContestEnsureRunning {
+		} else if existing.Status == model.ContestEnsureRunning {
 			// 僵尸 running：updated_at 过久才允许抢占
 			if time.Since(existing.UpdatedAt) < ensureRunningTimeout {
 				return existing.Status, nil
@@ -81,8 +75,8 @@ func (uc *ProblemUseCase) ensureContestProblems(platform, contestID string, forc
 			res := uc.data.DB.Model(&model.ContestProblemEnsure{}).
 				Where("id = ? AND status = ? AND updated_at < ?", existing.ID, model.ContestEnsureRunning, time.Now().Add(-ensureRunningTimeout)).
 				Updates(map[string]interface{}{
-					"status":    model.ContestEnsureRunning,
-					"error_msg": "",
+					"status":     model.ContestEnsureRunning,
+					"error_msg":  "",
 					"updated_at": time.Now(),
 				})
 			if res.Error != nil {
@@ -127,8 +121,20 @@ func (uc *ProblemUseCase) ensureContestProblems(platform, contestID string, forc
 			return "", res.Error
 		}
 		if res.RowsAffected == 0 {
-			_ = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).First(&existing).Error
-			return existing.Status, nil
+			if force {
+				// 并发下强制：再抢一次
+				_ = uc.data.DB.Model(&model.ContestProblemEnsure{}).
+					Where("platform = ? AND contest_id = ?", platform, contestID).
+					Updates(map[string]interface{}{
+						"status":     model.ContestEnsureRunning,
+						"error_msg":  "",
+						"ensured_at": nil,
+						"updated_at": time.Now(),
+					}).Error
+			} else {
+				_ = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).First(&existing).Error
+				return existing.Status, nil
+			}
 		}
 	}
 
