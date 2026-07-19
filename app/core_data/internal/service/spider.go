@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -84,6 +87,77 @@ func (s SpiderService) UpdateAll(ctx context.Context, _ *spider.UpdateAllReq) (*
 		Message: fmt.Sprintf("已为 %d 名用户全部入队全量更新，后台并发抓取中", len(userIds)),
 		Count:   int64(len(userIds)),
 	}, nil
+}
+
+// RegisterSpiderExtraRoutes 站管：按平台全量回填（如力扣比赛记录）
+func RegisterSpiderExtraRoutes(srv *khttp.Server, s *SpiderService) {
+	if srv == nil || s == nil {
+		return
+	}
+	r := srv.Route("/")
+	r.POST("/v1/core/spider/update-platform", s.handleUpdatePlatform)
+}
+
+// handleUpdatePlatform body: { "platform": "LeetCode" }
+// 仅入队该平台已绑定用户的 needAll 任务，并强制清去重（避免与刚跑完的 update-all 撞 pending）。
+func (s *SpiderService) handleUpdatePlatform(ctx khttp.Context) error {
+	if !auth.VerifyAdmin(ctx) {
+		writeSpiderJSON(ctx, 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可操作", "count": 0})
+		return nil
+	}
+	adminId := int64(auth.GetCurrentUserId(ctx))
+	if !s.allow(ctx, ratelimit.SpiderUpdateAllKey(adminId)+":plat", 2*time.Minute) {
+		writeSpiderJSON(ctx, 429, map[string]interface{}{"code": 1, "message": "请求过于频繁，请稍后再试", "count": 0})
+		return nil
+	}
+	var req struct {
+		Platform string `json:"platform"`
+	}
+	body, _ := io.ReadAll(ctx.Request().Body)
+	_ = json.Unmarshal(body, &req)
+	plat := strings.TrimSpace(req.Platform)
+	if plat == "" {
+		writeSpiderJSON(ctx, 400, map[string]interface{}{"code": 1, "message": "缺少 platform", "count": 0})
+		return nil
+	}
+	// 规范化已知平台名
+	switch strings.ToLower(plat) {
+	case "leetcode", "力扣":
+		plat = spiderregistry.LeetCode
+	case "codeforces", "cf":
+		plat = spiderregistry.CodeForces
+	case "atcoder":
+		plat = spiderregistry.AtCoder
+	case "luogu", "洛谷":
+		plat = spiderregistry.LuoGu
+	case "nowcoder", "牛客":
+		plat = spiderregistry.NowCoder
+	case "qoj":
+		plat = spiderregistry.QOJ
+	}
+	if _, ok := spiderregistry.Get(plat); !ok {
+		writeSpiderJSON(ctx, 400, map[string]interface{}{"code": 1, "message": "不支持的平台: " + plat, "count": 0})
+		return nil
+	}
+	users, published := 0, 0
+	if s.spider != nil {
+		users, published = s.spider.DoBatchPlatform(context.Background(), plat, true, true)
+	}
+	writeSpiderJSON(ctx, 200, map[string]interface{}{
+		"code":      0,
+		"message":   fmt.Sprintf("已为平台 %s 的 %d 名用户入队全量同步（published=%d），后台抓取中", plat, users, published),
+		"count":     users,
+		"published": published,
+		"platform":  plat,
+	})
+	return nil
+}
+
+func writeSpiderJSON(ctx khttp.Context, status int, v interface{}) {
+	w := ctx.Response()
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func (s SpiderService) GetSpider(ctx context.Context, req *spider.GetSpiderReq) (*spider.GetSpiderRep, error) {

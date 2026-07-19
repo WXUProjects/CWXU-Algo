@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -262,6 +263,44 @@ func CurrentGeneration(rdb *redis.Client, userId int64, platform string) int64 {
 		return 0
 	}
 	return v
+}
+
+// DoBatchPlatform 仅入队指定平台（如 LeetCode 回填）；force 时清 pending/inflight 去重以免刚 update-all 被跳过。
+func (t *SpiderTask) DoBatchPlatform(ctx context.Context, platform string, needAll, force bool) (users, published int) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	platform = strings.TrimSpace(platform)
+	if platform == "" || t.db == nil {
+		return 0, 0
+	}
+	var userIds []int64
+	if err := t.db.Model(&model.Platform{}).
+		Where("platform = ?", platform).
+		Distinct("user_id").
+		Pluck("user_id", &userIds).Error; err != nil {
+		log.Errorf("SpiderTask: DoBatchPlatform list users %s: %v", platform, err)
+		return 0, 0
+	}
+	if len(userIds) == 0 {
+		return 0, 0
+	}
+	n := 0
+	for i, uid := range userIds {
+		select {
+		case <-ctx.Done():
+			log.Warnf("SpiderTask: DoBatchPlatform cancelled at %d/%d", i, len(userIds))
+			return len(userIds), n
+		default:
+		}
+		if force {
+			t.ResetDedup(uid, platform)
+		}
+		n += t.DoPlatform(uid, platform, needAll).Published
+	}
+	log.Infof("SpiderTask: DoBatchPlatform platform=%s users=%d published=%d needAll=%v force=%v",
+		platform, len(userIds), n, needAll, force)
+	return len(userIds), n
 }
 
 // DoBatch 为给定用户的每个绑定平台各入队一条消息（一次 Publish = 一个平台）。

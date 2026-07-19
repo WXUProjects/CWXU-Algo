@@ -113,5 +113,6 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 	service.RegisterCommunityRoutes(srv, communityService)
 	service.RegisterProblemsetRoutes(srv, problemsetService)
 	service.RegisterContestExtraRoutes(srv, contestLogService)
+	service.RegisterSpiderExtraRoutes(srv, spiderService)
 	return srv
 }
