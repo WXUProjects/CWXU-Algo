@@ -82,6 +82,35 @@ type ContestRankSnap struct {
 	Top         []ContestRankRow `json:"top"`
 }
 
+// MemberStat 活跃成员综合行（排行榜用；不含 0 提交）
+type MemberStat struct {
+	Rank    int64   `json:"rank"`
+	UserID  int64   `json:"userId"`
+	Name    string  `json:"name"`
+	Submits int64   `json:"submits"`
+	AC      int64   `json:"ac"`
+	ACRate  float64 `json:"acRate"` // 百分比 0-100
+	Share   float64 `json:"share"`  // 提交占组织总提交 %
+}
+
+// TagHit 团队标签计数
+type TagHit struct {
+	Tag   string `json:"tag"`
+	Count int    `json:"count"`
+}
+
+// ProblemTouch 做题概览：谁交了啥题
+type ProblemTouch struct {
+	Problem    string   `json:"problem"`
+	Title      string   `json:"title,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
+	Platform   string   `json:"platform,omitempty"`
+	Submitters int      `json:"submitters"`
+	ACCount    int      `json:"acCount"`
+	ACUsers    []string `json:"acUsers,omitempty"`
+	TryUsers   []string `json:"tryUsers,omitempty"`
+}
+
 // TrainingReportData 组织/组训练报告聚合数据（规则模板与 AI 共用）
 type TrainingReportData struct {
 	OrgID            int64       `json:"orgId"`
@@ -98,11 +127,16 @@ type TrainingReportData struct {
 	PrevTotalSubmits int64       `json:"prevTotalSubmits"`
 	TotalAC          int64       `json:"totalAc"`
 	DailyTrend       []DayCount  `json:"dailyTrend"`
+	DailyACTrend     []DayCount  `json:"dailyAcTrend,omitempty"`
 	TopSubmit        []RankEntry `json:"topSubmit"`
 	TopAC            []RankEntry `json:"topAc"`
-	InactiveMembers  []string    `json:"inactiveMembers"`
-	ActiveMembers    int         `json:"activeMembers"`
+	// ActiveRanking 全部有提交成员（按提交降序，已剔除 0 提交）
+	ActiveRanking   []MemberStat `json:"activeRanking"`
+	InactiveMembers []string     `json:"inactiveMembers"`
+	ActiveMembers   int          `json:"activeMembers"`
 	// 多维度预取（AI 与规则共用）
+	TeamTags        []TagHit          `json:"teamTags,omitempty"`
+	ProblemOverview []ProblemTouch    `json:"problemOverview,omitempty"`
 	RecentBlogs     []BlogBrief       `json:"recentBlogs,omitempty"`
 	OrgSubmitSample []SubmitFeedItem  `json:"orgSubmitSample,omitempty"`
 	Contests        []ContestBrief    `json:"contests,omitempty"`
@@ -300,10 +334,12 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 	prevEnd := start.AddDate(0, 0, -1)
 	prevStart := prevEnd.AddDate(0, 0, -(days - 1))
 
-	// 聚合每日提交
+	// 聚合每日提交 / AC
 	dayTotals := make([]DayCount, 0, days)
+	dayACTotals := make([]DayCount, 0, days)
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
 		dayTotals = append(dayTotals, DayCount{Date: d.Format(dateLayout), Count: 0})
+		dayACTotals = append(dayACTotals, DayCount{Date: d.Format(dateLayout), Count: 0})
 	}
 	submitByUser := make(map[int64]int64, len(memberIDs))
 	acByUser := make(map[int64]int64, len(memberIDs))
@@ -328,7 +364,10 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 		acHm, err := uc.fetchHeatmapUser(ctx, uid, start, end, true)
 		if err == nil {
 			var acSum int64
-			for _, d := range acHm {
+			for i, d := range acHm {
+				if i < len(dayACTotals) {
+					dayACTotals[i].Count += d.Count
+				}
 				acSum += d.Count
 			}
 			acByUser[uid] = acSum
@@ -342,8 +381,10 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 
 	nameMap := uc.fetchNames(ctx, memberIDs, orgID)
 
-	topSubmit := rankFromMap(submitByUser, nameMap, 10)
-	topAC := rankFromMap(acByUser, nameMap, 10)
+	// 全量活跃榜 + 兼容旧 Top 字段
+	activeRanking := buildActiveRanking(submitByUser, acByUser, nameMap)
+	topSubmit := rankFromMap(submitByUser, nameMap, 0) // 0=全部有分
+	topAC := rankFromMap(acByUser, nameMap, 0)
 
 	// 不活跃：区间内 0 提交，或最后提交早于 end-2 天
 	threshold := end.AddDate(0, 0, -2)
@@ -414,8 +455,10 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 		PrevTotalSubmits: prevTotal,
 		TotalAC:          sumMap(acByUser),
 		DailyTrend:       dayTotals,
+		DailyACTrend:     dayACTotals,
 		TopSubmit:        topSubmit,
 		TopAC:            topAC,
+		ActiveRanking:    activeRanking,
 		InactiveMembers:  inactive,
 		ActiveMembers:    active,
 		InitiatorUserID:  initiatorID,
@@ -429,12 +472,173 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 		log.Warnf("training report elevated: %v", eerr)
 		elevated = ctx
 	}
-	data.OrgSubmitSample = uc.fetchOrgSubmitSample(elevated, start, end, 20)
+	// 动态抽样加大，供标签/做题概览聚合
+	data.OrgSubmitSample = uc.fetchOrgSubmitSample(elevated, start, end, 60)
+	data.TeamTags = aggregateTeamTags(data.OrgSubmitSample, 24)
+	data.ProblemOverview = aggregateProblemOverview(data.OrgSubmitSample, 25)
 	data.Contests = uc.fetchOrgContests(elevated, start, end, 15)
-	data.ContestRankings = uc.fetchContestRankSnaps(elevated, data.Contests, 3, 8)
-	data.RecentBlogs = uc.fetchOrgBlogBriefs(elevated, orgID, 10)
+	data.ContestRankings = uc.fetchContestRankSnaps(elevated, data.Contests, 3, 12)
+	data.RecentBlogs = uc.fetchOrgBlogBriefs(elevated, orgID, 12)
 
 	return data, nil
+}
+
+// buildActiveRanking 仅有提交成员，按提交降序
+func buildActiveRanking(submit, ac map[int64]int64, names map[int64]string) []MemberStat {
+	type pair struct {
+		id  int64
+		sub int64
+		ac  int64
+	}
+	arr := make([]pair, 0, len(submit))
+	var totalSub int64
+	for id, s := range submit {
+		if s <= 0 {
+			continue
+		}
+		arr = append(arr, pair{id: id, sub: s, ac: ac[id]})
+		totalSub += s
+	}
+	sort.Slice(arr, func(i, j int) bool {
+		if arr[i].sub == arr[j].sub {
+			if arr[i].ac == arr[j].ac {
+				return arr[i].id < arr[j].id
+			}
+			return arr[i].ac > arr[j].ac
+		}
+		return arr[i].sub > arr[j].sub
+	})
+	out := make([]MemberStat, 0, len(arr))
+	for i, p := range arr {
+		n := names[p.id]
+		if n == "" {
+			n = fmt.Sprintf("用户%d", p.id)
+		}
+		rate := 0.0
+		if p.sub > 0 {
+			rate = float64(p.ac) / float64(p.sub) * 100
+		}
+		share := 0.0
+		if totalSub > 0 {
+			share = float64(p.sub) / float64(totalSub) * 100
+		}
+		out = append(out, MemberStat{
+			Rank: int64(i + 1), UserID: p.id, Name: n,
+			Submits: p.sub, AC: p.ac, ACRate: rate, Share: share,
+		})
+	}
+	return out
+}
+
+func aggregateTeamTags(feed []SubmitFeedItem, limit int) []TagHit {
+	m := map[string]int{}
+	for _, f := range feed {
+		for _, t := range f.Tags {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			m[t]++
+		}
+	}
+	arr := make([]TagHit, 0, len(m))
+	for k, v := range m {
+		arr = append(arr, TagHit{Tag: k, Count: v})
+	}
+	sort.Slice(arr, func(i, j int) bool {
+		if arr[i].Count == arr[j].Count {
+			return arr[i].Tag < arr[j].Tag
+		}
+		return arr[i].Count > arr[j].Count
+	})
+	if limit > 0 && len(arr) > limit {
+		arr = arr[:limit]
+	}
+	return arr
+}
+
+func aggregateProblemOverview(feed []SubmitFeedItem, limit int) []ProblemTouch {
+	type agg struct {
+		title    string
+		platform string
+		tags     []string
+		trySet   map[string]struct{}
+		acSet    map[string]struct{}
+		acN      int
+	}
+	m := map[string]*agg{}
+	for _, f := range feed {
+		key := f.Platform + "|" + f.Problem
+		if f.Title != "" {
+			key = f.Platform + "|" + f.Title
+		}
+		a, ok := m[key]
+		if !ok {
+			a = &agg{
+				title: f.Title, platform: f.Platform,
+				trySet: map[string]struct{}{}, acSet: map[string]struct{}{},
+			}
+			if a.title == "" {
+				a.title = f.Problem
+			}
+			if len(f.Tags) > 0 {
+				a.tags = append([]string(nil), f.Tags...)
+			}
+			m[key] = a
+		}
+		name := f.UserName
+		if name == "" {
+			name = fmt.Sprintf("用户%d", f.UserID)
+		}
+		a.trySet[name] = struct{}{}
+		us := strings.ToUpper(f.Status)
+		if strings.Contains(us, "AC") || us == "OK" || us == "ACCEPT" || us == "ACCEPTED" {
+			if _, seen := a.acSet[name]; !seen {
+				a.acSet[name] = struct{}{}
+				a.acN++
+			}
+		}
+	}
+	out := make([]ProblemTouch, 0, len(m))
+	for k, a := range m {
+		parts := strings.SplitN(k, "|", 2)
+		prob := a.title
+		if len(parts) == 2 && parts[1] != "" {
+			prob = parts[1]
+		}
+		tryUsers := make([]string, 0, len(a.trySet))
+		for n := range a.trySet {
+			tryUsers = append(tryUsers, n)
+		}
+		sort.Strings(tryUsers)
+		acUsers := make([]string, 0, len(a.acSet))
+		for n := range a.acSet {
+			acUsers = append(acUsers, n)
+		}
+		sort.Strings(acUsers)
+		// 名单过长截断
+		if len(tryUsers) > 8 {
+			tryUsers = append(tryUsers[:8], "…")
+		}
+		if len(acUsers) > 8 {
+			acUsers = append(acUsers[:8], "…")
+		}
+		out = append(out, ProblemTouch{
+			Problem: prob, Title: a.title, Tags: a.tags, Platform: a.platform,
+			Submitters: len(a.trySet), ACCount: a.acN,
+			ACUsers: acUsers, TryUsers: tryUsers,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Submitters == out[j].Submitters {
+			return out[i].ACCount > out[j].ACCount
+		}
+		return out[i].Submitters > out[j].Submitters
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 func (uc *SummaryUseCase) fetchOrgSubmitSample(ctx context.Context, start, end time.Time, limit int) []SubmitFeedItem {
@@ -656,6 +860,7 @@ func sumMap(m map[int64]int64) int64 {
 	return s
 }
 
+// rankFromMap topN<=0 表示返回全部有分成员
 func rankFromMap(scores map[int64]int64, names map[int64]string, topN int) []RankEntry {
 	type pair struct {
 		id    int64

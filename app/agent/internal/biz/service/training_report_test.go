@@ -60,15 +60,35 @@ func fixtureTrainingData() *TrainingReportData {
 			{Date: "2026-07-11", Count: 4},
 			{Date: "2026-07-12", Count: 3},
 		},
+		DailyACTrend: []DayCount{
+			{Date: "2026-07-06", Count: 2},
+			{Date: "2026-07-07", Count: 3},
+		},
 		TopSubmit: []RankEntry{
 			{Rank: 1, UserID: 1, Name: "Alice", Score: 15},
 			{Rank: 2, UserID: 2, Name: "Bob", Score: 12},
+			{Rank: 3, UserID: 3, Name: "Eve", Score: 15},
 		},
 		TopAC: []RankEntry{
 			{Rank: 1, UserID: 1, Name: "Alice", Score: 8},
 		},
+		ActiveRanking: []MemberStat{
+			{Rank: 1, UserID: 1, Name: "Alice", Submits: 15, AC: 8, ACRate: 53.3, Share: 35.7},
+			{Rank: 2, UserID: 3, Name: "Eve", Submits: 15, AC: 7, ACRate: 46.7, Share: 35.7},
+			{Rank: 3, UserID: 2, Name: "Bob", Submits: 12, AC: 3, ACRate: 25.0, Share: 28.6},
+		},
 		InactiveMembers: []string{"Carol", "Dave"},
 		ActiveMembers:   3,
+		TeamTags: []TagHit{
+			{Tag: "dp", Count: 12},
+			{Tag: "图论", Count: 5},
+		},
+		ProblemOverview: []ProblemTouch{
+			{Problem: "A+B", Title: "A+B", Tags: []string{"模拟"}, Submitters: 3, ACCount: 2, ACUsers: []string{"Alice", "Bob"}},
+		},
+		OrgSubmitSample: []SubmitFeedItem{
+			{UserName: "Alice", Problem: "A+B", Title: "A+B", Status: "AC", Platform: "cf", Time: "07-10 12:00", Tags: []string{"dp"}},
+		},
 		InitiatorUserID: 99,
 		InitiatorName:   "Coach",
 		InitiatorEmail:  "coach@example.com",
@@ -83,17 +103,52 @@ func TestRenderRuleTemplateHTML_UsesFixtureNumbers(t *testing.T) {
 	}
 	// 必须包含真实数字与名单，禁止编造
 	mustContain := []string{
-		"42", "18", "Alice", "Bob", "Carol", "Dave",
+		"42", "18", "Alice", "Bob", "Carol", "Dave", "Eve",
 		"2026-07-06", "2026-07-12", "整组织", "30",
+		"viewport", "活跃成员排行榜", "题目标签", "做题概览", "不活跃成员",
+		"综合维度评价", "dp", "A+B",
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(html, s) {
 			t.Errorf("template missing %q", s)
 		}
 	}
+	// 响应式媒体查询
+	if !strings.Contains(html, "@media") {
+		t.Error("expected responsive @media")
+	}
 	// 不应出现未在数据中的假成员
 	if strings.Contains(html, "FakeUser999") {
 		t.Error("invented member")
+	}
+}
+
+func TestBuildActiveRanking_ExcludesZero(t *testing.T) {
+	submit := map[int64]int64{1: 10, 2: 0, 3: 5}
+	ac := map[int64]int64{1: 4, 2: 0, 3: 5}
+	names := map[int64]string{1: "A", 2: "B", 3: "C"}
+	r := buildActiveRanking(submit, ac, names)
+	if len(r) != 2 {
+		t.Fatalf("want 2 active, got %+v", r)
+	}
+	if r[0].Name != "A" || r[1].Name != "C" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestAggregateTeamTagsAndProblems(t *testing.T) {
+	feed := []SubmitFeedItem{
+		{UserName: "A", Problem: "P1", Title: "题1", Status: "AC", Tags: []string{"dp", "贪心"}},
+		{UserName: "B", Problem: "P1", Title: "题1", Status: "WA", Tags: []string{"dp"}},
+		{UserName: "A", Problem: "P2", Title: "题2", Status: "AC", Tags: []string{"图论"}},
+	}
+	tags := aggregateTeamTags(feed, 10)
+	if len(tags) < 2 || tags[0].Tag != "dp" {
+		t.Fatalf("tags %+v", tags)
+	}
+	probs := aggregateProblemOverview(feed, 10)
+	if len(probs) != 2 {
+		t.Fatalf("probs %+v", probs)
 	}
 }
 
@@ -669,6 +724,106 @@ func TestWeeklyUsesTrainingPipeline_DateScope(t *testing.T) {
 	}
 }
 
+func TestFindSharedWeeklyJob_ReusesOrgDoc(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	uc := &SummaryUseCase{redis: rdb}
+	ctx := context.Background()
+	dir := t.TempDir()
+	t.Setenv(reportDirEnv, dir)
+
+	startS, endS := "2026-07-06", "2026-07-12"
+	htmlPath := filepath.Join(dir, "shared-weekly.html")
+	const body = "<html>shared weekly body</html>"
+	if err := os.WriteFile(htmlPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 无关 manual 任务不应被命中
+	_ = uc.saveJob(ctx, &TrainingReportJob{
+		JobID: "manual-1", Status: ReportStatusDone, OrgID: 7,
+		StartDate: startS, EndDate: endS, Source: "manual",
+		ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		HTMLPath:  htmlPath, UseAI: true,
+	}, true)
+	// 分组周报不应被命中
+	_ = uc.saveJob(ctx, &TrainingReportJob{
+		JobID: "weekly-group", Status: ReportStatusDone, OrgID: 7, GroupID: 3,
+		StartDate: startS, EndDate: endS, Source: "weekly",
+		ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		HTMLPath:  htmlPath, UseAI: true,
+	}, true)
+	// 正确的组织共享周报
+	_ = uc.saveJob(ctx, &TrainingReportJob{
+		JobID: "weekly-shared", Status: ReportStatusDone, OrgID: 7, GroupID: 0,
+		StartDate: startS, EndDate: endS, Source: "weekly",
+		ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		HTMLPath:  htmlPath, UseAI: true,
+	}, true)
+
+	got := uc.findSharedWeeklyJob(ctx, 7, startS, endS)
+	if got == nil || got.JobID != "weekly-shared" {
+		t.Fatalf("want weekly-shared, got %+v", got)
+	}
+	h, id, ok := uc.loadSharedWeeklyHTML(ctx, 7, startS, endS)
+	if !ok || id != "weekly-shared" || h != body {
+		t.Fatalf("loadShared: ok=%v id=%s h=%q", ok, id, h)
+	}
+	// 过期不复用
+	_ = uc.saveJob(ctx, &TrainingReportJob{
+		JobID: "weekly-expired", Status: ReportStatusDone, OrgID: 8,
+		StartDate: startS, EndDate: endS, Source: "weekly",
+		ExpiresAt: time.Now().Add(-time.Hour).Unix(),
+		HTMLPath:  htmlPath, UseAI: true,
+	}, true)
+	if j := uc.findSharedWeeklyJob(ctx, 8, startS, endS); j != nil {
+		t.Fatalf("expired should not match: %+v", j)
+	}
+}
+
+func TestPersistWeeklyAsJob_DedupesExisting(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	uc := &SummaryUseCase{redis: rdb}
+	ctx := context.Background()
+	dir := t.TempDir()
+	t.Setenv(reportDirEnv, dir)
+
+	start := time.Date(2026, 7, 6, 0, 0, 0, 0, time.Local)
+	end := time.Date(2026, 7, 12, 0, 0, 0, 0, time.Local)
+	htmlPath := filepath.Join(dir, "existing.html")
+	_ = os.WriteFile(htmlPath, []byte("<html>first</html>"), 0o644)
+	_ = uc.saveJob(ctx, &TrainingReportJob{
+		JobID: "first-weekly", Status: ReportStatusDone, OrgID: 11,
+		StartDate: start.Format(dateLayout), EndDate: end.Format(dateLayout),
+		Source: "weekly", ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		HTMLPath: htmlPath, UseAI: true,
+	}, true)
+
+	id, err := uc.persistWeeklyAsJob(ctx, 11, 99, start, end, "<html>second</html>", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "first-weekly" {
+		t.Fatalf("should reuse first job, got %s", id)
+	}
+	list, err := uc.listJobs(ctx, 11, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 不应再插入新 job
+	if len(list) != 1 || list[0].JobID != "first-weekly" {
+		t.Fatalf("list=%+v", list)
+	}
+}
+
 func TestRankFromMap(t *testing.T) {
 	scores := map[int64]int64{1: 10, 2: 20, 3: 0}
 	names := map[int64]string{1: "A", 2: "B", 3: "C"}
@@ -732,12 +887,11 @@ func TestDetailModeFromSource(t *testing.T) {
 func TestRenderRuleTemplate_CompactAndFull(t *testing.T) {
 	data := fixtureTrainingData()
 	data.Contests = []ContestBrief{{ContestName: "CF Round", Platform: "codeforces", ACCount: 3, TotalCount: 6, Time: "2026-07-10"}}
-	data.OrgSubmitSample = []SubmitFeedItem{{UserName: "Alice", Problem: "A", Status: "AC", Platform: "cf", Time: "07-10 12:00", Tags: []string{"dp"}}}
 	data.RecentBlogs = []BlogBrief{{Title: "DP 笔记", Author: "Bob", Summary: "区间 DP"}}
 	full := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeFull)
 	compact := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeCompact)
 	for _, html := range []string{full, compact} {
-		for _, s := range []string{"综合维度评价", "比赛表现", "知识沉淀", "提交动态", "排行榜", "活跃度"} {
+		for _, s := range []string{"综合维度评价", "比赛表现", "知识沉淀", "做题概览", "活跃成员排行榜", "活跃度", "viewport", "@media"} {
 			if !strings.Contains(html, s) {
 				t.Errorf("missing dim %q", s)
 			}
@@ -792,15 +946,17 @@ func TestDailyAgentTools_HasContest(t *testing.T) {
 
 func TestTrainingReportPrompts_Dimensions(t *testing.T) {
 	sys := trainingReportSystemPrompt(DetailModeFull)
-	if !strings.Contains(sys, "综合维度评价") || !strings.Contains(sys, "contest_ranking") {
-		t.Fatal("system prompt")
+	for _, s := range []string{"综合维度评价", "activeRanking", "viewport", "响应式", "teamTags", "problemOverview"} {
+		if !strings.Contains(sys, s) {
+			t.Fatalf("system prompt missing %q", s)
+		}
 	}
 	sys2 := trainingReportSystemPrompt(DetailModeCompact)
 	if !strings.Contains(sys2, "简版") {
 		t.Fatal("compact system")
 	}
 	up := trainingReportUserPrompt(fixtureTrainingData(), DetailModeFull)
-	if !strings.Contains(up, "详版") {
+	if !strings.Contains(up, "详版") || !strings.Contains(up, "activeRanking") {
 		t.Fatal("user prompt")
 	}
 }
