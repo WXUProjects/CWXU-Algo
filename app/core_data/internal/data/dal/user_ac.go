@@ -128,8 +128,17 @@ type PlatformACCount struct {
 	Count int64
 }
 
-// ListUserPlatformAC 按平台生涯过题数（力扣优先官方合成键，不 JOIN 题库）
-// 注意：GORM Raw 会把 SQL 里任意 `?`（含字符串字面量）当绑定占位符，禁止写 `'?'`。
+// 牛客饼图拆分展示名（主站 UUID / AC 站数字题号）
+const (
+	// PlatformACNowCoderTracker 主站 practice（questionUuid）
+	PlatformACNowCoderTracker = "牛客Tracker"
+	// PlatformACNowCoderContest AC 竞赛站（acm/problem 数字 id）
+	PlatformACNowCoderContest = "竞赛站"
+)
+
+// ListUserPlatformAC 按平台生涯过题数（力扣优先官方合成键）
+// NowCoder 拆成「竞赛站」(数字 external_id) + 「牛客Tracker」(32 hex UUID)，饼图可区分主站/AC 站。
+// 注意：GORM Raw 会把 SQL 里任意问号（含作字符串字面量的问号）当绑定占位符，空平台回落用 unknown 而非问号。
 func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 	if db == nil || userID <= 0 {
 		return nil, nil
@@ -139,12 +148,45 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 		Count int64  `gorm:"column:cnt"`
 	}
 	var rows []nc
-	// 非力扣：直接按 platform 聚合；力扣：有官方合成则只计 ac-*，否则计全部
-	err := db.Raw(`
+	// 非力扣非牛客：按 platform 聚合
+	// 牛客：p: 键 JOIN problems.external_id 判 UUID/数字；e:NowCoder: 直接看后缀
+	// 力扣：有官方合成则只计 ac-*，否则计全部
+	// 展示名用拼接插入（不可写在 raw string 内部当“假拼接”）
+	q := `
 		SELECT name, cnt FROM (
 			SELECT COALESCE(NULLIF(btrim(platform), ''), 'unknown') AS name, COUNT(*)::bigint AS cnt
 			FROM user_ac_problems
-			WHERE user_id = ? AND platform IS DISTINCT FROM 'LeetCode'
+			WHERE user_id = ?
+			  AND platform IS DISTINCT FROM 'LeetCode'
+			  AND platform IS DISTINCT FROM 'NowCoder'
+			GROUP BY 1
+			UNION ALL
+			SELECT
+				CASE
+					WHEN kind = 'tracker' THEN '` + PlatformACNowCoderTracker + `'
+					ELSE '` + PlatformACNowCoderContest + `'
+				END AS name,
+				COUNT(*)::bigint AS cnt
+			FROM (
+				SELECT
+					CASE
+						WHEN u.problem_key LIKE 'e:NowCoder:%'
+							AND length(substr(u.problem_key, 12)) = 32
+							AND lower(substr(u.problem_key, 12)) ~ '^[0-9a-f]+$'
+						THEN 'tracker'
+						WHEN u.problem_key ~ '^p:[0-9]+$'
+							AND p.external_id IS NOT NULL
+							AND length(btrim(p.external_id)) = 32
+							AND lower(btrim(p.external_id)) ~ '^[0-9a-f]+$'
+						THEN 'tracker'
+						ELSE 'contest'
+					END AS kind
+				FROM user_ac_problems u
+				LEFT JOIN problems p
+					ON u.problem_key ~ '^p:[0-9]+$'
+					AND p.id = CAST(substr(u.problem_key, 3) AS bigint)
+				WHERE u.user_id = ? AND u.platform = 'NowCoder'
+			) nc
 			GROUP BY 1
 			UNION ALL
 			SELECT 'LeetCode' AS name,
@@ -158,7 +200,8 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 		) t
 		WHERE cnt > 0
 		ORDER BY cnt DESC
-	`, userID, userID).Scan(&rows).Error
+	`
+	err := db.Raw(q, userID, userID, userID).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

@@ -15,8 +15,8 @@ import (
 
 // 画像缓存：ver 精确失效 + latest 兜底（爬虫后仍可读旧画像，同时 MQ 刷新）
 const (
-	// s3：ListUserPlatformAC 修复 GORM 占位符误替换导致 platforms 恒空
-	userProfileCacheSchema = "3"
+	// s4：NowCoder 平台过题拆成「竞赛站 / 牛客Tracker」（主站 UUID vs AC 站数字 id）
+	userProfileCacheSchema = "4"
 	userProfileLatestTTL   = 30 * 24 * time.Hour
 	userProfileVerTTL      = 7 * 24 * time.Hour
 )
@@ -243,8 +243,8 @@ func (uc *ProblemUseCase) computeUserProfile(userID int64) (*UserProfileSnapshot
 		}
 	}
 
-	// 平台过题：直接读 user_ac_problems；力扣优先官方 acTotal 合成键（e:LeetCode:ac-*）
-	// 不再 JOIN problems——力扣明细爬不全且合成 AC 不进题库，JOIN 会严重漏计。
+	// 平台过题：读 user_ac_problems；力扣优先官方 acTotal 合成键（e:LeetCode:ac-*）
+	// 牛客会按 external_id 形态拆「竞赛站 / 牛客Tracker」（仅 NowCoder 行 LEFT JOIN problems）
 	if plats, e := dal.ListUserPlatformAC(uc.data.DB, userID); e != nil {
 		log.Errorf("platforms sql user=%d: %v", userID, e)
 	} else {

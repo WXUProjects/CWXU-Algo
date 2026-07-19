@@ -198,33 +198,14 @@ func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []mo
 
 	handle := func(records []Record) bool {
 		for _, it := range records {
-			title := strings.TrimSpace(it.Problem.Title)
-			// 主站：优先 questionUuid（32 hex）；AC 站：数字 id
-			// 写入 "id 标题" 供 parseNowCoder 识别
-			problem := title
-			uuid := normalizeNowCoderUUID(it.Problem.QuestionUUID)
-			if uuid != "" {
-				if title != "" {
-					problem = uuid + " " + title
-				} else {
-					problem = uuid
-				}
-			} else {
-				pid := it.Problem.ID
-				if pid == 0 {
-					pid = it.Problem.QuestionID
-				}
-				if pid > 0 {
-					if title != "" {
-						problem = strconv.FormatInt(pid, 10) + " " + title
-					} else {
-						problem = strconv.FormatInt(pid, 10)
-					}
-				} else if qn := strings.TrimSpace(it.Problem.QuestionNum); qn != "" && isDigits(qn) {
-					// 兜底：仅纯数字 questionNum 可用（ACM413 等展示号不可）
-					problem = strings.TrimSpace(qn + " " + title)
-				}
-			}
+			// 优先 problem.id（= AC 站数字题号），勿优先 UUID，否则与 practice-coding 双计
+			// 不用 questionId：与 ac.nowcoder.com/acm/problem/{id} 不是同一命名空间
+			problem := nowcoderProblemLabel(
+				it.Problem.ID,
+				it.Problem.QuestionUUID,
+				it.Problem.QuestionNum,
+				it.Problem.Title,
+			)
 			result = append(result, model.SubmitLog{
 				UserID:   userId,
 				Platform: spider.NowCoder,
