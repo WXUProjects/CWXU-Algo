@@ -43,9 +43,8 @@ type TrainingReportJob struct {
 	FinishedAt  int64  `json:"finishedAt,omitempty"`
 	ExpiresAt   int64  `json:"expiresAt,omitempty"`
 	ErrorDetail string `json:"errorDetail,omitempty"`
-	HTMLPath    string `json:"htmlPath,omitempty"`
-	PDFPath     string `json:"pdfPath,omitempty"`
-	FileName    string `json:"fileName,omitempty"`
+	HTMLPath string `json:"htmlPath,omitempty"`
+	FileName string `json:"fileName,omitempty"`
 	// Source: manual | weekly
 	Source string `json:"source,omitempty"`
 }
@@ -150,9 +149,8 @@ func (uc *SummaryUseCase) updateJob(ctx context.Context, jobID string, mut func(
 	return uc.saveJob(ctx, job)
 }
 
-func jobArtifactPaths(jobID string) (htmlPath, pdfPath string) {
-	base := filepath.Join(reportDir(), jobID)
-	return base + ".html", base + ".pdf"
+func jobHTMLPath(jobID string) string {
+	return filepath.Join(reportDir(), jobID) + ".html"
 }
 
 // IsDownloadable 是否仍在 24h 下载窗内
@@ -163,7 +161,7 @@ func (j *TrainingReportJob) IsDownloadable(now time.Time) bool {
 	if j.ExpiresAt <= 0 {
 		return false
 	}
-	return now.Unix() <= j.ExpiresAt && (j.HTMLPath != "" || j.PDFPath != "")
+	return now.Unix() <= j.ExpiresAt && j.HTMLPath != ""
 }
 
 // EffectiveStatus 含过期态

@@ -48,8 +48,9 @@ func (uc *SummaryUseCase) StartTrainingReport(ctx context.Context, p StartTraini
 	if err != nil {
 		return "", err
 	}
-	_ = start
-	_ = end
+	if err := ValidateAIDateRange(start, end, p.UseAI); err != nil {
+		return "", err
+	}
 	if err := ensureReportDir(); err != nil {
 		return "", fmt.Errorf("创建报告目录失败: %w", err)
 	}
@@ -118,18 +119,19 @@ func (uc *SummaryUseCase) runTrainingReportJob(jobID string) {
 	})
 
 	brand := uc.brandTitle(ctx)
+	mode := DetailModeFromSource(job.Source)
 	var html string
 	if job.UseAI {
-		html, err = uc.generateTrainingReportAI(ctx, data)
+		html, err = uc.generateTrainingReportAI(ctx, data, mode)
 		if err != nil {
 			log.Warnf("training report AI failed job=%s: %v; fallback rule template", jobID, err)
-			html = RenderRuleTemplateHTML(data, brand)
+			html = RenderRuleTemplateHTML(data, brand, mode)
 			_ = uc.updateJob(ctx, jobID, func(j *TrainingReportJob) {
 				j.Message = "AI 不可用，已用规则模板"
 			})
 		}
 	} else {
-		html = RenderRuleTemplateHTML(data, brand)
+		html = RenderRuleTemplateHTML(data, brand, mode)
 	}
 	html = stripCodeFence(html)
 	if strings.TrimSpace(html) == "" {
@@ -137,20 +139,15 @@ func (uc *SummaryUseCase) runTrainingReportJob(jobID string) {
 		return
 	}
 
-	pdfBytes := RenderSimplePDF(data, brand)
-	htmlPath, pdfPath := jobArtifactPaths(jobID)
+	htmlPath := jobHTMLPath(jobID)
 	if err := os.WriteFile(htmlPath, []byte(html), 0o644); err != nil {
 		uc.failJob(ctx, jobID, "写入 HTML 失败: "+err.Error())
-		return
-	}
-	if err := os.WriteFile(pdfPath, pdfBytes, 0o644); err != nil {
-		uc.failJob(ctx, jobID, "写入 PDF 失败: "+err.Error())
 		return
 	}
 
 	finished := time.Now()
 	expires := finished.Add(reportDownloadTTL)
-	fileName := fmt.Sprintf("training-report-%s-%s.pdf", job.StartDate, job.EndDate)
+	fileName := fmt.Sprintf("training-report-%s-%s.html", job.StartDate, job.EndDate)
 
 	// 就地更新本地 job 再落盘，保证 notify 使用含 ExpiresAt/FileName 的快照
 	job.Status = ReportStatusDone
@@ -159,7 +156,6 @@ func (uc *SummaryUseCase) runTrainingReportJob(jobID string) {
 	job.FinishedAt = finished.Unix()
 	job.ExpiresAt = expires.Unix()
 	job.HTMLPath = htmlPath
-	job.PDFPath = pdfPath
 	job.FileName = fileName
 	if err := uc.saveJob(ctx, job); err != nil {
 		uc.failJob(ctx, jobID, "保存完成状态失败: "+err.Error())
@@ -171,7 +167,7 @@ func (uc *SummaryUseCase) runTrainingReportJob(jobID string) {
 		job = fresh
 	}
 
-	if err := uc.notifyTrainingReportDone(ctx, data, job, html, pdfPath); err != nil {
+	if err := uc.notifyTrainingReportDone(ctx, data, job, html); err != nil {
 		log.Warnf("training report notify job=%s: %v", jobID, err)
 	}
 	log.Infof("training report done job=%s org=%d", jobID, job.OrgID)
@@ -188,7 +184,7 @@ func (uc *SummaryUseCase) failJob(ctx context.Context, jobID, detail string) {
 	log.Errorf("training report failed job=%s: %s", jobID, detail)
 }
 
-func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *TrainingReportData) (string, error) {
+func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *TrainingReportData, mode string) (string, error) {
 	if uc.chat == nil {
 		return "", fmt.Errorf("chat 未初始化")
 	}
@@ -203,13 +199,13 @@ func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *Tr
 		{
 			Role: model.ChatMessageRoleSystem,
 			Content: &model.ChatCompletionMessageContent{
-				StringValue: volcengine.String(trainingReportSystemPrompt()),
+				StringValue: volcengine.String(trainingReportSystemPrompt(mode)),
 			},
 		},
 		{
 			Role: model.ChatMessageRoleUser,
 			Content: &model.ChatCompletionMessageContent{
-				StringValue: volcengine.String(trainingReportUserPrompt(data)),
+				StringValue: volcengine.String(trainingReportUserPrompt(data, mode)),
 			},
 		},
 	}
@@ -229,25 +225,25 @@ func BuildNotifyEmail(job *TrainingReportJob, brand, html string) (subject, body
 		attachName = strings.TrimSpace(job.FileName)
 	}
 	if attachName == "" {
-		attachName = "training-report.pdf"
+		attachName = "training-report.html"
 	}
 	subject = fmt.Sprintf("【%s 训练报告】%s ~ %s 已生成", brand, start, end)
 	body = html
 	if strings.TrimSpace(body) == "" {
 		body = fmt.Sprintf(`<p>您好，您发起的训练报告（%s ~ %s）已生成完成。</p>
-<p>下载有效期 24 小时，请尽快在组织管理页下载。</p>
+<p>下载有效期 24 小时，请尽快在组织管理页下载 HTML。</p>
 <p>任务 ID：%s</p>`, start, end, id)
 	}
 	expStr := "—"
 	if expiresAt > 0 {
 		expStr = time.Unix(expiresAt, 0).Format("2006-01-02 15:04")
 	}
-	body += fmt.Sprintf(`<hr><p style="font-size:12px;color:#666">任务 %s · 下载有效期至 %s（24 小时）· 附件为 PDF 摘要</p>`,
+	body += fmt.Sprintf(`<hr><p style="font-size:12px;color:#666">任务 %s · 下载有效期至 %s（24 小时）· 产物为 HTML 报告</p>`,
 		id, expStr)
 	return subject, body, attachName
 }
 
-func (uc *SummaryUseCase) notifyTrainingReportDone(ctx context.Context, data *TrainingReportData, job *TrainingReportJob, html, pdfPath string) error {
+func (uc *SummaryUseCase) notifyTrainingReportDone(ctx context.Context, data *TrainingReportData, job *TrainingReportJob, html string) error {
 	email := ""
 	if data != nil {
 		email = data.InitiatorEmail
@@ -267,12 +263,12 @@ func (uc *SummaryUseCase) notifyTrainingReportDone(ctx context.Context, data *Tr
 		return fmt.Errorf("SMTP 未配置")
 	}
 	var atts []mail.Attachment
-	if pdfPath != "" {
-		if _, err := os.Stat(pdfPath); err == nil {
+	if job != nil && job.HTMLPath != "" {
+		if _, err := os.Stat(job.HTMLPath); err == nil {
 			atts = append(atts, mail.Attachment{
 				Filename:    attachName,
-				Path:        pdfPath,
-				ContentType: "application/pdf",
+				Path:        job.HTMLPath,
+				ContentType: "text/html; charset=utf-8",
 			})
 		}
 	}
@@ -285,20 +281,24 @@ func (uc *SummaryUseCase) GenerateTrainingReportSync(ctx context.Context, p Star
 	if err != nil {
 		return "", nil, err
 	}
+	if err := ValidateAIDateRange(start, end, p.UseAI); err != nil {
+		return "", nil, err
+	}
 	data, err = uc.LoadTrainingReportData(ctx, p.OrgID, p.GroupID, p.CreatedBy, start, end)
 	if err != nil {
 		return "", nil, err
 	}
 	brand := uc.brandTitle(ctx)
+	mode := DetailModeFromSource(p.Source)
 	if p.UseAI {
-		html, err = uc.generateTrainingReportAI(ctx, data)
+		html, err = uc.generateTrainingReportAI(ctx, data, mode)
 		if err != nil {
 			log.Warnf("weekly training AI fallback: %v", err)
-			html = RenderRuleTemplateHTML(data, brand)
+			html = RenderRuleTemplateHTML(data, brand, mode)
 			err = nil
 		}
 	} else {
-		html = RenderRuleTemplateHTML(data, brand)
+		html = RenderRuleTemplateHTML(data, brand, mode)
 	}
 	html = stripCodeFence(html)
 	return html, data, nil
@@ -323,12 +323,18 @@ func DomainAgentTools(reg *registry.Registrar, orgID uint, toolCtx context.Conte
 		core_data.NewGroupMembersTool(reg, ctx),
 		core_data.NewLastSubmitTool(reg, ctx),
 		core_data.NewPeriodACTool(reg, ctx),
-		// 题目标签：全站标签表 / 用户标签画像 / 按 problemId 取标签
 		core_data.NewProblemTagsTool(reg, ctx),
+		// 组织博客 / 提交动态 / 比赛（列表·排行·详细榜）
+		core_data.NewOrgBlogsTool(reg, ctx),
+		core_data.NewOrgSubmitFeedTool(reg, ctx),
+		core_data.NewContestListTool(reg, ctx),
+		core_data.NewContestRankingTool(reg, ctx),
+		core_data.NewContestBoardTool(reg, ctx),
+		core_data.NewContestHistoryTool(reg, ctx),
 	}
 }
 
-// DailyAgentTools 个人日报 AI 工具：标签 + 提交明细 + 热力（轻量）。
+// DailyAgentTools 个人日报 AI 工具：标签 + 提交 + 热力 + 个人比赛。
 func DailyAgentTools(reg *registry.Registrar, toolCtx context.Context) []agenttool.AgentToolFactory {
 	if reg == nil {
 		return nil
@@ -339,6 +345,9 @@ func DailyAgentTools(reg *registry.Registrar, toolCtx context.Context) []agentto
 		core_data.NewSubmitLog(reg, ctx),
 		core_data.NewHeatmapTool(reg, ctx),
 		core_data.NewPeriodACTool(reg, ctx),
+		core_data.NewContestHistoryTool(reg, ctx),
+		core_data.NewContestListTool(reg, ctx),
+		core_data.NewContestRankingTool(reg, ctx),
 	}
 }
 
@@ -354,34 +363,25 @@ func ToolAuthContexts(tools []agenttool.AgentToolFactory) []context.Context {
 	return out
 }
 
-// ResolveArtifactAbs 校验并返回可读文件
-func ResolveArtifactAbs(job *TrainingReportJob, preferPDF bool) (abs string, contentType string, name string, err error) {
+// ResolveArtifactAbs 校验并返回可读 HTML 文件
+func ResolveArtifactAbs(job *TrainingReportJob) (abs string, contentType string, name string, err error) {
 	if job == nil {
 		return "", "", "", fmt.Errorf("job nil")
 	}
 	if !job.IsDownloadable(time.Now()) {
 		return "", "", "", fmt.Errorf("报告不存在或已过期")
 	}
-	if preferPDF && job.PDFPath != "" {
-		abs = job.PDFPath
-		contentType = "application/pdf"
-		name = job.FileName
-		if name == "" {
-			name = filepath.Base(abs)
-		}
-	} else if job.HTMLPath != "" {
-		abs = job.HTMLPath
-		contentType = "text/html; charset=utf-8"
-		name = strings.TrimSuffix(job.FileName, ".pdf") + ".html"
-		if job.FileName == "" {
-			name = filepath.Base(abs)
-		}
-	} else if job.PDFPath != "" {
-		abs = job.PDFPath
-		contentType = "application/pdf"
-		name = job.FileName
-	} else {
-		return "", "", "", fmt.Errorf("无可用文件")
+	if job.HTMLPath == "" {
+		return "", "", "", fmt.Errorf("无可用 HTML 文件")
+	}
+	abs = job.HTMLPath
+	contentType = "text/html; charset=utf-8"
+	name = job.FileName
+	if name == "" {
+		name = filepath.Base(abs)
+	}
+	if !strings.HasSuffix(strings.ToLower(name), ".html") {
+		name = strings.TrimSuffix(name, filepath.Ext(name)) + ".html"
 	}
 	abs = filepath.Clean(abs)
 	base := filepath.Clean(reportDir())

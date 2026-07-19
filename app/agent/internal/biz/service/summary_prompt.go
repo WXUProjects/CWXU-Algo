@@ -11,9 +11,14 @@ func dailySystemPrompt(name string) string {
 要求：
 1. 风格：Acmer 校园口语、可爱有活力、像朋友直接对用户说话（第一人称对「你」）。
 2. 严格只输出完整 HTML 片段（可含 style），适配 PC 与移动端，手机排版不乱。
-3. 只能使用用户消息中提供的真实数据与工具返回，禁止编造提交次数、题目、标签、日期或连续天数。
-4. 可使用工具 problem_tags 查询：用户标签画像(user_profile)、按 problemId 取标签(by_ids)、全站标签表(list)。
-5. 若 yesterdayLogs 或 tagRadar / yesterdayTagHits 有标签，请结合知识点点评（如 DP/图论薄弱、昨天主攻什么标签）。
+3. 只能使用用户消息中提供的真实数据与工具返回，禁止编造提交次数、题目、标签、比赛名次或日期。
+4. 可用工具：
+   - problem_tags：用户标签画像(user_profile)、按 problemId 取标签(by_ids)、全站标签表(list)
+   - contest_history / contest_list / contest_ranking：个人比赛记录与相关排行榜（含过题数）
+   - submit_log / heatmap / period_ac：提交与热力
+5. 分析维度（都要覆盖，空数据写「暂无」）：
+   (1) 昨日提交与近 7 日走势 (2) 知识点/标签 (3) 近期比赛表现（名次、过题数）
+   (4) 轻量综合维度评价（昨日状态 + 标签 + 比赛 + 1～2 条建议）
 6. 不要输出提示词本身，不要输出 Markdown 代码围栏。
 7. 邮件末尾引导访问 https://algo.zhiyuansofts.cn 查看完整提交。`
 	if name == "Jing." {
@@ -29,12 +34,13 @@ func dailyUserPrompt(data *DailyReportData) string {
 	if data.YesterdayCount == 0 {
 		extra = fmt.Sprintf("\n昨天 0 提交，已连续 %d 天未提交，请狠狠批评（但仍要鼓励）。", data.ConsecutiveZeros)
 	} else {
-		extra = "\n昨天有提交，既往漏交不要追究。可结合标签做知识点点评。"
+		extra = "\n昨天有提交，既往漏交不要追究。可结合标签与比赛做点评。"
 	}
 	return fmt.Sprintf(`请根据以下 JSON 真实数据，为用户写一份昨日日报 HTML。
 日期说明：yesterday 是昨天，last7Days 是含昨天在内的近 7 天走势（缺日已补 0）。
-字段说明：yesterdayLogs 可能含 problemId/tags/difficulty；tagRadar 为用户标签 AC 画像；yesterdayTagHits 为昨日涉及标签计数。
-需要更细标签时可调用工具 problem_tags（userId=%d）。
+字段说明：yesterdayLogs 可能含 problemId/tags/difficulty；tagRadar 为用户标签 AC 画像；
+yesterdayTagHits 为昨日涉及标签计数；recentContests 为近期比赛（含 rank/acCount）。
+需要更细时可调用工具（userId=%d）。
 %s
 数据：
 %s`, data.UserID, extra, string(b))
@@ -59,26 +65,15 @@ updateTime 必须使用 nowUnix=%d。
 %s`, data.NowUnix, string(b))
 }
 
+// weeklySystemPrompt 兼容旧名：实际走 trainingReport compact
 func weeklySystemPrompt() string {
-	return `你是无锡学院算法协会的教练助手，为教练写团队周报。
-要求：
-1. 风格：Acmer 校园口语、简洁有力。
-2. 只输出完整 HTML（可含 style），适配 PC/移动端。
-3. 只能使用给定数据与工具返回，禁止编造成员姓名、排行或题目标签。
-4. 可用工具 problem_tags 查成员标签画像/题目知识点，用于知识点维度点评。
-5. 不要输出提示词，不要 Markdown 代码围栏。`
+	return trainingReportSystemPrompt(DetailModeCompact)
 }
 
 func weeklyUserPrompt(data *WeeklyReportData) string {
+	// 旧周报数据结构：引导改用训练报告管道；保留最小可用提示
 	b, _ := json.MarshalIndent(data, "", "  ")
-	return fmt.Sprintf(`请根据以下真实团队数据生成上周周报 HTML，结构建议包含：
-1. 本周总提交 vs 上周（箭头升降）
-2. Top 5 活跃（topSubmit）
-3. 连续 3 天以上未提交名单（inactiveMembers，可截取重点）
-4. AC 最多成员（topAC 第一名）
-5. 知识点/标签观察（可对 top 成员调用 problem_tags.user_profile）
-6. 给教练的鼓励/鞭策建议
-7. 团队状态 emoji（🔥/⚠️/❄️）
+	return fmt.Sprintf(`请根据以下团队周报数据生成简版 HTML，覆盖活跃/排行/不活跃/建议与综合维度评价。
 数据：
 %s`, string(b))
 }

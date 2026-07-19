@@ -1,40 +1,24 @@
-package service
+package core_data
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
-	"cwxu-algo/app/agent/internal/agent/tool/core_data"
-
 	"github.com/go-kratos/kratos/v2/registry"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
-func jsonIndent(v interface{}) (string, error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
-
-func jsonUnmarshal(b []byte, v interface{}) error {
-	return json.Unmarshal(b, v)
-}
-
-// httpDiscoveryGet 服务发现 HTTP GET（带 elevated Bearer）
-func httpDiscoveryGet(ctx context.Context, reg *registry.Registrar, service, path string) ([]byte, int, error) {
+// discoveryHTTPGet 经服务发现对目标服务发 GET（带 elevated Bearer）。
+// service 形如 "core-data" / "user"；path 含 query。
+func discoveryHTTPGet(ctx context.Context, reg *registry.Registrar, service, path string) ([]byte, int, error) {
 	if reg == nil {
 		return nil, 0, fmt.Errorf("registry 未配置")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx = toolRPCContext(ctx)
 	client, err := khttp.NewClient(
 		ctx,
 		khttp.WithEndpoint("discovery:///"+service),
@@ -45,6 +29,7 @@ func httpDiscoveryGet(ctx context.Context, reg *registry.Registrar, service, pat
 		return nil, 0, err
 	}
 	defer client.Close()
+
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
@@ -52,7 +37,7 @@ func httpDiscoveryGet(ctx context.Context, reg *registry.Registrar, service, pat
 	if err != nil {
 		return nil, 0, err
 	}
-	if tok := core_data.BearerFromContext(ctx); tok != "" {
+	if tok := BearerFromContext(ctx); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	res, err := client.Do(req)
@@ -60,7 +45,7 @@ func httpDiscoveryGet(ctx context.Context, reg *registry.Registrar, service, pat
 		return nil, 0, err
 	}
 	defer res.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(res.Body, 2<<20))
+	b, err := io.ReadAll(io.LimitReader(res.Body, 2<<20)) // 2MB
 	if err != nil {
 		return nil, res.StatusCode, err
 	}

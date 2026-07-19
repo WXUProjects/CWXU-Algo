@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"cwxu-algo/api/core/v1/contest_log"
 	"cwxu-algo/api/core/v1/problem"
 	"cwxu-algo/api/core/v1/statistic"
 	"cwxu-algo/api/core/v1/submit_log"
@@ -66,6 +67,8 @@ type DailyReportData struct {
 	TagRadar []TagACBrief `json:"tagRadar,omitempty"`
 	// 昨日提交涉及的标签聚合 count
 	YesterdayTagHits map[string]int `json:"yesterdayTagHits,omitempty"`
+	// 近期个人比赛（含 rank、过题数）
+	RecentContests []ContestBrief `json:"recentContests,omitempty"`
 }
 
 type RecentReportData struct {
@@ -511,6 +514,7 @@ func (uc *SummaryUseCase) loadDailyReportData(ctx context.Context, userId int64)
 		logs = []SubmitItem{}
 	}
 	radar := uc.fetchUserTagRadar(ctx, userId)
+	contests := uc.fetchUserRecentContests(ctx, userId, 15)
 
 	return &DailyReportData{
 		UserID:           userId,
@@ -523,7 +527,51 @@ func (uc *SummaryUseCase) loadDailyReportData(ctx context.Context, userId int64)
 		YesterdayLogs:    logs,
 		TagRadar:         radar,
 		YesterdayTagHits: aggregateTagHits(logs),
+		RecentContests:   contests,
 	}, nil
+}
+
+func (uc *SummaryUseCase) fetchUserRecentContests(ctx context.Context, userId int64, limit int64) []ContestBrief {
+	if userId <= 0 {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 15
+	}
+	if limit > 30 {
+		limit = 30
+	}
+	conn, err := uc.dialCoreData(ctx)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	cli := contest_log.NewContestClient(conn)
+	res, err := cli.GetUserContestHistory(ctx, &contest_log.GetUserContestHistoryReq{
+		UserId: userId,
+		Limit:  limit,
+		Cursor: 0,
+	})
+	if err != nil || res == nil {
+		log.Warnf("fetchUserRecentContests user=%d: %v", userId, err)
+		return nil
+	}
+	out := make([]ContestBrief, 0, len(res.Data))
+	for _, v := range res.Data {
+		if v == nil {
+			continue
+		}
+		ts := ""
+		if v.Time > 0 {
+			ts = time.Unix(v.Time, 0).Format(dateLayout)
+		}
+		out = append(out, ContestBrief{
+			ID: v.Id, Platform: v.Platform, ContestID: v.ContestId, ContestName: v.ContestName,
+			Rank: v.Rank, ACCount: v.AcCount, TotalCount: v.TotalCount, Time: ts,
+			UserID: v.UserId, UserName: v.UserName,
+		})
+	}
+	return out
 }
 
 func (uc *SummaryUseCase) loadRecentReportData(ctx context.Context, userId int64) (*RecentReportData, error) {

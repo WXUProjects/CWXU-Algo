@@ -194,8 +194,6 @@ func RegisterTrainingReportDownload(srv *khttp.Server, uc *biz.SummaryUseCase) {
 				"code": 1, "message": "缺少 jobId",
 			})
 		}
-		format := ctx.Query().Get("format")
-		preferPDF := format != "html"
 		job, err := uc.GetTrainingReportJob(ctx, jobID)
 		if err != nil || job == nil {
 			return ctx.JSON(http.StatusNotFound, map[string]interface{}{
@@ -208,7 +206,7 @@ func RegisterTrainingReportDownload(srv *khttp.Server, uc *biz.SummaryUseCase) {
 				"code": 1, "message": "无权下载其他组织报告",
 			})
 		}
-		abs, ct, name, err := biz.ResolveArtifactAbs(job, preferPDF)
+		abs, ct, name, err := biz.ResolveArtifactAbs(job)
 		if err != nil {
 			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
 				"code": 1, "message": err.Error(),

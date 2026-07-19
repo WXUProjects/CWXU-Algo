@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"cwxu-algo/api/core/v1/contest_log"
 	"cwxu-algo/api/core/v1/statistic"
+	"cwxu-algo/api/core/v1/submit_log"
 	profile2 "cwxu-algo/api/user/v1/profile"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -15,6 +17,70 @@ import (
 	"github.com/go-kratos/kratos/v2/transport/grpc"
 	grpc2 "google.golang.org/grpc"
 )
+
+const (
+	// DetailModeFull 后台训练报告详版
+	DetailModeFull = "full"
+	// DetailModeCompact 教练周报简版（维度不少，篇幅更短）
+	DetailModeCompact = "compact"
+	// MaxAIRangeDays AI 分析最长约 8 个月
+	MaxAIRangeDays = 243
+)
+
+// BlogBrief 组织博客摘要（无正文）
+type BlogBrief struct {
+	ID      int64  `json:"id,omitempty"`
+	Title   string `json:"title"`
+	Summary string `json:"summary,omitempty"`
+	Author  string `json:"author,omitempty"`
+	Time    string `json:"time,omitempty"`
+}
+
+// SubmitFeedItem 组织提交动态抽样
+type SubmitFeedItem struct {
+	UserID   int64    `json:"userId"`
+	UserName string   `json:"userName,omitempty"`
+	Platform string   `json:"platform"`
+	Problem  string   `json:"problem"`
+	Title    string   `json:"title,omitempty"`
+	Status   string   `json:"status"`
+	Lang     string   `json:"lang,omitempty"`
+	Time     string   `json:"time,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+}
+
+// ContestBrief 比赛摘要
+type ContestBrief struct {
+	ID          uint32 `json:"id,omitempty"`
+	Platform    string `json:"platform"`
+	ContestID   string `json:"contestId"`
+	ContestName string `json:"contestName"`
+	Rank        int32  `json:"rank,omitempty"`
+	ACCount     int32  `json:"acCount"`
+	TotalCount  int32  `json:"totalCount,omitempty"`
+	Time        string `json:"time,omitempty"`
+	UserID      int64  `json:"userId,omitempty"`
+	UserName    string `json:"userName,omitempty"`
+}
+
+// ContestRankRow 单场排行行
+type ContestRankRow struct {
+	Rank       int64  `json:"rank"`
+	UserID     int64  `json:"userId"`
+	Name       string `json:"name"`
+	Score      int32  `json:"score"`
+	ACCount    int32  `json:"acCount"`
+	TotalCount int32  `json:"totalCount"`
+}
+
+// ContestRankSnap 重点场次排行摘要
+type ContestRankSnap struct {
+	ContestID   string           `json:"contestId"`
+	ContestName string           `json:"contestName"`
+	Platform    string           `json:"platform"`
+	Total       int64            `json:"total"`
+	Top         []ContestRankRow `json:"top"`
+}
 
 // TrainingReportData 组织/组训练报告聚合数据（规则模板与 AI 共用）
 type TrainingReportData struct {
@@ -36,10 +102,35 @@ type TrainingReportData struct {
 	TopAC            []RankEntry `json:"topAc"`
 	InactiveMembers  []string    `json:"inactiveMembers"`
 	ActiveMembers    int         `json:"activeMembers"`
+	// 多维度预取（AI 与规则共用）
+	RecentBlogs     []BlogBrief       `json:"recentBlogs,omitempty"`
+	OrgSubmitSample []SubmitFeedItem  `json:"orgSubmitSample,omitempty"`
+	Contests        []ContestBrief    `json:"contests,omitempty"`
+	ContestRankings []ContestRankSnap `json:"contestRankings,omitempty"`
 	// Initiator 发起人（邮件）
 	InitiatorUserID int64  `json:"initiatorUserId"`
 	InitiatorName   string `json:"initiatorName"`
 	InitiatorEmail  string `json:"initiatorEmail"`
+}
+
+// DetailModeFromSource weekly → compact，其余 full
+func DetailModeFromSource(source string) string {
+	if strings.EqualFold(strings.TrimSpace(source), "weekly") {
+		return DetailModeCompact
+	}
+	return DetailModeFull
+}
+
+// ValidateAIDateRange AI 开启时跨度不得超过约 8 个月
+func ValidateAIDateRange(start, end time.Time, useAI bool) error {
+	if !useAI {
+		return nil
+	}
+	days := int(end.Sub(start).Hours()/24) + 1
+	if days > MaxAIRangeDays {
+		return fmt.Errorf("AI 分析最长允许 %d 天（约 8 个月），当前 %d 天", MaxAIRangeDays, days)
+	}
+	return nil
 }
 
 // LastWeekRange 相对 now 的上一完整周：周一到周日（end=昨天若 now 为周一则上周日）
@@ -309,7 +400,7 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 		}
 	}
 
-	return &TrainingReportData{
+	data := &TrainingReportData{
 		OrgID:            orgID,
 		GroupID:          groupID,
 		ScopeLabel:       scopeLabel,
@@ -330,7 +421,231 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 		InitiatorUserID:  initiatorID,
 		InitiatorName:    initName,
 		InitiatorEmail:   initEmail,
-	}, nil
+	}
+
+	// 多维度预取（失败不阻断）
+	elevated, eerr := ContextWithElevatedAgent(ctx, uint(orgID))
+	if eerr != nil {
+		log.Warnf("training report elevated: %v", eerr)
+		elevated = ctx
+	}
+	data.OrgSubmitSample = uc.fetchOrgSubmitSample(elevated, start, end, 20)
+	data.Contests = uc.fetchOrgContests(elevated, start, end, 15)
+	data.ContestRankings = uc.fetchContestRankSnaps(elevated, data.Contests, 3, 8)
+	data.RecentBlogs = uc.fetchOrgBlogBriefs(elevated, orgID, 10)
+
+	return data, nil
+}
+
+func (uc *SummaryUseCase) fetchOrgSubmitSample(ctx context.Context, start, end time.Time, limit int) []SubmitFeedItem {
+	if limit <= 0 {
+		limit = 20
+	}
+	conn, err := uc.dialCoreCtx(ctx)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	cli := submit_log.NewSubmitClient(conn)
+	cursor := end.AddDate(0, 0, 1).Unix()
+	res, err := cli.GetSubmitLog(ctx, &submit_log.GetSubmitLogReq{
+		UserId: -1,
+		Limit:  int64(limit * 2),
+		Cursor: cursor,
+	})
+	if err != nil || res == nil {
+		log.Warnf("fetchOrgSubmitSample: %v", err)
+		return nil
+	}
+	dayStart := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location())
+	dayEnd := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, end.Location()).AddDate(0, 0, 1)
+	out := make([]SubmitFeedItem, 0, limit)
+	for _, v := range res.Data {
+		if v == nil {
+			continue
+		}
+		t := time.Unix(v.Time, 0)
+		if t.Before(dayStart) || !t.Before(dayEnd) {
+			continue
+		}
+		out = append(out, SubmitFeedItem{
+			UserID: v.UserId, UserName: v.UserName, Platform: v.Platform,
+			Problem: v.Problem, Title: v.ProblemTitle, Status: v.Status, Lang: v.Lang,
+			Time: t.Format("01-02 15:04"), Tags: append([]string(nil), v.ProblemTags...),
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func (uc *SummaryUseCase) fetchOrgContests(ctx context.Context, start, end time.Time, limit int) []ContestBrief {
+	if limit <= 0 {
+		limit = 15
+	}
+	conn, err := uc.dialCoreCtx(ctx)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	cli := contest_log.NewContestClient(conn)
+	timeFrom := start.Unix()
+	timeTo := end.AddDate(0, 0, 1).Unix() - 1
+	res, err := cli.GetContestList(ctx, &contest_log.GetContestListReq{
+		UserId:   -1,
+		Limit:    int64(limit),
+		Offset:   0,
+		TimeFrom: timeFrom,
+		TimeTo:   timeTo,
+	})
+	if err != nil || res == nil {
+		log.Warnf("fetchOrgContests: %v", err)
+		return nil
+	}
+	out := make([]ContestBrief, 0, len(res.Data))
+	for _, v := range res.Data {
+		if v == nil {
+			continue
+		}
+		ts := ""
+		if v.Time > 0 {
+			ts = time.Unix(v.Time, 0).Format(dateLayout)
+		}
+		out = append(out, ContestBrief{
+			ID: v.Id, Platform: v.Platform, ContestID: v.ContestId, ContestName: v.ContestName,
+			Rank: v.Rank, ACCount: v.AcCount, TotalCount: v.TotalCount, Time: ts,
+			UserID: v.UserId, UserName: v.UserName,
+		})
+	}
+	return out
+}
+
+func (uc *SummaryUseCase) fetchContestRankSnaps(ctx context.Context, contests []ContestBrief, maxContests, topN int) []ContestRankSnap {
+	if maxContests <= 0 {
+		maxContests = 3
+	}
+	if topN <= 0 {
+		topN = 8
+	}
+	seen := map[string]struct{}{}
+	out := make([]ContestRankSnap, 0, maxContests)
+	conn, err := uc.dialCoreCtx(ctx)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	cli := contest_log.NewContestClient(conn)
+	for _, c := range contests {
+		if c.ContestID == "" {
+			continue
+		}
+		key := c.Platform + ":" + c.ContestID
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		res, err := cli.GetContestRanking(ctx, &contest_log.GetContestRankingReq{
+			ContestId: c.ContestID,
+			Limit:     int64(topN),
+			Offset:    0,
+		})
+		if err != nil || res == nil {
+			continue
+		}
+		snap := ContestRankSnap{
+			ContestID:   c.ContestID,
+			ContestName: c.ContestName,
+			Platform:    c.Platform,
+			Total:       res.GetTotal(),
+		}
+		if ct := res.GetContest(); ct != nil {
+			if ct.ContestName != "" {
+				snap.ContestName = ct.ContestName
+			}
+			if ct.Platform != "" {
+				snap.Platform = ct.Platform
+			}
+		}
+		for _, r := range res.GetData() {
+			if r == nil {
+				continue
+			}
+			snap.Top = append(snap.Top, ContestRankRow{
+				Rank: r.Rank, UserID: r.UserId, Name: r.Name,
+				Score: r.Score, ACCount: r.AcCount, TotalCount: r.TotalCount,
+			})
+		}
+		out = append(out, snap)
+		if len(out) >= maxContests {
+			break
+		}
+	}
+	return out
+}
+
+func (uc *SummaryUseCase) fetchOrgBlogBriefs(ctx context.Context, orgID int64, limit int) []BlogBrief {
+	if uc == nil || uc.reg == nil || orgID <= 0 {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 15 {
+		limit = 15
+	}
+	// 复用 agent tool 的 discovery HTTP
+	path := fmt.Sprintf("/v1/user/blog/recommend?orgId=%d&page=1&pageSize=%d", orgID, limit)
+	body, code, err := httpDiscoveryGet(ctx, uc.reg, "user", path)
+	if err != nil || code >= 400 {
+		log.Warnf("fetchOrgBlogBriefs org=%d: code=%d err=%v", orgID, code, err)
+		return nil
+	}
+	var raw map[string]interface{}
+	if err := jsonUnmarshal(body, &raw); err != nil {
+		return nil
+	}
+	data, _ := raw["data"].(map[string]interface{})
+	list, _ := data["list"].([]interface{})
+	out := make([]BlogBrief, 0, len(list))
+	for _, it := range list {
+		m, ok := it.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		b := BlogBrief{
+			Title:   fmt.Sprint(m["title"]),
+			Summary: fmt.Sprint(m["summary"]),
+		}
+		if b.Title == "<nil>" {
+			b.Title = ""
+		}
+		if b.Summary == "<nil>" {
+			b.Summary = ""
+		}
+		if len(b.Summary) > 120 {
+			b.Summary = b.Summary[:120] + "…"
+		}
+		if id, ok := m["id"].(float64); ok {
+			b.ID = int64(id)
+		}
+		if a, ok := m["author"].(map[string]interface{}); ok {
+			if n, ok := a["name"].(string); ok && n != "" {
+				b.Author = n
+			} else if n, ok := a["username"].(string); ok {
+				b.Author = n
+			}
+		}
+		if t, ok := m["publishedAt"].(string); ok && t != "" {
+			b.Time = t
+		} else if t, ok := m["createdAt"].(string); ok {
+			b.Time = t
+		}
+		if b.Title != "" {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 func sumMap(m map[int64]int64) int64 {

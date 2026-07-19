@@ -206,7 +206,7 @@ func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
 		if jobID, e := uc.persistWeeklyAsJob(ctx, orgID, userId, weekStart, weekEnd, html, data); e != nil {
 			log.Warnf("weekly persist job user=%d org=%d: %v", userId, orgID, e)
 		} else if jobID != "" {
-			html += fmt.Sprintf(`<hr><p style="font-size:12px;color:#666">本周报即上周训练报告，任务 %s，可在组织管理下载 PDF（24 小时内）。</p>`, jobID)
+			html += fmt.Sprintf(`<hr><p style="font-size:12px;color:#666">本周报即上周训练报告（简版），任务 %s，可在组织管理下载 HTML（24 小时内）。</p>`, jobID)
 		}
 		if err := uc.sendHTMLEmail(email, subject, html); err != nil {
 			lastErr = err
@@ -247,14 +247,11 @@ func (uc *SummaryUseCase) persistWeeklyAsJob(ctx context.Context, orgID, userID 
 	}
 	jobID := newJobID()
 	now := time.Now()
-	htmlPath, pdfPath := jobArtifactPaths(jobID)
+	htmlPath := jobHTMLPath(jobID)
 	if err := os.WriteFile(htmlPath, []byte(html), 0o644); err != nil {
 		return "", err
 	}
-	pdf := RenderSimplePDF(data, uc.brandTitle(ctx))
-	if err := os.WriteFile(pdfPath, pdf, 0o644); err != nil {
-		return "", err
-	}
+	_ = data // 保留参数签名，便于后续扩展元数据
 	job := &TrainingReportJob{
 		JobID:      jobID,
 		Status:     ReportStatusDone,
@@ -269,8 +266,7 @@ func (uc *SummaryUseCase) persistWeeklyAsJob(ctx context.Context, orgID, userID 
 		FinishedAt: now.Unix(),
 		ExpiresAt:  now.Add(reportDownloadTTL).Unix(),
 		HTMLPath:   htmlPath,
-		PDFPath:    pdfPath,
-		FileName:   fmt.Sprintf("weekly-report-%s-%s.pdf", start.Format(dateLayout), end.Format(dateLayout)),
+		FileName:   fmt.Sprintf("weekly-report-%s-%s.html", start.Format(dateLayout), end.Format(dateLayout)),
 		Source:     "weekly",
 	}
 	if err := uc.saveJob(ctx, job); err != nil {

@@ -97,15 +97,6 @@ func TestRenderRuleTemplateHTML_UsesFixtureNumbers(t *testing.T) {
 	}
 }
 
-func TestRenderSimplePDF_Valid(t *testing.T) {
-	pdf := RenderSimplePDF(fixtureTrainingData(), "GoAlgo")
-	if !PDFLooksValid(pdf) {
-		t.Fatalf("invalid pdf header: %q", string(pdf[:min(20, len(pdf))]))
-	}
-	if !strings.Contains(string(pdf), "Alice") && !strings.Contains(string(pdf), "Training Report") {
-		t.Error("pdf missing expected content markers")
-	}
-}
 
 func TestLastWeekRange_Monday(t *testing.T) {
 	// 2026-07-13 is Monday → last week 07-06 ~ 07-12
@@ -221,7 +212,7 @@ func TestStartTrainingReport_ReturnsJobID_NonAI(t *testing.T) {
 }
 
 func TestNonAI_EndToEndInProcess(t *testing.T) {
-	// 真实路径：规则模板 → 写产物 → finalize job（与 runTrainingReportJob 完成段一致）→ re-get → notify
+	// 真实路径：规则模板 → 写 HTML → finalize job → re-get → notify
 	mr, err := miniredis.Run()
 	if err != nil {
 		t.Fatal(err)
@@ -234,21 +225,17 @@ func TestNonAI_EndToEndInProcess(t *testing.T) {
 	ctx := context.Background()
 
 	data := fixtureTrainingData()
-	html := RenderRuleTemplateHTML(data, "GoAlgo")
+	html := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeFull)
 	if !strings.Contains(html, "42") || !strings.Contains(html, "Alice") {
 		t.Fatal("template missing fixture stats")
 	}
-	pdf := RenderSimplePDF(data, "GoAlgo")
-	if !PDFLooksValid(pdf) {
-		t.Fatal("bad pdf")
+	if !strings.Contains(html, "综合维度评价") {
+		t.Fatal("template missing comprehensive eval")
 	}
 
 	jobID := "e2e-job"
-	htmlPath, pdfPath := jobArtifactPaths(jobID)
+	htmlPath := jobHTMLPath(jobID)
 	if err := os.WriteFile(htmlPath, []byte(html), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(pdfPath, pdf, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -270,14 +257,13 @@ func TestNonAI_EndToEndInProcess(t *testing.T) {
 
 	finished := time.Now()
 	expires := finished.Add(reportDownloadTTL)
-	fileName := fmt.Sprintf("training-report-%s-%s.pdf", job.StartDate, job.EndDate)
+	fileName := fmt.Sprintf("training-report-%s-%s.html", job.StartDate, job.EndDate)
 	job.Status = ReportStatusDone
 	job.Progress = 100
 	job.Message = "已完成"
 	job.FinishedAt = finished.Unix()
 	job.ExpiresAt = expires.Unix()
 	job.HTMLPath = htmlPath
-	job.PDFPath = pdfPath
 	job.FileName = fileName
 	if err := uc.saveJob(ctx, job); err != nil {
 		t.Fatal(err)
@@ -290,11 +276,11 @@ func TestNonAI_EndToEndInProcess(t *testing.T) {
 	if !fresh.IsDownloadable(now) {
 		t.Fatal("should download within 24h")
 	}
-	abs, ct, name, err := ResolveArtifactAbs(fresh, true)
+	abs, ct, name, err := ResolveArtifactAbs(fresh)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(abs, ".pdf") || ct != "application/pdf" || name != fileName {
+	if !strings.HasSuffix(abs, ".html") || !strings.Contains(ct, "text/html") || name != fileName {
 		t.Fatalf("artifact %s %s %s", abs, ct, name)
 	}
 	_, body, attach := BuildNotifyEmail(fresh, "GoAlgo", html)
@@ -306,11 +292,11 @@ func TestNonAI_EndToEndInProcess(t *testing.T) {
 	}
 	// 过期后拒绝
 	fresh.ExpiresAt = now.Add(-time.Minute).Unix()
-	if _, _, _, err := ResolveArtifactAbs(fresh, true); err == nil {
+	if _, _, _, err := ResolveArtifactAbs(fresh); err == nil {
 		t.Fatal("expected expire error")
 	}
 	fresh.ExpiresAt = expires.Unix()
-	err = uc.notifyTrainingReportDone(ctx, data, fresh, html, pdfPath)
+	err = uc.notifyTrainingReportDone(ctx, data, fresh, html)
 	if err == nil {
 		t.Log("SMTP configured; notify ok")
 	} else if !strings.Contains(err.Error(), "SMTP") && !strings.Contains(err.Error(), "邮箱") {
@@ -409,7 +395,7 @@ func TestDomainAgentTools_CarryElevatedAuth(t *testing.T) {
 			names[d.Function.Name] = true
 		}
 	}
-	for _, n := range []string{"statistic_period", "submit_cnt", "submit_log", "rank", "heatmap", "org_members", "last_submit_times", "problem_tags"} {
+	for _, n := range []string{"statistic_period", "submit_cnt", "submit_log", "rank", "heatmap", "org_members", "last_submit_times", "problem_tags", "org_blogs", "org_submit_feed", "contest_list", "contest_ranking", "contest_board", "contest_history"} {
 		if !names[n] {
 			t.Errorf("missing tool %s", n)
 		}
@@ -517,7 +503,7 @@ func TestBuildNotifyEmail_UsesExpiresAndFileName(t *testing.T) {
 	if !strings.Contains(bodyStale, "—") && strings.Contains(bodyStale, "1970") {
 		t.Fatal("stale job should not show 1970 when using — for zero expires")
 	}
-	if nameStale != "training-report.pdf" {
+	if nameStale != "training-report.html" {
 		t.Fatalf("default attach name got %s", nameStale)
 	}
 
@@ -529,7 +515,7 @@ func TestBuildNotifyEmail_UsesExpiresAndFileName(t *testing.T) {
 		EndDate:   "2026-07-12",
 		Status:    ReportStatusDone,
 		ExpiresAt: exp.Unix(),
-		FileName:  "training-report-2026-07-06-2026-07-12.pdf",
+		FileName:  "training-report-2026-07-06-2026-07-12.html",
 	}
 	subj, body, name := BuildNotifyEmail(done, "GoAlgo", "<p>report</p>")
 	if !strings.Contains(subj, "2026-07-06") {
@@ -563,16 +549,11 @@ func TestCompleteJobThenNotify_Snapshot(t *testing.T) {
 	jobID := "finalize-job"
 	data := fixtureTrainingData()
 	html := RenderRuleTemplateHTML(data, "GoAlgo")
-	pdf := RenderSimplePDF(data, "GoAlgo")
-	htmlPath, pdfPath := jobArtifactPaths(jobID)
+	htmlPath := jobHTMLPath(jobID)
 	if err := os.WriteFile(htmlPath, []byte(html), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(pdfPath, pdf, 0o644); err != nil {
-		t.Fatal(err)
-	}
 
-	// 模拟 runTrainingReportJob 完成段（与 shipped 代码一致）
 	job := &TrainingReportJob{
 		JobID:     jobID,
 		Status:    ReportStatusRunning,
@@ -587,14 +568,13 @@ func TestCompleteJobThenNotify_Snapshot(t *testing.T) {
 	}
 	finished := time.Now()
 	expires := finished.Add(reportDownloadTTL)
-	fileName := fmt.Sprintf("training-report-%s-%s.pdf", job.StartDate, job.EndDate)
+	fileName := fmt.Sprintf("training-report-%s-%s.html", job.StartDate, job.EndDate)
 	job.Status = ReportStatusDone
 	job.Progress = 100
 	job.Message = "已完成"
 	job.FinishedAt = finished.Unix()
 	job.ExpiresAt = expires.Unix()
 	job.HTMLPath = htmlPath
-	job.PDFPath = pdfPath
 	job.FileName = fileName
 	if err := uc.saveJob(ctx, job); err != nil {
 		t.Fatal(err)
@@ -616,8 +596,7 @@ func TestCompleteJobThenNotify_Snapshot(t *testing.T) {
 	if name != fileName {
 		t.Fatalf("name %s want %s", name, fileName)
 	}
-	// notify 在无 SMTP 时返回 SMTP 错误（路径被调用）
-	err = uc.notifyTrainingReportDone(ctx, data, fresh, html, pdfPath)
+	err = uc.notifyTrainingReportDone(ctx, data, fresh, html)
 	if err == nil {
 		t.Log("SMTP configured; notify ok")
 	} else if !strings.Contains(err.Error(), "SMTP") && !strings.Contains(err.Error(), "邮箱") {
@@ -664,22 +643,127 @@ func TestRankFromMap(t *testing.T) {
 func TestArtifactPathSandbox(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(reportDirEnv, dir)
-	f := filepath.Join(dir, "safe.pdf")
-	_ = os.WriteFile(f, []byte("%PDF-1.4"), 0o644)
+	f := filepath.Join(dir, "safe.html")
+	_ = os.WriteFile(f, []byte("<html>ok</html>"), 0o644)
 	job := &TrainingReportJob{
 		Status:    ReportStatusDone,
 		ExpiresAt: time.Now().Add(time.Hour).Unix(),
-		PDFPath:   f,
-		FileName:  "safe.pdf",
+		HTMLPath:  f,
+		FileName:  "safe.html",
 	}
-	abs, _, _, err := ResolveArtifactAbs(job, true)
-	if err != nil || abs != filepath.Clean(f) {
-		t.Fatalf("%v %s", err, abs)
+	abs, ct, _, err := ResolveArtifactAbs(job)
+	if err != nil || abs != filepath.Clean(f) || !strings.Contains(ct, "html") {
+		t.Fatalf("%v %s %s", err, abs, ct)
 	}
 	// path traversal
-	job.PDFPath = filepath.Join(dir, "..", "etc", "passwd")
-	if _, _, _, err := ResolveArtifactAbs(job, true); err == nil {
+	job.HTMLPath = filepath.Join(dir, "..", "etc", "passwd")
+	if _, _, _, err := ResolveArtifactAbs(job); err == nil {
 		t.Fatal("expected path reject")
+	}
+}
+
+func TestValidateAIDateRange(t *testing.T) {
+	s := time.Date(2026, 1, 1, 0, 0, 0, 0, time.Local)
+	e := s.AddDate(0, 0, 100)
+	if err := ValidateAIDateRange(s, e, true); err != nil {
+		t.Fatal(err)
+	}
+	// 含首尾：跨度 MaxAIRangeDays 天 = start 起加 (MaxAIRangeDays-1) 天
+	e2 := s.AddDate(0, 0, MaxAIRangeDays-1)
+	if err := ValidateAIDateRange(s, e2, true); err != nil {
+		t.Fatal(err)
+	}
+	e3 := s.AddDate(0, 0, MaxAIRangeDays)
+	if err := ValidateAIDateRange(s, e3, true); err == nil {
+		t.Fatal("expected AI range error")
+	}
+	if err := ValidateAIDateRange(s, e3, false); err != nil {
+		t.Fatal("non-AI should allow long range at this layer")
+	}
+}
+
+func TestDetailModeFromSource(t *testing.T) {
+	if DetailModeFromSource("weekly") != DetailModeCompact {
+		t.Fatal("weekly")
+	}
+	if DetailModeFromSource("manual") != DetailModeFull {
+		t.Fatal("manual")
+	}
+}
+
+func TestRenderRuleTemplate_CompactAndFull(t *testing.T) {
+	data := fixtureTrainingData()
+	data.Contests = []ContestBrief{{ContestName: "CF Round", Platform: "codeforces", ACCount: 3, TotalCount: 6, Time: "2026-07-10"}}
+	data.OrgSubmitSample = []SubmitFeedItem{{UserName: "Alice", Problem: "A", Status: "AC", Platform: "cf", Time: "07-10 12:00", Tags: []string{"dp"}}}
+	data.RecentBlogs = []BlogBrief{{Title: "DP 笔记", Author: "Bob", Summary: "区间 DP"}}
+	full := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeFull)
+	compact := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeCompact)
+	for _, html := range []string{full, compact} {
+		for _, s := range []string{"综合维度评价", "比赛表现", "知识沉淀", "提交动态", "排行榜", "活跃度"} {
+			if !strings.Contains(html, s) {
+				t.Errorf("missing dim %q", s)
+			}
+		}
+	}
+	if !strings.Contains(compact, "教练周报") {
+		t.Error("compact title")
+	}
+	if !strings.Contains(full, "训练报告") {
+		t.Error("full title")
+	}
+	if !strings.Contains(full, "CF Round") || !strings.Contains(full, "DP 笔记") {
+		t.Error("fixture contest/blog")
+	}
+}
+
+func TestDomainAgentTools_HasNewTools(t *testing.T) {
+	var dummyReg registry.Registrar
+	regPtr := &dummyReg
+	tools := DomainAgentTools(regPtr, 1, context.Background())
+	names := map[string]bool{}
+	for _, tfac := range tools {
+		d := tfac.Description()
+		if d != nil && d.Function != nil {
+			names[d.Function.Name] = true
+		}
+	}
+	for _, n := range []string{"org_blogs", "org_submit_feed", "contest_list", "contest_ranking", "contest_board", "contest_history", "problem_tags", "rank"} {
+		if !names[n] {
+			t.Errorf("missing tool %s", n)
+		}
+	}
+}
+
+func TestDailyAgentTools_HasContest(t *testing.T) {
+	var dummyReg registry.Registrar
+	regPtr := &dummyReg
+	tools := DailyAgentTools(regPtr, context.Background())
+	names := map[string]bool{}
+	for _, tfac := range tools {
+		d := tfac.Description()
+		if d != nil && d.Function != nil {
+			names[d.Function.Name] = true
+		}
+	}
+	for _, n := range []string{"contest_history", "contest_list", "contest_ranking", "problem_tags"} {
+		if !names[n] {
+			t.Errorf("daily missing %s", n)
+		}
+	}
+}
+
+func TestTrainingReportPrompts_Dimensions(t *testing.T) {
+	sys := trainingReportSystemPrompt(DetailModeFull)
+	if !strings.Contains(sys, "综合维度评价") || !strings.Contains(sys, "contest_ranking") {
+		t.Fatal("system prompt")
+	}
+	sys2 := trainingReportSystemPrompt(DetailModeCompact)
+	if !strings.Contains(sys2, "简版") {
+		t.Fatal("compact system")
+	}
+	up := trainingReportUserPrompt(fixtureTrainingData(), DetailModeFull)
+	if !strings.Contains(up, "详版") {
+		t.Fatal("user prompt")
 	}
 }
 
