@@ -91,7 +91,7 @@ func fetchLeetCodeGraphQL() ([]Item, error) {
 			title = slug
 		}
 		out = append(out, Item{
-			Platform:     "leetcode",
+			Platform:     NormalizePlatform("leetcode"),
 			PlatformName: "力扣",
 			ExternalID:   slug,
 			Name:         title,
@@ -161,7 +161,7 @@ func fetchLeetCodeREST() ([]Item, error) {
 			title = slug
 		}
 		out = append(out, Item{
-			Platform:     "leetcode",
+			Platform:     NormalizePlatform("leetcode"),
 			PlatformName: "力扣",
 			ExternalID:   slug,
 			Name:         title,

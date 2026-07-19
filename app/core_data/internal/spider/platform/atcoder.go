@@ -63,17 +63,19 @@ func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) 
 	if err != nil {
 		return nil, err
 	}
-	// 构建res
+	// 构建res（external_id = problem_id，供站内榜 cell-submits / 题库绑定）
 	for _, v := range atc {
+		pid := strings.TrimSpace(v.ProblemID)
 		tmp := model.SubmitLog{
-			UserID:   userId,
-			Platform: "AtCoder",
-			SubmitID: strconv.Itoa(v.ID),
-			Contest:  v.ContestID,
-			Problem:  v.ProblemID,
-			Lang:     v.Language,
-			Status:   v.Result,
-			Time:     time.Unix(v.EpochSecond, 0),
+			UserID:     userId,
+			Platform:   "AtCoder",
+			SubmitID:   strconv.Itoa(v.ID),
+			Contest:    v.ContestID,
+			Problem:    pid,
+			ExternalID: pid,
+			Lang:       v.Language,
+			Status:     v.Result,
+			Time:       time.Unix(v.EpochSecond, 0),
 		}
 		res = append(res, tmp)
 	}
@@ -100,15 +102,17 @@ func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) 
 			start = 1
 		}
 		for _, v := range atc[start:] {
+			pid := strings.TrimSpace(v.ProblemID)
 			tmp := model.SubmitLog{
-				UserID:   userId,
-				Platform: "AtCoder",
-				SubmitID: strconv.Itoa(v.ID),
-				Contest:  v.ContestID,
-				Problem:  v.ProblemID,
-				Lang:     v.Language,
-				Status:   v.Result,
-				Time:     time.Unix(v.EpochSecond, 0),
+				UserID:     userId,
+				Platform:   "AtCoder",
+				SubmitID:   strconv.Itoa(v.ID),
+				Contest:    v.ContestID,
+				Problem:    pid,
+				ExternalID: pid,
+				Lang:       v.Language,
+				Status:     v.Result,
+				Time:       time.Unix(v.EpochSecond, 0),
 			}
 			res = append(res, tmp)
 		}
@@ -404,8 +408,12 @@ func (p NewAtCoder) FetchContestDetails(userId int64, username string, needAll b
 				t := time.Unix(a.firstAC, 0)
 				cell.FirstACAt = &t
 				if end, ok := endBy[cid]; ok && end > 0 {
-					// 无官方 start：用 end-100min 粗估相对时间不靠谱，保持 RelativeSec 空
-					_ = end
+					// history 仅有 EndTime：用平台默认 100min 反推开赛，写 relative_sec 供榜罚时
+					startApprox := end - int64((100 * time.Minute).Seconds())
+					if a.firstAC >= startApprox {
+						rel := int(a.firstAC - startApprox)
+						cell.RelativeSec = &rel
+					}
 				}
 			} else {
 				cell.Status = model.ContestCellTried

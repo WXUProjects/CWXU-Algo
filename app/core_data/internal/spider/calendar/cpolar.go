@@ -84,6 +84,10 @@ func FetchCpolar() ([]Item, error) {
 		if oj.Icon.URL != "" {
 			icon = oj.Icon.URL
 		}
+		canonPlat := NormalizePlatform(plat)
+		if canonPlat == "" {
+			continue
+		}
 		for _, c := range oj.Contests {
 			extID := stringifyID(c.ID)
 			if extID == "" || strings.TrimSpace(c.Name) == "" {
@@ -99,7 +103,7 @@ func FetchCpolar() ([]Item, error) {
 				end = start + 2*3600
 			}
 			out = append(out, Item{
-				Platform:     plat,
+				Platform:     canonPlat,
 				PlatformName: platName,
 				ExternalID:   extID,
 				Name:         strings.TrimSpace(c.Name),

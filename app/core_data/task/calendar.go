@@ -40,6 +40,9 @@ func (t *CronTask) runCalendarCrawl() {
 		log.Errorf("CronTask calendar upsert: %v", err)
 		return
 	}
+	if nerr := t.calDal().NormalizeLegacyPlatformNames(); nerr != nil {
+		log.Warnf("CronTask calendar normalize platform: %v", nerr)
+	}
 	keepBefore := time.Now().Add(-7 * 24 * time.Hour).Unix()
 	deleted, _ := t.calDal().CleanupEnded(keepBefore)
 	_, _ = t.calDal().CleanupNotifyLogs(time.Now().Add(-30 * 24 * time.Hour))

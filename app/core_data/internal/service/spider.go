@@ -11,6 +11,7 @@ import (
 	"cwxu-algo/api/core/v1/spider"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/common/utils/ratelimit"
+	bizservice "cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -96,6 +97,32 @@ func RegisterSpiderExtraRoutes(srv *khttp.Server, s *SpiderService) {
 	}
 	r := srv.Route("/")
 	r.POST("/v1/core/spider/update-platform", s.handleUpdatePlatform)
+	// 站内榜 cell-submits 脏数据修复（external_id / 赛后练习格 / relative_sec）
+	r.POST("/v1/core/spider/repair-contest-cells", s.handleRepairContestCells)
+}
+
+// handleRepairContestCells 幂等修复 AtCoder 赛时提交明细相关脏数据（仅站管）。
+func (s *SpiderService) handleRepairContestCells(ctx khttp.Context) error {
+	if !auth.VerifySiteAdmin(ctx) && !auth.VerifyAdmin(ctx) {
+		writeSpiderJSON(ctx, 403, map[string]interface{}{"success": false, "message": "仅管理员可操作"})
+		return nil
+	}
+	// 顺带规范日历 platform 大小写
+	if s.db != nil {
+		_ = dal.NewContestCalendarDalDB(s.db).NormalizeLegacyPlatformNames()
+	}
+	stats, err := bizservice.RepairContestCellSubmitData(s.db)
+	if err != nil {
+		log.Errorf("repair-contest-cells: %v", err)
+		writeSpiderJSON(ctx, 500, map[string]interface{}{"success": false, "message": err.Error()})
+		return nil
+	}
+	writeSpiderJSON(ctx, 200, map[string]interface{}{
+		"success": true,
+		"message": "ok",
+		"data":    stats,
+	})
+	return nil
 }
 
 // handleUpdatePlatform body: { "platform": "LeetCode" }

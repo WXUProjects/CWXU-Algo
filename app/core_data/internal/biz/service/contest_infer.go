@@ -28,18 +28,88 @@ const (
 	contestInferSubmitLimit = 8000
 )
 
+// calendarPlatformAliases 赛程表 platform 与爬虫 platform 不一致（cpolar 小写）。
+// 查询/归一时同时匹配这些别名。
+func calendarPlatformAliases(platform string) []string {
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 4)
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	add(platform)
+	add(strings.ToLower(platform))
+	switch strings.ToLower(platform) {
+	case "atcoder":
+		add(spider.AtCoder)
+		add("atcoder")
+	case "codeforces", "cf":
+		add(spider.CodeForces)
+		add("Codeforces")
+		add("codeforces")
+	case "nowcoder", "牛客":
+		add(spider.NowCoder)
+		add("nowcoder")
+	case "leetcode", "力扣":
+		add(spider.LeetCode)
+		add("leetcode")
+	case "luogu", "洛谷":
+		add(spider.LuoGu)
+		add("luogu")
+	case "qoj":
+		add(spider.QOJ)
+		add("qoj")
+	}
+	return out
+}
+
+// NormalizeCalendarPlatform 将 cpolar/leetcode 源的 platform 规范为爬虫侧常量。
+func NormalizeCalendarPlatform(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "atcoder":
+		return spider.AtCoder
+	case "codeforces", "cf":
+		return spider.CodeForces
+	case "nowcoder":
+		return spider.NowCoder
+	case "leetcode":
+		return spider.LeetCode
+	case "luogu":
+		return spider.LuoGu
+	case "qoj":
+		return spider.QOJ
+	default:
+		return strings.TrimSpace(raw)
+	}
+}
+
 // lookupContestCalendar 按 platform+external_id（及模糊）查赛程日历。
+// platform 大小写/别名不敏感（日历表常为 atcoder，参赛记录为 AtCoder）。
 func lookupContestCalendar(db *gorm.DB, platform, contestID string) (model.ContestCalendar, bool) {
 	var cal model.ContestCalendar
 	if db == nil || contestID == "" {
 		return cal, false
 	}
-	platform = strings.TrimSpace(platform)
 	contestID = strings.TrimSpace(contestID)
-	err := db.Where("platform = ? AND external_id = ?", platform, contestID).First(&cal).Error
+	plats := calendarPlatformAliases(platform)
+	if len(plats) == 0 {
+		return cal, false
+	}
+	err := db.Where("platform IN ? AND external_id = ?", plats, contestID).First(&cal).Error
 	if err != nil {
-		_ = db.Where("platform = ? AND (external_id LIKE ? OR url LIKE ?)",
-			platform, "%"+contestID+"%", "%"+contestID+"%").
+		_ = db.Where("platform IN ? AND (external_id LIKE ? OR url LIKE ?)",
+			plats, "%"+contestID+"%", "%"+contestID+"%").
 			Order("start_time DESC").First(&cal).Error
 	}
 	if cal.ID > 0 && cal.StartTime > 0 {
@@ -48,80 +118,167 @@ func lookupContestCalendar(db *gorm.DB, platform, contestID string) (model.Conte
 	return cal, false
 }
 
+// minContestFirstAC 本场最早首次 AC（用于校验日历/时间窗是否偏晚）。
+func minContestFirstAC(db *gorm.DB, platform, contestID string) (time.Time, bool) {
+	if db == nil || contestID == "" {
+		return time.Time{}, false
+	}
+	plats := calendarPlatformAliases(platform)
+	var t *time.Time
+	err := db.Model(&model.ContestUserProblem{}).
+		Select("MIN(first_ac_at)").
+		Where("platform IN ? AND contest_id = ? AND first_ac_at IS NOT NULL", plats, contestID).
+		Scan(&t).Error
+	if err != nil || t == nil || t.IsZero() {
+		return time.Time{}, false
+	}
+	return *t, true
+}
+
+// calendarWindowPlausible 日历开赛不应明显晚于本场最早 AC（否则多半是脏数据或平台名撞库）。
+func calendarWindowPlausible(db *gorm.DB, platform, contestID string, start, end time.Time) bool {
+	if start.IsZero() || !end.After(start) {
+		return false
+	}
+	// 赛长过长不可信（AHC 等超长赛另议，cell-submits 宁可走 hint）
+	if end.Sub(start) > 12*time.Hour {
+		return false
+	}
+	if minAC, ok := minContestFirstAC(db, platform, contestID); ok {
+		// 日历开赛比最早 AC 晚 5min 以上 → 偏晚（常见：把结束时间当开始）
+		if start.After(minAC.Add(5 * time.Minute)) {
+			return false
+		}
+	}
+	return true
+}
+
+// platformDuration 平台默认赛长。
+func platformDuration(platform string) time.Duration {
+	dur := defaultContestDuration[strings.TrimSpace(platform)]
+	if dur <= 0 {
+		// 小写日历名
+		dur = defaultContestDuration[NormalizeCalendarPlatform(platform)]
+	}
+	if dur <= 0 {
+		return 5 * time.Hour
+	}
+	return dur
+}
+
+// hintAsContestEnd AtCoder history 的 EndTime；CF rating 结算在赛后。
+func hintAsContestEnd(platform string) bool {
+	switch NormalizeCalendarPlatform(platform) {
+	case spider.AtCoder:
+		return true
+	default:
+		return false
+	}
+}
+
+// windowFromHint 按平台语义解释 contest_logs.time 等 hint。
+func windowFromHint(platform string, hintTime time.Time, withEndBuffer bool) (start, end time.Time) {
+	if hintTime.IsZero() {
+		return time.Time{}, time.Time{}
+	}
+	dur := platformDuration(platform)
+	plat := NormalizeCalendarPlatform(platform)
+	switch {
+	case plat == spider.AtCoder || hintAsContestEnd(platform):
+		// history JSON EndTime → 结束；向前默认赛长
+		end = hintTime
+		start = hintTime.Add(-dur)
+	case plat == spider.CodeForces || plat == "Codeforces":
+		// rating 结算偏晚：向前多看一段
+		start = hintTime.Add(-(dur + 3*time.Hour))
+		end = hintTime
+	default:
+		start = hintTime
+		end = hintTime.Add(dur)
+	}
+	if withEndBuffer {
+		end = end.Add(contestInferEndBuffer)
+	}
+	return start, end
+}
+
 // ResolveContestDisplayWindow 给人看的起止时间（无赛后缓冲）。
-// 优先日历；否则用 hint + 平台默认赛长估算（hint 当作开赛）。
+// 优先可信日历；否则按平台语义解释 hint（AtCoder=结束时间，多数平台=开赛）。
 // 返回的 ok 表示至少有可信开赛时间。
 func ResolveContestDisplayWindow(db *gorm.DB, platform, contestID string, hintTime time.Time) (start, end time.Time, ok bool) {
 	platform = strings.TrimSpace(platform)
 	contestID = strings.TrimSpace(contestID)
+	dur := platformDuration(platform)
+
 	if cal, found := lookupContestCalendar(db, platform, contestID); found {
-		start = time.Unix(cal.StartTime, 0)
+		cs := time.Unix(cal.StartTime, 0)
+		var ce time.Time
 		if cal.EndTime > cal.StartTime {
-			end = time.Unix(cal.EndTime, 0)
+			ce = time.Unix(cal.EndTime, 0)
+		} else {
+			ce = cs.Add(dur)
+		}
+		if calendarWindowPlausible(db, platform, contestID, cs, ce) {
+			return cs, ce, true
 		}
 	}
-	if start.IsZero() && !hintTime.IsZero() {
-		start = hintTime
+
+	if !hintTime.IsZero() {
+		start, end = windowFromHint(platform, hintTime, false)
+		if !start.IsZero() {
+			return start, end, true
+		}
 	}
-	dur := defaultContestDuration[platform]
-	if dur <= 0 {
-		dur = 5 * time.Hour
-	}
-	if end.IsZero() && !start.IsZero() {
+
+	// 用最早 AC 粗估（展示用）
+	if minAC, okMin := minContestFirstAC(db, platform, contestID); okMin {
+		start = minAC.Add(-2 * time.Minute)
 		end = start.Add(dur)
+		return start, end, true
 	}
-	if start.IsZero() {
-		return time.Time{}, time.Time{}, false
-	}
-	if !end.After(start) {
-		end = start.Add(dur)
-	}
-	return start, end, true
+
+	return time.Time{}, time.Time{}, false
 }
 
 // ResolveContestWindow 解析比赛时间窗 [start, end]（end 含赛后缓冲，供 Infer 扫提交）。
-// hintTime：contest_logs.time 等提示；零值则仅靠日历/默认。
+// hintTime：contest_logs.time 等提示；AtCoder 为结束时间，不可当开赛。
 func ResolveContestWindow(db *gorm.DB, platform, contestID string, hintTime time.Time) (start, end time.Time) {
 	platform = strings.TrimSpace(platform)
 	contestID = strings.TrimSpace(contestID)
+	dur := platformDuration(platform)
 
-	// 1) 日历
+	// 1) 可信日历
 	if cal, found := lookupContestCalendar(db, platform, contestID); found {
-		start = time.Unix(cal.StartTime, 0)
+		cs := time.Unix(cal.StartTime, 0)
+		var ce time.Time
 		if cal.EndTime > cal.StartTime {
-			end = time.Unix(cal.EndTime, 0)
+			ce = time.Unix(cal.EndTime, 0)
+		} else {
+			ce = cs.Add(dur)
+		}
+		if calendarWindowPlausible(db, platform, contestID, cs, ce) {
+			return cs, ce.Add(contestInferEndBuffer)
 		}
 	}
 
-	// 2) contest_logs 提示 start
-	if start.IsZero() && !hintTime.IsZero() {
-		start = hintTime
+	// 2) hint（平台语义）
+	if !hintTime.IsZero() {
+		return windowFromHint(platform, hintTime, true)
 	}
-	if start.IsZero() && db != nil && contestID != "" {
+
+	// 3) contest_logs.time 兜底
+	if db != nil && contestID != "" {
 		var cl model.ContestLog
-		if db.Where("platform = ? AND contest_id = ?", platform, contestID).
-			Order("time ASC").First(&cl).Error == nil && !cl.Time.IsZero() {
-			start = cl.Time
+		plats := calendarPlatformAliases(platform)
+		if db.Where("platform IN ? AND contest_id = ?", plats, contestID).
+			Order("time DESC").First(&cl).Error == nil && !cl.Time.IsZero() {
+			return windowFromHint(platform, cl.Time, true)
 		}
 	}
 
-	// 3) 默认时长补 end
-	dur := defaultContestDuration[platform]
-	if dur <= 0 {
-		dur = 5 * time.Hour
-	}
-	if end.IsZero() && !start.IsZero() {
-		end = start.Add(dur)
-	}
-	// 仍无 start：用 now-dur 宽窗（兜底，尽量少用）
-	if start.IsZero() {
-		end = time.Now()
-		start = end.Add(-dur)
-	}
-	if !end.After(start) {
-		end = start.Add(dur)
-	}
-	// 缓冲
+	// 4) 仍无：用 now-dur 宽窗
+	end = time.Now()
+	start = end.Add(-dur)
 	end = end.Add(contestInferEndBuffer)
 	return start, end
 }
@@ -141,34 +298,43 @@ func BatchContestDisplayTimes(db *gorm.DB, logs []model.ContestLog) map[string][
 			need[k] = l.Time
 		}
 	}
-	// 日历批量：按平台分组查
+	// 日历批量：按平台别名分组查（atcoder ↔ AtCoder）
 	byPlat := map[string][]string{}
 	for k := range need {
-		byPlat[k.p] = append(byPlat[k.p], k.c)
+		for _, ap := range calendarPlatformAliases(k.p) {
+			byPlat[ap] = append(byPlat[ap], k.c)
+		}
 	}
-	calMap := map[key]model.ContestCalendar{}
+	// external_id → cal（忽略 platform 大小写，按 need 的 canonical key 回填）
+	calByExt := map[string]model.ContestCalendar{}
 	if db != nil {
 		for plat, ids := range byPlat {
 			var cals []model.ContestCalendar
 			_ = db.Where("platform = ? AND external_id IN ?", plat, ids).Find(&cals).Error
 			for _, cal := range cals {
-				calMap[key{p: cal.Platform, c: cal.ExternalID}] = cal
+				ext := strings.TrimSpace(cal.ExternalID)
+				if ext == "" {
+					continue
+				}
+				// 同 ext 保留 start 更早的
+				if prev, ok := calByExt[ext]; !ok || cal.StartTime < prev.StartTime {
+					calByExt[ext] = cal
+				}
 			}
 		}
 	}
 	for k, hint := range need {
 		mapKey := k.p + "\x00" + k.c
-		if cal, ok := calMap[k]; ok && cal.StartTime > 0 {
-			end := cal.EndTime
-			if end <= cal.StartTime {
-				dur := defaultContestDuration[k.p]
-				if dur <= 0 {
-					dur = 5 * time.Hour
-				}
-				end = cal.StartTime + int64(dur.Seconds())
+		if cal, ok := calByExt[k.c]; ok && cal.StartTime > 0 {
+			cs := time.Unix(cal.StartTime, 0)
+			ce := time.Unix(cal.EndTime, 0)
+			if cal.EndTime <= cal.StartTime {
+				ce = cs.Add(platformDuration(k.p))
 			}
-			out[mapKey] = [2]int64{cal.StartTime, end}
-			continue
+			if calendarWindowPlausible(db, k.p, k.c, cs, ce) {
+				out[mapKey] = [2]int64{cs.Unix(), ce.Unix()}
+				continue
+			}
 		}
 		start, end, ok := ResolveContestDisplayWindow(db, k.p, k.c, hint)
 		if ok {
@@ -497,53 +663,39 @@ const contestCellSubmitLimit = 200
 // 注意 contest_logs.time 语义因平台而异，不能一律当「开赛」：
 //   - AtCoder history：结束时间
 //   - Codeforces rating：出分/结算时间（赛后）
-//   - 日历：可信 start/end
-//   - 格子 FirstACAt − RelativeSec：可反推开赛
+//   - 日历：可信 start/end（且与 earliest AC 交叉校验）
+//   - 格子 FirstACAt − RelativeSec：仅多样本一致时采用（单条脏 relative_sec 会污染全场）
 //
 // 返回 start 供相对赛时展示；end 含短缓冲。
 func resolveCellSubmitWindow(db *gorm.DB, platform, contestID string, hintTime time.Time) (start, end time.Time) {
 	platform = strings.TrimSpace(platform)
 	contestID = strings.TrimSpace(contestID)
-	dur := defaultContestDuration[platform]
-	if dur <= 0 {
-		dur = 5 * time.Hour
-	}
+	dur := platformDuration(platform)
 
-	// 1) 日历最可信
+	// 1) 可信日历
 	if cal, found := lookupContestCalendar(db, platform, contestID); found {
-		start = time.Unix(cal.StartTime, 0)
+		cs := time.Unix(cal.StartTime, 0)
+		var ce time.Time
 		if cal.EndTime > cal.StartTime {
-			end = time.Unix(cal.EndTime, 0).Add(contestInferEndBuffer)
+			ce = time.Unix(cal.EndTime, 0)
 		} else {
-			end = start.Add(dur + contestInferEndBuffer)
+			ce = cs.Add(dur)
 		}
-		return start, end
+		if calendarWindowPlausible(db, platform, contestID, cs, ce) {
+			return cs, ce.Add(contestInferEndBuffer)
+		}
 	}
 
-	// 2) 用本场格子 FirstACAt − RelativeSec 反推开赛
+	// 2) 平台语义 hint（AtCoder 必须优先于 relative_sec：线上曾出现单条脏 relative 把窗推到赛后）
+	if !hintTime.IsZero() && (hintAsContestEnd(platform) || NormalizeCalendarPlatform(platform) == spider.CodeForces) {
+		return windowFromHint(platform, hintTime, true)
+	}
+
+	// 3) 用本场格子 FirstACAt − RelativeSec 反推（需 ≥2 条一致，且不晚于最早 AC）
 	if db != nil && contestID != "" {
-		var cells []model.ContestUserProblem
-		_ = db.Where("platform = ? AND contest_id = ? AND first_ac_at IS NOT NULL AND relative_sec IS NOT NULL",
-			platform, contestID).
-			Limit(50).Find(&cells).Error
-		var derivedStart time.Time
-		for _, c := range cells {
-			if c.FirstACAt == nil || c.RelativeSec == nil || *c.RelativeSec < 0 {
-				continue
-			}
-			s := c.FirstACAt.Add(-time.Duration(*c.RelativeSec) * time.Second)
-			if s.IsZero() {
-				continue
-			}
-			if derivedStart.IsZero() || s.Before(derivedStart) {
-				derivedStart = s
-			}
-		}
-		if !derivedStart.IsZero() {
-			// 略放宽开赛前 2min，避免边界
-			start = derivedStart.Add(-2 * time.Minute)
-			end = derivedStart.Add(dur + contestInferEndBuffer)
-			// 若 hint 更晚且像结束/出分时间，把 end 拉到 hint+buffer
+		if ds, ok := deriveStartFromRelativeCells(db, platform, contestID); ok {
+			start = ds.Add(-2 * time.Minute)
+			end = ds.Add(dur + contestInferEndBuffer)
 			if !hintTime.IsZero() && hintTime.After(end) {
 				end = hintTime.Add(contestInferEndBuffer)
 			}
@@ -551,30 +703,48 @@ func resolveCellSubmitWindow(db *gorm.DB, platform, contestID string, hintTime t
 		}
 	}
 
-	// 3) 无日历：按平台理解 hint
+	// 4) 其余平台：hint 当开赛
 	if !hintTime.IsZero() {
-		switch platform {
-		case spider.AtCoder:
-			// history JSON 的 EndTime → contest_logs.time
-			end = hintTime.Add(contestInferEndBuffer)
-			start = hintTime.Add(-dur)
-			return start, end
-		case spider.CodeForces, "Codeforces":
-			// rating 结算时间在赛后；向前多看一段覆盖赛时
-			// 默认赛长 2h，结算可能再晚几小时
-			start = hintTime.Add(-(dur + 3*time.Hour))
-			end = hintTime.Add(contestInferEndBuffer)
-			return start, end
-		default:
-			// 多数平台 hint 当开赛
-			start = hintTime
-			end = hintTime.Add(dur + contestInferEndBuffer)
-			return start, end
-		}
+		return windowFromHint(platform, hintTime, true)
 	}
 
-	// 4) 兜底
+	// 5) 兜底
 	return ResolveContestWindow(db, platform, contestID, hintTime)
+}
+
+// deriveStartFromRelativeCells 多样本 FirstACAt−RelativeSec 取最早；样本不足或与 minAC 矛盾则失败。
+func deriveStartFromRelativeCells(db *gorm.DB, platform, contestID string) (time.Time, bool) {
+	plats := calendarPlatformAliases(platform)
+	var cells []model.ContestUserProblem
+	_ = db.Where("platform IN ? AND contest_id = ? AND first_ac_at IS NOT NULL AND relative_sec IS NOT NULL",
+		plats, contestID).
+		Limit(50).Find(&cells).Error
+	var derivedStart time.Time
+	n := 0
+	for _, c := range cells {
+		if c.FirstACAt == nil || c.RelativeSec == nil || *c.RelativeSec < 0 {
+			continue
+		}
+		s := c.FirstACAt.Add(-time.Duration(*c.RelativeSec) * time.Second)
+		if s.IsZero() {
+			continue
+		}
+		n++
+		if derivedStart.IsZero() || s.Before(derivedStart) {
+			derivedStart = s
+		}
+	}
+	// 单条 relative_sec 不可信（赛后练习 AC + 错误窗反推会污染全场）
+	if n < 2 || derivedStart.IsZero() {
+		return time.Time{}, false
+	}
+	if minAC, ok := minContestFirstAC(db, platform, contestID); ok {
+		// 反推开赛不应明显晚于最早 AC
+		if derivedStart.After(minAC.Add(5 * time.Minute)) {
+			return time.Time{}, false
+		}
+	}
+	return derivedStart, true
 }
 
 // collectWantExternalIDs 格子 externalId + 题号 label → 要匹配的 external_id 集合。
@@ -681,29 +851,40 @@ func ListContestCellSubmits(
 		q = q.Where("submit_id LIKE ?", "lc-prob-%")
 	}
 
-	// 主路径：external_id 反查；辅：本场 contest + 题号（历史行未写 external_id）
-	// 用 LOWER/LIKE 兼容 Postgres 与单测 SQLite
+	// 主路径：external_id 或 problem（AtCoder 历史行 problem=abc462_a、external 可空）
+	// 辅：本场 contest + 展示 label（A / A- / A.）
+	// 用 LOWER 兼容 Postgres 与单测 SQLite
 	label = strings.TrimSpace(label)
 	if len(wantExt) > 0 && label != "" {
 		q = q.Where(
 			`(LOWER(external_id) IN ?)
+			 OR (LOWER(problem) IN ?)
 			 OR (
 			   (contest = ? OR contest = ?)
-			   AND (external_id = '' OR external_id IS NULL)
-			   AND (problem = ? OR problem LIKE ? OR problem LIKE ? OR problem LIKE ?)
+			   AND (problem = ? OR problem LIKE ? OR problem LIKE ? OR problem LIKE ?
+			        OR LOWER(problem) LIKE ?)
 			 )`,
+			lowerExt,
 			lowerExt,
 			contestID, "-"+contestID,
 			label, label+"-%", label+" %", label+".%",
+			strings.ToLower("%_"+label),
 		)
 	} else if len(wantExt) > 0 {
-		q = q.Where("LOWER(external_id) IN ?", lowerExt)
+		q = q.Where(
+			`(LOWER(external_id) IN ?) OR (LOWER(problem) IN ?)
+			 OR ((contest = ? OR contest = ?) AND LOWER(problem) IN ?)`,
+			lowerExt, lowerExt,
+			contestID, "-"+contestID, lowerExt,
+		)
 	} else {
 		q = q.Where(
 			`(contest = ? OR contest = ?)
-			 AND (problem = ? OR problem LIKE ? OR problem LIKE ? OR problem LIKE ?)`,
+			 AND (problem = ? OR problem LIKE ? OR problem LIKE ? OR problem LIKE ?
+			      OR LOWER(problem) LIKE ?)`,
 			contestID, "-"+contestID,
 			label, label+"-%", label+" %", label+".%",
+			strings.ToLower("%_"+label),
 		)
 	}
 
@@ -725,7 +906,10 @@ func ListContestCellSubmits(
 		ext, _ := resolveSubmitExternal(platform, contestID, r.Contest, r.Problem, r.ExternalID)
 		extKey := strings.ToLower(strings.TrimSpace(firstNonEmpty(ext, r.ExternalID)))
 		if len(wantSet) > 0 {
-			if _, ok := wantSet[extKey]; !ok {
+			probKey := strings.ToLower(strings.TrimSpace(r.Problem))
+			_, extOK := wantSet[extKey]
+			_, probOK := wantSet[probKey]
+			if !extOK && !probOK {
 				// 允许 problem 前缀匹配 label 且 contest 精确为本场
 				p := strings.TrimSpace(r.Problem)
 				cField := strings.TrimSpace(r.Contest)
@@ -733,7 +917,9 @@ func ListContestCellSubmits(
 					strings.EqualFold(p, label) ||
 						strings.HasPrefix(p, label+"-") ||
 						strings.HasPrefix(p, label+" ") ||
-						strings.HasPrefix(strings.ToUpper(p), strings.ToUpper(label)+"."))
+						strings.HasPrefix(strings.ToUpper(p), strings.ToUpper(label)+".") ||
+						// AtCoder: abc462_a ↔ label A
+						strings.HasSuffix(strings.ToLower(p), "_"+strings.ToLower(label)))
 				contestOK := cField == contestID || cField == "-"+contestID || strings.EqualFold(cField, contestID)
 				if !(labelOK && contestOK) {
 					continue

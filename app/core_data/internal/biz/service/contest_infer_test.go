@@ -181,6 +181,85 @@ func TestInferContestUserProblems_NoProblemSetRequiresContestField(t *testing.T)
 	}
 }
 
+func TestResolveContestDisplayWindow_AtCoderHintIsEnd(t *testing.T) {
+	db := testInferDB(t)
+	endHint := time.Date(2026, 6, 13, 13, 40, 0, 0, time.UTC) // abc462 EndTime
+	start, end, ok := ResolveContestDisplayWindow(db, spider.AtCoder, "abc462", endHint)
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	wantStart := endHint.Add(-100 * time.Minute)
+	if !start.Equal(wantStart) {
+		t.Fatalf("start=%v want %v (hint is end, not start)", start, wantStart)
+	}
+	if !end.Equal(endHint) {
+		t.Fatalf("end=%v want %v", end, endHint)
+	}
+}
+
+func TestResolveCellSubmitWindow_IgnoresSinglePoisonRelativeSec(t *testing.T) {
+	db := testInferDB(t)
+	endHint := time.Date(2026, 6, 13, 13, 40, 0, 0, time.UTC)
+	// 赛后练习 AC + 错误 relative_sec（线上 user2 D 题脏数据形态）
+	practice := endHint.Add(40 * time.Minute)
+	badRel := 3403
+	_ = db.Create(&model.ContestUserProblem{
+		Platform: spider.AtCoder, ContestID: "abc462", UserID: 2,
+		Label: "D", ExternalID: "abc462_d", Status: model.ContestCellAC,
+		FirstACAt: &practice, RelativeSec: &badRel,
+	}).Error
+	// 正常赛时 AC（无 relative）
+	okAC := endHint.Add(-98 * time.Minute)
+	_ = db.Create(&model.ContestUserProblem{
+		Platform: spider.AtCoder, ContestID: "abc462", UserID: 98,
+		Label: "A", ExternalID: "abc462_a", Status: model.ContestCellAC,
+		FirstACAt: &okAC,
+	}).Error
+
+	start, end := resolveCellSubmitWindow(db, spider.AtCoder, "abc462", endHint)
+	wantStart := endHint.Add(-100 * time.Minute)
+	if start.After(wantStart.Add(time.Minute)) {
+		t.Fatalf("start=%v should cover real open %v (poison relative ignored)", start, wantStart)
+	}
+	if end.Before(endHint) {
+		t.Fatalf("end=%v want >= %v", end, endHint)
+	}
+	// 窗必须包含赛时 AC，排除练习点
+	if !okAC.After(start) || !okAC.Before(end) {
+		t.Fatalf("okAC %v not in [%v,%v]", okAC, start, end)
+	}
+	if practice.Before(end) && practice.After(start) {
+		// 练习在 end+40min，应在窗外
+		t.Fatalf("practice %v should be outside window end %v", practice, end)
+	}
+}
+
+func TestListContestCellSubmits_AtCoderByProblemWhenExternalEmpty(t *testing.T) {
+	db := testInferDB(t)
+	endHint := time.Date(2026, 6, 13, 13, 40, 0, 0, time.UTC)
+	// 历史行：只有 problem=abc462_a，无 external_id
+	logs := []model.SubmitLog{
+		{Platform: spider.AtCoder, UserID: 98, SubmitID: "1", Contest: "abc462",
+			Problem: "abc462_a", Status: "AC",
+			Time: endHint.Add(-98 * time.Minute)},
+		{Platform: spider.AtCoder, UserID: 98, SubmitID: "2", Contest: "abc462",
+			Problem: "abc462_b", Status: "AC",
+			Time: endHint.Add(-90 * time.Minute)},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	list, _, _, err := ListContestCellSubmits(
+		db, spider.AtCoder, "abc462", 98, "A", "abc462_a", endHint,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].SubmitID != "1" {
+		t.Fatalf("list=%+v want one A submit", list)
+	}
+}
+
 // AtCoder contest_logs.time 是结束时间；按 external_id 反查应落在 end−赛长 窗内。
 func TestListContestCellSubmits_AtCoderByExternalIDEndHint(t *testing.T) {
 	db := testInferDB(t)

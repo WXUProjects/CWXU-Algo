@@ -37,9 +37,15 @@ func (d *ContestCalendarDal) UpsertItems(items []calspider.Item) (int, error) {
 		if it.Platform == "" || it.ExternalID == "" {
 			continue
 		}
+		// 与参赛记录/爬虫 platform 对齐（AtCoder 而非 atcoder），避免站内榜查日历 miss
+		plat := calspider.NormalizePlatform(it.Platform)
+		platName := strings.TrimSpace(it.PlatformName)
+		if platName == "" {
+			platName = plat
+		}
 		rows = append(rows, model.ContestCalendar{
-			Platform:     it.Platform,
-			PlatformName: it.PlatformName,
+			Platform:     plat,
+			PlatformName: platName,
 			ExternalID:   it.ExternalID,
 			Name:         it.Name,
 			URL:          it.URL,
@@ -62,7 +68,43 @@ func (d *ContestCalendarDal) UpsertItems(items []calspider.Item) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// 历史脏数据：platform 小写 atcoder 等，与爬虫 AtCoder 并存时优先规范名
+	_ = d.NormalizeLegacyPlatformNames()
 	return len(rows), nil
+}
+
+// NormalizeLegacyPlatformNames 将日历 platform 从 cpolar 小写 id 迁到爬虫常量名。
+// 若规范名行已存在则删掉小写重复行。
+func (d *ContestCalendarDal) NormalizeLegacyPlatformNames() error {
+	if d.db == nil {
+		return nil
+	}
+	type pair struct{ from, to string }
+	for _, p := range []pair{
+		{"atcoder", "AtCoder"},
+		{"codeforces", "CodeForces"},
+		{"nowcoder", "NowCoder"},
+		{"leetcode", "LeetCode"},
+		{"luogu", "LuoGu"},
+		{"qoj", "QOJ"},
+	} {
+		// 无冲突：直接改名
+		if err := d.db.Exec(`
+			UPDATE contest_calendars AS c
+			SET platform = ?
+			WHERE platform = ?
+			  AND NOT EXISTS (
+			    SELECT 1 FROM contest_calendars x
+			    WHERE x.platform = ? AND x.external_id = c.external_id
+			  )`, p.to, p.from, p.to).Error; err != nil {
+			return err
+		}
+		// 有冲突：丢掉小写重复
+		if err := d.db.Where("platform = ?", p.from).Delete(&model.ContestCalendar{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // CleanupEnded 删除 end_time 早于 keepBeforeUnix 的赛程（默认保留刚结束 7 天）
