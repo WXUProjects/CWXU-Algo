@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -462,13 +463,27 @@ func listQOJContestProblems(contestID string) ([]ContestProblemSpec, error) {
 func listLeetCodeContestProblems(contestID string) ([]ContestProblemSpec, error) {
 	// contestID 多为 weekly-contest-xxx / biweekly-contest-xxx
 	slug := strings.TrimSpace(contestID)
-	query := `{"query":"query contest($titleSlug:String!){contest(titleSlug:$titleSlug){title titleSlug questions{title titleSlug questionId}}}","variables":{"titleSlug":"` + escapeJSON(slug) + `"}}`
-	req, err := http.NewRequest(http.MethodPost, "https://leetcode.cn/graphql", strings.NewReader(query))
+	if slug == "" || strings.HasPrefix(slug, "lc-") {
+		return nil, fmt.Errorf("leetcode: invalid contest slug %q", contestID)
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"query": `query contest($titleSlug: String!) {
+			contest(titleSlug: $titleSlug) {
+				title
+				titleSlug
+				questions { title titleSlug questionId translatedTitle }
+			}
+		}`,
+		"variables": map[string]string{"titleSlug": slug},
+	})
+	// 主站 graphql；noj-go 对 contest 查询常 422
+	req, err := http.NewRequest(http.MethodPost, "https://leetcode.cn/graphql/", bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", `Mozilla/5.0 (compatible; GoAlgo/1.0)`)
+	req.Header.Set("Referer", "https://leetcode.cn/contest/"+slug+"/")
 	client := &http.Client{Timeout: 25 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -480,20 +495,27 @@ func listLeetCodeContestProblems(contestID string) ([]ContestProblemSpec, error)
 		return nil, err
 	}
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("leetcode contest status %d", resp.StatusCode)
+		return nil, fmt.Errorf("leetcode contest status %d: %s", resp.StatusCode, truncateBody(body, 120))
 	}
 	var out struct {
 		Data struct {
 			Contest *struct {
 				Questions []struct {
-					Title     string `json:"title"`
-					TitleSlug string `json:"titleSlug"`
+					Title           string `json:"title"`
+					TranslatedTitle string `json:"translatedTitle"`
+					TitleSlug       string `json:"titleSlug"`
 				} `json:"questions"`
 			} `json:"contest"`
 		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, err
+	}
+	if len(out.Errors) > 0 {
+		return nil, fmt.Errorf("leetcode contest graphql: %s", out.Errors[0].Message)
 	}
 	if out.Data.Contest == nil || len(out.Data.Contest.Questions) == 0 {
 		return nil, fmt.Errorf("leetcode: no questions for %s", slug)
@@ -508,15 +530,30 @@ func listLeetCodeContestProblems(contestID string) ([]ContestProblemSpec, error)
 		if i >= 26 {
 			label = strconv.Itoa(i + 1)
 		}
+		title := firstNonEmpty(strings.TrimSpace(q.TranslatedTitle), strings.TrimSpace(q.Title))
+		if title == "" {
+			title = ts
+		}
 		specs = append(specs, ContestProblemSpec{
 			Label:      label,
-			ExternalID: ts,
-			Title:      firstNonEmpty(strings.TrimSpace(q.Title), ts),
+			ExternalID: ts, // 与提交解析 titleSlug 一致
+			Title:      title,
 			URL:        "https://leetcode.cn/problems/" + ts + "/",
 			Platform:   spider.LeetCode,
 		})
 	}
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("leetcode: empty specs for %s", slug)
+	}
 	return specs, nil
+}
+
+func truncateBody(b []byte, n int) string {
+	s := string(b)
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
 
 func escapeJSON(s string) string {

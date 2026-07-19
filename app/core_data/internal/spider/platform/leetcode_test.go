@@ -67,8 +67,9 @@ func TestMapLeetCodeContestHistory(t *testing.T) {
 	if full[0].Time.Unix() != 1800000000 {
 		t.Fatalf("time=%v", full[0].Time)
 	}
-	if full[0].TotalCount != 4 || full[0].AcCount != 0 {
-		t.Fatalf("counts total=%d ac=%d", full[0].TotalCount, full[0].AcCount)
+	// AcCount 存力扣竞赛 score，供站内榜展示
+	if full[0].TotalCount != 4 || full[0].AcCount != 18 {
+		t.Fatalf("counts total=%d ac=%d want total=4 ac=18", full[0].TotalCount, full[0].AcCount)
 	}
 
 	var foundBi bool

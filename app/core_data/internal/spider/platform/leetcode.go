@@ -561,9 +561,9 @@ func mapLeetCodeContestHistory(userId int64, items []lcContestHistoryItem, needA
 			ContestName: title,
 			ContestUrl:  contestURL,
 			Rank:        it.Ranking,
-			// totalProblems 为场次题数；接口无「过题数」仅有 score（分），AcCount 置 0
+			// totalProblems 为场次题数；力扣无 AC 数，用 score 写入 AcCount 供站内榜展示
 			TotalCount: it.TotalProblems,
-			AcCount:    0,
+			AcCount:    it.Score,
 			Time:       t,
 		})
 	}

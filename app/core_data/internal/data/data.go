@@ -138,6 +138,7 @@ func migrateModels(db *gorm.DB) {
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
 	}
+	migrateContestLogUnique(db)
 	// 旧顶层评论 root_id=0 → 回填为自身 id（层级评论依赖）
 	_ = db.Exec(`UPDATE problem_comments SET root_id = id WHERE parent_id = 0 AND (root_id = 0 OR root_id IS NULL)`).Error
 	// 丢弃旧无 platform 日汇总（清洗任务会从 submit_logs 全量重建）
@@ -240,6 +241,28 @@ func backfillDailyUserStatsIfEmpty(db *gorm.DB) {
 		return
 	}
 	log.Infof("daily_user_stats backfill done rows=%d", res.RowsAffected)
+}
+
+// migrateContestLogUnique 唯一键改为 (platform, user_id, contest_id)，避免力扣与其它平台撞 contest_id。
+func migrateContestLogUnique(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasTable(&model.ContestLog{}) {
+		return
+	}
+	// 旧 GORM 索引名可能是 idx_contest_user
+	for _, name := range []string{
+		"idx_contest_user",
+		"uni_contest_logs_user_id_contest_id",
+		"contest_logs_user_id_contest_id_key",
+	} {
+		_ = db.Exec(`DROP INDEX IF EXISTS ` + name).Error
+	}
+	// 新唯一索引（IF NOT EXISTS 可重复执行）
+	if err := db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_contest_plat_user_cid
+		ON contest_logs (platform, user_id, contest_id)
+	`).Error; err != nil {
+		log.Warnf("migrate contest_logs unique index: %v", err)
+	}
 }
 
 // backfillUserACIfEmpty 生涯/按日 AC 去重表空则从明细回填

@@ -238,15 +238,17 @@ func (s *SpiderDal) GetContestListScoped(ctx context.Context, userId int64, offs
 		return q
 	}
 
-	// 1. 计算去重后的总数
+	// 1. 按 (platform, contest_id) 去重计数（力扣 weekly-contest-N 与其它平台 id 不能并）
 	var total int64
-	countQuery := buildQuery().Select("COUNT(DISTINCT contest_id)")
+	countQuery := buildQuery().Select("COUNT(DISTINCT (platform, contest_id))")
 	if err := countQuery.Scan(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	var contestLogs []model.ContestLog
-	ranked := buildQuery().Select("contest_logs.*, ROW_NUMBER() OVER (PARTITION BY contest_id ORDER BY time DESC, id DESC) AS row_num")
+	ranked := buildQuery().Select(
+		"contest_logs.*, ROW_NUMBER() OVER (PARTITION BY platform, contest_id ORDER BY time DESC, id DESC) AS row_num",
+	)
 	if err := s.db.WithContext(ctx).Table("(?) AS ranked", ranked).
 		Where("row_num = 1").Order("time DESC, id DESC").
 		Offset(int(offset)).Limit(int(limit)).Scan(&contestLogs).Error; err != nil {
