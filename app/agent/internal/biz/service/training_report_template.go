@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// RenderRuleTemplateHTML 非 AI：基于真实统计套规则模板生成 HTML。
+// RenderRuleTemplateHTML 非 AI：固定精美 HTML 模板 + 真实数据回填。
 // mode: full（后台详版）| compact（教练周报简版）；维度一致，篇幅不同。
 func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...string) string {
 	if data == nil {
@@ -23,96 +23,104 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 
 	delta := data.TotalSubmits - data.PrevTotalSubmits
 	deltaStr := fmt.Sprintf("%+d", delta)
-	trendEmoji := "➡️"
+	trendLabel := "持平"
+	trendClass := "flat"
 	if delta > 0 {
-		trendEmoji = "🔥"
+		trendLabel = "上升"
+		trendClass = "up"
 	} else if delta < 0 {
-		trendEmoji = "⚠️"
+		trendLabel = "下降"
+		trendClass = "down"
 	}
 	statusEmoji, dimLines, advice := ruleComprehensiveEval(data, delta)
+	activeRatio := 0.0
+	if data.MemberCount > 0 {
+		activeRatio = float64(data.ActiveMembers) / float64(data.MemberCount) * 100
+	}
 
-	topN := 10
-	inactiveN := 50
-	feedN := 12
-	contestN := 8
-	blogN := 8
+	topN, inactiveN, feedN, contestN, blogN := 10, 40, 12, 8, 8
 	if compact {
-		topN = 5
-		inactiveN = 15
-		feedN = 6
-		contestN = 3
-		blogN = 5
+		topN, inactiveN, feedN, contestN, blogN = 5, 12, 6, 3, 5
+	}
+
+	title := "训练报告"
+	badge := "详版 · 规则模板"
+	if compact {
+		title = "教练周报"
+		badge = "简版 · 上周"
+	}
+
+	// 日走势迷你柱
+	maxDay := int64(1)
+	for _, d := range data.DailyTrend {
+		if d.Count > maxDay {
+			maxDay = d.Count
+		}
 	}
 
 	var b strings.Builder
-	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`)
-	b.WriteString(`<style>
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;padding:16px;background:#f6f7fb;color:#1a1a1a}
-.card{max-width:720px;margin:0 auto;background:#fff;border-radius:12px;padding:20px 22px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
-h1{font-size:20px;margin:0 0 8px}
-.meta{color:#666;font-size:13px;margin-bottom:16px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 18px}
-.stat{background:#f3f5fa;border-radius:10px;padding:12px}
-.stat .n{font-size:22px;font-weight:700}
-.stat .l{font-size:12px;color:#666;margin-top:2px}
-h2{font-size:15px;margin:18px 0 8px}
-table{width:100%;border-collapse:collapse;font-size:13px}
-td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left}
-.tag{display:inline-block;background:#eef2ff;color:#334;border-radius:999px;padding:2px 8px;font-size:12px;margin:2px}
-.foot{margin-top:18px;font-size:12px;color:#888}
-.eval{background:#f8fafc;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.65}
-@media(max-width:520px){.grid{grid-template-columns:1fr}}
-</style></head><body><div class="card">`)
+	b.WriteString(`<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">`)
+	b.WriteString(`<meta name="viewport" content="width=device-width,initial-scale=1">`)
+	b.WriteString(`<title>`)
+	b.WriteString(html.EscapeString(brand + " " + title))
+	b.WriteString(`</title><style>`)
+	b.WriteString(reportTemplateCSS())
+	b.WriteString(`</style></head><body><div class="page">`)
 
-	title := "训练报告"
-	if compact {
-		title = "教练周报"
-	}
-	fmt.Fprintf(&b, `<h1>%s %s %s</h1>`, html.EscapeString(brand), title, statusEmoji)
-	fmt.Fprintf(&b, `<div class="meta">区间 %s ~ %s · 范围 %s · 成员 %d 人`,
+	// Header
+	b.WriteString(`<header class="hero">`)
+	fmt.Fprintf(&b, `<div class="hero-top"><span class="brand">%s</span><span class="badge">%s</span></div>`,
+		html.EscapeString(brand), html.EscapeString(badge))
+	fmt.Fprintf(&b, `<h1>%s <span class="emoji">%s</span></h1>`, html.EscapeString(title), statusEmoji)
+	fmt.Fprintf(&b, `<p class="hero-meta">%s ~ %s · %s · 成员 %d 人 · 活跃 %.0f%%</p>`,
 		html.EscapeString(data.StartDate), html.EscapeString(data.EndDate),
-		html.EscapeString(data.ScopeLabel), data.MemberCount)
-	if compact {
-		b.WriteString(` · 简版`)
+		html.EscapeString(data.ScopeLabel), data.MemberCount, activeRatio)
+	b.WriteString(`</header>`)
+
+	// KPI cards
+	b.WriteString(`<section class="kpis">`)
+	fmt.Fprintf(&b, `<div class="kpi"><div class="kpi-n">%d</div><div class="kpi-l">总提交</div><div class="kpi-sub %s">环比 %s %s</div></div>`,
+		data.TotalSubmits, trendClass, deltaStr, trendLabel)
+	fmt.Fprintf(&b, `<div class="kpi"><div class="kpi-n">%d</div><div class="kpi-l">AC 次数</div><div class="kpi-sub">上期提交 %d</div></div>`,
+		data.TotalAC, data.PrevTotalSubmits)
+	fmt.Fprintf(&b, `<div class="kpi"><div class="kpi-n">%d<span class="kpi-den">/%d</span></div><div class="kpi-l">有提交成员</div><div class="kpi-sub">活跃率 %.0f%%</div></div>`,
+		data.ActiveMembers, data.MemberCount, activeRatio)
+	fmt.Fprintf(&b, `<div class="kpi"><div class="kpi-n">%d</div><div class="kpi-l">未提交</div><div class="kpi-sub">需跟进名单见下</div></div>`,
+		len(data.InactiveMembers))
+	b.WriteString(`</section>`)
+
+	// 1 走势
+	b.WriteString(`<section class="block"><div class="block-h"><h2>1. 活跃度与趋势</h2></div>`)
+	if len(data.DailyTrend) > 0 {
+		b.WriteString(`<div class="bars">`)
+		for _, d := range data.DailyTrend {
+			h := 8
+			if maxDay > 0 {
+				h = int(8 + float64(d.Count)/float64(maxDay)*72)
+			}
+			label := d.Date
+			if len(label) >= 5 {
+				label = label[5:]
+			}
+			fmt.Fprintf(&b, `<div class="bar-col" title="%s: %d"><div class="bar" style="height:%dpx"></div><div class="bar-v">%d</div><div class="bar-d">%s</div></div>`,
+				html.EscapeString(d.Date), d.Count, h, d.Count, html.EscapeString(label))
+		}
+		b.WriteString(`</div>`)
 	} else {
-		b.WriteString(` · 详版`)
+		b.WriteString(`<p class="empty">暂无日走势数据</p>`)
 	}
-	b.WriteString(`</div>`)
+	b.WriteString(`</section>`)
 
-	// 1 活跃度
-	b.WriteString(`<h2>1. 活跃度与趋势</h2><div class="grid">`)
-	fmt.Fprintf(&b, `<div class="stat"><div class="n">%d</div><div class="l">本区间总提交 %s %s</div></div>`,
-		data.TotalSubmits, trendEmoji, deltaStr)
-	fmt.Fprintf(&b, `<div class="stat"><div class="n">%d</div><div class="l">本区间 AC 次数</div></div>`, data.TotalAC)
-	fmt.Fprintf(&b, `<div class="stat"><div class="n">%d</div><div class="l">有提交成员</div></div>`, data.ActiveMembers)
-	fmt.Fprintf(&b, `<div class="stat"><div class="n">%d</div><div class="l">对比上期提交</div></div>`, data.PrevTotalSubmits)
-	b.WriteString(`</div>`)
+	// 2 排行
+	b.WriteString(`<section class="block"><div class="block-h"><h2>2. 排行榜结构</h2></div><div class="split">`)
+	b.WriteString(`<div><h3>提交 Top</h3>`)
+	writePrettyRank(&b, data.TopSubmit, topN, "次")
+	b.WriteString(`</div><div><h3>AC Top</h3>`)
+	writePrettyRank(&b, data.TopAC, topN, "题次")
+	b.WriteString(`</div></div></section>`)
 
-	if !compact {
-		b.WriteString(`<h2>每日提交走势</h2><table><tr><th>日期</th><th>提交</th></tr>`)
-		for _, d := range data.DailyTrend {
-			fmt.Fprintf(&b, `<tr><td>%s</td><td>%d</td></tr>`, html.EscapeString(d.Date), d.Count)
-		}
-		b.WriteString(`</table>`)
-	} else if len(data.DailyTrend) > 0 {
-		// 简版：一行汇总
-		parts := make([]string, 0, len(data.DailyTrend))
-		for _, d := range data.DailyTrend {
-			parts = append(parts, fmt.Sprintf("%s:%d", d.Date[5:], d.Count))
-		}
-		fmt.Fprintf(&b, `<p style="font-size:13px;color:#444">日走势：%s</p>`, html.EscapeString(strings.Join(parts, " · ")))
-	}
-
-	// 2 排行榜
-	b.WriteString(`<h2>2. 排行榜结构</h2>`)
-	b.WriteString(`<h3 style="font-size:13px;margin:8px 0 4px">提交 Top</h3>`)
-	writeRankTable(&b, data.TopSubmit, topN, "提交")
-	b.WriteString(`<h3 style="font-size:13px;margin:8px 0 4px">AC Top</h3>`)
-	writeRankTable(&b, data.TopAC, topN, "AC")
-
-	// 3 知识点（规则侧无全量标签预取时提示可用 AI）
-	b.WriteString(`<h2>3. 知识点 / 标签</h2>`)
-	b.WriteString(`<p style="font-size:13px;color:#666">规则模板根据提交动态中的标签抽样观察；开启 AI 可调用 problem_tags 深挖成员画像。</p>`)
+	// 3 标签
+	b.WriteString(`<section class="block"><div class="block-h"><h2>3. 知识点 / 标签</h2></div>`)
 	tagHits := map[string]int{}
 	for _, f := range data.OrgSubmitSample {
 		for _, t := range f.Tags {
@@ -123,7 +131,7 @@ td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left}
 		}
 	}
 	if len(tagHits) == 0 {
-		b.WriteString(`<p style="color:#888;font-size:13px">本区间动态未带标签信息。</p>`)
+		b.WriteString(`<p class="empty">本区间动态未带标签；开启 AI 可深挖成员标签画像。</p>`)
 	} else {
 		type kv struct {
 			k string
@@ -133,7 +141,6 @@ td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left}
 		for k, v := range tagHits {
 			arr = append(arr, kv{k, v})
 		}
-		// 简单选择排序前 12
 		for i := 0; i < len(arr); i++ {
 			for j := i + 1; j < len(arr); j++ {
 				if arr[j].v > arr[i].v {
@@ -141,24 +148,27 @@ td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left}
 				}
 			}
 		}
-		maxShow := 12
+		maxShow := 14
 		if compact {
-			maxShow = 6
+			maxShow = 8
 		}
+		b.WriteString(`<div class="tags">`)
 		for i, x := range arr {
 			if i >= maxShow {
 				break
 			}
-			fmt.Fprintf(&b, `<span class="tag">%s ×%d</span>`, html.EscapeString(x.k), x.v)
+			fmt.Fprintf(&b, `<span class="tag">%s <em>%d</em></span>`, html.EscapeString(x.k), x.v)
 		}
+		b.WriteString(`</div>`)
 	}
+	b.WriteString(`</section>`)
 
-	// 4 提交动态
-	b.WriteString(`<h2>4. 提交动态画像</h2>`)
+	// 4 动态
+	b.WriteString(`<section class="block"><div class="block-h"><h2>4. 提交动态画像</h2></div>`)
 	if len(data.OrgSubmitSample) == 0 {
-		b.WriteString(`<p style="color:#888;font-size:13px">区间内暂无组织提交动态抽样。</p>`)
+		b.WriteString(`<p class="empty">区间内暂无组织提交动态抽样。</p>`)
 	} else {
-		b.WriteString(`<table><tr><th>时间</th><th>成员</th><th>题</th><th>状态</th><th>平台</th></tr>`)
+		b.WriteString(`<div class="table-wrap"><table><thead><tr><th>时间</th><th>成员</th><th>题目</th><th>状态</th><th>平台</th></tr></thead><tbody>`)
 		n := 0
 		for _, f := range data.OrgSubmitSample {
 			if n >= feedN {
@@ -172,31 +182,39 @@ td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left}
 			if prob == "" {
 				prob = f.Problem
 			}
-			fmt.Fprintf(&b, `<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+			stClass := "st-other"
+			us := strings.ToUpper(f.Status)
+			if strings.Contains(us, "AC") || us == "OK" || us == "ACCEPT" {
+				stClass = "st-ac"
+			} else if strings.Contains(us, "WA") || strings.Contains(us, "WRONG") {
+				stClass = "st-wa"
+			}
+			fmt.Fprintf(&b, `<tr><td class="mono">%s</td><td>%s</td><td>%s</td><td><span class="pill %s">%s</span></td><td>%s</td></tr>`,
 				html.EscapeString(f.Time), html.EscapeString(name), html.EscapeString(prob),
-				html.EscapeString(f.Status), html.EscapeString(f.Platform))
+				stClass, html.EscapeString(f.Status), html.EscapeString(f.Platform))
 			n++
 		}
-		b.WriteString(`</table>`)
+		b.WriteString(`</tbody></table></div>`)
 	}
+	b.WriteString(`</section>`)
 
 	// 5 比赛
-	b.WriteString(`<h2>5. 比赛表现</h2>`)
+	b.WriteString(`<section class="block"><div class="block-h"><h2>5. 比赛表现</h2></div>`)
 	if len(data.Contests) == 0 {
-		b.WriteString(`<p style="color:#888;font-size:13px">区间内暂无组织比赛记录。</p>`)
+		b.WriteString(`<p class="empty">区间内暂无组织比赛记录。</p>`)
 	} else {
-		b.WriteString(`<table><tr><th>比赛</th><th>平台</th><th>过题</th><th>日期</th></tr>`)
+		b.WriteString(`<div class="table-wrap"><table><thead><tr><th>比赛</th><th>平台</th><th>过题</th><th>日期</th></tr></thead><tbody>`)
 		n := 0
 		for _, c := range data.Contests {
 			if n >= contestN {
 				break
 			}
-			fmt.Fprintf(&b, `<tr><td>%s</td><td>%s</td><td>%d/%d</td><td>%s</td></tr>`,
+			fmt.Fprintf(&b, `<tr><td>%s</td><td>%s</td><td class="mono">%d<span class="muted">/%d</span></td><td class="mono">%s</td></tr>`,
 				html.EscapeString(c.ContestName), html.EscapeString(c.Platform),
 				c.ACCount, c.TotalCount, html.EscapeString(c.Time))
 			n++
 		}
-		b.WriteString(`</table>`)
+		b.WriteString(`</tbody></table></div>`)
 	}
 	if len(data.ContestRankings) > 0 {
 		maxR := len(data.ContestRankings)
@@ -205,9 +223,9 @@ td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left}
 		}
 		for i := 0; i < maxR; i++ {
 			snap := data.ContestRankings[i]
-			fmt.Fprintf(&b, `<h3 style="font-size:13px;margin:10px 0 4px">%s 组织榜 Top（共 %d 人）</h3>`,
+			fmt.Fprintf(&b, `<h3 class="subh">%s · 组织榜 Top <span class="muted">共 %d 人</span></h3>`,
 				html.EscapeString(snap.ContestName), snap.Total)
-			b.WriteString(`<table><tr><th>#</th><th>成员</th><th>过题</th><th>分</th></tr>`)
+			b.WriteString(`<div class="table-wrap"><table><thead><tr><th>#</th><th>成员</th><th>过题</th><th>得分</th></tr></thead><tbody>`)
 			rowN := 8
 			if compact {
 				rowN = 5
@@ -216,80 +234,176 @@ td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left}
 				if j >= rowN {
 					break
 				}
-				fmt.Fprintf(&b, `<tr><td>%d</td><td>%s</td><td>%d/%d</td><td>%d</td></tr>`,
-					r.Rank, html.EscapeString(r.Name), r.ACCount, r.TotalCount, r.Score)
+				medal := ""
+				if j == 0 {
+					medal = " medal-g"
+				} else if j == 1 {
+					medal = " medal-s"
+				} else if j == 2 {
+					medal = " medal-b"
+				}
+				fmt.Fprintf(&b, `<tr><td class="rank%s">%d</td><td>%s</td><td class="mono">%d<span class="muted">/%d</span></td><td class="mono">%d</td></tr>`,
+					medal, r.Rank, html.EscapeString(r.Name), r.ACCount, r.TotalCount, r.Score)
 			}
-			b.WriteString(`</table>`)
+			b.WriteString(`</tbody></table></div>`)
 		}
 	}
+	b.WriteString(`</section>`)
 
 	// 6 博客
-	b.WriteString(`<h2>6. 知识沉淀（博客）</h2>`)
+	b.WriteString(`<section class="block"><div class="block-h"><h2>6. 知识沉淀（博客）</h2></div>`)
 	if len(data.RecentBlogs) == 0 {
-		b.WriteString(`<p style="color:#888;font-size:13px">暂无组织博客摘要（AI 可调用 org_blogs 再查）。</p>`)
+		b.WriteString(`<p class="empty">暂无组织博客摘要。可鼓励队员写题解沉淀。</p>`)
 	} else {
-		b.WriteString(`<table><tr><th>标题</th><th>作者</th><th>摘要</th></tr>`)
+		b.WriteString(`<div class="blog-list">`)
 		n := 0
 		for _, bl := range data.RecentBlogs {
 			if n >= blogN {
 				break
 			}
-			fmt.Fprintf(&b, `<tr><td>%s</td><td>%s</td><td>%s</td></tr>`,
+			fmt.Fprintf(&b, `<article class="blog-card"><h4>%s</h4><p class="blog-meta">%s</p><p class="blog-sum">%s</p></article>`,
 				html.EscapeString(bl.Title), html.EscapeString(bl.Author), html.EscapeString(bl.Summary))
 			n++
 		}
-		b.WriteString(`</table>`)
+		b.WriteString(`</div>`)
 	}
+	b.WriteString(`</section>`)
 
 	// 7 风险
-	b.WriteString(`<h2>7. 风险成员（区间未提交）</h2>`)
+	b.WriteString(`<section class="block"><div class="block-h"><h2>7. 风险成员（区间未提交）</h2></div>`)
 	if len(data.InactiveMembers) == 0 {
-		b.WriteString(`<p style="color:#888;font-size:13px">全员都有提交，给力！</p>`)
+		b.WriteString(`<p class="ok">全员都有提交，给力！</p>`)
 	} else {
+		b.WriteString(`<div class="tags">`)
 		n := 0
 		for _, name := range data.InactiveMembers {
 			if n >= inactiveN {
-				fmt.Fprintf(&b, `<span class="tag">…等共 %d 人</span>`, len(data.InactiveMembers))
+				fmt.Fprintf(&b, `<span class="tag warn">…共 %d 人</span>`, len(data.InactiveMembers))
 				break
 			}
-			fmt.Fprintf(&b, `<span class="tag">%s</span>`, html.EscapeString(name))
+			fmt.Fprintf(&b, `<span class="tag warn">%s</span>`, html.EscapeString(name))
 			n++
 		}
+		b.WriteString(`</div>`)
 	}
+	b.WriteString(`</section>`)
 
-	// 8 综合维度评价
-	b.WriteString(`<h2>8. 综合维度评价</h2><div class="eval">`)
+	// 8 综合评价
+	b.WriteString(`<section class="block eval-block"><div class="block-h"><h2>8. 综合维度评价</h2></div><div class="eval">`)
 	for _, line := range dimLines {
-		fmt.Fprintf(&b, `<div>%s</div>`, html.EscapeString(line))
+		fmt.Fprintf(&b, `<div class="eval-line">%s</div>`, html.EscapeString(line))
 	}
-	fmt.Fprintf(&b, `<div style="margin-top:8px"><strong>总评 %s</strong></div>`, statusEmoji)
-	b.WriteString(`<ul style="margin:8px 0 0;padding-left:18px">`)
+	fmt.Fprintf(&b, `<div class="eval-total">总评 %s</div><ul class="advice">`, statusEmoji)
 	for _, a := range advice {
 		fmt.Fprintf(&b, `<li>%s</li>`, html.EscapeString(a))
 	}
-	b.WriteString(`</ul></div>`)
+	b.WriteString(`</ul></div></section>`)
 
-	fmt.Fprintf(&b, `<div class="foot">由 %s 规则模板生成 · 仅使用真实统计数据，未编造名单与数字。</div>`, html.EscapeString(brand))
+	fmt.Fprintf(&b, `<footer class="foot">由 %s 规则模板生成 · 仅回填真实统计，未编造名单与数字</footer>`,
+		html.EscapeString(brand))
 	b.WriteString(`</div></body></html>`)
 	return b.String()
 }
 
-func writeRankTable(b *strings.Builder, rows []RankEntry, topN int, label string) {
+func reportTemplateCSS() string {
+	return `
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:linear-gradient(165deg,#eef2ff 0%,#f8fafc 40%,#f1f5f9 100%);color:#0f172a;line-height:1.55}
+.page{max-width:760px;margin:0 auto;padding:20px 14px 40px}
+.hero{background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 55%,#6366f1 100%);color:#fff;border-radius:18px;padding:22px 22px 20px;box-shadow:0 12px 40px rgba(79,70,229,.28);margin-bottom:16px}
+.hero-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.brand{font-weight:700;letter-spacing:.02em;opacity:.95}
+.badge{font-size:11px;background:rgba(255,255,255,.18);padding:4px 10px;border-radius:999px;backdrop-filter:blur(4px)}
+.hero h1{margin:0 0 6px;font-size:24px;font-weight:700}
+.hero .emoji{font-size:22px}
+.hero-meta{margin:0;font-size:13px;opacity:.9}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.kpi{background:#fff;border-radius:14px;padding:14px 12px;box-shadow:0 1px 3px rgba(15,23,42,.06);border:1px solid rgba(15,23,42,.04)}
+.kpi-n{font-size:26px;font-weight:800;letter-spacing:-.02em;color:#1e1b4b}
+.kpi-den{font-size:14px;font-weight:600;color:#94a3b8}
+.kpi-l{font-size:12px;color:#64748b;margin-top:2px}
+.kpi-sub{font-size:11px;margin-top:6px;color:#94a3b8}
+.kpi-sub.up{color:#059669}.kpi-sub.down{color:#dc2626}
+.block{background:#fff;border-radius:16px;padding:16px 18px 18px;margin-bottom:12px;box-shadow:0 1px 3px rgba(15,23,42,.05);border:1px solid rgba(15,23,42,.04)}
+.block-h h2{margin:0 0 12px;font-size:15px;font-weight:700;color:#1e293b;display:flex;align-items:center;gap:8px}
+.block-h h2:before{content:"";width:4px;height:14px;border-radius:2px;background:linear-gradient(180deg,#6366f1,#8b5cf6)}
+h3{margin:0 0 8px;font-size:13px;color:#475569;font-weight:600}
+.subh{margin:14px 0 8px;font-size:13px;color:#334155}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.bars{display:flex;align-items:flex-end;gap:6px;min-height:110px;padding:8px 0 0;overflow-x:auto}
+.bar-col{flex:1;min-width:28px;display:flex;flex-direction:column;align-items:center;gap:4px}
+.bar{width:100%;max-width:36px;background:linear-gradient(180deg,#818cf8,#4f46e5);border-radius:6px 6px 2px 2px;min-height:8px}
+.bar-v{font-size:10px;color:#64748b;font-variant-numeric:tabular-nums}
+.bar-d{font-size:10px;color:#94a3b8}
+.table-wrap{overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 10px;background:#f8fafc;color:#64748b;font-weight:600;font-size:12px;border-bottom:1px solid #e2e8f0}
+td{padding:9px 10px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.mono{font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.muted{color:#94a3b8}
+.rank{font-weight:700;color:#64748b}
+.rank.medal-g{color:#d97706}.rank.medal-s{color:#64748b}.rank.medal-b{color:#b45309}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{display:inline-flex;align-items:center;gap:4px;background:#eef2ff;color:#3730a3;border-radius:999px;padding:4px 10px;font-size:12px}
+.tag em{font-style:normal;font-weight:700;color:#4f46e5}
+.tag.warn{background:#fef3c7;color:#92400e}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600}
+.st-ac{background:#d1fae5;color:#065f46}.st-wa{background:#fee2e2;color:#991b1b}.st-other{background:#f1f5f9;color:#475569}
+.blog-list{display:grid;gap:8px}
+.blog-card{border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;background:#fafbff}
+.blog-card h4{margin:0 0 4px;font-size:14px}
+.blog-meta{margin:0 0 4px;font-size:12px;color:#64748b}
+.blog-sum{margin:0;font-size:12px;color:#475569}
+.empty{margin:0;font-size:13px;color:#94a3b8}
+.ok{margin:0;font-size:13px;color:#059669;font-weight:600}
+.eval-block{border:1px solid #c7d2fe;background:linear-gradient(180deg,#fafafe,#fff)}
+.eval{font-size:13px;line-height:1.7}
+.eval-line{color:#334155}
+.eval-total{margin-top:10px;font-size:15px;font-weight:700;color:#312e81}
+.advice{margin:8px 0 0;padding-left:18px;color:#475569}
+.foot{text-align:center;font-size:11px;color:#94a3b8;margin-top:8px;padding:8px}
+@media(max-width:560px){
+  .kpis{grid-template-columns:1fr 1fr}
+  .split{grid-template-columns:1fr}
+  .hero h1{font-size:20px}
+  .kpi-n{font-size:22px}
+}
+`
+}
+
+func writePrettyRank(b *strings.Builder, rows []RankEntry, topN int, unit string) {
 	if len(rows) == 0 {
-		fmt.Fprintf(b, `<p style="color:#888;font-size:13px">本区间暂无 %s 记录。</p>`, html.EscapeString(label))
+		b.WriteString(`<p class="empty">本区间暂无记录</p>`)
 		return
 	}
-	b.WriteString(`<table><tr><th>#</th><th>成员</th><th>`)
-	b.WriteString(html.EscapeString(label))
-	b.WriteString(`</th></tr>`)
+	b.WriteString(`<ol class="rank-list">`)
+	max := int64(1)
+	for _, r := range rows {
+		if r.Score > max {
+			max = r.Score
+		}
+	}
 	for i, r := range rows {
 		if i >= topN {
 			break
 		}
-		fmt.Fprintf(b, `<tr><td>%d</td><td>%s</td><td>%d</td></tr>`,
-			r.Rank, html.EscapeString(r.Name), r.Score)
+		pct := 8
+		if max > 0 {
+			pct = int(8 + float64(r.Score)/float64(max)*92)
+		}
+		fmt.Fprintf(b, `<li><div class="rl-row"><span class="rl-name">%s</span><span class="rl-score">%d %s</span></div><div class="rl-track"><div class="rl-fill" style="width:%d%%"></div></div></li>`,
+			html.EscapeString(r.Name), r.Score, html.EscapeString(unit), pct)
 	}
-	b.WriteString(`</table>`)
+	b.WriteString(`</ol><style>
+.rank-list{list-style:none;margin:0;padding:0}
+.rank-list li{margin-bottom:10px}
+.rl-row{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px}
+.rl-name{font-weight:600;color:#1e293b}
+.rl-score{color:#64748b;font-variant-numeric:tabular-nums;font-size:12px}
+.rl-track{height:6px;background:#eef2ff;border-radius:999px;overflow:hidden}
+.rl-fill{height:100%;background:linear-gradient(90deg,#818cf8,#4f46e5);border-radius:999px}
+</style>`)
 }
 
 // ruleComprehensiveEval 规则侧综合维度评价
@@ -352,14 +466,14 @@ func firstRankName(rows []RankEntry) string {
 // trainingReportSystemPrompt AI 训练报告 / 周报
 func trainingReportSystemPrompt(mode string) string {
 	compact := mode == DetailModeCompact
-	depth := "详版：可含表格、多场比赛、成员级点评。"
+	depth := "详版：可含表格、多场比赛、成员级点评。HTML 请做得美观（卡片/表格/清晰标题），不要纯纯文本堆砌。"
 	if compact {
-		depth = "简版（教练周报）：维度一个不少，但每维 2～4 句短评，名单 Top5，比赛最多 2～3 场。"
+		depth = "简版（教练周报）：维度一个不少，但每维 2～4 句短评，名单 Top5，比赛最多 2～3 场。HTML 简洁美观。"
 	}
 	return fmt.Sprintf(`你是算法训练平台的教练助手，为教练/队长写组织训练报告。
 要求：
 1. 风格：Acmer 校园口语、简洁有力。
-2. 只输出完整 HTML（可含 style），适配 PC/移动端。
+2. 只输出完整 HTML（可含 style），适配 PC/移动端，视觉清晰（分区卡片、表格、标签）。
 3. 只能使用给定数据与工具返回的真实名单/数字/标签，禁止编造。
 4. 可调用工具：org_members、rank、heatmap、submit_log、org_submit_feed、problem_tags、
    contest_list、contest_ranking、contest_board、contest_history、org_blogs 等。

@@ -72,7 +72,9 @@ func newJobID() string {
 	return uuid.NewString()
 }
 
-func (uc *SummaryUseCase) saveJob(ctx context.Context, job *TrainingReportJob) error {
+// saveJob 写入任务元数据。indexInOrgList=true 时才写入组织任务索引（仅创建时一次）。
+// 注意：进度/完成更新必须 indexInOrgList=false，否则 LPush 会把同一 job 刷出多条。
+func (uc *SummaryUseCase) saveJob(ctx context.Context, job *TrainingReportJob, indexInOrgList bool) error {
 	if uc.redis == nil || job == nil || job.JobID == "" {
 		return fmt.Errorf("redis or job invalid")
 	}
@@ -82,9 +84,11 @@ func (uc *SummaryUseCase) saveJob(ctx context.Context, job *TrainingReportJob) e
 	}
 	pipe := uc.redis.Pipeline()
 	pipe.Set(ctx, jobRedisKey(job.JobID), string(b), reportJobTTL)
-	pipe.LPush(ctx, orgJobsKey(job.OrgID), job.JobID)
-	pipe.LTrim(ctx, orgJobsKey(job.OrgID), 0, 49)
-	pipe.Expire(ctx, orgJobsKey(job.OrgID), reportJobTTL)
+	if indexInOrgList && job.OrgID > 0 {
+		pipe.LPush(ctx, orgJobsKey(job.OrgID), job.JobID)
+		pipe.LTrim(ctx, orgJobsKey(job.OrgID), 0, 49)
+		pipe.Expire(ctx, orgJobsKey(job.OrgID), reportJobTTL)
+	}
 	_, err = pipe.Exec(ctx)
 	return err
 }
@@ -118,17 +122,29 @@ func (uc *SummaryUseCase) listJobs(ctx context.Context, orgID int64, limit int64
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
-	ids, err := uc.redis.LRange(ctx, orgJobsKey(orgID), 0, limit-1).Result()
+	// 多取一些再去重：历史 bug 会把同一 jobId 重复 LPush
+	ids, err := uc.redis.LRange(ctx, orgJobsKey(orgID), 0, 99).Result()
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*TrainingReportJob, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]*TrainingReportJob, 0, int(limit))
 	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
 		j, err := uc.getJob(ctx, id)
 		if err != nil || j == nil {
 			continue
 		}
 		out = append(out, j)
+		if int64(len(out)) >= limit {
+			break
+		}
 	}
 	return out, nil
 }
@@ -146,7 +162,7 @@ func (uc *SummaryUseCase) updateJob(ctx context.Context, jobID string, mut func(
 		// still allow status field rewrite on disk copy
 	}
 	mut(job)
-	return uc.saveJob(ctx, job)
+	return uc.saveJob(ctx, job, false)
 }
 
 func jobHTMLPath(jobID string) string {

@@ -54,6 +54,10 @@ func (uc *SummaryUseCase) StartTrainingReport(ctx context.Context, p StartTraini
 	if err := ensureReportDir(); err != nil {
 		return "", fmt.Errorf("创建报告目录失败: %w", err)
 	}
+	// 同组织同区间同分组防连点：进行中的任务直接复用
+	if existing := uc.findActiveTrainingJob(ctx, p); existing != "" {
+		return existing, nil
+	}
 	jobID := newJobID()
 	now := time.Now()
 	job := &TrainingReportJob{
@@ -73,11 +77,42 @@ func (uc *SummaryUseCase) StartTrainingReport(ctx context.Context, p StartTraini
 	if job.Source == "" {
 		job.Source = "manual"
 	}
-	if err := uc.saveJob(ctx, job); err != nil {
+	if err := uc.saveJob(ctx, job, true); err != nil {
 		return "", fmt.Errorf("保存任务失败: %w", err)
 	}
 	go uc.runTrainingReportJob(jobID)
 	return jobID, nil
+}
+
+// findActiveTrainingJob 返回同参数仍在排队/运行的 jobId
+func (uc *SummaryUseCase) findActiveTrainingJob(ctx context.Context, p StartTrainingReportParams) string {
+	jobs, err := uc.listJobs(ctx, p.OrgID, 20)
+	if err != nil || len(jobs) == 0 {
+		return ""
+	}
+	src := p.Source
+	if src == "" {
+		src = "manual"
+	}
+	for _, j := range jobs {
+		if j == nil {
+			continue
+		}
+		if j.Status != ReportStatusPending && j.Status != ReportStatusRunning {
+			continue
+		}
+		if j.StartDate == p.StartDate && j.EndDate == p.EndDate &&
+			j.GroupID == p.GroupID && j.UseAI == p.UseAI {
+			js := j.Source
+			if js == "" {
+				js = "manual"
+			}
+			if js == src {
+				return j.JobID
+			}
+		}
+	}
+	return ""
 }
 
 func (uc *SummaryUseCase) runTrainingReportJob(jobID string) {
@@ -157,7 +192,7 @@ func (uc *SummaryUseCase) runTrainingReportJob(jobID string) {
 	job.ExpiresAt = expires.Unix()
 	job.HTMLPath = htmlPath
 	job.FileName = fileName
-	if err := uc.saveJob(ctx, job); err != nil {
+	if err := uc.saveJob(ctx, job, false); err != nil {
 		uc.failJob(ctx, jobID, "保存完成状态失败: "+err.Error())
 		return
 	}

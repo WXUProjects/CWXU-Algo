@@ -269,7 +269,7 @@ func (uc *SummaryUseCase) persistWeeklyAsJob(ctx context.Context, orgID, userID 
 		FileName:   fmt.Sprintf("weekly-report-%s-%s.html", start.Format(dateLayout), end.Format(dateLayout)),
 		Source:     "weekly",
 	}
-	if err := uc.saveJob(ctx, job); err != nil {
+	if err := uc.saveJob(ctx, job, true); err != nil {
 		return "", err
 	}
 	return jobID, nil

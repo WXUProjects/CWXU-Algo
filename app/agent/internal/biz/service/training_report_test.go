@@ -157,16 +157,54 @@ func TestJobStore_RedisRoundTrip(t *testing.T) {
 		CreatedBy: 1,
 		CreatedAt: time.Now().Unix(),
 	}
-	if err := uc.saveJob(ctx, job); err != nil {
+	if err := uc.saveJob(ctx, job, true); err != nil {
+		t.Fatal(err)
+	}
+	// 进度更新不得再次 LPush，否则列表出现重复
+	job.Status = ReportStatusRunning
+	job.Progress = 40
+	if err := uc.saveJob(ctx, job, false); err != nil {
+		t.Fatal(err)
+	}
+	job.Status = ReportStatusDone
+	if err := uc.saveJob(ctx, job, false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := uc.getJob(ctx, "job-test-1")
-	if err != nil || got == nil || got.OrgID != 3 {
+	if err != nil || got == nil || got.OrgID != 3 || got.Status != ReportStatusDone {
 		t.Fatalf("getJob: %+v err=%v", got, err)
 	}
 	list, err := uc.listJobs(ctx, 3, 10)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list: %v len=%d", err, len(list))
+	}
+}
+
+func TestListJobs_DedupesRepeatedIDs(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	uc := &SummaryUseCase{redis: rdb}
+	ctx := context.Background()
+
+	job := &TrainingReportJob{
+		JobID: "dup-1", Status: ReportStatusDone, OrgID: 9,
+		StartDate: "2026-07-01", EndDate: "2026-07-07",
+		ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		HTMLPath:  "/tmp/x.html",
+	}
+	// 模拟历史 bug：同一 id 被 LPush 多次
+	_ = uc.saveJob(ctx, job, true)
+	_ = rdb.LPush(ctx, orgJobsKey(9), "dup-1", "dup-1", "dup-1").Err()
+	list, err := uc.listJobs(ctx, 9, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].JobID != "dup-1" {
+		t.Fatalf("want 1 unique, got %+v", list)
 	}
 }
 
@@ -249,11 +287,11 @@ func TestNonAI_EndToEndInProcess(t *testing.T) {
 		CreatedAt: time.Now().Unix(),
 		UseAI:     false,
 	}
-	if err := uc.saveJob(ctx, job); err != nil {
+	if err := uc.saveJob(ctx, job, true); err != nil {
 		t.Fatal(err)
 	}
 	job.Status = ReportStatusRunning
-	_ = uc.saveJob(ctx, job)
+	_ = uc.saveJob(ctx, job, true)
 
 	finished := time.Now()
 	expires := finished.Add(reportDownloadTTL)
@@ -265,7 +303,7 @@ func TestNonAI_EndToEndInProcess(t *testing.T) {
 	job.ExpiresAt = expires.Unix()
 	job.HTMLPath = htmlPath
 	job.FileName = fileName
-	if err := uc.saveJob(ctx, job); err != nil {
+	if err := uc.saveJob(ctx, job, true); err != nil {
 		t.Fatal(err)
 	}
 	fresh, err := uc.getJob(ctx, jobID)
@@ -563,7 +601,7 @@ func TestCompleteJobThenNotify_Snapshot(t *testing.T) {
 		CreatedBy: data.InitiatorUserID,
 		CreatedAt: time.Now().Unix(),
 	}
-	if err := uc.saveJob(ctx, job); err != nil {
+	if err := uc.saveJob(ctx, job, true); err != nil {
 		t.Fatal(err)
 	}
 	finished := time.Now()
@@ -576,7 +614,7 @@ func TestCompleteJobThenNotify_Snapshot(t *testing.T) {
 	job.ExpiresAt = expires.Unix()
 	job.HTMLPath = htmlPath
 	job.FileName = fileName
-	if err := uc.saveJob(ctx, job); err != nil {
+	if err := uc.saveJob(ctx, job, true); err != nil {
 		t.Fatal(err)
 	}
 	fresh, err := uc.getJob(ctx, jobID)
