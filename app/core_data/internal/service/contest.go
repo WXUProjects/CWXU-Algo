@@ -382,25 +382,15 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 		return nil
 	}
 
-	// 异步 ensure（每场一次）；已 done/running 则立即返回目录
+	// ensure：done 直接读库；running/空/failed 走 EnsureContestProblemsOnce
+	// （failed 会 CAS 重试；done 内部短路，不会重复打 OJ）
 	ensureStatus := ""
 	if c.prob != nil {
-		// 先读状态；未开始则后台启动
-		var en model.ContestProblemEnsure
-		_ = c.db.Where("platform = ? AND contest_id = ?", cl.Platform, cl.ContestId).First(&en).Error
-		ensureStatus = en.Status
-		if en.ID == 0 {
-			// 同步抢占并执行（列表通常很快；爬取异步）
-			st, err := c.prob.EnsureContestProblemsOnce(cl.Platform, cl.ContestId)
-			if err != nil {
-				log.Warnf("ensure contest problems: %v", err)
-			}
-			ensureStatus = st
-		} else if en.Status == model.ContestEnsureRunning {
-			ensureStatus = model.ContestEnsureRunning
-		} else {
-			ensureStatus = en.Status
+		st, err := c.prob.EnsureContestProblemsOnce(cl.Platform, cl.ContestId)
+		if err != nil {
+			log.Warnf("ensure contest problems %s/%s: %v", cl.Platform, cl.ContestId, err)
 		}
+		ensureStatus = st
 	}
 
 	list := []map[string]interface{}{}
