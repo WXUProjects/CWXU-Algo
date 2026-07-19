@@ -133,11 +133,11 @@ const (
 	// PlatformACNowCoderTracker 主站 practice（questionUuid）
 	PlatformACNowCoderTracker = "牛客Tracker"
 	// PlatformACNowCoderContest AC 竞赛站（acm/problem 数字 id）
-	PlatformACNowCoderContest = "竞赛站"
+	PlatformACNowCoderContest = "牛客竞赛站"
 )
 
 // ListUserPlatformAC 按平台生涯过题数（力扣优先官方合成键）
-// NowCoder 拆成「竞赛站」(数字 external_id) + 「牛客Tracker」(32 hex UUID)，饼图可区分主站/AC 站。
+// NowCoder 拆成「牛客竞赛站」(数字 external_id) + 「牛客Tracker」(32 hex UUID)，饼图可区分主站/AC 站。
 // 三段独立查询：牛客 JOIN 失败时仍返回其它平台，避免整段 UNION 挂掉导致饼图全空。
 // 注意：GORM Raw 会把 SQL 里任意问号当绑定占位符，空平台回落用 unknown。
 func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
@@ -170,7 +170,7 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 	}
 
 	// 2) 牛客：p: 键用 'p:'||id 等值 JOIN（避免 CAST+正则在部分数据上整句失败）
-	//    e:NowCoder: + 32hex → Tracker；题库 external_id 为 32hex → Tracker；其余 → 竞赛站
+	//    e:NowCoder: + 32hex → Tracker；题库 external_id 为 32hex → Tracker；其余 → 牛客竞赛站
 	var ncRows []nc
 	ncSQL := `
 		SELECT name, cnt FROM (
@@ -208,7 +208,7 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 		if firstErr == nil {
 			firstErr = err
 		}
-		// 降级：牛客整包计为竞赛站，保证饼图有扇区
+		// 降级：牛客整包计为牛客竞赛站，保证饼图有扇区
 		var n int64
 		if e2 := db.Table("user_ac_problems").
 			Where("user_id = ? AND platform = ?", userID, "NowCoder").

@@ -476,6 +476,8 @@ func RegisterContestExtraRoutes(srv *khttp.Server, s *ContestLogService) {
 	r := srv.Route("/")
 	r.GET("/v1/core/contest/problems", s.handleContestProblems)
 	r.GET("/v1/core/contest/board", s.handleContestBoard)
+	// 站内榜格子：该用户本场该题的赛时提交明细
+	r.GET("/v1/core/contest/cell-submits", s.handleContestCellSubmits)
 }
 
 // handleContestProblems GET ?id= 或 ?contestId=（contest_logs 行 id）
@@ -941,6 +943,155 @@ func cellToMap(cell model.ContestUserProblem) map[string]interface{} {
 		m["firstAcAt"] = cell.FirstACAt.Unix()
 	}
 	return m
+}
+
+// handleContestCellSubmits GET ?id=|contestId=&userId=&label=&externalId=
+// 返回该用户在本场该题的赛时提交列表（供站内榜格子弹窗）。
+func (c *ContestLogService) handleContestCellSubmits(ctx khttp.Context) error {
+	idStr := strings.TrimSpace(ctx.Query().Get("id"))
+	if idStr == "" {
+		idStr = strings.TrimSpace(ctx.Query().Get("contestId"))
+	}
+	id, _ := strconv.ParseUint(idStr, 10, 64)
+	userID, _ := strconv.ParseInt(strings.TrimSpace(ctx.Query().Get("userId")), 10, 64)
+	label := strings.TrimSpace(ctx.Query().Get("label"))
+	externalID := strings.TrimSpace(ctx.Query().Get("externalId"))
+	if externalID == "" {
+		externalID = strings.TrimSpace(ctx.Query().Get("external_id"))
+	}
+	if id == 0 || userID == 0 {
+		writeContestJSON(ctx, 400, map[string]interface{}{
+			"success": false,
+			"message": "缺少比赛 id 或 userId",
+		})
+		return nil
+	}
+	if label == "" && externalID == "" {
+		writeContestJSON(ctx, 400, map[string]interface{}{
+			"success": false,
+			"message": "缺少题目 label 或 externalId",
+		})
+		return nil
+	}
+
+	var seed model.ContestLog
+	if c.db.First(&seed, uint(id)).Error != nil {
+		writeContestJSON(ctx, 404, map[string]interface{}{
+			"success": false,
+			"message": "比赛不存在",
+		})
+		return nil
+	}
+
+	list, start, end, err := bizservice.ListContestCellSubmits(
+		c.db, seed.Platform, seed.ContestId, userID, label, externalID, seed.Time,
+	)
+	if err != nil {
+		log.Warnf("cell-submits %s/%s u=%d: %v", seed.Platform, seed.ContestId, userID, err)
+		writeContestJSON(ctx, 500, map[string]interface{}{
+			"success": false,
+			"message": "加载提交记录失败",
+		})
+		return nil
+	}
+
+	// 展示名
+	userName := ""
+	if cli, e := userrpc.ProfileClient(c.reg); e == nil && cli != nil {
+		var orgID int64
+		if pd := auth.GetCurrentUser(ctx); pd != nil {
+			orgID = int64(pd.OrgID)
+		}
+		if res, e2 := cli.GetByIds(ctx, &profile.GetByIdsReq{
+			UserIds: []int64{userID},
+			OrgId:   orgID,
+		}); e2 == nil && res != nil {
+			for _, p := range res.Profiles {
+				if p.UserId == userID {
+					userName = displayNameFromProfile(p.Name, p.Username)
+					break
+				}
+			}
+		}
+	}
+
+	items := make([]map[string]interface{}, 0, len(list))
+	for _, s := range list {
+		// 原站代码链接需要 contest 字段；提交表缺省时用本场 contest_id
+		contestField := strings.TrimSpace(s.Contest)
+		if contestField == "" || contestField == "leetcode" {
+			contestField = seed.ContestId
+		}
+		m := map[string]interface{}{
+			"id":         s.ID,
+			"submitId":   s.SubmitID,
+			"status":     s.Status,
+			"lang":       s.Lang,
+			"time":       s.Time.Unix(),
+			"problem":    s.Problem,
+			"contest":    contestField,
+			"externalId": s.ExternalID,
+			"platform":   seed.Platform,
+		}
+		if s.RelativeSec != nil {
+			m["relativeSec"] = *s.RelativeSec
+		}
+		if s.ProblemID != nil && *s.ProblemID > 0 {
+			m["problemId"] = *s.ProblemID
+		}
+		items = append(items, m)
+	}
+
+	// 若请求 label 为空，用目录/首条补全
+	outLabel := label
+	outExt := externalID
+	if outLabel == "" && outExt != "" {
+		// 从目录反查
+		if c.prob != nil {
+			if probs, _, _, e := c.prob.ListContestProblems(seed.Platform, seed.ContestId); e == nil {
+				for _, p := range probs {
+					ext, _ := p["externalId"].(string)
+					if ext == "" {
+						ext, _ = p["external_id"].(string)
+					}
+					if strings.EqualFold(ext, outExt) {
+						if lb, ok := p["label"].(string); ok {
+							outLabel = lb
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+	if outExt == "" && len(list) > 0 {
+		outExt = list[0].ExternalID
+	}
+
+	data := map[string]interface{}{
+		"contest":    contestMapWithTimes(c.db, seed),
+		"platform":   seed.Platform,
+		"contestId":  seed.ContestId,
+		"userId":     userID,
+		"userName":   userName,
+		"label":      outLabel,
+		"externalId": outExt,
+		"list":       items,
+		"total":      len(items),
+	}
+	if !start.IsZero() {
+		data["startTime"] = start.Unix()
+	}
+	if !end.IsZero() {
+		data["endTime"] = end.Unix()
+	}
+
+	writeContestJSON(ctx, 200, map[string]interface{}{
+		"success": true,
+		"message": "ok",
+		"data":    data,
+	})
+	return nil
 }
 
 func writeContestJSON(ctx khttp.Context, status int, v interface{}) {
