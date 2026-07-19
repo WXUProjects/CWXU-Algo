@@ -110,6 +110,10 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 	}
 
 	items := c.contestLogsToProto(ctx, logs)
+	// 「全部比赛」按场次去重后代表行可能是别人的成绩：只保留当前登录用户自己的排名/过题，否则清空
+	if req.UserId == -1 {
+		c.attachViewerPersonalStats(ctx, items)
+	}
 
 	return &contest_log.GetContestListRes{
 		Code:    0,
@@ -117,6 +121,74 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 		Data:    items,
 		Total:   total,
 	}, nil
+}
+
+// attachViewerPersonalStats 「全部比赛」列表：只暴露当前用户自己的成绩。
+// 若当前用户未打过该场，清空他人 userId/rank/ac，保留 totalCount 供前端展示「共 N 题」。
+func (c ContestLogService) attachViewerPersonalStats(ctx context.Context, items []*contest_log.ContestLog) {
+	if len(items) == 0 {
+		return
+	}
+	viewerID := int64(auth.GetCurrentUserId(ctx))
+	myByKey := map[string]model.ContestLog{}
+	if viewerID > 0 {
+		or := c.db.Where("1 = 0")
+		for _, it := range items {
+			if it == nil || it.Platform == "" || it.ContestId == "" {
+				continue
+			}
+			or = or.Or("platform = ? AND contest_id = ?", it.Platform, it.ContestId)
+		}
+		var mine []model.ContestLog
+		if err := c.db.WithContext(ctx).Where("user_id = ?", viewerID).Where(or).Find(&mine).Error; err != nil {
+			log.Warnf("viewer contest stats: %v", err)
+		} else {
+			for _, m := range mine {
+				key := m.Platform + "\x00" + m.ContestId
+				// 同一场多次记录取 id 较大者
+				if prev, ok := myByKey[key]; !ok || m.ID > prev.ID {
+					myByKey[key] = m
+				}
+			}
+		}
+	}
+
+	var viewerName string
+	if viewerID > 0 && len(myByKey) > 0 {
+		if cli, err := userrpc.ProfileClient(c.reg); err == nil {
+			seed := make([]model.ContestLog, 0, 1)
+			for _, m := range myByKey {
+				seed = append(seed, m)
+				break
+			}
+			if names := c.fetchUserNames(ctx, cli, seed); len(names) > 0 {
+				viewerName = names[viewerID].Name
+			}
+		}
+	}
+
+	for _, it := range items {
+		if it == nil {
+			continue
+		}
+		key := it.Platform + "\x00" + it.ContestId
+		if m, ok := myByKey[key]; ok {
+			it.Id = uint32(m.ID)
+			it.UserId = m.UserID
+			it.Rank = int32(m.Rank)
+			it.AcCount = int32(m.AcCount)
+			if m.TotalCount > 0 {
+				it.TotalCount = int32(m.TotalCount)
+			}
+			it.UserName = viewerName
+			continue
+		}
+		// 未参赛 / 未登录：不暴露他人成绩
+		it.UserId = 0
+		it.UserName = ""
+		it.Rank = 0
+		it.AcCount = 0
+	}
 }
 
 func contestLogToProto(v model.ContestLog) *contest_log.ContestLog {
@@ -138,17 +210,13 @@ func contestLogToProto(v model.ContestLog) *contest_log.ContestLog {
 	}
 }
 
-// contestLogsToProto 填起止时间 + 参赛者展示名（列表「全部比赛」需要知道是谁）
+// contestLogsToProto 填起止时间；展示名仅在按用户筛选时有意义（「全部比赛」由 attachViewerPersonalStats 处理）
 func (c ContestLogService) contestLogsToProto(ctx context.Context, logs []model.ContestLog) []*contest_log.ContestLog {
 	items := make([]*contest_log.ContestLog, 0, len(logs))
 	if len(logs) == 0 {
 		return items
 	}
 	times := bizservice.BatchContestDisplayTimes(c.db, logs)
-	nameMap := map[int64]userInfo{}
-	if cli, err := userrpc.ProfileClient(c.reg); err == nil {
-		nameMap = c.fetchUserNames(ctx, cli, logs)
-	}
 	for _, v := range logs {
 		p := contestLogToProto(v)
 		key := v.Platform + "\x00" + v.ContestId
@@ -159,9 +227,6 @@ func (c ContestLogService) contestLogsToProto(ctx context.Context, logs []model.
 			if p.StartTime > 0 {
 				p.Time = p.StartTime
 			}
-		}
-		if u, ok := nameMap[v.UserID]; ok {
-			p.UserName = u.Name
 		}
 		items = append(items, p)
 	}
@@ -508,10 +573,10 @@ func contestMapWithTimes(db *gorm.DB, cl model.ContestLog) map[string]interface{
 // handleContestBoard GET ?id=|contestId= contest_logs 行 id
 // 返回 XCPCIO 风格：problems[] + rows[{cells}]；组织成员过滤与 ranking 一致。
 //
-// 数据路径：
+// 只读快照，不在本接口触发 ensure / Infer / 自动更新：
 //  1. Redis 整包缓存（~90s，随 contest list global ver 失效）——热路径不扫库
 //  2. 回源：contest_logs + contest_problems + contest_user_problems（已入库格子）
-//  3. 仅当格子为空：异步 Infer（扫 submit 一次写回）；Redis SETNX 防并发扫
+//  题目 ensure 走 /contest/problems；题级明细由爬虫同步写入。
 func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 	idStr := strings.TrimSpace(ctx.Query().Get("id"))
 	if idStr == "" {
@@ -622,22 +687,16 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		_ = q.Order("CASE WHEN rank > 0 THEN 0 ELSE 1 END, rank ASC, ac_count DESC, id ASC").Find(&logs).Error
 	}
 
-	// 题目目录（表内目录；ensure 只跑一次）
+	// 题目目录：只读表内已有目录（ensure 由 /contest/problems 负责，榜单不触发）
 	problems := []map[string]interface{}{}
 	if c.prob != nil {
-		items, st, _, err := c.prob.ListContestProblems(seed.Platform, seed.ContestId)
+		items, _, _, err := c.prob.ListContestProblems(seed.Platform, seed.ContestId)
 		if err == nil {
 			problems = items
 		}
-		if st != model.ContestEnsureDone || len(problems) == 0 {
-			plat, cid := seed.Platform, seed.ContestId
-			go func() {
-				_, _ = c.prob.EnsureContestProblemsOnce(plat, cid)
-			}()
-		}
 	}
 
-	// 题级格子：只读 contest_user_problems（爬虫/Infer 已入库），不扫 submit_logs
+	// 题级格子：只读 contest_user_problems（爬虫同步已入库），不扫 submit、不异步 Infer
 	userIDs := make([]int64, 0, len(logs))
 	for _, l := range logs {
 		userIDs = append(userIDs, l.UserID)
@@ -650,26 +709,6 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		for _, cell := range cells {
 			cellsByUser[cell.UserID] = append(cellsByUser[cell.UserID], cell)
 		}
-	}
-
-	// 缺明细：异步 Infer 一次写回；SETNX 防多人同时打开反复扫提交
-	if len(cellsByUser) == 0 && len(logs) > 0 {
-		plat, cid, uids, hint := seed.Platform, seed.ContestId, append([]int64(nil), userIDs...), seed.Time
-		go func() {
-			if c.rdb != nil {
-				lockKey := fmt.Sprintf("core:contest:infer:lock:%s:%s", plat, cid)
-				ok, err := c.rdb.SetNX(context.Background(), lockKey, "1", 2*time.Minute).Result()
-				if err != nil || !ok {
-					return // 已有任务在跑
-				}
-				defer c.rdb.Del(context.Background(), lockKey)
-			}
-			n, _ := bizservice.InferContestUserProblems(c.db, plat, cid, uids, hint)
-			if n > 0 && c.rdb != nil {
-				// 写回后 bump ver，使 board 缓存失效
-				_ = c.rdb.Incr(context.Background(), "core:contest:list:global:ver").Err()
-			}
-		}()
 	}
 
 	// 用户资料
@@ -877,14 +916,10 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 			"total":         len(rows),
 		},
 	}
-	// 有格子或无人参赛时缓存 90s；空格子 Infer 中则 15s，避免长期空缓存
+	// 只读快照，统一缓存 90s（不再因「等 Infer」而缩短 TTL）
 	if boardCacheKey != "" && c.rdb != nil {
-		ttl := 90 * time.Second
-		if len(cellsByUser) == 0 && len(logs) > 0 {
-			ttl = 15 * time.Second
-		}
 		if b, e := json.Marshal(resp); e == nil {
-			_ = c.rdb.Set(reqCtx, boardCacheKey, b, ttl).Err()
+			_ = c.rdb.Set(reqCtx, boardCacheKey, b, 90*time.Second).Err()
 		}
 	}
 	writeContestJSON(ctx, 200, resp)
