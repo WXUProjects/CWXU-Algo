@@ -404,13 +404,15 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 	}
 
 	list := []map[string]interface{}{}
+	ensureError := ""
 	if c.prob != nil {
-		items, st, err := c.prob.ListContestProblems(cl.Platform, cl.ContestId)
+		items, st, errMsg, err := c.prob.ListContestProblems(cl.Platform, cl.ContestId)
 		if err == nil {
 			list = items
 			if st != "" {
 				ensureStatus = st
 			}
+			ensureError = errMsg
 		}
 	}
 
@@ -428,6 +430,7 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 				"time":        cl.Time.Unix(),
 			},
 			"ensureStatus": ensureStatus,
+			"ensureError":  ensureError,
 			"list":         list,
 		},
 	})

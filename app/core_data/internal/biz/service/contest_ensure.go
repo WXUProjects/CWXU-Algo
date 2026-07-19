@@ -258,15 +258,15 @@ func (uc *ProblemUseCase) ForceEnqueueFetchContest(problemID uint) error {
 	})
 }
 
-// ListContestProblems 读目录 + 关联 problem 状态。
-func (uc *ProblemUseCase) ListContestProblems(platform, contestID string) ([]map[string]interface{}, string, error) {
+// ListContestProblems 读目录 + 关联 problem 状态。返回 ensureStatus、ensureError。
+func (uc *ProblemUseCase) ListContestProblems(platform, contestID string) (list []map[string]interface{}, status, ensureErr string, err error) {
 	if uc == nil || uc.data == nil {
-		return nil, "", fmt.Errorf("usecase not ready")
+		return nil, "", "", fmt.Errorf("usecase not ready")
 	}
 	var ensure model.ContestProblemEnsure
-	status := ""
 	if uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).First(&ensure).Error == nil {
 		status = ensure.Status
+		ensureErr = ensure.ErrorMsg
 	}
 	var items []model.ContestProblem
 	_ = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).
@@ -309,6 +309,6 @@ func (uc *ProblemUseCase) ListContestProblems(platform, contestID string) ([]map
 		}
 		out = append(out, m)
 	}
-	return out, status, nil
+	return out, status, ensureErr, nil
 }
 
