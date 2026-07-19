@@ -44,6 +44,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.core.v1.problem.Problem/List":                  "",
 		"/api.core.v1.problem.Problem/ListTags":              "",
 		"/api.core.v1.problem.Problem/Get":                   "",
+		"/api.core.v1.problem.Problem/RelatedContests":        "",
 		"/api.core.v1.problem.Problem/ListSubmissions":       "",
 		"/api.core.v1.problem.Problem/UserProfile":           "",
 		"/api.core.v1.contest_calendar.ContestCalendar/ListCalendar":  "",

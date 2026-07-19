@@ -9,6 +9,7 @@ import (
 
 	"cwxu-algo/app/common/event"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/spider/problem_fetch"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/streadway/amqp"
@@ -152,21 +153,27 @@ func (uc *ProblemUseCase) runContestEnsure(platform, contestID string) error {
 		if sp.ExternalID == "" || sp.Platform == "" {
 			continue
 		}
+		// problems 表 URL 用题库规范形态；比赛页仅作抓取回退
+		bankURL := sp.URL
+		contestURL := ""
+		if strings.EqualFold(platform, "NowCoder") {
+			if u := problem_fetch.NowCoderBankProblemURL(sp.ExternalID); u != "" {
+				bankURL = u
+			}
+			contestURL = problem_fetch.NowCoderContestProblemURL(contestID, firstNonEmpty(sp.Label, ""))
+		}
 		parsed := &ParsedProblem{
 			Platform:   sp.Platform,
 			ExternalID: sp.ExternalID,
 			Title:      sp.Title,
-			URL:        sp.URL,
+			URL:        firstNonEmpty(bankURL, sp.URL),
 		}
 		p, err := uc.UpsertProblemFromParsedNoAI(parsed)
 		if err != nil {
 			log.Warnf("contest ensure upsert %s/%s: %v", sp.Platform, sp.ExternalID, err)
 			continue
 		}
-		// 强制爬题面；AI 不强制（SkipAnalyze=false + Actor=0 → 走 submitter 闸门）
-		if err := uc.ForceEnqueueFetchContest(p.ID); err != nil {
-			log.Warnf("contest ensure fetch %d: %v", p.ID, err)
-		}
+		// 先写 contest_problems，再入队（避免消费者早于目录落库、拿不到比赛页回退）
 		item := model.ContestProblem{
 			Platform:   platform,
 			ContestID:  contestID,
@@ -174,8 +181,9 @@ func (uc *ProblemUseCase) runContestEnsure(platform, contestID string) error {
 			SortOrder:  i,
 			ExternalID: sp.ExternalID,
 			Title:      firstNonEmpty(sp.Title, p.Title),
-			URL:        firstNonEmpty(sp.URL, p.URL),
-			ProblemID:  p.ID,
+			// NowCoder：存比赛页，供题库无权限时回退抓取
+			URL:       firstNonEmpty(contestURL, firstNonEmpty(sp.URL, p.URL)),
+			ProblemID: p.ID,
 		}
 		_ = uc.data.DB.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "platform"}, {Name: "contest_id"}, {Name: "label"}},
@@ -183,6 +191,10 @@ func (uc *ProblemUseCase) runContestEnsure(platform, contestID string) error {
 				"sort_order", "external_id", "title", "url", "problem_id", "updated_at",
 			}),
 		}).Create(&item).Error
+		// 强制爬题面；AI 不强制（SkipAnalyze=false + Actor=0 → 走 submitter 闸门）
+		if err := uc.ForceEnqueueFetchContest(p.ID, contestURL); err != nil {
+			log.Warnf("contest ensure fetch %d: %v", p.ID, err)
+		}
 	}
 
 	// 回写 contest_logs.total_count（同场所有用户行）
@@ -326,8 +338,9 @@ func (uc *ProblemUseCase) UpsertProblemFromParsedNoAI(parsed *ParsedProblem) (*m
 	return &existing, nil
 }
 
-// ForceEnqueueFetchContest 比赛题面：强制爬取；爬完后标准 AI 闸门（有资格用户提交才分析）。
-func (uc *ProblemUseCase) ForceEnqueueFetchContest(problemID uint) error {
+// ForceEnqueueFetchContest 比赛 ensure 强制爬题面（忽略资格；爬完走标准 AI 闸门）。
+// contestFallbackURL：NowCoder 比赛页如 /acm/contest/137561/A，题库页无权限时回退。
+func (uc *ProblemUseCase) ForceEnqueueFetchContest(problemID uint, contestFallbackURL ...string) error {
 	if uc == nil || problemID == 0 {
 		return nil
 	}
@@ -345,24 +358,36 @@ func (uc *ProblemUseCase) ForceEnqueueFetchContest(problemID uint) error {
 	if p.Status == model.ProblemStatusCompleted || p.Status == model.ProblemStatusSkipped {
 		return nil
 	}
-	if p.Status == model.ProblemStatusFailedPerm {
-		return nil
-	}
-	if p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg) {
-		// 永久失败不再刷
-		return nil
+	// 赛后题库暂无权限曾误标永久失败：允许比赛 ensure 再试
+	if p.Status == model.ProblemStatusFailedPerm ||
+		(p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg)) {
+		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+			"status":           model.ProblemStatusPending,
+			"error_msg":        "",
+			"fetch_attempts":   0,
+			"fetch_fail_since": nil,
+		}).Error
+		p.Status = model.ProblemStatusPending
 	}
 	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
 	}
+	var fb []string
+	for _, u := range contestFallbackURL {
+		u = strings.TrimSpace(u)
+		if u != "" {
+			fb = append(fb, u)
+		}
+	}
 	body, _ := json.Marshal(event.ProblemFetchEvent{
-		ProblemID:   p.ID,
-		Platform:    p.Platform,
-		ExternalID:  p.ExternalID,
-		URL:         p.URL,
-		Force:       true,  // 忽略用户爬取资格
-		SkipAnalyze: false, // 爬完走 enqueueAnalyze（submitter AI 闸门）
-		ActorUserID: 0,
+		ProblemID:    p.ID,
+		Platform:     p.Platform,
+		ExternalID:   p.ExternalID,
+		URL:          p.URL,
+		FallbackURLs: fb,
+		Force:        true,  // 忽略用户爬取资格
+		SkipAnalyze:  false, // 爬完走 enqueueAnalyze（submitter AI 闸门）
+		ActorUserID:  0,
 	})
 	if err := uc.declareProblemQueue("problem_fetch"); err != nil {
 		return err

@@ -23,6 +23,7 @@ const (
 	Problem_ListTags_FullMethodName         = "/api.core.v1.problem.Problem/ListTags"
 	Problem_Hot_FullMethodName              = "/api.core.v1.problem.Problem/Hot"
 	Problem_Get_FullMethodName              = "/api.core.v1.problem.Problem/Get"
+	Problem_RelatedContests_FullMethodName  = "/api.core.v1.problem.Problem/RelatedContests"
 	Problem_ListSubmissions_FullMethodName  = "/api.core.v1.problem.Problem/ListSubmissions"
 	Problem_FollowingStatus_FullMethodName  = "/api.core.v1.problem.Problem/FollowingStatus"
 	Problem_UserProfile_FullMethodName      = "/api.core.v1.problem.Problem/UserProfile"
@@ -52,6 +53,8 @@ type ProblemClient interface {
 	// 全站热题：近 N 天按提交次数 / 做题人数 / AC 次数综合热度排序
 	Hot(ctx context.Context, in *HotProblemReq, opts ...grpc.CallOption) (*HotProblemRes, error)
 	Get(ctx context.Context, in *GetProblemReq, opts ...grpc.CallOption) (*GetProblemRes, error)
+	// 本题出现过的比赛（contest_problems 反查，全平台）
+	RelatedContests(ctx context.Context, in *RelatedContestsReq, opts ...grpc.CallOption) (*RelatedContestsRes, error)
 	ListSubmissions(ctx context.Context, in *ListSubmissionsReq, opts ...grpc.CallOption) (*ListSubmissionsRes, error)
 	// 关注用户对本题状态（不受组织域限制；需登录）
 	FollowingStatus(ctx context.Context, in *FollowingStatusReq, opts ...grpc.CallOption) (*FollowingStatusRes, error)
@@ -64,7 +67,7 @@ type ProblemClient interface {
 	ResetAll(ctx context.Context, in *ResetAllReq, opts ...grpc.CallOption) (*ResetAllRes, error)
 	// 恢复 AI（兼容）
 	Resume(ctx context.Context, in *ResumeReq, opts ...grpc.CallOption) (*ResumeRes, error)
-	// 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+	// 重试错误队列：默认仅 FAILED；include_permanent=true 时含可恢复的 FAILED_PERM
 	RetryFailed(ctx context.Context, in *RetryFailedReq, opts ...grpc.CallOption) (*RetryFailedRes, error)
 	// 暂停/恢复 AI 分析（仅停消费，不清空队列）
 	ToggleAnalyze(ctx context.Context, in *TogglePipelineReq, opts ...grpc.CallOption) (*TogglePipelineRes, error)
@@ -126,6 +129,16 @@ func (c *problemClient) Get(ctx context.Context, in *GetProblemReq, opts ...grpc
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetProblemRes)
 	err := c.cc.Invoke(ctx, Problem_Get_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) RelatedContests(ctx context.Context, in *RelatedContestsReq, opts ...grpc.CallOption) (*RelatedContestsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RelatedContestsRes)
+	err := c.cc.Invoke(ctx, Problem_RelatedContests_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -312,6 +325,8 @@ type ProblemServer interface {
 	// 全站热题：近 N 天按提交次数 / 做题人数 / AC 次数综合热度排序
 	Hot(context.Context, *HotProblemReq) (*HotProblemRes, error)
 	Get(context.Context, *GetProblemReq) (*GetProblemRes, error)
+	// 本题出现过的比赛（contest_problems 反查，全平台）
+	RelatedContests(context.Context, *RelatedContestsReq) (*RelatedContestsRes, error)
 	ListSubmissions(context.Context, *ListSubmissionsReq) (*ListSubmissionsRes, error)
 	// 关注用户对本题状态（不受组织域限制；需登录）
 	FollowingStatus(context.Context, *FollowingStatusReq) (*FollowingStatusRes, error)
@@ -324,7 +339,7 @@ type ProblemServer interface {
 	ResetAll(context.Context, *ResetAllReq) (*ResetAllRes, error)
 	// 恢复 AI（兼容）
 	Resume(context.Context, *ResumeReq) (*ResumeRes, error)
-	// 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+	// 重试错误队列：默认仅 FAILED；include_permanent=true 时含可恢复的 FAILED_PERM
 	RetryFailed(context.Context, *RetryFailedReq) (*RetryFailedRes, error)
 	// 暂停/恢复 AI 分析（仅停消费，不清空队列）
 	ToggleAnalyze(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error)
@@ -363,6 +378,9 @@ func (UnimplementedProblemServer) Hot(context.Context, *HotProblemReq) (*HotProb
 }
 func (UnimplementedProblemServer) Get(context.Context, *GetProblemReq) (*GetProblemRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Get not implemented")
+}
+func (UnimplementedProblemServer) RelatedContests(context.Context, *RelatedContestsReq) (*RelatedContestsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method RelatedContests not implemented")
 }
 func (UnimplementedProblemServer) ListSubmissions(context.Context, *ListSubmissionsReq) (*ListSubmissionsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListSubmissions not implemented")
@@ -504,6 +522,24 @@ func _Problem_Get_Handler(srv interface{}, ctx context.Context, dec func(interfa
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProblemServer).Get(ctx, req.(*GetProblemReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_RelatedContests_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RelatedContestsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).RelatedContests(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_RelatedContests_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).RelatedContests(ctx, req.(*RelatedContestsReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -836,6 +872,10 @@ var Problem_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Get",
 			Handler:    _Problem_Get_Handler,
+		},
+		{
+			MethodName: "RelatedContests",
+			Handler:    _Problem_RelatedContests_Handler,
 		},
 		{
 			MethodName: "ListSubmissions",

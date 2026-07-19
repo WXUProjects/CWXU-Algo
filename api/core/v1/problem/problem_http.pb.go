@@ -32,6 +32,7 @@ const OperationProblemListTags = "/api.core.v1.problem.Problem/ListTags"
 const OperationProblemMyPendingEdit = "/api.core.v1.problem.Problem/MyPendingEdit"
 const OperationProblemProgress = "/api.core.v1.problem.Problem/Progress"
 const OperationProblemProposeEdit = "/api.core.v1.problem.Problem/ProposeEdit"
+const OperationProblemRelatedContests = "/api.core.v1.problem.Problem/RelatedContests"
 const OperationProblemResetAll = "/api.core.v1.problem.Problem/ResetAll"
 const OperationProblemResetQueues = "/api.core.v1.problem.Problem/ResetQueues"
 const OperationProblemResume = "/api.core.v1.problem.Problem/Resume"
@@ -63,13 +64,15 @@ type ProblemHTTPServer interface {
 	Progress(context.Context, *ProgressReq) (*ProgressRes, error)
 	// ProposeEdit 登录用户：提交标签/题面修改申请（站点管理员审核）
 	ProposeEdit(context.Context, *ProposeProblemEditReq) (*ProposeProblemEditRes, error)
+	// RelatedContests 本题出现过的比赛（contest_problems 反查，全平台）
+	RelatedContests(context.Context, *RelatedContestsReq) (*RelatedContestsRes, error)
 	// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(context.Context, *ResetAllReq) (*ResetAllRes, error)
 	// ResetQueues 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
 	ResetQueues(context.Context, *ResetQueuesReq) (*ResetQueuesRes, error)
 	// Resume 恢复 AI（兼容）
 	Resume(context.Context, *ResumeReq) (*ResumeRes, error)
-	// RetryFailed 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+	// RetryFailed 重试错误队列：默认仅 FAILED；include_permanent=true 时含可恢复的 FAILED_PERM
 	RetryFailed(context.Context, *RetryFailedReq) (*RetryFailedRes, error)
 	// ReviewEdit 站点管理员：通过/驳回申请
 	ReviewEdit(context.Context, *ReviewProblemEditReq) (*ReviewProblemEditRes, error)
@@ -86,6 +89,7 @@ func RegisterProblemHTTPServer(s *http.Server, srv ProblemHTTPServer) {
 	r.GET("/v1/core/problem/tags", _Problem_ListTags0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/hot", _Problem_Hot0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/get", _Problem_Get1_HTTP_Handler(srv))
+	r.GET("/v1/core/problem/related-contests", _Problem_RelatedContests0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/submissions", _Problem_ListSubmissions0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/following-status", _Problem_FollowingStatus0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/user-profile", _Problem_UserProfile0_HTTP_Handler(srv))
@@ -177,6 +181,25 @@ func _Problem_Get1_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) er
 			return err
 		}
 		reply := out.(*GetProblemRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problem_RelatedContests0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in RelatedContestsReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemRelatedContests)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.RelatedContests(ctx, req.(*RelatedContestsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*RelatedContestsRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -559,13 +582,15 @@ type ProblemHTTPClient interface {
 	Progress(ctx context.Context, req *ProgressReq, opts ...http.CallOption) (rsp *ProgressRes, err error)
 	// ProposeEdit 登录用户：提交标签/题面修改申请（站点管理员审核）
 	ProposeEdit(ctx context.Context, req *ProposeProblemEditReq, opts ...http.CallOption) (rsp *ProposeProblemEditRes, err error)
+	// RelatedContests 本题出现过的比赛（contest_problems 反查，全平台）
+	RelatedContests(ctx context.Context, req *RelatedContestsReq, opts ...http.CallOption) (rsp *RelatedContestsRes, err error)
 	// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(ctx context.Context, req *ResetAllReq, opts ...http.CallOption) (rsp *ResetAllRes, err error)
 	// ResetQueues 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
 	ResetQueues(ctx context.Context, req *ResetQueuesReq, opts ...http.CallOption) (rsp *ResetQueuesRes, err error)
 	// Resume 恢复 AI（兼容）
 	Resume(ctx context.Context, req *ResumeReq, opts ...http.CallOption) (rsp *ResumeRes, err error)
-	// RetryFailed 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+	// RetryFailed 重试错误队列：默认仅 FAILED；include_permanent=true 时含可恢复的 FAILED_PERM
 	RetryFailed(ctx context.Context, req *RetryFailedReq, opts ...http.CallOption) (rsp *RetryFailedRes, err error)
 	// ReviewEdit 站点管理员：通过/驳回申请
 	ReviewEdit(ctx context.Context, req *ReviewProblemEditReq, opts ...http.CallOption) (rsp *ReviewProblemEditRes, err error)
@@ -761,6 +786,20 @@ func (c *ProblemHTTPClientImpl) ProposeEdit(ctx context.Context, in *ProposeProb
 	return &out, nil
 }
 
+// RelatedContests 本题出现过的比赛（contest_problems 反查，全平台）
+func (c *ProblemHTTPClientImpl) RelatedContests(ctx context.Context, in *RelatedContestsReq, opts ...http.CallOption) (*RelatedContestsRes, error) {
+	var out RelatedContestsRes
+	pattern := "/v1/core/problem/related-contests"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProblemRelatedContests))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 func (c *ProblemHTTPClientImpl) ResetAll(ctx context.Context, in *ResetAllReq, opts ...http.CallOption) (*ResetAllRes, error) {
 	var out ResetAllRes
@@ -803,7 +842,7 @@ func (c *ProblemHTTPClientImpl) Resume(ctx context.Context, in *ResumeReq, opts 
 	return &out, nil
 }
 
-// RetryFailed 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+// RetryFailed 重试错误队列：默认仅 FAILED；include_permanent=true 时含可恢复的 FAILED_PERM
 func (c *ProblemHTTPClientImpl) RetryFailed(ctx context.Context, in *RetryFailedReq, opts ...http.CallOption) (*RetryFailedRes, error) {
 	var out RetryFailedRes
 	pattern := "/v1/core/problem/retry-failed"

@@ -26,6 +26,12 @@ type FetchedContent struct {
 // 六大 OJ（CodeForces / AtCoder / LuoGu / NowCoder / QOJ / LeetCode）均支持：
 // 提交识别入库 + 链接加题识别 + 题面爬取。
 func Fetch(platform, externalID, problemURL string) (*FetchedContent, error) {
+	return FetchWithFallbacks(platform, externalID, problemURL, nil)
+}
+
+// FetchWithFallbacks 同 Fetch；fallbackURLs 供 NowCoder 在题库页暂无权限时改走比赛页
+// （/acm/contest/{contestId}/{A}），成功后仍按 external_id=problemId 入库。
+func FetchWithFallbacks(platform, externalID, problemURL string, fallbackURLs []string) (*FetchedContent, error) {
 	switch platform {
 	case "CodeForces":
 		return fetchCodeforces(externalID, problemURL)
@@ -36,7 +42,7 @@ func Fetch(platform, externalID, problemURL string) (*FetchedContent, error) {
 	case "QOJ":
 		return fetchQOJ(externalID, problemURL)
 	case "NowCoder":
-		return fetchNowCoder(externalID, problemURL)
+		return fetchNowCoder(externalID, problemURL, fallbackURLs...)
 	case "LeetCode":
 		return fetchLeetCode(externalID, problemURL)
 	default:
@@ -297,6 +303,18 @@ func isNowCoderWAF(html string) bool {
 		strings.Contains(html, "aliyunCaptcha") ||
 		strings.Contains(html, "访问验证") ||
 		strings.Contains(html, "请进行验证")
+}
+
+// isNowCoderNoPermission 比赛/私有题：未登录或无权时返回的壳页（无 subject-question）
+// 例 title:「牛客网-没有查看题目的权限哦」——链接可能正确，只是暂时不可匿名读题面
+func isNowCoderNoPermission(html string) bool {
+	if html == "" {
+		return false
+	}
+	return strings.Contains(html, "没有查看题目的权限") ||
+		strings.Contains(html, "没有权限查看该题目") ||
+		strings.Contains(html, "无权查看该题目") ||
+		(strings.Contains(html, "暂无权限") && strings.Contains(html, "题目"))
 }
 
 func fetchCodeforces(externalID, problemURL string) (*FetchedContent, error) {
@@ -649,47 +667,148 @@ func parseLuoGuJSON(body []byte) (*FetchedContent, error) {
 	return &FetchedContent{Title: title, ContentMD: collapseBlankLines(desc)}, nil
 }
 
-func fetchNowCoder(externalID, problemURL string) (*FetchedContent, error) {
-	id := strings.TrimSpace(externalID)
-	if problemURL == "" {
-		if id == "" {
-			return nil, fmt.Errorf("NowCoder 缺少题面 URL 与 external_id")
-		}
-		// 主站：32 hex UUID → https://www.nowcoder.com/practice/{uuid}
-		if isNowCoderUUID(id) {
-			problemURL = "https://www.nowcoder.com/practice/" + strings.ToLower(strings.ReplaceAll(id, "-", ""))
-		} else {
-			// AC 站：数字题号 → ac.nowcoder.com/acm/problem/{id}
-			if !isAllDigits(id) {
-				if m := regexp.MustCompile(`^\d+`).FindString(id); m != "" {
-					id = m
-				}
-			}
-			if isAllDigits(id) {
-				problemURL = "https://ac.nowcoder.com/acm/problem/" + id
-			} else {
-				return nil, fmt.Errorf("NowCoder 无稳定题面 URL，跳过爬取")
-			}
-		}
+// NowCoderContestProblemURL 比赛内题面：https://ac.nowcoder.com/acm/contest/{contestId}/{A}
+// 刚结束比赛时题库 /acm/problem/{id} 常「没有查看题目的权限」，比赛页仍可读；
+// pageInfo.problemId 与题库 id 一致，入库 external_id 仍用数字 problemId。
+func NowCoderContestProblemURL(contestID, index string) string {
+	contestID = strings.TrimSpace(contestID)
+	index = strings.TrimSpace(index)
+	if contestID == "" || index == "" {
+		return ""
 	}
-	// 强制主站 UUID 走 /practice/{uuid}（避免错误 URL 导致 405）
+	return "https://ac.nowcoder.com/acm/contest/" + contestID + "/" + index
+}
+
+// NowCoderBankProblemURL 题库规范链接（长期可访问形态）
+func NowCoderBankProblemURL(problemID string) string {
+	problemID = strings.TrimSpace(problemID)
+	if problemID == "" || !isAllDigits(problemID) {
+		return ""
+	}
+	return "https://ac.nowcoder.com/acm/problem/" + problemID
+}
+
+var reNowCoderContestPath = regexp.MustCompile(`(?i)/acm/contest/(\d+)/([A-Za-z0-9]+)`)
+
+// IsNowCoderContestURL 是否比赛内题面路径 /acm/contest/{id}/{A}
+func IsNowCoderContestURL(raw string) bool {
+	return reNowCoderContestPath.MatchString(raw)
+}
+
+func isNowCoderContestURL(raw string) bool {
+	return IsNowCoderContestURL(raw)
+}
+
+func fetchNowCoder(externalID, problemURL string, fallbackURLs ...string) (*FetchedContent, error) {
+	id := strings.TrimSpace(externalID)
+	// 规范化 id / 主站 UUID
 	if isNowCoderUUID(id) || isNowCoderUUID(extractUUIDFromURL(problemURL)) {
 		uuid := id
 		if !isNowCoderUUID(uuid) {
 			uuid = extractUUIDFromURL(problemURL)
 		}
 		uuid = strings.ToLower(strings.ReplaceAll(uuid, "-", ""))
-		problemURL = "https://www.nowcoder.com/practice/" + uuid
+		return fetchNowCoderOne("https://www.nowcoder.com/practice/"+uuid, uuid)
+	}
+	if id != "" && !isAllDigits(id) {
+		if m := regexp.MustCompile(`^\d+`).FindString(id); m != "" {
+			id = m
+		}
 	}
 
+	// 候选 URL：题库页优先（稳定），比赛页作刚结束时的回退
+	var candidates []string
+	seen := map[string]struct{}{}
+	add := func(u string) {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			return
+		}
+		if _, ok := seen[u]; ok {
+			return
+		}
+		seen[u] = struct{}{}
+		candidates = append(candidates, u)
+	}
+
+	// 若调用方给的就是比赛页，先试比赛页（赛中/赛后立刻有题面）
+	if isNowCoderContestURL(problemURL) {
+		add(problemURL)
+	}
+	if bank := NowCoderBankProblemURL(id); bank != "" {
+		add(bank)
+	}
+	if problemURL != "" && !isNowCoderContestURL(problemURL) {
+		add(problemURL)
+	}
+	for _, u := range fallbackURLs {
+		add(u)
+	}
+	if len(candidates) == 0 {
+		if id == "" {
+			return nil, fmt.Errorf("NowCoder 缺少题面 URL 与 external_id")
+		}
+		return nil, fmt.Errorf("NowCoder 无稳定题面 URL，跳过爬取")
+	}
+
+	var lastErr error
+	for _, u := range candidates {
+		fc, err := fetchNowCoderOne(u, id)
+		if err == nil {
+			return fc, nil
+		}
+		lastErr = err
+		// 仅权限/DOM/空题面等可回退；WAF/网络错误也试下一个候选
+		if !nowcoderShouldTryNextURL(err) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("NowCoder 未找到题面 DOM，请稍后重试")
+}
+
+func nowcoderShouldTryNextURL(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "暂无访问权限") ||
+		strings.Contains(msg, "未找到题面") ||
+		strings.Contains(msg, "题面为空") ||
+		strings.Contains(msg, "需要登录") ||
+		strings.Contains(msg, "WAF") ||
+		strings.Contains(msg, "被拦截") ||
+		strings.Contains(msg, "请稍后重试") ||
+		strings.Contains(msg, "status ")
+}
+
+func fetchNowCoderOne(problemURL, expectProblemID string) (*FetchedContent, error) {
 	html, err := nowcoderFetchHTML(problemURL)
 	if err != nil {
 		return nil, err
+	}
+	// 比赛页 window.pageInfo.problemId 与题库 id 对齐时校验（防错题）
+	if isNowCoderContestURL(problemURL) && expectProblemID != "" && isAllDigits(expectProblemID) {
+		if pid := extractNowCoderPageInfoProblemID(html); pid != "" && pid != expectProblemID {
+			return nil, fmt.Errorf("NowCoder 比赛页 problemId=%s 与期望 %s 不一致，请稍后重试", pid, expectProblemID)
+		}
 	}
 	if isMainNowCoderURL(problemURL) {
 		return parseNowCoderMainHTML(html)
 	}
 	return parseNowCoderACHHTML(html)
+}
+
+// extractNowCoderPageInfoProblemID 从比赛题面页 window.pageInfo.problemId 提取
+func extractNowCoderPageInfoProblemID(html string) string {
+	// problemId: '319811' 或 problemId: "319811"
+	m := regexp.MustCompile(`(?i)problemId\s*:\s*['"](\d+)['"]`).FindStringSubmatch(html)
+	if m == nil {
+		return ""
+	}
+	return m[1]
 }
 
 func extractUUIDFromURL(raw string) string {
@@ -751,6 +870,10 @@ func nowcoderFetchHTML(problemURL string) (string, error) {
 	if isNowCoderWAF(html) {
 		return "", fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")
 	}
+	if isNowCoderNoPermission(html) {
+		// 链接通常正确（/acm/problem/{id}），只是比赛未公开 / 需登录 / 暂不可匿名访问
+		return "", fmt.Errorf("NowCoder 题面暂无访问权限，请稍后重试")
+	}
 	if strings.Contains(html, "请先登录") &&
 		!strings.Contains(html, "subject-question") &&
 		!strings.Contains(html, "输入描述") &&
@@ -761,7 +884,16 @@ func nowcoderFetchHTML(problemURL string) (string, error) {
 }
 
 func cleanNowCoderTitle(title string) string {
-	return cleanProblemTitle(title)
+	title = cleanProblemTitle(title)
+	// 比赛页 title：A-小红的字符串处理_牛客周赛 Round 153
+	for _, sep := range []string{"_牛客", "_NowCoder", "_nowcoder"} {
+		if i := strings.Index(title, sep); i > 0 {
+			title = strings.TrimSpace(title[:i])
+		}
+	}
+	// 去掉题号前缀 A- / G1-
+	title = regexp.MustCompile(`(?i)^[A-Z]\d*\s*[-–—]\s*`).ReplaceAllString(title, "")
+	return strings.TrimSpace(title)
 }
 
 // cleanProblemTitle 去掉 AtCoder 等页头夹带的 Editorial / 换行 / 多余空白
@@ -820,7 +952,14 @@ func parseNowCoderMainHTML(html string) (*FetchedContent, error) {
 		}
 	}
 	if root == nil {
-		return nil, fmt.Errorf("NowCoder 主站未找到题面 DOM")
+		if isNowCoderNoPermission(html) {
+			return nil, fmt.Errorf("NowCoder 题面暂无访问权限，请稍后重试")
+		}
+		if isNowCoderWAF(html) {
+			return nil, fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")
+		}
+		// 可能是 SPA 壳 / 短暂空页：走退避重试，勿立刻永久失败
+		return nil, fmt.Errorf("NowCoder 主站未找到题面 DOM，请稍后重试")
 	}
 
 	// 公式 img → $alt$
@@ -920,12 +1059,13 @@ func parseNowCoderMainHTML(html string) (*FetchedContent, error) {
 	md := collapseBlankLines(strings.TrimSpace(b.String()))
 	md = strings.ReplaceAll(md, "$$$", "$")
 	if len(md) < 8 {
-		return nil, fmt.Errorf("NowCoder 主站题面为空")
+		return nil, fmt.Errorf("NowCoder 主站题面为空，请稍后重试")
 	}
 	return &FetchedContent{Title: title, ContentMD: md}, nil
 }
 
 // parseNowCoderACHHTML AC 站 /acm/problem/{id}
+// 规范 URL：https://ac.nowcoder.com/acm/problem/{数字 external_id}
 func parseNowCoderACHHTML(html string) (*FetchedContent, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
@@ -943,7 +1083,14 @@ func parseNowCoderACHHTML(html string) (*FetchedContent, error) {
 		q = doc.Find(".question-content, .problem-content, .topic-sentence, #questionContent, .nc-post-content").First()
 	}
 	if q.Length() == 0 {
-		return nil, fmt.Errorf("NowCoder 未找到题面 DOM")
+		if isNowCoderNoPermission(html) {
+			return nil, fmt.Errorf("NowCoder 题面暂无访问权限，请稍后重试")
+		}
+		if isNowCoderWAF(html) {
+			return nil, fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")
+		}
+		// 无 DOM 多数是权限壳/WAF 漏检/短暂空页，勿当永久黑名单
+		return nil, fmt.Errorf("NowCoder 未找到题面 DOM，请稍后重试")
 	}
 
 	replaceNowCoderMath(q)
@@ -1004,7 +1151,7 @@ func parseNowCoderACHHTML(html string) (*FetchedContent, error) {
 	md := collapseBlankLines(strings.TrimSpace(b.String()))
 	md = strings.ReplaceAll(md, "$$$", "$")
 	if len(md) < 8 {
-		return nil, fmt.Errorf("NowCoder 题面为空")
+		return nil, fmt.Errorf("NowCoder 题面为空，请稍后重试")
 	}
 	return &FetchedContent{Title: title, ContentMD: md}, nil
 }

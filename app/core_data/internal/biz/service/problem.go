@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -296,6 +297,44 @@ func (uc *ProblemUseCase) enqueueAnalyzePrio(id uint, priority uint8) error {
 	})
 }
 
+// nowcoderContestFetchURLs 从 contest_problems 解析比赛页回退链接。
+// 例：external_id=319811 → https://ac.nowcoder.com/acm/contest/137561/A
+// 刚结束比赛时题库页无权限，比赛页 window.pageInfo.problemId 仍与题库 id 一致。
+func (uc *ProblemUseCase) nowcoderContestFetchURLs(externalID string, problemID uint) []string {
+	if uc == nil || uc.data == nil || uc.data.DB == nil {
+		return nil
+	}
+	externalID = strings.TrimSpace(externalID)
+	var rows []model.ContestProblem
+	q := uc.data.DB.Where("platform = ?", spider.NowCoder)
+	if externalID != "" {
+		q = q.Where("external_id = ?", externalID)
+	} else if problemID > 0 {
+		q = q.Where("problem_id = ?", problemID)
+	} else {
+		return nil
+	}
+	_ = q.Order("updated_at DESC").Limit(8).Find(&rows).Error
+	seen := map[string]struct{}{}
+	var out []string
+	for _, r := range rows {
+		u := strings.TrimSpace(r.URL)
+		if problem_fetch.IsNowCoderContestURL(u) {
+			if _, ok := seen[u]; !ok {
+				seen[u] = struct{}{}
+				out = append(out, u)
+			}
+		}
+		if cu := problem_fetch.NowCoderContestProblemURL(r.ContestID, r.Label); cu != "" {
+			if _, ok := seen[cu]; !ok {
+				seen[cu] = struct{}{}
+				out = append(out, cu)
+			}
+		}
+	}
+	return out
+}
+
 // ProcessFetch 仅爬取题面；成功后状态 TAGGING 并投递 AI 队列
 // Force=true 时忽略用户爬取资格；SkipAnalyze=true 时爬取成功后不入 AI。
 func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetchEvent) error {
@@ -366,7 +405,15 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if url == "" {
 		url = ev.URL
 	}
-	fetched, err := problem_fetch.Fetch(p.Platform, p.ExternalID, url)
+	// NowCoder：题库页赛后常无权限；用 contest_problems / 事件附带的比赛页回退
+	var fallbacks []string
+	if strings.EqualFold(strings.TrimSpace(p.Platform), spider.NowCoder) {
+		fallbacks = uc.nowcoderContestFetchURLs(p.ExternalID, p.ID)
+		if len(ev.FallbackURLs) > 0 {
+			fallbacks = append(ev.FallbackURLs, fallbacks...)
+		}
+	}
+	fetched, err := problem_fetch.FetchWithFallbacks(p.Platform, p.ExternalID, url, fallbacks)
 	if err != nil {
 		return uc.handleFetchError(&p, err)
 	}
@@ -383,7 +430,11 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		"fetch_attempts":   0,
 		"fetch_fail_since": nil,
 	}
-	if p.URL == "" && url != "" {
+	// 规范 URL：牛客数字题号始终写题库形态（即使从比赛页抓到）
+	if bank := problem_fetch.NowCoderBankProblemURL(p.ExternalID); bank != "" &&
+		strings.EqualFold(strings.TrimSpace(p.Platform), spider.NowCoder) {
+		updates["url"] = bank
+	} else if p.URL == "" && url != "" && !problem_fetch.IsNowCoderContestURL(url) {
 		updates["url"] = url
 	}
 	if err := uc.data.DB.Model(&p).Updates(updates).Error; err != nil {
@@ -433,14 +484,14 @@ func (uc *ProblemUseCase) ForceEnqueueFetch(problemID uint, actorUID uint) error
 	if p.Status == model.ProblemStatusCompleted || p.Status == model.ProblemStatusSkipped {
 		return nil
 	}
-	if p.Status == model.ProblemStatusFailedPerm {
-		return nil
-	}
-	// 若永久失败标记在 FAILED 上，仍允许用户主动再试一次：重置为 PENDING
-	if p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg) {
+	// 用户/管理员主动重试：允许从 FAILED_PERM / 硬永久 FAILED 重置
+	if p.Status == model.ProblemStatusFailedPerm ||
+		(p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg)) {
 		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
-			"status":    model.ProblemStatusPending,
-			"error_msg": "",
+			"status":           model.ProblemStatusPending,
+			"error_msg":        "",
+			"fetch_attempts":   0,
+			"fetch_fail_since": nil,
 		}).Error
 		p.Status = model.ProblemStatusPending
 	}
@@ -1042,26 +1093,61 @@ func (uc *ProblemUseCase) ResetQueues() (purgedFetch, purgedAnalyze, enqueuedFet
 	return
 }
 
-// RetryFailed 重试错误队列：仅重入 FAILED（可重试失败），排除 FAILED_PERM 黑名单
-// 会先把永久错误升级为 FAILED_PERM，并解除误标的 WAF/登录墙 FAILED_PERM
+// RetryFailed 重试错误队列。
+// includePermanent=false：仅 FAILED；并解除误标的 WAF/登录墙/DOM 类 FAILED_PERM
+// includePermanent=true：近 6 月 FAILED_PERM 中非硬永久错误也重置入队（管理员「重试永久失败」）
 // 仅近 6 月有提交 + 有流水线资格用户提交的题才会真正入队（避免公共域假入队后立刻 Ack）
-func (uc *ProblemUseCase) RetryFailed(limit int) (scanned, enqueued, blacklisted int64, err error) {
+func (uc *ProblemUseCase) RetryFailed(limit int, includePermanent bool) (scanned, enqueued, blacklisted int64, err error) {
 	pipelineControl.SetAnalyzePaused(false)
 	pipelineControl.SetFetchPaused(false)
 
-	// 解除误标：WAF/登录墙不应进黑名单（历史曾标 FAILED_PERM）
+	// 解除误标：WAF/登录墙/DOM/暂无权限 不应进黑名单（历史曾标 FAILED_PERM）
 	if res := uc.data.DB.Model(&model.Problem{}).
 		Where("status = ?", model.ProblemStatusFailedPerm).
-		Where("error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ?",
-			"%需要登录%", "%被拦截%", "%WAF%").
+		Where(
+			"error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ?",
+			"%需要登录%", "%被拦截%", "%WAF%",
+			"%未找到题面%", "%题面为空%", "%暂无访问权限%", "%请稍后重试%",
+		).
 		Updates(map[string]interface{}{
-			"status":    model.ProblemStatusFailed,
-			"error_msg": "retry: was false permanent (WAF/login)",
+			"status":           model.ProblemStatusFailed,
+			"error_msg":        "retry: was false permanent (WAF/login/DOM/permission)",
+			"fetch_attempts":   0,
+			"fetch_fail_since": nil,
 		}); res.Error == nil && res.RowsAffected > 0 {
-		log.Infof("RetryFailed: unblocked %d false FAILED_PERM (WAF/login)", res.RowsAffected)
+		log.Infof("RetryFailed: unblocked %d false FAILED_PERM (WAF/login/DOM)", res.RowsAffected)
 	}
 
-	// 先把已是永久错误文案的 FAILED 升为黑名单
+	// 管理员显式重试永久失败：把近 6 月非硬永久的 FAILED_PERM 全部降级为 FAILED
+	if includePermanent {
+		cutoff := time.Now().Add(-backfillWindow)
+		recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
+		var perms []model.Problem
+		_ = uc.data.DB.Where("status = ?", model.ProblemStatusFailedPerm).
+			Where(recentClause, recentArgs...).
+			Find(&perms).Error
+		var unblocked int64
+		for _, p := range perms {
+			// 硬永久（QOJ 403 / 付费题等）仍跳过
+			if isPermanentFetchError(p.ErrorMsg) || isQOJFailedForbidden(&p) {
+				continue
+			}
+			if err2 := uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
+				Updates(map[string]interface{}{
+					"status":           model.ProblemStatusFailed,
+					"error_msg":        "retry: admin requeue permanent",
+					"fetch_attempts":   0,
+					"fetch_fail_since": nil,
+				}).Error; err2 == nil {
+				unblocked++
+			}
+		}
+		if unblocked > 0 {
+			log.Infof("RetryFailed: admin unblocked %d FAILED_PERM for retry", unblocked)
+		}
+	}
+
+	// 先把已是硬永久错误文案的 FAILED 升为黑名单
 	blacklisted = uc.markExistingPermanentFailures()
 
 	// 近 6 月以 submit_logs 为准（与 Progress / ProcessAnalyze 一致）
@@ -1088,7 +1174,7 @@ func (uc *ProblemUseCase) RetryFailed(limit int) (scanned, enqueued, blacklisted
 			continue
 		}
 		seen[p.ID] = true
-		// 双保险：error_msg 已是永久错误 → 黑名单，不入队
+		// 双保险：error_msg 已是硬永久错误 → 黑名单，不入队
 		if isPermanentFetchError(p.ErrorMsg) {
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 				Update("status", model.ProblemStatusFailedPerm).Error
@@ -1114,8 +1200,10 @@ func (uc *ProblemUseCase) RetryFailed(limit int) (scanned, enqueued, blacklisted
 			}
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 				Updates(map[string]interface{}{
-					"status":    model.ProblemStatusTagging,
-					"error_msg": "",
+					"status":           model.ProblemStatusTagging,
+					"error_msg":        "",
+					"fetch_attempts":   0,
+					"fetch_fail_since": nil,
 				}).Error
 			if e := uc.enqueueAnalyze(p.ID); e == nil {
 				enqueued++
@@ -1126,15 +1214,18 @@ func (uc *ProblemUseCase) RetryFailed(limit int) (scanned, enqueued, blacklisted
 			}
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 				Updates(map[string]interface{}{
-					"status":    model.ProblemStatusPending,
-					"error_msg": "",
+					"status":           model.ProblemStatusPending,
+					"error_msg":        "",
+					"fetch_attempts":   0,
+					"fetch_fail_since": nil,
 				}).Error
 			if e := uc.enqueueFetch(p.ID, p.Platform, p.ExternalID, p.URL); e == nil {
 				enqueued++
 			}
 		}
 	}
-	log.Infof("RetryFailed: scanned=%d enqueued=%d blacklisted=%d", scanned, enqueued, blacklisted)
+	log.Infof("RetryFailed: includePermanent=%v scanned=%d enqueued=%d blacklisted=%d",
+		includePermanent, scanned, enqueued, blacklisted)
 	return
 }
 
@@ -1506,6 +1597,83 @@ func (uc *ProblemUseCase) listTagsDB(limit int) ([]TagCount, error) {
 
 func (uc *ProblemUseCase) Get(id uint) (*model.Problem, error) {
 	return uc.getProblemCached(id)
+}
+
+// ProblemRelatedContest 题目在站内出现过的比赛（全平台）
+type ProblemRelatedContest struct {
+	Platform      string
+	ContestID     string
+	Label         string
+	ContestName   string
+	ContestLogID  uint
+	ContestTime   int64
+	ProblemTitle  string
+	ContestURL    string
+}
+
+// ListRelatedContests 按 problem_id（及 external_id 兜底）反查 contest_problems，
+// 并尽量挂上 contest_logs 的名称/时间/站内详情 id。
+func (uc *ProblemUseCase) ListRelatedContests(problemID uint) ([]ProblemRelatedContest, error) {
+	if uc == nil || uc.data == nil || uc.data.DB == nil || problemID == 0 {
+		return nil, nil
+	}
+	var p model.Problem
+	if err := uc.data.DB.Select("id, platform, external_id").First(&p, problemID).Error; err != nil {
+		return nil, err
+	}
+	var cps []model.ContestProblem
+	q := uc.data.DB.Where("problem_id = ?", problemID)
+	if p.ExternalID != "" {
+		// 历史行可能只写了 external_id、problem_id=0
+		q = uc.data.DB.Where(
+			"problem_id = ? OR (platform = ? AND external_id = ?)",
+			problemID, p.Platform, p.ExternalID,
+		)
+	}
+	if err := q.Order("updated_at DESC").Limit(50).Find(&cps).Error; err != nil {
+		return nil, err
+	}
+	// 去重 platform+contest_id+label
+	type key struct{ plat, cid, label string }
+	seen := map[key]struct{}{}
+	out := make([]ProblemRelatedContest, 0, len(cps))
+	for _, cp := range cps {
+		k := key{cp.Platform, cp.ContestID, cp.Label}
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		item := ProblemRelatedContest{
+			Platform:     cp.Platform,
+			ContestID:    cp.ContestID,
+			Label:        cp.Label,
+			ProblemTitle: cp.Title,
+			ContestURL:   cp.URL,
+		}
+		// 任取一条 contest_logs 作为站内详情入口
+		var cl model.ContestLog
+		err := uc.data.DB.
+			Where("platform = ? AND contest_id = ?", cp.Platform, cp.ContestID).
+			Order("id ASC").
+			First(&cl).Error
+		if err == nil {
+			item.ContestLogID = cl.ID
+			item.ContestName = cl.ContestName
+			item.ContestURL = firstNonEmpty(cl.ContestUrl, item.ContestURL)
+			if !cl.Time.IsZero() {
+				item.ContestTime = cl.Time.Unix()
+			}
+		}
+		out = append(out, item)
+	}
+	// 时间新→旧
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].ContestTime != out[j].ContestTime {
+			return out[i].ContestTime > out[j].ContestTime
+		}
+		return out[i].ContestID > out[j].ContestID
+	})
+	return out, nil
 }
 
 func (uc *ProblemUseCase) ListSubmissions(problemID uint, userID, page, pageSize int64, followingIDs []int64, status string) ([]model.SubmitLog, int64, error) {
@@ -1964,11 +2132,19 @@ func transientBackoff(attempts int) time.Duration {
 	}
 }
 
-// isTransientFetchError 瞬时/风控类错误：退避重试，满 24h 才升 FAILED_PERM
+// isTransientFetchError 瞬时/风控/暂不可读类错误：退避重试，满 24h 才升 FAILED_PERM
+// 含：WAF、登录墙、牛客暂无权限、DOM 未找到（常为权限壳/空页误判）等
 func isTransientFetchError(msg string) bool {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
 		return false
+	}
+	// 历史误标永久失败的文案也当可退避（管理员重试 / 消费者再爬）
+	if strings.Contains(msg, "未找到题面") ||
+		strings.Contains(msg, "题面为空") ||
+		strings.Contains(msg, "暂无访问权限") ||
+		strings.Contains(msg, "没有查看题目的权限") {
+		return true
 	}
 	return strings.Contains(msg, "Cloudflare") ||
 		strings.Contains(msg, "请稍后重试") ||
@@ -1985,9 +2161,8 @@ func isTransientFetchError(msg string) bool {
 		strings.Contains(msg, "瞬时失败")
 }
 
-// isPermanentFetchError 不可恢复的爬取错误：不再重试、不再入队（软黑名单 FAILED_PERM）
-// 例如 CF/洛谷/牛客「未找到题面」、无 URL、不支持平台等
-// 注意：WAF/登录墙/Cloudflare/405 等拦截类一律可重试，不进黑名单
+// isPermanentFetchError 真正不可恢复：立刻 FAILED_PERM，不入退避窗口
+// 注意：未找到题面 DOM / 题面为空 / 暂无权限 一律走瞬时退避（满 24h 才永久）
 // 例外：QOJ 403 = 无权限（比赛/私有题），直接永久失效
 func isPermanentFetchError(msg string) bool {
 	msg = strings.TrimSpace(msg)
@@ -2001,9 +2176,8 @@ func isPermanentFetchError(msg string) bool {
 	if isTransientFetchError(msg) {
 		return false
 	}
+	// 仅硬错误立刻永久；DOM/空题面已归入瞬时
 	permanent := []string{
-		"未找到题面",
-		"未找到题面 DOM",
 		"无法解析 CF external_id",
 		"力扣付费题/无公开题面",
 		"LeetCode 缺少 titleSlug",
@@ -2013,8 +2187,9 @@ func isPermanentFetchError(msg string) bool {
 		"竞赛题无稳定题面 URL",
 		"AtCoder 缺少 URL",
 		"empty url",
-		"题面为空",
 		"JSON 无题面",
+		"NowCoder 无稳定题面 URL",
+		"NowCoder 缺少题面 URL",
 	}
 	for _, p := range permanent {
 		if strings.Contains(msg, p) {

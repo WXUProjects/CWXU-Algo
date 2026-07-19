@@ -347,7 +347,8 @@ func listNowCoderContestProblems(contestID string) ([]ContestProblemSpec, error)
 			Data []struct {
 				ProblemID   json.Number `json:"problemId"`
 				Index       string      `json:"index"`
-				ProblemName string      `json:"problemName"`
+				Title       string      `json:"title"`       // 实际字段
+				ProblemName string      `json:"problemName"` // 兼容旧字段
 			} `json:"data"`
 		} `json:"data"`
 		Msg string `json:"msg"`
@@ -368,9 +369,10 @@ func listNowCoderContestProblems(contestID string) ([]ContestProblemSpec, error)
 		specs = append(specs, ContestProblemSpec{
 			Label:      label,
 			ExternalID: pid,
-			Title:      firstNonEmpty(strings.TrimSpace(p.ProblemName), label),
-			URL:        "https://ac.nowcoder.com/acm/problem/" + pid,
-			Platform:   spider.NowCoder,
+			Title:      firstNonEmpty(firstNonEmpty(strings.TrimSpace(p.Title), strings.TrimSpace(p.ProblemName)), label),
+			// 题库规范链接；抓取时另用 /acm/contest/{id}/{index} 回退
+			URL:      "https://ac.nowcoder.com/acm/problem/" + pid,
+			Platform: spider.NowCoder,
 		})
 	}
 	if len(specs) == 0 {

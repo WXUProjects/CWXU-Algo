@@ -21,6 +21,8 @@ type ProblemFetchEvent struct {
 	Platform   string `json:"platform"`
 	ExternalID string `json:"external_id"`
 	URL        string `json:"url"`
+	// FallbackURLs 额外候选（如 NowCoder 比赛页 /acm/contest/{id}/{A}），题库页无权限时回退
+	FallbackURLs []string `json:"fallback_urls,omitempty"`
 	// Force 忽略用户题面爬取资格闸门（题单加题等主动场景）
 	Force bool `json:"force,omitempty"`
 	// SkipAnalyze 爬取成功后不入 AI 分析队列

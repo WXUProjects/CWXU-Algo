@@ -260,6 +260,34 @@ func (s *ProblemService) Get(ctx context.Context, req *problem.GetProblemReq) (*
 	}, nil
 }
 
+func (s *ProblemService) RelatedContests(ctx context.Context, req *problem.RelatedContestsReq) (*problem.RelatedContestsRes, error) {
+	if req == nil || req.ProblemId == 0 {
+		return &problem.RelatedContestsRes{Code: 1, Message: "缺少题目"}, nil
+	}
+	list, err := s.uc.ListRelatedContests(uint(req.ProblemId))
+	if err != nil {
+		return &problem.RelatedContestsRes{Code: 1, Message: "查询失败，请稍后重试"}, nil
+	}
+	data := make([]*problem.ProblemRelatedContest, 0, len(list))
+	for _, c := range list {
+		data = append(data, &problem.ProblemRelatedContest{
+			Platform:     c.Platform,
+			ContestId:    c.ContestID,
+			Label:        c.Label,
+			ContestName:  c.ContestName,
+			ContestLogId: uint32(c.ContestLogID),
+			ContestTime:  c.ContestTime,
+			ProblemTitle: c.ProblemTitle,
+			ContestUrl:   c.ContestURL,
+		})
+	}
+	return &problem.RelatedContestsRes{
+		Code:    0,
+		Message: "success",
+		Data:    data,
+	}, nil
+}
+
 func (s *ProblemService) ListSubmissions(ctx context.Context, req *problem.ListSubmissionsReq) (*problem.ListSubmissionsRes, error) {
 	var followingIDs []int64
 	if req.FollowingOnly {
@@ -627,22 +655,28 @@ func (s *ProblemService) RetryFailed(ctx context.Context, req *problem.RetryFail
 		return &problem.RetryFailedRes{Code: 1, Message: "已有任务在执行：" + running + "，请稍后再试"}, nil
 	}
 	limit := 0
+	includePermanent := false
 	if req != nil {
 		limit = int(req.Limit)
+		includePermanent = req.IncludePermanent
 	}
 	go func() {
 		defer s.uc.FinishAdminOp()
-		scanned, enqueued, blacklisted, err := s.uc.RetryFailed(limit)
+		scanned, enqueued, blacklisted, err := s.uc.RetryFailed(limit, includePermanent)
 		if err != nil {
 			log.Errorf("RetryFailed background failed: %v", err)
 			return
 		}
-		log.Infof("RetryFailed background done scanned=%d enqueued=%d blacklisted=%d",
-			scanned, enqueued, blacklisted)
+		log.Infof("RetryFailed background done includePermanent=%v scanned=%d enqueued=%d blacklisted=%d",
+			includePermanent, scanned, enqueued, blacklisted)
 	}()
+	msg := "已开始后台重试近 6 月失败题，请稍后刷新进度"
+	if includePermanent {
+		msg = "已开始后台重试近 6 月永久失败（可恢复项），请稍后刷新进度"
+	}
 	return &problem.RetryFailedRes{
 		Code:    0,
-		Message: "已开始后台重试近 6 月失败题，请稍后刷新进度",
+		Message: msg,
 	}, nil
 }
 

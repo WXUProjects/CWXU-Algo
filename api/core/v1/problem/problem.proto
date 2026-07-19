@@ -30,6 +30,12 @@ service Problem {
       get: "/v1/core/problem/get"
     };
   }
+  // 本题出现过的比赛（contest_problems 反查，全平台）
+  rpc RelatedContests (RelatedContestsReq) returns (RelatedContestsRes) {
+    option (google.api.http) = {
+      get: "/v1/core/problem/related-contests"
+    };
+  }
   rpc ListSubmissions (ListSubmissionsReq) returns (ListSubmissionsRes) {
     option (google.api.http) = {
       get: "/v1/core/problem/submissions"
@@ -78,7 +84,7 @@ service Problem {
       body: "*"
     };
   }
-  // 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+  // 重试错误队列：默认仅 FAILED；include_permanent=true 时含可恢复的 FAILED_PERM
   rpc RetryFailed (RetryFailedReq) returns (RetryFailedRes) {
     option (google.api.http) = {
       post: "/v1/core/problem/retry-failed"
@@ -252,6 +258,35 @@ message GetProblemRes {
   int64 code = 1;
   string message = 2;
   ProblemInfo data = 3;
+}
+
+// 题目关联的一场比赛（站内详情用 contest_log_id → /contest/{id}）
+message ProblemRelatedContest {
+  string platform = 1;
+  // OJ 侧比赛 id（如牛客 137561、CF 1791）
+  string contest_id = 2;
+  // 本场题号 A/B/C
+  string label = 3;
+  // 比赛名称（来自 contest_logs，可能为空）
+  string contest_name = 4;
+  // 站内 contest_logs 任一行 id，用于跳转详情
+  uint32 contest_log_id = 5;
+  // 比赛时间 unix 秒
+  int64 contest_time = 6;
+  // 本场内题目展示名（可选）
+  string problem_title = 7;
+  // 外链（contest_logs.contest_url，可选）
+  string contest_url = 8;
+}
+
+message RelatedContestsReq {
+  uint32 problem_id = 1;
+}
+
+message RelatedContestsRes {
+  int64 code = 1;
+  string message = 2;
+  repeated ProblemRelatedContest data = 3;
 }
 
 message SubmissionInfo {
@@ -440,6 +475,8 @@ message ResumeRes {
 message RetryFailedReq {
   // 最大重试条数，0 表示不限制
   int64 limit = 1;
+  // true：同时重试近 6 月 FAILED_PERM（非硬永久错误，如 DOM/WAF/暂无权限）
+  bool include_permanent = 2;
 }
 
 message RetryFailedRes {

@@ -767,6 +767,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.ProposeProblemEditRes'
+    /v1/core/problem/related-contests:
+        get:
+            tags:
+                - Problem
+            description: 本题出现过的比赛（contest_problems 反查，全平台）
+            operationId: Problem_RelatedContests
+            parameters:
+                - name: problemId
+                  in: query
+                  schema:
+                    type: integer
+                    format: uint32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.RelatedContestsRes'
     /v1/core/problem/reset-all:
         post:
             tags:
@@ -828,7 +847,7 @@ paths:
         post:
             tags:
                 - Problem
-            description: 重试错误队列：仅重入 FAILED（可重试），排除 FAILED_PERM 黑名单
+            description: 重试错误队列：默认仅 FAILED；include_permanent=true 时含可恢复的 FAILED_PERM
             operationId: Problem_RetryFailed
             requestBody:
                 content:
@@ -3031,6 +3050,34 @@ components:
                 userStatus:
                     type: string
                     description: '当前用户对该题状态: AC / TRIED / NONE（仅 list 且传 userId 时）'
+        api.core.v1.problem.ProblemRelatedContest:
+            type: object
+            properties:
+                platform:
+                    type: string
+                contestId:
+                    type: string
+                    description: OJ 侧比赛 id（如牛客 137561、CF 1791）
+                label:
+                    type: string
+                    description: 本场题号 A/B/C
+                contestName:
+                    type: string
+                    description: 比赛名称（来自 contest_logs，可能为空）
+                contestLogId:
+                    type: integer
+                    description: 站内 contest_logs 任一行 id，用于跳转详情
+                    format: uint32
+                contestTime:
+                    type: string
+                    description: 比赛时间 unix 秒
+                problemTitle:
+                    type: string
+                    description: 本场内题目展示名（可选）
+                contestUrl:
+                    type: string
+                    description: 外链（contest_logs.contest_url，可选）
+            description: 题目关联的一场比赛（站内详情用 contest_log_id → /contest/{id}）
         api.core.v1.problem.ProgressItem:
             type: object
             properties:
@@ -3119,6 +3166,17 @@ components:
                     type: string
                 concurrency:
                     type: string
+        api.core.v1.problem.RelatedContestsRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.ProblemRelatedContest'
         api.core.v1.problem.ResetAllReq:
             type: object
             properties:
@@ -3178,6 +3236,9 @@ components:
                 limit:
                     type: string
                     description: 最大重试条数，0 表示不限制
+                includePermanent:
+                    type: boolean
+                    description: true：同时重试近 6 月 FAILED_PERM（非硬永久错误，如 DOM/WAF/暂无权限）
         api.core.v1.problem.RetryFailedRes:
             type: object
             properties:
