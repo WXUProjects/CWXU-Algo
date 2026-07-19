@@ -100,6 +100,16 @@ func (uc *ProblemUseCase) EnsureContestProblemsOnce(platform, contestID string) 
 
 func (uc *ProblemUseCase) runContestEnsure(platform, contestID string) error {
 	specs, err := ListContestProblemSpecs(platform, contestID)
+	if err != nil || len(specs) == 0 {
+		// OJ 拉列表失败（CF 机房 400/Cloudflare 等）：用站内提交反推题目目录
+		// external_id 仍走 ParseProblemIdentity，与用户提交一致
+		if fromSub, subErr := uc.listContestProblemsFromSubmits(platform, contestID); subErr == nil && len(fromSub) > 0 {
+			log.Infof("contest ensure %s/%s: OJ list failed (%v), fallback submits n=%d",
+				platform, contestID, err, len(fromSub))
+			specs = fromSub
+			err = nil
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -159,6 +169,85 @@ func (uc *ProblemUseCase) runContestEnsure(platform, contestID string) error {
 			Update("total_count", n).Error
 	}
 	return nil
+}
+
+// listContestProblemsFromSubmits 从 submit_logs 反推比赛题目（OJ 列表不可用时兜底）。
+func (uc *ProblemUseCase) listContestProblemsFromSubmits(platform, contestID string) ([]ContestProblemSpec, error) {
+	if uc == nil || uc.data == nil || uc.data.DB == nil {
+		return nil, fmt.Errorf("no db")
+	}
+	platform = strings.TrimSpace(platform)
+	contestID = strings.TrimSpace(contestID)
+	if platform == "" || contestID == "" {
+		return nil, fmt.Errorf("empty")
+	}
+	// CF 提交 contest 字段为数字 id；problem 形如 "A-Title"
+	type row struct {
+		Contest string
+		Problem string
+	}
+	var rows []row
+	q := uc.data.DB.Model(&model.SubmitLog{}).
+		Select("DISTINCT contest, problem").
+		Where("platform = ?", platform).
+		Where("problem <> ''")
+	// contest 精确或 gym 前缀
+	if platform == "CodeForces" || platform == "Codeforces" {
+		q = q.Where("contest = ? OR contest = ? OR contest = ?", contestID, "-"+contestID, "gym"+contestID)
+	} else {
+		q = q.Where("contest = ?", contestID)
+	}
+	if err := q.Limit(80).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		// 部分平台 contest 为空，problem 自带 id：再试 contest 模糊
+		_ = uc.data.DB.Model(&model.SubmitLog{}).
+			Select("DISTINCT contest, problem").
+			Where("platform = ? AND (contest = ? OR contest LIKE ?)", platform, contestID, "%"+contestID+"%").
+			Where("problem <> ''").
+			Limit(80).Find(&rows).Error
+	}
+	seen := map[string]struct{}{}
+	var specs []ContestProblemSpec
+	for _, r := range rows {
+		parsed, err := ParseProblemIdentity(platform, r.Contest, r.Problem)
+		if err != nil || parsed == nil || parsed.ExternalID == "" {
+			continue
+		}
+		if _, ok := seen[parsed.ExternalID]; ok {
+			continue
+		}
+		seen[parsed.ExternalID] = struct{}{}
+		label := strings.TrimSpace(parsed.ExternalID)
+		// CF external 2247A → A；gym102861A → A
+		if platform == "CodeForces" || platform == "Codeforces" {
+			ext := parsed.ExternalID
+			if strings.HasPrefix(strings.ToLower(ext), "gym") {
+				ext = ext[3:]
+			}
+			for i := 0; i < len(ext); i++ {
+				if (ext[i] >= 'A' && ext[i] <= 'Z') || (ext[i] >= 'a' && ext[i] <= 'z') {
+					label = ext[i:]
+					break
+				}
+			}
+		}
+		specs = append(specs, ContestProblemSpec{
+			Label:      label,
+			ExternalID: parsed.ExternalID,
+			Title:      firstNonEmpty(parsed.Title, label),
+			URL:        parsed.URL,
+			Platform:   parsed.Platform,
+		})
+	}
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("no submits for contest")
+	}
+	sort.SliceStable(specs, func(i, j int) bool {
+		return labelSortKey(specs[i].Label) < labelSortKey(specs[j].Label)
+	})
+	return specs, nil
 }
 
 // UpsertProblemFromParsedNoAI 入库但不按 actor 强制 AI；题面强制爬取走 ForceEnqueueFetchContest。
