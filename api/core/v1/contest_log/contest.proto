@@ -43,7 +43,10 @@ message ContestLog {
   int32 rank = 7;               // 官方排名（0=未知/未出分）
   int32 total_count = 8;        // 总题数
   int32 ac_count = 9;           // 过题数（力扣为 score）
-  int64 time = 10;              // 比赛时间戳
+  int64 time = 10;              // 比赛时间戳（兼容：常为开赛或结算时刻）
+  int64 start_time = 11;        // 开赛 unix 秒（0=未知）
+  int64 end_time = 12;          // 结束 unix 秒（0=未知）
+  string user_name = 13;        // 参赛者展示名（列表「全部比赛」用）
 }
 
 // 获取竞赛列表请求

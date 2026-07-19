@@ -471,12 +471,13 @@ func listLeetCodeContestProblems(contestID string) ([]ContestProblemSpec, error)
 	if slug == "" || strings.HasPrefix(slug, "lc-") {
 		return nil, fmt.Errorf("leetcode: invalid contest slug %q", contestID)
 	}
+	// 注意：ContestQuestionNode 已无 translatedTitle 字段（带上会 400）
 	payload, _ := json.Marshal(map[string]interface{}{
 		"query": `query contest($titleSlug: String!) {
 			contest(titleSlug: $titleSlug) {
 				title
 				titleSlug
-				questions { title titleSlug questionId translatedTitle }
+				questions { title titleSlug questionId }
 			}
 		}`,
 		"variables": map[string]string{"titleSlug": slug},
@@ -506,9 +507,8 @@ func listLeetCodeContestProblems(contestID string) ([]ContestProblemSpec, error)
 		Data struct {
 			Contest *struct {
 				Questions []struct {
-					Title           string `json:"title"`
-					TranslatedTitle string `json:"translatedTitle"`
-					TitleSlug       string `json:"titleSlug"`
+					Title     string `json:"title"`
+					TitleSlug string `json:"titleSlug"`
 				} `json:"questions"`
 			} `json:"contest"`
 		} `json:"data"`
@@ -535,7 +535,7 @@ func listLeetCodeContestProblems(contestID string) ([]ContestProblemSpec, error)
 		if i >= 26 {
 			label = strconv.Itoa(i + 1)
 		}
-		title := firstNonEmpty(strings.TrimSpace(q.TranslatedTitle), strings.TrimSpace(q.Title))
+		title := strings.TrimSpace(q.Title)
 		if title == "" {
 			title = ts
 		}

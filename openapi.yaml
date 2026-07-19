@@ -2500,6 +2500,12 @@ components:
                     format: int32
                 time:
                     type: string
+                startTime:
+                    type: string
+                endTime:
+                    type: string
+                userName:
+                    type: string
             description: 竞赛日志消息体
         api.core.v1.contest_log.GetContestListRes:
             type: object

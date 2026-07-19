@@ -34,7 +34,10 @@ type ContestLog struct {
 	Rank          int32                  `protobuf:"varint,7,opt,name=rank,proto3" json:"rank,omitempty"`                                 // 官方排名（0=未知/未出分）
 	TotalCount    int32                  `protobuf:"varint,8,opt,name=total_count,json=totalCount,proto3" json:"total_count,omitempty"`   // 总题数
 	AcCount       int32                  `protobuf:"varint,9,opt,name=ac_count,json=acCount,proto3" json:"ac_count,omitempty"`            // 过题数（力扣为 score）
-	Time          int64                  `protobuf:"varint,10,opt,name=time,proto3" json:"time,omitempty"`                                // 比赛时间戳
+	Time          int64                  `protobuf:"varint,10,opt,name=time,proto3" json:"time,omitempty"`                                // 比赛时间戳（兼容：常为开赛或结算时刻）
+	StartTime     int64                  `protobuf:"varint,11,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`     // 开赛 unix 秒（0=未知）
+	EndTime       int64                  `protobuf:"varint,12,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`           // 结束 unix 秒（0=未知）
+	UserName      string                 `protobuf:"bytes,13,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`         // 参赛者展示名（列表「全部比赛」用）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -137,6 +140,27 @@ func (x *ContestLog) GetTime() int64 {
 		return x.Time
 	}
 	return 0
+}
+
+func (x *ContestLog) GetStartTime() int64 {
+	if x != nil {
+		return x.StartTime
+	}
+	return 0
+}
+
+func (x *ContestLog) GetEndTime() int64 {
+	if x != nil {
+		return x.EndTime
+	}
+	return 0
+}
+
+func (x *ContestLog) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
 }
 
 // 获取竞赛列表请求
@@ -683,7 +707,7 @@ var File_core_v1_contest_log_contest_proto protoreflect.FileDescriptor
 
 const file_core_v1_contest_log_contest_proto_rawDesc = "" +
 	"\n" +
-	"!core/v1/contest_log/contest.proto\x12\x17api.core.v1.contest_log\x1a\x1cgoogle/api/annotations.proto\"\x98\x02\n" +
+	"!core/v1/contest_log/contest.proto\x12\x17api.core.v1.contest_log\x1a\x1cgoogle/api/annotations.proto\"\xef\x02\n" +
 	"\n" +
 	"ContestLog\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1a\n" +
@@ -699,7 +723,11 @@ const file_core_v1_contest_log_contest_proto_rawDesc = "" +
 	"totalCount\x12\x19\n" +
 	"\bac_count\x18\t \x01(\x05R\aacCount\x12\x12\n" +
 	"\x04time\x18\n" +
-	" \x01(\x03R\x04time\"\xc6\x01\n" +
+	" \x01(\x03R\x04time\x12\x1d\n" +
+	"\n" +
+	"start_time\x18\v \x01(\x03R\tstartTime\x12\x19\n" +
+	"\bend_time\x18\f \x01(\x03R\aendTime\x12\x1b\n" +
+	"\tuser_name\x18\r \x01(\tR\buserName\"\xc6\x01\n" +
 	"\x11GetContestListReq\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x03R\x05limit\x12\x16\n" +

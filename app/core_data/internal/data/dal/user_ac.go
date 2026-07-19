@@ -129,19 +129,20 @@ type PlatformACCount struct {
 }
 
 // ListUserPlatformAC 按平台生涯过题数（力扣优先官方合成键，不 JOIN 题库）
+// 注意：GORM Raw 会把 SQL 里任意 `?`（含字符串字面量）当绑定占位符，禁止写 `'?'`。
 func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 	if db == nil || userID <= 0 {
 		return nil, nil
 	}
 	type nc struct {
-		Name  string
-		Count int64
+		Name  string `gorm:"column:name"`
+		Count int64  `gorm:"column:cnt"`
 	}
 	var rows []nc
 	// 非力扣：直接按 platform 聚合；力扣：有官方合成则只计 ac-*，否则计全部
 	err := db.Raw(`
-		SELECT name, count FROM (
-			SELECT COALESCE(NULLIF(btrim(platform), ''), '?') AS name, COUNT(*)::bigint AS count
+		SELECT name, cnt FROM (
+			SELECT COALESCE(NULLIF(btrim(platform), ''), 'unknown') AS name, COUNT(*)::bigint AS cnt
 			FROM user_ac_problems
 			WHERE user_id = ? AND platform IS DISTINCT FROM 'LeetCode'
 			GROUP BY 1
@@ -151,12 +152,12 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 					WHEN COUNT(*) FILTER (WHERE problem_key LIKE 'e:LeetCode:ac-%') > 0
 					THEN COUNT(*) FILTER (WHERE problem_key LIKE 'e:LeetCode:ac-%')
 					ELSE COUNT(*)
-				END::bigint AS count
+				END::bigint AS cnt
 			FROM user_ac_problems
 			WHERE user_id = ? AND platform = 'LeetCode'
 		) t
-		WHERE count > 0
-		ORDER BY count DESC
+		WHERE cnt > 0
+		ORDER BY cnt DESC
 	`, userID, userID).Scan(&rows).Error
 	if err != nil {
 		return nil, err

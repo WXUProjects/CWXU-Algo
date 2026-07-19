@@ -109,10 +109,7 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 		}
 	}
 
-	items := make([]*contest_log.ContestLog, 0, len(logs))
-	for _, v := range logs {
-		items = append(items, contestLogToProto(v))
-	}
+	items := c.contestLogsToProto(ctx, logs)
 
 	return &contest_log.GetContestListRes{
 		Code:    0,
@@ -123,6 +120,10 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 }
 
 func contestLogToProto(v model.ContestLog) *contest_log.ContestLog {
+	t := int64(0)
+	if !v.Time.IsZero() {
+		t = v.Time.Unix()
+	}
 	return &contest_log.ContestLog{
 		Id:          uint32(v.ID),
 		Platform:    v.Platform,
@@ -133,8 +134,38 @@ func contestLogToProto(v model.ContestLog) *contest_log.ContestLog {
 		Rank:        int32(v.Rank),
 		TotalCount:  int32(v.TotalCount),
 		AcCount:     int32(v.AcCount),
-		Time:        v.Time.Unix(),
+		Time:        t,
 	}
+}
+
+// contestLogsToProto 填起止时间 + 参赛者展示名（列表「全部比赛」需要知道是谁）
+func (c ContestLogService) contestLogsToProto(ctx context.Context, logs []model.ContestLog) []*contest_log.ContestLog {
+	items := make([]*contest_log.ContestLog, 0, len(logs))
+	if len(logs) == 0 {
+		return items
+	}
+	times := bizservice.BatchContestDisplayTimes(c.db, logs)
+	nameMap := map[int64]userInfo{}
+	if cli, err := userrpc.ProfileClient(c.reg); err == nil {
+		nameMap = c.fetchUserNames(ctx, cli, logs)
+	}
+	for _, v := range logs {
+		p := contestLogToProto(v)
+		key := v.Platform + "\x00" + v.ContestId
+		if se, ok := times[key]; ok {
+			p.StartTime = se[0]
+			p.EndTime = se[1]
+			// 兼容：time 优先展示开赛
+			if p.StartTime > 0 {
+				p.Time = p.StartTime
+			}
+		}
+		if u, ok := nameMap[v.UserID]; ok {
+			p.UserName = u.Name
+		}
+		items = append(items, p)
+	}
+	return items
 }
 
 func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_log.GetContestRankingReq) (*contest_log.GetContestRankingRes, error) {
@@ -142,6 +173,11 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 	_ = c.db.Where("id = ?", req.ContestId).First(&contest)
 
 	contestProto := contestLogToProto(contest)
+	if start, end, ok := bizservice.ResolveContestDisplayWindow(c.db, contest.Platform, contest.ContestId, contest.Time); ok {
+		contestProto.StartTime = start.Unix()
+		contestProto.EndTime = end.Unix()
+		contestProto.Time = contestProto.StartTime
+	}
 
 	// 复用进程内 user 长连接
 	var userClient profile.ProfileClient
@@ -299,7 +335,15 @@ type userInfo struct {
 	Name   string
 }
 
-// fetchUserNames 批量获取用户姓名和头像，一次 RPC 调用
+// displayNameFromProfile 组织昵称 → 用户名；绝不回落到「用户{id}」（那是内部编号，不是给人看的）
+func displayNameFromProfile(name, username string) string {
+	if s := strings.TrimSpace(name); s != "" {
+		return s
+	}
+	return strings.TrimSpace(username)
+}
+
+// fetchUserNames 批量获取用户展示名和头像，一次 RPC 调用
 func (c ContestLogService) fetchUserNames(ctx context.Context, client profile.ProfileClient, logs []model.ContestLog) map[int64]userInfo {
 	result := map[int64]userInfo{}
 	if client == nil || len(logs) == 0 {
@@ -328,7 +372,10 @@ func (c ContestLogService) fetchUserNames(ctx context.Context, client profile.Pr
 		return result
 	}
 	for _, p := range res.Profiles {
-		result[p.UserId] = userInfo{Name: p.Name, Avatar: p.Avatar}
+		result[p.UserId] = userInfo{
+			Name:   displayNameFromProfile(p.Name, p.Username),
+			Avatar: p.Avatar,
+		}
 	}
 	return result
 }
@@ -339,15 +386,10 @@ func (c ContestLogService) GetUserContestHistory(ctx context.Context, req *conte
 		return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
 	}
 
-	items := make([]*contest_log.ContestLog, 0, len(logs))
-	for _, v := range logs {
-		items = append(items, contestLogToProto(v))
-	}
-
 	return &contest_log.GetUserContestHistoryRes{
 		Code:    0,
 		Message: "OK",
-		Data:    items,
+		Data:    c.contestLogsToProto(ctx, logs),
 	}, nil
 }
 
@@ -390,6 +432,7 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 	}
 
 	// 先读目录；未完成则异步 ensure（避免 CF standings 阻塞 HTTP 网关）
+	// 状态如实返回：failed 不再伪装成 running，避免前端永久轮询。
 	list := []map[string]interface{}{}
 	ensureStatus := ""
 	ensureError := ""
@@ -400,8 +443,9 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 			ensureStatus = st
 			ensureError = errMsg
 		}
-		// done 且已有题：不再触发
-		needEnsure := ensureStatus != model.ContestEnsureDone || len(list) == 0
+		// 已有目录：不再触发；done 不再触发；running 由 Ensure 内部处理超时抢占
+		// failed：允许重试，但由 EnsureContestProblemsOnce 内部节流（ensured_at）
+		needEnsure := len(list) == 0 && ensureStatus != model.ContestEnsureDone
 		if needEnsure && ensureStatus != model.ContestEnsureRunning {
 			plat, cid := cl.Platform, cl.ContestId
 			go func() {
@@ -409,7 +453,8 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 					log.Warnf("ensure contest problems async %s/%s: %v", plat, cid, e)
 				}
 			}()
-			if ensureStatus == "" || ensureStatus == model.ContestEnsureFailed {
+			// 仅「从未 ensure」时对外显示 running；failed 保持 failed 让前端停轮询
+			if ensureStatus == "" {
 				ensureStatus = model.ContestEnsureRunning
 			}
 		}
@@ -419,7 +464,7 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 		"success": true,
 		"message": "ok",
 		"data": map[string]interface{}{
-			"contest": contestMap(cl),
+			"contest":      contestMapWithTimes(c.db, cl),
 			"ensureStatus": ensureStatus,
 			"ensureError":  ensureError,
 			"list":         list,
@@ -429,7 +474,11 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 }
 
 func contestMap(cl model.ContestLog) map[string]interface{} {
-	return map[string]interface{}{
+	t := int64(0)
+	if !cl.Time.IsZero() {
+		t = cl.Time.Unix()
+	}
+	m := map[string]interface{}{
 		"id":          cl.ID,
 		"platform":    cl.Platform,
 		"userId":      cl.UserID,
@@ -439,8 +488,21 @@ func contestMap(cl model.ContestLog) map[string]interface{} {
 		"rank":        cl.Rank,
 		"totalCount":  cl.TotalCount,
 		"acCount":     cl.AcCount,
-		"time":        cl.Time.Unix(),
+		"time":        t,
 	}
+	return m
+}
+
+// contestMapWithTimes 附带开赛/结束时间（日历优先）
+func contestMapWithTimes(db *gorm.DB, cl model.ContestLog) map[string]interface{} {
+	m := contestMap(cl)
+	start, end, ok := bizservice.ResolveContestDisplayWindow(db, cl.Platform, cl.ContestId, cl.Time)
+	if ok {
+		m["startTime"] = start.Unix()
+		m["endTime"] = end.Unix()
+		m["time"] = start.Unix()
+	}
+	return m
 }
 
 // handleContestBoard GET ?id=|contestId= contest_logs 行 id
@@ -633,21 +695,40 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 	}
 
 	type rowDraft struct {
-		log      model.ContestLog
-		solved   int
-		penalty  int
-		score    int
-		cellMaps []map[string]interface{}
+		log       model.ContestLog
+		solved    int
+		penalty   int
+		score     int
+		hasDetail bool
+		cellMaps  []map[string]interface{}
 	}
+	// 全场是否有任意逐题明细（无则前端只展示 AC 题数，不画空格子）
+	boardHasDetail := false
+	for _, cells := range cellsByUser {
+		for _, cell := range cells {
+			if cell.Status == model.ContestCellAC || cell.Status == model.ContestCellTried {
+				boardHasDetail = true
+				break
+			}
+		}
+		if boardHasDetail {
+			break
+		}
+	}
+
 	drafts := make([]rowDraft, 0, len(logs))
 	for _, l := range logs {
 		userCells := cellsByUser[l.UserID]
 		byLabel := map[string]model.ContestUserProblem{}
 		byExt := map[string]model.ContestUserProblem{}
+		rowHasDetail := false
 		for _, cell := range userCells {
 			byExt[cell.ExternalID] = cell
 			if cell.Label != "" {
 				byLabel[cell.Label] = cell
+			}
+			if cell.Status == model.ContestCellAC || cell.Status == model.ContestCellTried {
+				rowHasDetail = true
 			}
 		}
 		cellMaps := make([]map[string]interface{}, 0, len(problems))
@@ -657,65 +738,72 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		if scoring == "leetcode" {
 			score = l.AcCount // 力扣 ac_count 存 score
 		}
-		// 无题目录时用格子本身
-		if len(problems) == 0 {
-			for _, cell := range userCells {
-				cm := cellToMap(cell)
-				cellMaps = append(cellMaps, cm)
-				if cell.Status == model.ContestCellAC {
-					solved++
-					if scoring == "icpc" {
-						if cell.RelativeSec != nil {
-							penalty += *cell.RelativeSec + cell.Attempts*penaltyPerWrong
+		// 有逐题明细时才铺格子；否则只靠场级 AC
+		if boardHasDetail && rowHasDetail {
+			if len(problems) == 0 {
+				for _, cell := range userCells {
+					cm := cellToMap(cell)
+					cellMaps = append(cellMaps, cm)
+					if cell.Status == model.ContestCellAC {
+						solved++
+						if scoring == "icpc" {
+							if cell.RelativeSec != nil {
+								penalty += *cell.RelativeSec + cell.Attempts*penaltyPerWrong
+							} else {
+								penalty += cell.Attempts * penaltyPerWrong
+							}
+						}
+					}
+				}
+			} else {
+				for _, p := range problems {
+					label, _ := p["label"].(string)
+					ext, _ := p["externalId"].(string)
+					if ext == "" {
+						ext, _ = p["external_id"].(string)
+					}
+					cell, ok := byExt[ext]
+					if !ok {
+						cell, ok = byLabel[label]
+					}
+					if !ok {
+						cellMaps = append(cellMaps, map[string]interface{}{
+							"label":    label,
+							"status":   model.ContestCellNone,
+							"attempts": 0,
+						})
+						continue
+					}
+					cm := cellToMap(cell)
+					if cm["label"] == "" {
+						cm["label"] = label
+					}
+					cellMaps = append(cellMaps, cm)
+					if cell.Status == model.ContestCellAC {
+						solved++
+						if scoring == "icpc" {
+							if cell.RelativeSec != nil {
+								penalty += *cell.RelativeSec + cell.Attempts*penaltyPerWrong
+							} else {
+								penalty += cell.Attempts * penaltyPerWrong
+							}
 						} else {
-							penalty += cell.Attempts * penaltyPerWrong
+							score += cell.ScoreDelta
 						}
 					}
 				}
 			}
-		} else {
-			for _, p := range problems {
-				label, _ := p["label"].(string)
-				ext, _ := p["externalId"].(string)
-				if ext == "" {
-					ext, _ = p["external_id"].(string)
-				}
-				cell, ok := byExt[ext]
-				if !ok {
-					cell, ok = byLabel[label]
-				}
-				if !ok {
-					cellMaps = append(cellMaps, map[string]interface{}{
-						"label":    label,
-						"status":   model.ContestCellNone,
-						"attempts": 0,
-					})
-					continue
-				}
-				cm := cellToMap(cell)
-				if cm["label"] == "" {
-					cm["label"] = label
-				}
-				cellMaps = append(cellMaps, cm)
-				if cell.Status == model.ContestCellAC {
-					solved++
-					if scoring == "icpc" {
-						if cell.RelativeSec != nil {
-							penalty += *cell.RelativeSec + cell.Attempts*penaltyPerWrong
-						} else {
-							penalty += cell.Attempts * penaltyPerWrong
-						}
-					} else {
-						score += cell.ScoreDelta
-					}
-				}
+		}
+		// 无格子 / 无明细时用场级 ac_count
+		if solved == 0 && l.AcCount > 0 {
+			if scoring == "icpc" {
+				solved = l.AcCount
 			}
 		}
-		// 无格子时用场级 ac_count
-		if solved == 0 && l.AcCount > 0 && scoring == "icpc" {
-			solved = l.AcCount
-		}
-		drafts = append(drafts, rowDraft{log: l, solved: solved, penalty: penalty, score: score, cellMaps: cellMaps})
+		drafts = append(drafts, rowDraft{
+			log: l, solved: solved, penalty: penalty, score: score,
+			hasDetail: rowHasDetail, cellMaps: cellMaps,
+		})
 	}
 
 	if allZero && scoring == "icpc" {
@@ -738,6 +826,11 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		if rankLocal <= 0 {
 			rankLocal = i + 1
 		}
+		// 无明细时不铺空格子，避免「AC 了 6 题但格子全空」的错觉
+		cells := d.cellMaps
+		if !boardHasDetail || !d.hasDetail {
+			cells = []map[string]interface{}{}
+		}
 		row := map[string]interface{}{
 			"userId":       d.log.UserID,
 			"name":         u.Name,
@@ -748,36 +841,40 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 			"penaltySec":   d.penalty,
 			"score":        d.score,
 			"acCount":      d.log.AcCount,
-			"cells":        d.cellMaps,
+			"hasDetail":    d.hasDetail,
+			"cells":        cells,
 		}
 		rows = append(rows, row)
 	}
 
-	// problems 规范化
+	// problems 规范化；全场无明细时不返回题列（前端只显示 AC 题数）
 	probOut := make([]map[string]interface{}, 0, len(problems))
-	for _, p := range problems {
-		label, _ := p["label"].(string)
-		ext, _ := p["externalId"].(string)
-		if ext == "" {
-			ext, _ = p["external_id"].(string)
+	if boardHasDetail {
+		for _, p := range problems {
+			label, _ := p["label"].(string)
+			ext, _ := p["externalId"].(string)
+			if ext == "" {
+				ext, _ = p["external_id"].(string)
+			}
+			title, _ := p["title"].(string)
+			probOut = append(probOut, map[string]interface{}{
+				"label":      label,
+				"externalId": ext,
+				"title":      title,
+			})
 		}
-		title, _ := p["title"].(string)
-		probOut = append(probOut, map[string]interface{}{
-			"label":      label,
-			"externalId": ext,
-			"title":      title,
-		})
 	}
 
 	resp := map[string]interface{}{
 		"success": true,
 		"message": "ok",
 		"data": map[string]interface{}{
-			"contest":  contestMap(seed),
-			"scoring":  scoring,
-			"problems": probOut,
-			"rows":     rows,
-			"total":    len(rows),
+			"contest":       contestMapWithTimes(c.db, seed),
+			"scoring":       scoring,
+			"hasCellDetail": boardHasDetail,
+			"problems":      probOut,
+			"rows":          rows,
+			"total":         len(rows),
 		},
 	}
 	// 有格子或无人参赛时缓存 90s；空格子 Infer 中则 15s，避免长期空缓存

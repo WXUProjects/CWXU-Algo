@@ -50,7 +50,11 @@ func (s *ProblemService) fetchUserNames(ctx context.Context, userIDs []int64) ma
 		return out
 	}
 	for _, p := range res.Profiles {
-		out[p.UserId] = p.Name
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			name = strings.TrimSpace(p.Username)
+		}
+		out[p.UserId] = name
 	}
 	return out
 }

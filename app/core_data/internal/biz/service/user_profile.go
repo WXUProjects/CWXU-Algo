@@ -15,8 +15,8 @@ import (
 
 // 画像缓存：ver 精确失效 + latest 兜底（爬虫后仍可读旧画像，同时 MQ 刷新）
 const (
-	// s2：平台过题 / TotalAC 力扣改走官方 acTotal 合成键（不再 JOIN 题库漏计）
-	userProfileCacheSchema = "2"
+	// s3：ListUserPlatformAC 修复 GORM 占位符误替换导致 platforms 恒空
+	userProfileCacheSchema = "3"
 	userProfileLatestTTL   = 30 * 24 * time.Hour
 	userProfileVerTTL      = 7 * 24 * time.Hour
 )

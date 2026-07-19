@@ -29,16 +29,43 @@ func (uc *ProblemUseCase) EnsureContestProblemsOnce(platform, contestID string) 
 		return "", fmt.Errorf("empty platform/contestId")
 	}
 
-	// 已 done / 正在 running：直接返回（每场成功只跑一次，不因多用户重复打 OJ）
-	// failed 允许再试一次（网络/OJ 抖动）；用 CAS 从 failed→running 抢占
+	// 已 done：直接返回（每场成功只跑一次，不因多用户重复打 OJ）
+	// running 超过 5 分钟视为僵尸，允许抢占
+	// failed：距上次完成不足 10 分钟则节流，避免前端/爬虫打爆 OJ
+	const (
+		ensureRunningTimeout = 5 * time.Minute
+		ensureFailedCooldown     = 10 * time.Minute
+	)
 	var existing model.ContestProblemEnsure
 	err = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).First(&existing).Error
 	claimed := false
 	if err == nil {
-		if existing.Status == model.ContestEnsureDone || existing.Status == model.ContestEnsureRunning {
+		if existing.Status == model.ContestEnsureDone {
 			return existing.Status, nil
 		}
-		if existing.Status == model.ContestEnsureFailed {
+		if existing.Status == model.ContestEnsureRunning {
+			// 僵尸 running：updated_at 过久才允许抢占
+			if time.Since(existing.UpdatedAt) < ensureRunningTimeout {
+				return existing.Status, nil
+			}
+			res := uc.data.DB.Model(&model.ContestProblemEnsure{}).
+				Where("id = ? AND status = ? AND updated_at < ?", existing.ID, model.ContestEnsureRunning, time.Now().Add(-ensureRunningTimeout)).
+				Updates(map[string]interface{}{
+					"status":    model.ContestEnsureRunning,
+					"error_msg": "",
+					"updated_at": time.Now(),
+				})
+			if res.Error != nil {
+				return "", res.Error
+			}
+			if res.RowsAffected == 0 {
+				return model.ContestEnsureRunning, nil
+			}
+			claimed = true
+		} else if existing.Status == model.ContestEnsureFailed {
+			if existing.EnsuredAt != nil && time.Since(*existing.EnsuredAt) < ensureFailedCooldown {
+				return existing.Status, nil
+			}
 			res := uc.data.DB.Model(&model.ContestProblemEnsure{}).
 				Where("id = ? AND status = ?", existing.ID, model.ContestEnsureFailed).
 				Updates(map[string]interface{}{

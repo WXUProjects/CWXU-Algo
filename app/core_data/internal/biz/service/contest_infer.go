@@ -28,27 +28,68 @@ const (
 	contestInferSubmitLimit = 8000
 )
 
-// ResolveContestWindow 解析比赛时间窗 [start, end]（含缓冲前的 end）。
+// lookupContestCalendar 按 platform+external_id（及模糊）查赛程日历。
+func lookupContestCalendar(db *gorm.DB, platform, contestID string) (model.ContestCalendar, bool) {
+	var cal model.ContestCalendar
+	if db == nil || contestID == "" {
+		return cal, false
+	}
+	platform = strings.TrimSpace(platform)
+	contestID = strings.TrimSpace(contestID)
+	err := db.Where("platform = ? AND external_id = ?", platform, contestID).First(&cal).Error
+	if err != nil {
+		_ = db.Where("platform = ? AND (external_id LIKE ? OR url LIKE ?)",
+			platform, "%"+contestID+"%", "%"+contestID+"%").
+			Order("start_time DESC").First(&cal).Error
+	}
+	if cal.ID > 0 && cal.StartTime > 0 {
+		return cal, true
+	}
+	return cal, false
+}
+
+// ResolveContestDisplayWindow 给人看的起止时间（无赛后缓冲）。
+// 优先日历；否则用 hint + 平台默认赛长估算（hint 当作开赛）。
+// 返回的 ok 表示至少有可信开赛时间。
+func ResolveContestDisplayWindow(db *gorm.DB, platform, contestID string, hintTime time.Time) (start, end time.Time, ok bool) {
+	platform = strings.TrimSpace(platform)
+	contestID = strings.TrimSpace(contestID)
+	if cal, found := lookupContestCalendar(db, platform, contestID); found {
+		start = time.Unix(cal.StartTime, 0)
+		if cal.EndTime > cal.StartTime {
+			end = time.Unix(cal.EndTime, 0)
+		}
+	}
+	if start.IsZero() && !hintTime.IsZero() {
+		start = hintTime
+	}
+	dur := defaultContestDuration[platform]
+	if dur <= 0 {
+		dur = 5 * time.Hour
+	}
+	if end.IsZero() && !start.IsZero() {
+		end = start.Add(dur)
+	}
+	if start.IsZero() {
+		return time.Time{}, time.Time{}, false
+	}
+	if !end.After(start) {
+		end = start.Add(dur)
+	}
+	return start, end, true
+}
+
+// ResolveContestWindow 解析比赛时间窗 [start, end]（end 含赛后缓冲，供 Infer 扫提交）。
 // hintTime：contest_logs.time 等提示；零值则仅靠日历/默认。
 func ResolveContestWindow(db *gorm.DB, platform, contestID string, hintTime time.Time) (start, end time.Time) {
 	platform = strings.TrimSpace(platform)
 	contestID = strings.TrimSpace(contestID)
 
 	// 1) 日历
-	if db != nil && contestID != "" {
-		var cal model.ContestCalendar
-		err := db.Where("platform = ? AND external_id = ?", platform, contestID).First(&cal).Error
-		if err != nil {
-			// URL / 名称模糊：external_id 可能带前缀
-			_ = db.Where("platform = ? AND (external_id LIKE ? OR url LIKE ?)",
-				platform, "%"+contestID+"%", "%"+contestID+"%").
-				Order("start_time DESC").First(&cal).Error
-		}
-		if cal.ID > 0 && cal.StartTime > 0 {
-			start = time.Unix(cal.StartTime, 0)
-			if cal.EndTime > cal.StartTime {
-				end = time.Unix(cal.EndTime, 0)
-			}
+	if cal, found := lookupContestCalendar(db, platform, contestID); found {
+		start = time.Unix(cal.StartTime, 0)
+		if cal.EndTime > cal.StartTime {
+			end = time.Unix(cal.EndTime, 0)
 		}
 	}
 
@@ -83,6 +124,58 @@ func ResolveContestWindow(db *gorm.DB, platform, contestID string, hintTime time
 	// 缓冲
 	end = end.Add(contestInferEndBuffer)
 	return start, end
+}
+
+// BatchContestDisplayTimes 批量解析 (platform, contestId) → (start, end) unix。
+// 先一次查出相关日历行，缺的再按默认赛长用 hint 估算。
+func BatchContestDisplayTimes(db *gorm.DB, logs []model.ContestLog) map[string][2]int64 {
+	out := map[string][2]int64{}
+	if len(logs) == 0 {
+		return out
+	}
+	type key struct{ p, c string }
+	need := map[key]time.Time{}
+	for _, l := range logs {
+		k := key{p: l.Platform, c: l.ContestId}
+		if _, ok := need[k]; !ok {
+			need[k] = l.Time
+		}
+	}
+	// 日历批量：按平台分组查
+	byPlat := map[string][]string{}
+	for k := range need {
+		byPlat[k.p] = append(byPlat[k.p], k.c)
+	}
+	calMap := map[key]model.ContestCalendar{}
+	if db != nil {
+		for plat, ids := range byPlat {
+			var cals []model.ContestCalendar
+			_ = db.Where("platform = ? AND external_id IN ?", plat, ids).Find(&cals).Error
+			for _, cal := range cals {
+				calMap[key{p: cal.Platform, c: cal.ExternalID}] = cal
+			}
+		}
+	}
+	for k, hint := range need {
+		mapKey := k.p + "\x00" + k.c
+		if cal, ok := calMap[k]; ok && cal.StartTime > 0 {
+			end := cal.EndTime
+			if end <= cal.StartTime {
+				dur := defaultContestDuration[k.p]
+				if dur <= 0 {
+					dur = 5 * time.Hour
+				}
+				end = cal.StartTime + int64(dur.Seconds())
+			}
+			out[mapKey] = [2]int64{cal.StartTime, end}
+			continue
+		}
+		start, end, ok := ResolveContestDisplayWindow(db, k.p, k.c, hint)
+		if ok {
+			out[mapKey] = [2]int64{start.Unix(), end.Unix()}
+		}
+	}
+	return out
 }
 
 // loadContestProblemSet 本场 external_id → label

@@ -13,6 +13,7 @@ import (
 	"cwxu-algo/app/core_data/internal/userrpc"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/errors"
@@ -259,10 +260,11 @@ func (s SubmitLogService) fetchUserNames(ctx context.Context, logs []*submit_log
 		return result
 	}
 	for _, p := range res.Profiles {
-		name := p.Name
+		name := strings.TrimSpace(p.Name)
 		if name == "" {
-			name = fmt.Sprintf("用户%d", p.UserId)
+			name = strings.TrimSpace(p.Username)
 		}
+		// 仍无展示名时留空，由前端用中性文案，不把内部 userId 当名字
 		result[p.UserId] = name
 	}
 	return result
