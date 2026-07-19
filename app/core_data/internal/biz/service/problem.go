@@ -2046,7 +2046,9 @@ func truncateErr(s string) string {
 	return s
 }
 
-// handleFetchError 爬取失败：瞬时错误退避重试，持续超 24h 或非瞬时满 3 次 → FAILED_PERM
+// handleFetchError 爬取失败：瞬时错误退避重试，持续超 24h 或非瞬时满 3 次 → FAILED_PERM。
+// 禁止在 worker 内长 Sleep：4 并发被 2～10 分钟 sleep 占满会导致整条「获取题面中」假死。
+// 瞬时失败：写 FAILED 后 return nil（Ack 释放 worker），后台 goroutine 到点再入队。
 func (uc *ProblemUseCase) handleFetchError(p *model.Problem, err error) error {
 	msg := truncateErr(err.Error())
 	attempts := p.FetchAttempts + 1
@@ -2086,16 +2088,16 @@ func (uc *ProblemUseCase) handleFetchError(p *model.Problem, err error) error {
 			_ = uc.data.DB.Model(p).Updates(updates).Error
 			return nil
 		}
-		// 退避等待后再让消费者 requeue，避免 405 热循环
 		wait := transientBackoff(attempts)
 		msg = fmt.Sprintf("瞬时失败(退避%v, 自%s起可重试至24h): %s",
 			wait.Round(time.Second), failSince.Format("01-02 15:04"), msg)
 		updates["status"] = st
 		updates["error_msg"] = truncateErr(msg)
 		_ = uc.data.DB.Model(p).Updates(updates).Error
-		log.Warnf("problem %d fetch transient, sleep %v: %s", p.ID, wait, msg)
-		time.Sleep(wait)
-		return err
+		log.Warnf("problem %d fetch transient, schedule requeue after %v: %s", p.ID, wait, msg)
+		// 异步延迟再入队，不占消费并发
+		uc.scheduleFetchRetry(p.ID, p.Platform, p.ExternalID, p.URL, wait)
+		return nil
 	}
 
 	// 普通可恢复错误：满 3 次 → 永久
@@ -2110,7 +2112,51 @@ func (uc *ProblemUseCase) handleFetchError(p *model.Problem, err error) error {
 	}
 	updates["status"] = st
 	_ = uc.data.DB.Model(p).Updates(updates).Error
-	return err
+	// 短退避后异步重入，避免立刻热循环占满 MQ
+	uc.scheduleFetchRetry(p.ID, p.Platform, p.ExternalID, p.URL, 5*time.Second)
+	return nil
+}
+
+// scheduleFetchRetry 延迟后重新入队题面爬取（仅当仍无题面且状态可爬）。
+func (uc *ProblemUseCase) scheduleFetchRetry(id uint, platform, externalID, problemURL string, wait time.Duration) {
+	if uc == nil || id == 0 {
+		return
+	}
+	if wait < 0 {
+		wait = 0
+	}
+	// 封顶，防止异常 wait 占死 goroutine 太久
+	if wait > 15*time.Minute {
+		wait = 15 * time.Minute
+	}
+	go func() {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		<-timer.C
+		if pipelineControl.IsFetchPaused() {
+			return
+		}
+		var cur model.Problem
+		if err := uc.data.DB.Select("id, status, content_md, platform, external_id, url").
+			First(&cur, id).Error; err != nil {
+			return
+		}
+		if strings.TrimSpace(cur.ContentMD) != "" {
+			return
+		}
+		switch cur.Status {
+		case model.ProblemStatusFailed, model.ProblemStatusPending, model.ProblemStatusFetching:
+			// ok
+		default:
+			return
+		}
+		plat := firstNonEmpty(platform, cur.Platform)
+		ext := firstNonEmpty(externalID, cur.ExternalID)
+		u := firstNonEmpty(problemURL, cur.URL)
+		if e := uc.enqueueFetchPrio(id, plat, ext, u, mqPriorityIncremental); e != nil {
+			log.Warnf("scheduleFetchRetry enqueue id=%d: %v", id, e)
+		}
+	}()
 }
 
 // transientBackoff 405/WAF 退避：30s → 1m → 2m → 5m → 10m（封顶）
