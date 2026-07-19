@@ -294,6 +294,40 @@ func (uc *SpiderUseCase) fetchAndSaveContest(userId int64, plat model.Platform, 
 			n++
 		}
 	}
+	// 后补比赛记录：异步 ensure 题目录 + 对无题面强制再爬（牛客走比赛路径）
+	// 解决「先爬提交→题面失败/永久失败，后才有比赛记录」
+	if uc.problem != nil {
+		seen := map[string]struct{}{}
+		capN := 12
+		if needAll {
+			capN = 25
+		}
+		n := 0
+		for _, cl := range tmp {
+			if n >= capN {
+				break
+			}
+			cid := strings.TrimSpace(cl.ContestId)
+			if cid == "" {
+				continue
+			}
+			if _, ok := seen[cid]; ok {
+				continue
+			}
+			seen[cid] = struct{}{}
+			n++
+			pName, cID := plat.Platform, cid
+			go func() {
+				if _, e := uc.problem.EnsureContestProblemsOnce(pName, cID); e != nil {
+					log.Warnf("Spider: ensure contest after log %s/%s: %v", pName, cID, e)
+				}
+				// EnsureOnce 内部对 done 也会 RequeueMissing；此处再兜一层
+				if m := uc.problem.RequeueMissingContestProblemFetches(pName, cID); m > 0 {
+					log.Infof("Spider: requeue missing problem content %s/%s n=%d", pName, cID, m)
+				}
+			}()
+		}
+	}
 	return true, nil
 }
 

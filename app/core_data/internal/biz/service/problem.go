@@ -242,11 +242,36 @@ func (uc *ProblemUseCase) enqueueFetchPrio(id uint, platform, externalID, url st
 	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
 	}
+	// 牛客：附带比赛页候选；有比赛映射时 Force，以便 FAILED_PERM 也能再爬
+	force := false
+	var fallbacks []string
+	primary := url
+	if strings.EqualFold(strings.TrimSpace(platform), spider.NowCoder) {
+		fallbacks = uc.nowcoderContestFetchURLs(externalID, id)
+		if len(fallbacks) > 0 {
+			force = true
+			// 优先比赛页作主 URL
+			if problem_fetch.IsNowCoderContestURL(fallbacks[0]) {
+				primary = fallbacks[0]
+				rest := fallbacks[1:]
+				if bank := problem_fetch.NowCoderBankProblemURL(externalID); bank != "" {
+					fallbacks = append([]string{bank}, rest...)
+				} else {
+					fallbacks = rest
+				}
+				if url != "" && url != primary && !problem_fetch.IsNowCoderContestURL(url) {
+					fallbacks = append(fallbacks, url)
+				}
+			}
+		}
+	}
 	body, _ := json.Marshal(event.ProblemFetchEvent{
-		ProblemID:  id,
-		Platform:   platform,
-		ExternalID: externalID,
-		URL:        url,
+		ProblemID:    id,
+		Platform:     platform,
+		ExternalID:   externalID,
+		URL:          primary,
+		FallbackURLs: fallbacks,
+		Force:        force,
 	})
 	if err := uc.declareProblemQueue("problem_fetch"); err != nil {
 		return err
@@ -378,18 +403,35 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		}
 		return nil
 	}
-	// 永久失败：非 Force 直接丢弃；Force（比赛 ensure / 管理员）允许再爬
-	if p.Status == model.ProblemStatusFailedPerm && !ev.Force {
+
+	// 先解析牛客比赛页候选：后补 contest_problems 时，即使曾 FAILED_PERM 也可再爬
+	var fallbacks []string
+	if strings.EqualFold(strings.TrimSpace(p.Platform), spider.NowCoder) {
+		fallbacks = uc.nowcoderContestFetchURLs(p.ExternalID, p.ID)
+		if len(ev.FallbackURLs) > 0 {
+			fallbacks = append(ev.FallbackURLs, fallbacks...)
+		}
+	}
+	hasContestPath := false
+	for _, u := range append([]string{ev.URL}, fallbacks...) {
+		if problem_fetch.IsNowCoderContestURL(u) {
+			hasContestPath = true
+			break
+		}
+	}
+	// Force / 已有比赛路径：允许从永久失败恢复（用户先提交后失败、后有比赛记录）
+	allowRetryPerm := ev.Force || hasContestPath
+	if p.Status == model.ProblemStatusFailedPerm && !allowRetryPerm {
 		return nil
 	}
-	if p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg) && !ev.Force {
+	if p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg) && !allowRetryPerm {
 		_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusFailedPerm).Error
 		return nil
 	}
 	if p.Status == model.ProblemStatusSkipped {
 		return nil
 	}
-	if ev.Force && (p.Status == model.ProblemStatusFailedPerm || p.Status == model.ProblemStatusFailed) {
+	if allowRetryPerm && (p.Status == model.ProblemStatusFailedPerm || p.Status == model.ProblemStatusFailed) {
 		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
 			"status":           model.ProblemStatusPending,
 			"error_msg":        "",
@@ -404,7 +446,7 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 			model.ProblemStatusPending,
 			model.ProblemStatusFailed,
 			model.ProblemStatusFetching,
-			model.ProblemStatusFailedPerm, // Force 刚重置前的竞态
+			model.ProblemStatusFailedPerm, // 恢复竞态
 		}).
 		Update("status", model.ProblemStatusFetching)
 	if res.Error != nil {
@@ -419,12 +461,17 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if url == "" {
 		url = ev.URL
 	}
-	// NowCoder：题库页赛后常无权限；用 contest_problems / 事件附带的比赛页回退
-	var fallbacks []string
-	if strings.EqualFold(strings.TrimSpace(p.Platform), spider.NowCoder) {
-		fallbacks = uc.nowcoderContestFetchURLs(p.ExternalID, p.ID)
-		if len(ev.FallbackURLs) > 0 {
-			fallbacks = append(ev.FallbackURLs, fallbacks...)
+	// 有比赛页时主 URL 用比赛路径（赛后题库常无权限）
+	if hasContestPath {
+		if problem_fetch.IsNowCoderContestURL(ev.URL) {
+			url = ev.URL
+		} else {
+			for _, u := range fallbacks {
+				if problem_fetch.IsNowCoderContestURL(u) {
+					url = u
+					break
+				}
+			}
 		}
 	}
 	fetched, err := problem_fetch.FetchWithFallbacks(p.Platform, p.ExternalID, url, fallbacks)
@@ -2189,12 +2236,19 @@ func (uc *ProblemUseCase) scheduleFetchRetry(id uint, platform, externalID, prob
 		switch cur.Status {
 		case model.ProblemStatusFailed, model.ProblemStatusPending, model.ProblemStatusFetching:
 			// ok
+		case model.ProblemStatusFailedPerm:
+			// 仅当已有比赛路径映射时才自动重试（后补比赛记录场景）
+			if !strings.EqualFold(cur.Platform, spider.NowCoder) ||
+				len(uc.nowcoderContestFetchURLs(cur.ExternalID, cur.ID)) == 0 {
+				return
+			}
 		default:
 			return
 		}
 		plat := firstNonEmpty(platform, cur.Platform)
 		ext := firstNonEmpty(externalID, cur.ExternalID)
 		u := firstNonEmpty(problemURL, cur.URL)
+		// enqueueFetchPrio 会自动附带比赛页 + Force
 		if e := uc.enqueueFetchPrio(id, plat, ext, u, mqPriorityIncremental); e != nil {
 			log.Warnf("scheduleFetchRetry enqueue id=%d: %v", id, e)
 		}

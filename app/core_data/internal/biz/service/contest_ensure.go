@@ -21,12 +21,21 @@ import (
 // AI 分析不强制：爬完后走标准闸门（有资格用户提交才分析）。
 // 调用方可同步等待列表写入；爬取异步。
 func (uc *ProblemUseCase) EnsureContestProblemsOnce(platform, contestID string) (status string, err error) {
-	return uc.ensureContestProblems(platform, contestID, false)
+	st, err := uc.ensureContestProblems(platform, contestID, false)
+	// 无论 done/失败：已有目录则补抓无题面（后补比赛路径 / 曾 FAILED_PERM）
+	if n := uc.RequeueMissingContestProblemFetches(platform, contestID); n > 0 {
+		log.Infof("EnsureContestProblemsOnce requeue missing content %s/%s n=%d", platform, contestID, n)
+	}
+	return st, err
 }
 
 // EnsureContestProblemsForce 忽略 done 节流，强制重跑目录 + 无题面强制爬（牛客走比赛路径）。
 func (uc *ProblemUseCase) EnsureContestProblemsForce(platform, contestID string) (status string, err error) {
-	return uc.ensureContestProblems(platform, contestID, true)
+	st, err := uc.ensureContestProblems(platform, contestID, true)
+	if n := uc.RequeueMissingContestProblemFetches(platform, contestID); n > 0 {
+		log.Infof("EnsureContestProblemsForce requeue missing content %s/%s n=%d", platform, contestID, n)
+	}
+	return st, err
 }
 
 func (uc *ProblemUseCase) ensureContestProblems(platform, contestID string, force bool) (status string, err error) {
@@ -371,6 +380,48 @@ func (uc *ProblemUseCase) UpsertProblemFromParsedNoAI(parsed *ParsedProblem) (*m
 		}
 	}
 	return &existing, nil
+}
+
+// RequeueMissingContestProblemFetches 对本场已入库但无题面的题强制再爬（优先比赛路径）。
+// 用于：ensure 已 done 后新挂上 contest 映射、或曾被标 FAILED_PERM。
+func (uc *ProblemUseCase) RequeueMissingContestProblemFetches(platform, contestID string) int {
+	if uc == nil || uc.data == nil || uc.data.DB == nil {
+		return 0
+	}
+	platform = strings.TrimSpace(platform)
+	contestID = strings.TrimSpace(contestID)
+	if platform == "" || contestID == "" {
+		return 0
+	}
+	var cps []model.ContestProblem
+	_ = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).Find(&cps).Error
+	n := 0
+	for _, cp := range cps {
+		var p model.Problem
+		if cp.ProblemID > 0 {
+			if uc.data.DB.First(&p, cp.ProblemID).Error != nil {
+				continue
+			}
+		} else if cp.ExternalID != "" {
+			if uc.data.DB.Where("platform = ? AND external_id = ?", platform, cp.ExternalID).
+				First(&p).Error != nil {
+				continue
+			}
+		} else {
+			continue
+		}
+		if strings.TrimSpace(p.ContentMD) != "" {
+			continue
+		}
+		contestURL := strings.TrimSpace(cp.URL)
+		if !problem_fetch.IsNowCoderContestURL(contestURL) {
+			contestURL = problem_fetch.NowCoderContestProblemURL(contestID, cp.Label)
+		}
+		if e := uc.ForceEnqueueFetchContest(p.ID, contestURL); e == nil {
+			n++
+		}
+	}
+	return n
 }
 
 // ForceEnqueueFetchContest 比赛 ensure 强制爬题面（忽略资格；爬完走标准 AI 闸门）。
