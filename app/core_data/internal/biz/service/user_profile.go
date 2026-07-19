@@ -244,7 +244,7 @@ func (uc *ProblemUseCase) computeUserProfile(userID int64) (*UserProfileSnapshot
 	}
 
 	// 平台过题：读 user_ac_problems；力扣优先官方 acTotal 合成键（e:LeetCode:ac-*）
-	// 牛客会按 external_id 形态拆「牛客竞赛站 / 牛客Tracker」（仅 NowCoder 行 LEFT JOIN problems）
+	// 牛客统一为 NowCoder（不拆竞赛站 / Tracker）
 	if plats, e := dal.ListUserPlatformAC(uc.data.DB, userID); e != nil {
 		log.Errorf("platforms sql user=%d: %v", userID, e)
 	} else {

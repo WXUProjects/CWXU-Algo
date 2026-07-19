@@ -128,18 +128,9 @@ type PlatformACCount struct {
 	Count int64
 }
 
-// 牛客饼图拆分展示名（主站 UUID / AC 站数字题号）
-const (
-	// PlatformACNowCoderTracker 主站 practice（questionUuid）
-	PlatformACNowCoderTracker = "牛客Tracker"
-	// PlatformACNowCoderContest AC 竞赛站（acm/problem 数字 id）
-	PlatformACNowCoderContest = "牛客竞赛站"
-)
-
 // ListUserPlatformAC 按平台生涯过题数（力扣优先官方合成键）
-// NowCoder 拆成「牛客竞赛站」(数字 external_id) + 「牛客Tracker」(32 hex UUID)，饼图可区分主站/AC 站。
-// 三段独立查询：牛客 JOIN 失败时仍返回其它平台，避免整段 UNION 挂掉导致饼图全空。
-// 注意：GORM Raw 会把 SQL 里任意问号当绑定占位符，空平台回落用 unknown。
+// 牛客统一展示为 NowCoder（不再拆竞赛站 / Tracker）。
+// 分段查询：力扣单独处理；其余 platform 原样聚合。GORM Raw 勿写字面量 '?'。
 func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 	if db == nil || userID <= 0 {
 		return nil, nil
@@ -151,14 +142,13 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 	out := make([]PlatformACCount, 0, 8)
 	var firstErr error
 
-	// 1) 其它平台（非力扣、非牛客）
+	// 1) 非力扣：含 NowCoder，整包计为 platform 名
 	var others []nc
 	if err := db.Raw(`
 		SELECT COALESCE(NULLIF(btrim(platform), ''), 'unknown') AS name, COUNT(*)::bigint AS cnt
 		FROM user_ac_problems
 		WHERE user_id = ?
 		  AND platform IS DISTINCT FROM 'LeetCode'
-		  AND platform IS DISTINCT FROM 'NowCoder'
 		GROUP BY 1
 		HAVING COUNT(*) > 0
 	`, userID).Scan(&others).Error; err != nil {
@@ -169,59 +159,7 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 		}
 	}
 
-	// 2) 牛客：p: 键用 'p:'||id 等值 JOIN（避免 CAST+正则在部分数据上整句失败）
-	//    e:NowCoder: + 32hex → Tracker；题库 external_id 为 32hex → Tracker；其余 → 牛客竞赛站
-	var ncRows []nc
-	ncSQL := `
-		SELECT name, cnt FROM (
-			SELECT
-				CASE
-					WHEN kind = 'tracker' THEN '` + PlatformACNowCoderTracker + `'
-					ELSE '` + PlatformACNowCoderContest + `'
-				END AS name,
-				COUNT(*)::bigint AS cnt
-			FROM (
-				SELECT
-					CASE
-						WHEN length(ext) = 32 AND ext ~ '^[0-9a-f]+$' THEN 'tracker'
-						ELSE 'contest'
-					END AS kind
-				FROM (
-					SELECT
-						CASE
-							WHEN u.problem_key LIKE 'e:NowCoder:%' THEN lower(substr(u.problem_key, 12))
-							WHEN p.external_id IS NOT NULL AND btrim(p.external_id) <> '' THEN lower(btrim(p.external_id))
-							WHEN u.problem_key LIKE 'n:NowCoder:%' THEN lower(substr(u.problem_key, 12))
-							ELSE ''
-						END AS ext
-					FROM user_ac_problems u
-					LEFT JOIN problems p
-						ON u.problem_key = ('p:' || p.id::text)
-					WHERE u.user_id = ? AND u.platform = 'NowCoder'
-				) x
-			) y
-			GROUP BY 1
-		) z
-		WHERE cnt > 0
-	`
-	if err := db.Raw(ncSQL, userID).Scan(&ncRows).Error; err != nil {
-		if firstErr == nil {
-			firstErr = err
-		}
-		// 降级：牛客整包计为牛客竞赛站，保证饼图有扇区
-		var n int64
-		if e2 := db.Table("user_ac_problems").
-			Where("user_id = ? AND platform = ?", userID, "NowCoder").
-			Count(&n).Error; e2 == nil && n > 0 {
-			out = append(out, PlatformACCount{Name: PlatformACNowCoderContest, Count: n})
-		}
-	} else {
-		for _, r := range ncRows {
-			out = append(out, PlatformACCount{Name: r.Name, Count: r.Count})
-		}
-	}
-
-	// 3) 力扣：有官方合成键 e:LeetCode:ac-* 时只计这些
+	// 2) 力扣：有官方合成键 e:LeetCode:ac-* 时只计这些
 	var lc []nc
 	if err := db.Raw(`
 		SELECT 'LeetCode' AS name,
