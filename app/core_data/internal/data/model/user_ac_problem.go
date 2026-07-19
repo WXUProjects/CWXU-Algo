@@ -28,6 +28,8 @@ type UserACProblemDay struct {
 func (UserACProblemDay) TableName() string { return "user_ac_problem_days" }
 
 // ACProblemKey 与 dal.acProblemKeySQL 对齐：p:id / e:platform:ext / n:platform:name
+// 牛客：problem 常为「数字题号 标题」且 external_id 尚未回填时，用首 token 作 e: 键，
+// 避免与后续 p:{problem_id} / e:NowCoder:{id} 双计。
 func ACProblemKey(platform, externalID, problem string, problemID *uint) string {
 	if problemID != nil && *problemID != 0 {
 		return fmt.Sprintf("p:%d", *problemID)
@@ -36,7 +38,24 @@ func ACProblemKey(platform, externalID, problem string, problemID *uint) string 
 	if ext != "" {
 		return "e:" + platform + ":" + ext
 	}
+	if platform == "NowCoder" {
+		if tok := strings.Fields(strings.TrimSpace(problem)); len(tok) > 0 && isAllDigits(tok[0]) {
+			return "e:NowCoder:" + tok[0]
+		}
+	}
 	return "n:" + platform + ":" + problem
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // ACProblemKeyFromLog 从提交记录生成去重键
