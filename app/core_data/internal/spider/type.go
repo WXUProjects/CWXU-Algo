@@ -1,10 +1,32 @@
 package spider
 
-import "cwxu-algo/app/core_data/internal/data/model"
+import (
+	"time"
+
+	"cwxu-algo/app/core_data/internal/data/model"
+)
 
 // Provider 做题记录提供器
 type Provider interface {
 	Name() string
+}
+
+// ContestProblemCell 用户在某场比赛的单题汇总（写入 contest_user_problems）。
+type ContestProblemCell struct {
+	ContestID   string
+	Label       string // A / B / abc416_a 展示用
+	ExternalID  string
+	Status      string // AC | TRIED
+	Attempts    int    // AC 前错误次数+1 或总尝试（平台约定）
+	FirstACAt   *time.Time
+	RelativeSec *int // 相对开赛秒，可空
+	ScoreDelta  int  // 力扣 credit 等
+}
+
+// ContestDetailFetcher 可选：在 FetchContestLog 之外拉取题级明细（允许重爬）。
+type ContestDetailFetcher interface {
+	// FetchContestDetails 返回该用户若干场的题级格子；needAll 与 contest 一致。
+	FetchContestDetails(userId int64, username string, needAll bool) ([]ContestProblemCell, error)
 }
 
 // SubmitLogFetcher 提交记录抓取接口

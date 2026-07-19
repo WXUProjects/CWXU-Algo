@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -314,6 +315,106 @@ func (p NewAtCoder) FetchContestLog(userId int64, username string, needAll bool)
 		acByContest = fetchAtCoderContestAC(subs, atcoderHistoryEndUnix(hist))
 	}
 	return contestLogsFromAtCoderHistory(userId, hist, needAll, acByContest), nil
+}
+
+// FetchContestDetails 赛时提交 → 每题 AC/TRIED（EndTime 后练习不计）。
+func (p NewAtCoder) FetchContestDetails(userId int64, username string, needAll bool) ([]spider.ContestProblemCell, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, fmt.Errorf("atcoder username 为空")
+	}
+	hist, err := fetchAtCoderHistory(username)
+	if err != nil {
+		return nil, err
+	}
+	endBy := atcoderHistoryEndUnix(hist)
+	// start 近似：EndTime 未知时无法相对时间；有 EndTime 时用提交推 start 不可靠，相对秒可空
+	subs, err := fetchAtCoderSubmissions(username, needAll)
+	if err != nil {
+		return nil, err
+	}
+	type agg struct {
+		attempts int
+		ac       bool
+		firstAC  int64
+		label    string
+	}
+	by := map[string]map[string]*agg{} // contest -> problem_id -> agg
+
+	// 时间升序
+	sort.SliceStable(subs, func(i, j int) bool {
+		return subs[i].EpochSecond < subs[j].EpochSecond
+	})
+	for _, s := range subs {
+		cid := strings.TrimSpace(s.ContestID)
+		pid := strings.TrimSpace(s.ProblemID)
+		if cid == "" || pid == "" {
+			continue
+		}
+		if end, ok := endBy[cid]; ok && end > 0 && s.EpochSecond > end {
+			continue
+		}
+		m := by[cid]
+		if m == nil {
+			m = map[string]*agg{}
+			by[cid] = m
+		}
+		a := m[pid]
+		if a == nil {
+			// label: abc416_a → a 或 A
+			label := pid
+			if i := strings.LastIndex(pid, "_"); i >= 0 && i+1 < len(pid) {
+				label = strings.ToUpper(pid[i+1:])
+			}
+			a = &agg{label: label}
+			m[pid] = a
+		}
+		if a.ac {
+			continue
+		}
+		res := strings.ToUpper(strings.TrimSpace(s.Result))
+		if res == "AC" {
+			a.ac = true
+			a.firstAC = s.EpochSecond
+			continue
+		}
+		if res == "" || res == "WJ" || res == "WR" {
+			continue
+		}
+		if res == "CE" {
+			continue
+		}
+		a.attempts++
+	}
+
+	out := make([]spider.ContestProblemCell, 0, 64)
+	for cid, m := range by {
+		for pid, a := range m {
+			if a.attempts == 0 && !a.ac {
+				continue
+			}
+			cell := spider.ContestProblemCell{
+				ContestID:  cid,
+				Label:      a.label,
+				ExternalID: pid,
+				Attempts:   a.attempts,
+			}
+			if a.ac {
+				cell.Status = model.ContestCellAC
+				t := time.Unix(a.firstAC, 0)
+				cell.FirstACAt = &t
+				if end, ok := endBy[cid]; ok && end > 0 {
+					// 无官方 start：用 end-100min 粗估相对时间不靠谱，保持 RelativeSec 空
+					_ = end
+				}
+			} else {
+				cell.Status = model.ContestCellTried
+			}
+			_ = userId
+			out = append(out, cell)
+		}
+	}
+	return out, nil
 }
 
 // FetchRating 从 AtCoder 官方 rating 历史取最新 NewRating

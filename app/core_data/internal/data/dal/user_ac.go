@@ -97,6 +97,77 @@ func ApplyUserACFromSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 	return nil
 }
 
+// lifetimeACScoreSQL 生涯去重过题数（GROUP BY user_id 可用）
+// 力扣：有官方合成键 e:LeetCode:ac-* 时只计这些（= 官方 acTotal）；否则回退计全部 LeetCode 键
+// 其它平台：计全部键。避免 recentAC 明细与合成 AC 双计，也避免 JOIN 题库导致力扣漏计。
+const lifetimeACScoreSQL = `
+	COUNT(*) FILTER (WHERE platform IS DISTINCT FROM 'LeetCode')
+	+ CASE
+		WHEN COUNT(*) FILTER (WHERE platform = 'LeetCode' AND problem_key LIKE 'e:LeetCode:ac-%') > 0
+		THEN COUNT(*) FILTER (WHERE platform = 'LeetCode' AND problem_key LIKE 'e:LeetCode:ac-%')
+		ELSE COUNT(*) FILTER (WHERE platform = 'LeetCode')
+	  END
+`
+
+// CountUserLifetimeAC 单用户生涯去重过题数（力扣优先官方 acTotal 合成键）
+func CountUserLifetimeAC(db *gorm.DB, userID int64) (int64, error) {
+	if db == nil || userID <= 0 {
+		return 0, nil
+	}
+	var n int64
+	err := db.Table("user_ac_problems").
+		Where("user_id = ?", userID).
+		Select(lifetimeACScoreSQL).
+		Scan(&n).Error
+	return n, err
+}
+
+// PlatformACCount 平台过题数
+type PlatformACCount struct {
+	Name  string
+	Count int64
+}
+
+// ListUserPlatformAC 按平台生涯过题数（力扣优先官方合成键，不 JOIN 题库）
+func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
+	if db == nil || userID <= 0 {
+		return nil, nil
+	}
+	type nc struct {
+		Name  string
+		Count int64
+	}
+	var rows []nc
+	// 非力扣：直接按 platform 聚合；力扣：有官方合成则只计 ac-*，否则计全部
+	err := db.Raw(`
+		SELECT name, count FROM (
+			SELECT COALESCE(NULLIF(btrim(platform), ''), '?') AS name, COUNT(*)::bigint AS count
+			FROM user_ac_problems
+			WHERE user_id = ? AND platform IS DISTINCT FROM 'LeetCode'
+			GROUP BY 1
+			UNION ALL
+			SELECT 'LeetCode' AS name,
+				CASE
+					WHEN COUNT(*) FILTER (WHERE problem_key LIKE 'e:LeetCode:ac-%') > 0
+					THEN COUNT(*) FILTER (WHERE problem_key LIKE 'e:LeetCode:ac-%')
+					ELSE COUNT(*)
+				END::bigint AS count
+			FROM user_ac_problems
+			WHERE user_id = ? AND platform = 'LeetCode'
+		) t
+		WHERE count > 0
+		ORDER BY count DESC
+	`, userID, userID).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PlatformACCount, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, PlatformACCount{Name: r.Name, Count: r.Count})
+	}
+	return out, nil
+}
+
 // PeriodAcDistinctFromPreagg 个人 AC 去重时段统计（读预聚合，不扫 submit_logs）
 func PeriodAcDistinctFromPreagg(db *gorm.DB, userId int64, now time.Time) (PeriodAcCount, error) {
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
@@ -139,9 +210,14 @@ func PeriodAcDistinctFromPreagg(db *gorm.DB, userId int64, now time.Time) (Perio
 		return ac, err
 	}
 
-	_ = db.Table("user_ac_problems").
-		Where("user_id = ?", userId).
-		Count(&ac.Total).Error
+	// 生涯 total：力扣优先官方 acTotal 合成键，避免与 recentAC 明细双计
+	if n, e := CountUserLifetimeAC(db, userId); e == nil {
+		ac.Total = n
+	} else {
+		_ = db.Table("user_ac_problems").
+			Where("user_id = ?", userId).
+			Count(&ac.Total).Error
+	}
 
 	var raw struct{ Total int64 }
 	_ = db.Table("daily_user_stats").

@@ -209,6 +209,14 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: timeFrom
+                  in: query
+                  schema:
+                    type: string
+                - name: timeTo
+                  in: query
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -334,6 +342,18 @@ paths:
                   schema:
                     type: string
                 - name: platform
+                  in: query
+                  schema:
+                    type: string
+                - name: keyword
+                  in: query
+                  schema:
+                    type: string
+                - name: timeFrom
+                  in: query
+                  schema:
+                    type: string
+                - name: timeTo
                   in: query
                   schema:
                     type: string
@@ -2461,13 +2481,21 @@ components:
                     format: uint32
                 platform:
                     type: string
+                userId:
+                    type: string
                 contestId:
                     type: string
                 contestName:
                     type: string
                 contestUrl:
                     type: string
+                rank:
+                    type: integer
+                    format: int32
                 totalCount:
+                    type: integer
+                    format: int32
+                acCount:
                     type: integer
                     format: int32
                 time:

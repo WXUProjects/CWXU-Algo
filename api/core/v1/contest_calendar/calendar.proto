@@ -65,9 +65,11 @@ message CalendarItem {
 message ListCalendarReq {
   string platform = 1;
   string keyword = 2;
-  string status = 3; // upcoming | ongoing | all
+  string status = 3; // upcoming | ongoing | ended | all
   int64 limit = 4;
   int64 offset = 5;
+  int64 time_from = 6; // 开赛时间下界（unix 秒，含，0=不限）
+  int64 time_to = 7;   // 开赛时间上界（unix 秒，含，0=不限）
 }
 
 message ListCalendarRes {

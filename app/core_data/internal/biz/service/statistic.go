@@ -185,8 +185,8 @@ func (uc *StatisticUseCase) Rank(ctx context.Context, req *statistic.RankReq) (*
 		} else {
 			scope = fmt.Sprintf("org%d", orgID)
 		}
-		// schema s2：全时段过题改走 user_ac_problems；公共域 site-wide
-		snapKey = fmt.Sprintf("rank:snap:s2:%s:%s:%s_%s:v%s:ps%d",
+		// schema s3：生涯过题力扣优先官方 acTotal 合成键
+		snapKey = fmt.Sprintf("rank:snap:s3:%s:%s:%s_%s:v%s:ps%d",
 			scope, scoreType, req.StartDate, req.EndDate, globalVer, req.PageSize)
 		if b, e := uc.rdb.Get(ctx, snapKey).Bytes(); e == nil && len(b) > 0 {
 			var cached statistic.RankResp
@@ -237,8 +237,8 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 	var memberIDs []int64
 	queryUserId := req.UserId
 	// schema v6：个人 AC 去重走 user_ac_problem_* 预聚合
-	// s8：purge 后强制失效旧 period 缓存
-	const periodCacheSchema = "8"
+	// s9：生涯 total 力扣优先官方 acTotal 合成键（与平台过题一致，避免 recentAC 双计）
+	const periodCacheSchema = "9"
 	ttl := data2.DefaultCacheTTL
 	var cacheKey string
 

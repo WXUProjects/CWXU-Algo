@@ -58,6 +58,8 @@ func (s *ContestCalendarService) ListCalendar(ctx context.Context, req *contest_
 		Platform: req.GetPlatform(),
 		Keyword:  req.GetKeyword(),
 		Status:   status,
+		TimeFrom: req.GetTimeFrom(),
+		TimeTo:   req.GetTimeTo(),
 		Limit:    int(req.GetLimit()),
 		Offset:   int(req.GetOffset()),
 	})

@@ -257,7 +257,85 @@ func (uc *SpiderUseCase) fetchAndSaveContest(userId int64, plat model.Platform, 
 			}),
 		}).
 		CreateInBatches(&tmp, submitInsertBatchSize).Error
-	return true, err
+	if err != nil {
+		return true, err
+	}
+	// 题级明细（XCPCIO 格子）；失败不阻断场级写入
+	detailOK := false
+	if df, ok := p.(spider.ContestDetailFetcher); ok {
+		if cells, dErr := df.FetchContestDetails(userId, plat.Username, needAll); dErr != nil {
+			log.Warnf("Spider: FetchContestDetails %s %s: %v", plat.Platform, plat.Username, dErr)
+		} else if len(cells) > 0 {
+			if sErr := uc.saveContestUserProblems(userId, plat.Platform, cells); sErr != nil {
+				log.Warnf("Spider: saveContestUserProblems %s %s: %v", plat.Platform, plat.Username, sErr)
+			} else {
+				detailOK = true
+			}
+		}
+	}
+	// 原生无明细 / 失败：按「题目集 ∩ 时间窗 ∩ 提交」反推（牛客/力扣补洞/全平台兜底）
+	if !detailOK && uc.data != nil && uc.data.DB != nil {
+		// 最近若干场，避免全量历史扫爆
+		limit := 15
+		if needAll {
+			limit = 40
+		}
+		n := 0
+		for _, cl := range tmp {
+			if n >= limit {
+				break
+			}
+			if cl.ContestId == "" {
+				continue
+			}
+			if _, iErr := InferContestUserProblemsForUser(uc.data.DB, plat.Platform, cl.ContestId, userId, cl.Time); iErr != nil {
+				log.Warnf("Spider: InferContestUserProblems %s %s %s: %v", plat.Platform, plat.Username, cl.ContestId, iErr)
+			}
+			n++
+		}
+	}
+	return true, nil
+}
+
+// saveContestUserProblems 将题级格子 UPSERT 进 contest_user_problems。
+func (uc *SpiderUseCase) saveContestUserProblems(userId int64, platform string, cells []spider.ContestProblemCell) error {
+	if uc == nil || uc.data == nil || uc.data.DB == nil || len(cells) == 0 {
+		return nil
+	}
+	platform = strings.TrimSpace(platform)
+	rows := make([]model.ContestUserProblem, 0, len(cells))
+	for _, c := range cells {
+		if c.ContestID == "" || c.ExternalID == "" {
+			continue
+		}
+		st := strings.TrimSpace(c.Status)
+		if st == "" {
+			continue
+		}
+		rows = append(rows, model.ContestUserProblem{
+			Platform:    platform,
+			ContestID:   c.ContestID,
+			UserID:      userId,
+			Label:       c.Label,
+			ExternalID:  c.ExternalID,
+			Status:      st,
+			Attempts:    c.Attempts,
+			FirstACAt:   c.FirstACAt,
+			RelativeSec: c.RelativeSec,
+			ScoreDelta:  c.ScoreDelta,
+		})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return uc.data.DB.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "platform"}, {Name: "contest_id"}, {Name: "user_id"}, {Name: "external_id"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"label", "status", "attempts", "first_ac_at", "relative_sec", "score_delta", "updated_at",
+		}),
+	}).CreateInBatches(&rows, 100).Error
 }
 
 // fetchAndSaveRating 抓取并写回 platforms.rating（失败只打日志，不阻断提交/比赛同步）

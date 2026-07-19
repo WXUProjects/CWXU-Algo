@@ -27,10 +27,13 @@ type ContestLog struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                     // ID
 	Platform      string                 `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"`                          // 平台
+	UserId        int64                  `protobuf:"varint,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`               // 用户ID
 	ContestId     string                 `protobuf:"bytes,4,opt,name=contest_id,json=contestId,proto3" json:"contest_id,omitempty"`       // 比赛ID
 	ContestName   string                 `protobuf:"bytes,5,opt,name=contest_name,json=contestName,proto3" json:"contest_name,omitempty"` // 比赛名称
 	ContestUrl    string                 `protobuf:"bytes,6,opt,name=contest_url,json=contestUrl,proto3" json:"contest_url,omitempty"`    // 比赛链接
+	Rank          int32                  `protobuf:"varint,7,opt,name=rank,proto3" json:"rank,omitempty"`                                 // 官方排名（0=未知/未出分）
 	TotalCount    int32                  `protobuf:"varint,8,opt,name=total_count,json=totalCount,proto3" json:"total_count,omitempty"`   // 总题数
+	AcCount       int32                  `protobuf:"varint,9,opt,name=ac_count,json=acCount,proto3" json:"ac_count,omitempty"`            // 过题数（力扣为 score）
 	Time          int64                  `protobuf:"varint,10,opt,name=time,proto3" json:"time,omitempty"`                                // 比赛时间戳
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -80,6 +83,13 @@ func (x *ContestLog) GetPlatform() string {
 	return ""
 }
 
+func (x *ContestLog) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
 func (x *ContestLog) GetContestId() string {
 	if x != nil {
 		return x.ContestId
@@ -101,9 +111,23 @@ func (x *ContestLog) GetContestUrl() string {
 	return ""
 }
 
+func (x *ContestLog) GetRank() int32 {
+	if x != nil {
+		return x.Rank
+	}
+	return 0
+}
+
 func (x *ContestLog) GetTotalCount() int32 {
 	if x != nil {
 		return x.TotalCount
+	}
+	return 0
+}
+
+func (x *ContestLog) GetAcCount() int32 {
+	if x != nil {
+		return x.AcCount
 	}
 	return 0
 }
@@ -118,10 +142,13 @@ func (x *ContestLog) GetTime() int64 {
 // 获取竞赛列表请求
 type GetContestListReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"` // 用户ID
-	Limit         int64                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`                 // 限制数量
-	Offset        int64                  `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`               // 偏移量
-	Platform      string                 `protobuf:"bytes,4,opt,name=platform,proto3" json:"platform,omitempty"`            // 平台筛选
+	UserId        int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`       // 用户ID
+	Limit         int64                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`                       // 限制数量
+	Offset        int64                  `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`                     // 偏移量
+	Platform      string                 `protobuf:"bytes,4,opt,name=platform,proto3" json:"platform,omitempty"`                  // 平台筛选
+	Keyword       string                 `protobuf:"bytes,5,opt,name=keyword,proto3" json:"keyword,omitempty"`                    // 比赛名称关键字（模糊）
+	TimeFrom      int64                  `protobuf:"varint,6,opt,name=time_from,json=timeFrom,proto3" json:"time_from,omitempty"` // 时间下界（unix 秒，含，0=不限）
+	TimeTo        int64                  `protobuf:"varint,7,opt,name=time_to,json=timeTo,proto3" json:"time_to,omitempty"`       // 时间上界（unix 秒，含，0=不限）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -182,6 +209,27 @@ func (x *GetContestListReq) GetPlatform() string {
 		return x.Platform
 	}
 	return ""
+}
+
+func (x *GetContestListReq) GetKeyword() string {
+	if x != nil {
+		return x.Keyword
+	}
+	return ""
+}
+
+func (x *GetContestListReq) GetTimeFrom() int64 {
+	if x != nil {
+		return x.TimeFrom
+	}
+	return 0
+}
+
+func (x *GetContestListReq) GetTimeTo() int64 {
+	if x != nil {
+		return x.TimeTo
+	}
+	return 0
 }
 
 // 获取竞赛列表响应
@@ -635,25 +683,31 @@ var File_core_v1_contest_log_contest_proto protoreflect.FileDescriptor
 
 const file_core_v1_contest_log_contest_proto_rawDesc = "" +
 	"\n" +
-	"!core/v1/contest_log/contest.proto\x12\x17api.core.v1.contest_log\x1a\x1cgoogle/api/annotations.proto\"\xd0\x01\n" +
+	"!core/v1/contest_log/contest.proto\x12\x17api.core.v1.contest_log\x1a\x1cgoogle/api/annotations.proto\"\x98\x02\n" +
 	"\n" +
 	"ContestLog\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1a\n" +
-	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x1d\n" +
+	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\x03R\x06userId\x12\x1d\n" +
 	"\n" +
 	"contest_id\x18\x04 \x01(\tR\tcontestId\x12!\n" +
 	"\fcontest_name\x18\x05 \x01(\tR\vcontestName\x12\x1f\n" +
 	"\vcontest_url\x18\x06 \x01(\tR\n" +
-	"contestUrl\x12\x1f\n" +
+	"contestUrl\x12\x12\n" +
+	"\x04rank\x18\a \x01(\x05R\x04rank\x12\x1f\n" +
 	"\vtotal_count\x18\b \x01(\x05R\n" +
-	"totalCount\x12\x12\n" +
+	"totalCount\x12\x19\n" +
+	"\bac_count\x18\t \x01(\x05R\aacCount\x12\x12\n" +
 	"\x04time\x18\n" +
-	" \x01(\x03R\x04time\"v\n" +
+	" \x01(\x03R\x04time\"\xc6\x01\n" +
 	"\x11GetContestListReq\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x03R\x05limit\x12\x16\n" +
 	"\x06offset\x18\x03 \x01(\x03R\x06offset\x12\x1a\n" +
-	"\bplatform\x18\x04 \x01(\tR\bplatform\"\x90\x01\n" +
+	"\bplatform\x18\x04 \x01(\tR\bplatform\x12\x18\n" +
+	"\akeyword\x18\x05 \x01(\tR\akeyword\x12\x1b\n" +
+	"\ttime_from\x18\x06 \x01(\x03R\btimeFrom\x12\x17\n" +
+	"\atime_to\x18\a \x01(\x03R\x06timeTo\"\x90\x01\n" +
 	"\x11GetContestListRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x127\n" +

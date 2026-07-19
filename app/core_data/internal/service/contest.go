@@ -64,8 +64,23 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 	var total int64
 	var err error
 
+	listQ := dal.ContestListQuery{
+		UserId:    req.UserId,
+		Offset:    req.Offset,
+		Limit:     req.Limit,
+		Platform:  req.Platform,
+		Keyword:   req.Keyword,
+		TimeFrom:  req.TimeFrom,
+		TimeTo:    req.TimeTo,
+		MemberIDs: memberIDs,
+	}
+	// 有关键字/时间筛选时跳过短缓存，避免 key 爆炸
+	useCache := req.UserId == -1 && c.rdb != nil &&
+		req.Offset == 0 && req.Limit > 0 && req.Limit <= 50 &&
+		strings.TrimSpace(req.Keyword) == "" && req.TimeFrom == 0 && req.TimeTo == 0
+
 	// 组织首页短缓存（90s + global ver）
-	if req.UserId == -1 && c.rdb != nil && req.Offset == 0 && req.Limit > 0 && req.Limit <= 50 {
+	if useCache {
 		ver := "0"
 		if v, e := c.rdb.Get(ctx, "core:contest:list:global:ver").Result(); e == nil && v != "" {
 			ver = v
@@ -79,7 +94,7 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 			}
 		}
 		if logs == nil {
-			logs, total, err = c.sbDal.GetContestListScoped(ctx, req.UserId, req.Offset, req.Limit, req.Platform, memberIDs)
+			logs, total, err = c.sbDal.GetContestListScoped(ctx, listQ)
 			if err != nil {
 				return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
 			}
@@ -88,7 +103,7 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 			}
 		}
 	} else {
-		logs, total, err = c.sbDal.GetContestListScoped(ctx, req.UserId, req.Offset, req.Limit, req.Platform, memberIDs)
+		logs, total, err = c.sbDal.GetContestListScoped(ctx, listQ)
 		if err != nil {
 			return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
 		}
@@ -96,15 +111,7 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 
 	items := make([]*contest_log.ContestLog, 0, len(logs))
 	for _, v := range logs {
-		items = append(items, &contest_log.ContestLog{
-			Id:          uint32(v.ID),
-			Platform:    v.Platform,
-			ContestId:   v.ContestId,
-			ContestName: v.ContestName,
-			ContestUrl:  v.ContestUrl,
-			TotalCount:  int32(v.TotalCount),
-			Time:        v.Time.Unix(),
-		})
+		items = append(items, contestLogToProto(v))
 	}
 
 	return &contest_log.GetContestListRes{
@@ -115,19 +122,26 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 	}, nil
 }
 
+func contestLogToProto(v model.ContestLog) *contest_log.ContestLog {
+	return &contest_log.ContestLog{
+		Id:          uint32(v.ID),
+		Platform:    v.Platform,
+		UserId:      v.UserID,
+		ContestId:   v.ContestId,
+		ContestName: v.ContestName,
+		ContestUrl:  v.ContestUrl,
+		Rank:        int32(v.Rank),
+		TotalCount:  int32(v.TotalCount),
+		AcCount:     int32(v.AcCount),
+		Time:        v.Time.Unix(),
+	}
+}
+
 func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_log.GetContestRankingReq) (*contest_log.GetContestRankingRes, error) {
 	contest := model.ContestLog{}
 	_ = c.db.Where("id = ?", req.ContestId).First(&contest)
 
-	contestProto := &contest_log.ContestLog{
-		Id:          uint32(contest.ID),
-		Platform:    contest.Platform,
-		ContestId:   contest.ContestId,
-		ContestName: contest.ContestName,
-		ContestUrl:  contest.ContestUrl,
-		TotalCount:  int32(contest.TotalCount),
-		Time:        contest.Time.Unix(),
-	}
+	contestProto := contestLogToProto(contest)
 
 	// 复用进程内 user 长连接
 	var userClient profile.ProfileClient
@@ -327,15 +341,7 @@ func (c ContestLogService) GetUserContestHistory(ctx context.Context, req *conte
 
 	items := make([]*contest_log.ContestLog, 0, len(logs))
 	for _, v := range logs {
-		items = append(items, &contest_log.ContestLog{
-			Id:          uint32(v.ID),
-			Platform:    v.Platform,
-			ContestId:   v.ContestId,
-			ContestName: v.ContestName,
-			ContestUrl:  v.ContestUrl,
-			TotalCount:  int32(v.TotalCount),
-			Time:        v.Time.Unix(),
-		})
+		items = append(items, contestLogToProto(v))
 	}
 
 	return &contest_log.GetUserContestHistoryRes{
@@ -355,13 +361,14 @@ func NewContestLogService(sbDal *dal.SpiderDal, data *data.Data, reg *discovery.
 	}
 }
 
-// RegisterContestExtraRoutes 比赛题目目录（手写 HTTP，触发每场一次 ensure）。
+// RegisterContestExtraRoutes 比赛题目目录 + XCPCIO 风格站内榜（手写 HTTP）。
 func RegisterContestExtraRoutes(srv *khttp.Server, s *ContestLogService) {
 	if srv == nil || s == nil {
 		return
 	}
 	r := srv.Route("/")
 	r.GET("/v1/core/contest/problems", s.handleContestProblems)
+	r.GET("/v1/core/contest/board", s.handleContestBoard)
 }
 
 // handleContestProblems GET ?id= 或 ?contestId=（contest_logs 行 id）
@@ -412,21 +419,336 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 		"success": true,
 		"message": "ok",
 		"data": map[string]interface{}{
-			"contest": map[string]interface{}{
-				"id":          cl.ID,
-				"platform":    cl.Platform,
-				"contestId":   cl.ContestId,
-				"contestName": cl.ContestName,
-				"contestUrl":  cl.ContestUrl,
-				"totalCount":  cl.TotalCount,
-				"time":        cl.Time.Unix(),
-			},
+			"contest": contestMap(cl),
 			"ensureStatus": ensureStatus,
 			"ensureError":  ensureError,
 			"list":         list,
 		},
 	})
 	return nil
+}
+
+func contestMap(cl model.ContestLog) map[string]interface{} {
+	return map[string]interface{}{
+		"id":          cl.ID,
+		"platform":    cl.Platform,
+		"userId":      cl.UserID,
+		"contestId":   cl.ContestId,
+		"contestName": cl.ContestName,
+		"contestUrl":  cl.ContestUrl,
+		"rank":        cl.Rank,
+		"totalCount":  cl.TotalCount,
+		"acCount":     cl.AcCount,
+		"time":        cl.Time.Unix(),
+	}
+}
+
+// handleContestBoard GET ?id=|contestId= contest_logs 行 id
+// 返回 XCPCIO 风格：problems[] + rows[{cells}]；组织成员过滤与 ranking 一致。
+func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
+	idStr := strings.TrimSpace(ctx.Query().Get("id"))
+	if idStr == "" {
+		idStr = strings.TrimSpace(ctx.Query().Get("contestId"))
+	}
+	id, _ := strconv.ParseUint(idStr, 10, 64)
+	if id == 0 {
+		writeContestJSON(ctx, 400, map[string]interface{}{"success": false, "message": "缺少比赛 id"})
+		return nil
+	}
+	var seed model.ContestLog
+	if c.db.First(&seed, uint(id)).Error != nil {
+		writeContestJSON(ctx, 404, map[string]interface{}{"success": false, "message": "比赛不存在"})
+		return nil
+	}
+
+	// 组织成员范围（与 list userId=-1 一致）
+	var memberIDs []int64
+	if ids, _, unrestricted, err := ResolveOrgMemberIDs(ctx, c.reg, 0, false); err == nil && !unrestricted {
+		memberIDs = ids
+	}
+
+	// followingOnly：与 ranking 一致
+	followingOnly := strings.EqualFold(ctx.Query().Get("followingOnly"), "true") ||
+		ctx.Query().Get("followingOnly") == "1"
+	if followingOnly {
+		viewer := auth.GetCurrentUserId(ctx)
+		if viewer == 0 {
+			memberIDs = []int64{}
+		} else {
+			following := fetchFollowingIDs(ctx, c.reg, int64(viewer))
+			if memberIDs == nil {
+				memberIDs = following
+			} else {
+				memberIDs = intersectIDs(memberIDs, following)
+			}
+		}
+	}
+
+	// groupId 可选
+	if gStr := strings.TrimSpace(ctx.Query().Get("groupId")); gStr != "" {
+		if gid, err := strconv.ParseInt(gStr, 10, 64); err == nil {
+			if cli, err := userrpc.ProfileClient(c.reg); err == nil {
+				if res, err := cli.GetUserIdsByGroup(ctx, &profile.GetUserIdsByGroupReq{GroupId: gid}); err == nil {
+					if memberIDs == nil {
+						memberIDs = res.UserIds
+					} else {
+						gset := map[int64]struct{}{}
+						for _, u := range res.UserIds {
+							gset[u] = struct{}{}
+						}
+						var inter []int64
+						for _, u := range memberIDs {
+							if _, ok := gset[u]; ok {
+								inter = append(inter, u)
+							}
+						}
+						memberIDs = inter
+					}
+				}
+			}
+		}
+	}
+
+	// 本场全部站内参赛行
+	var logs []model.ContestLog
+	q := c.db.Where("platform = ? AND contest_id = ?", seed.Platform, seed.ContestId)
+	if memberIDs != nil {
+		if len(memberIDs) == 0 {
+			logs = nil
+		} else {
+			q = q.Where("user_id IN ?", memberIDs)
+		}
+	}
+	if memberIDs == nil || len(memberIDs) > 0 {
+		_ = q.Order("CASE WHEN rank > 0 THEN 0 ELSE 1 END, rank ASC, ac_count DESC, id ASC").Find(&logs).Error
+	}
+
+	// 题目目录
+	problems := []map[string]interface{}{}
+	if c.prob != nil {
+		items, st, _, err := c.prob.ListContestProblems(seed.Platform, seed.ContestId)
+		if err == nil {
+			problems = items
+		}
+		if st != model.ContestEnsureDone || len(problems) == 0 {
+			plat, cid := seed.Platform, seed.ContestId
+			go func() {
+				_, _ = c.prob.EnsureContestProblemsOnce(plat, cid)
+			}()
+		}
+	}
+
+	// 题级格子
+	userIDs := make([]int64, 0, len(logs))
+	for _, l := range logs {
+		userIDs = append(userIDs, l.UserID)
+	}
+	cellsByUser := map[int64][]model.ContestUserProblem{}
+	if len(userIDs) > 0 {
+		var cells []model.ContestUserProblem
+		_ = c.db.Where("platform = ? AND contest_id = ? AND user_id IN ?",
+			seed.Platform, seed.ContestId, userIDs).Find(&cells).Error
+		for _, cell := range cells {
+			cellsByUser[cell.UserID] = append(cellsByUser[cell.UserID], cell)
+		}
+	}
+
+	// 缺明细时：全平台通用「题目集 ∩ 时间窗 ∩ 提交」反推（异步；下一轮轮询可见）
+	if len(cellsByUser) == 0 && len(logs) > 0 {
+		plat, cid, uids, hint := seed.Platform, seed.ContestId, append([]int64(nil), userIDs...), seed.Time
+		go func() {
+			_, _ = bizservice.InferContestUserProblems(c.db, plat, cid, uids, hint)
+		}()
+	}
+
+	// 用户资料
+	var userClient profile.ProfileClient
+	if cli, err := userrpc.ProfileClient(c.reg); err == nil {
+		userClient = cli
+	}
+	nameMap := c.fetchUserNames(ctx, userClient, logs)
+
+	scoring := "icpc"
+	if seed.Platform == "LeetCode" {
+		scoring = "leetcode"
+	}
+	const penaltyPerWrong = 20 * 60 // ICPC 默认 20min
+
+	// 本地排名：官方 rank 优先；全 0 则按 solved/penalty
+	allZero := true
+	for _, l := range logs {
+		if l.Rank > 0 {
+			allZero = false
+			break
+		}
+	}
+
+	type rowDraft struct {
+		log        model.ContestLog
+		solved     int
+		penalty    int
+		score      int
+		cellMaps   []map[string]interface{}
+	}
+	drafts := make([]rowDraft, 0, len(logs))
+	for _, l := range logs {
+		userCells := cellsByUser[l.UserID]
+		byLabel := map[string]model.ContestUserProblem{}
+		byExt := map[string]model.ContestUserProblem{}
+		for _, cell := range userCells {
+			byExt[cell.ExternalID] = cell
+			if cell.Label != "" {
+				byLabel[cell.Label] = cell
+			}
+		}
+		cellMaps := make([]map[string]interface{}, 0, len(problems))
+		solved := 0
+		penalty := 0
+		score := 0
+		if scoring == "leetcode" {
+			score = l.AcCount // 力扣 ac_count 存 score
+		}
+		// 无题目录时用格子本身
+		if len(problems) == 0 {
+			for _, cell := range userCells {
+				cm := cellToMap(cell)
+				cellMaps = append(cellMaps, cm)
+				if cell.Status == model.ContestCellAC {
+					solved++
+					if scoring == "icpc" {
+						if cell.RelativeSec != nil {
+							penalty += *cell.RelativeSec + cell.Attempts*penaltyPerWrong
+						} else {
+							penalty += cell.Attempts * penaltyPerWrong
+						}
+					}
+				}
+			}
+		} else {
+			for _, p := range problems {
+				label, _ := p["label"].(string)
+				ext, _ := p["externalId"].(string)
+				if ext == "" {
+					ext, _ = p["external_id"].(string)
+				}
+				cell, ok := byExt[ext]
+				if !ok {
+					cell, ok = byLabel[label]
+				}
+				if !ok {
+					cellMaps = append(cellMaps, map[string]interface{}{
+						"label":    label,
+						"status":   model.ContestCellNone,
+						"attempts": 0,
+					})
+					continue
+				}
+				cm := cellToMap(cell)
+				if cm["label"] == "" {
+					cm["label"] = label
+				}
+				cellMaps = append(cellMaps, cm)
+				if cell.Status == model.ContestCellAC {
+					solved++
+					if scoring == "icpc" {
+						if cell.RelativeSec != nil {
+							penalty += *cell.RelativeSec + cell.Attempts*penaltyPerWrong
+						} else {
+							penalty += cell.Attempts * penaltyPerWrong
+						}
+					} else {
+						score += cell.ScoreDelta
+					}
+				}
+			}
+		}
+		// 无格子时用场级 ac_count
+		if solved == 0 && l.AcCount > 0 && scoring == "icpc" {
+			solved = l.AcCount
+		}
+		drafts = append(drafts, rowDraft{log: l, solved: solved, penalty: penalty, score: score, cellMaps: cellMaps})
+	}
+
+	if allZero && scoring == "icpc" {
+		// 按 solved desc, penalty asc
+		for i := 0; i < len(drafts); i++ {
+			for j := i + 1; j < len(drafts); j++ {
+				if drafts[j].solved > drafts[i].solved ||
+					(drafts[j].solved == drafts[i].solved && drafts[j].penalty < drafts[i].penalty) {
+					drafts[i], drafts[j] = drafts[j], drafts[i]
+				}
+			}
+		}
+	}
+
+	rows := make([]map[string]interface{}, 0, len(drafts))
+	for i, d := range drafts {
+		u := nameMap[d.log.UserID]
+		rankOff := d.log.Rank
+		rankLocal := rankOff
+		if rankLocal <= 0 {
+			rankLocal = i + 1
+		}
+		row := map[string]interface{}{
+			"userId":       d.log.UserID,
+			"name":         u.Name,
+			"avatar":       u.Avatar,
+			"rankOfficial": rankOff,
+			"rankLocal":    rankLocal,
+			"solved":       d.solved,
+			"penaltySec":   d.penalty,
+			"score":        d.score,
+			"acCount":      d.log.AcCount,
+			"cells":        d.cellMaps,
+		}
+		rows = append(rows, row)
+	}
+
+	// problems 规范化
+	probOut := make([]map[string]interface{}, 0, len(problems))
+	for _, p := range problems {
+		label, _ := p["label"].(string)
+		ext, _ := p["externalId"].(string)
+		if ext == "" {
+			ext, _ = p["external_id"].(string)
+		}
+		title, _ := p["title"].(string)
+		probOut = append(probOut, map[string]interface{}{
+			"label":      label,
+			"externalId": ext,
+			"title":      title,
+		})
+	}
+
+	writeContestJSON(ctx, 200, map[string]interface{}{
+		"success": true,
+		"message": "ok",
+		"data": map[string]interface{}{
+			"contest":  contestMap(seed),
+			"scoring":  scoring,
+			"problems": probOut,
+			"rows":     rows,
+			"total":    len(rows),
+		},
+	})
+	return nil
+}
+
+func cellToMap(cell model.ContestUserProblem) map[string]interface{} {
+	m := map[string]interface{}{
+		"label":      cell.Label,
+		"externalId": cell.ExternalID,
+		"status":     cell.Status,
+		"attempts":   cell.Attempts,
+		"scoreDelta": cell.ScoreDelta,
+	}
+	if cell.RelativeSec != nil {
+		m["relativeSec"] = *cell.RelativeSec
+	}
+	if cell.FirstACAt != nil {
+		m["firstAcAt"] = cell.FirstACAt.Unix()
+	}
+	return m
 }
 
 func writeContestJSON(ctx khttp.Context, status int, v interface{}) {

@@ -7,6 +7,7 @@ import (
 	"cwxu-algo/app/core_data/internal/data/model"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -215,27 +216,52 @@ func (s *SpiderDal) GetContestByUserId(ctx context.Context, userId int64, cursor
 	return contestLogs, nil
 }
 
+// ContestListQuery 比赛列表筛选（按 platform+contest_id 去重）
+type ContestListQuery struct {
+	UserId    int64
+	Offset    int64
+	Limit     int64
+	Platform  string
+	Keyword   string
+	TimeFrom  int64 // unix 秒，含；0=不限
+	TimeTo    int64 // unix 秒，含；0=不限
+	MemberIDs []int64
+}
+
 // GetContestList 获取比赛列表（按 contest_id 去重）
 func (s *SpiderDal) GetContestList(ctx context.Context, userId int64, offset int64, limit int64, platform string) ([]model.ContestLog, int64, error) {
-	return s.GetContestListScoped(ctx, userId, offset, limit, platform, nil)
+	return s.GetContestListScoped(ctx, ContestListQuery{
+		UserId: userId, Offset: offset, Limit: limit, Platform: platform,
+	})
 }
 
 // GetContestListScoped userId=-1 时 memberIDs 限制组织成员
-func (s *SpiderDal) GetContestListScoped(ctx context.Context, userId int64, offset int64, limit int64, platform string, memberIDs []int64) ([]model.ContestLog, int64, error) {
-	if memberIDs != nil && len(memberIDs) == 0 && userId == -1 {
+func (s *SpiderDal) GetContestListScoped(ctx context.Context, q ContestListQuery) ([]model.ContestLog, int64, error) {
+	if q.MemberIDs != nil && len(q.MemberIDs) == 0 && q.UserId == -1 {
 		return []model.ContestLog{}, 0, nil
 	}
 	buildQuery := func() *gorm.DB {
-		q := s.db.WithContext(ctx).Model(&model.ContestLog{})
-		if userId != -1 {
-			q = q.Where("user_id = ?", userId)
-		} else if memberIDs != nil {
-			q = q.Where("user_id IN ?", memberIDs)
+		db := s.db.WithContext(ctx).Model(&model.ContestLog{})
+		if q.UserId != -1 {
+			db = db.Where("user_id = ?", q.UserId)
+		} else if q.MemberIDs != nil {
+			db = db.Where("user_id IN ?", q.MemberIDs)
 		}
-		if platform != "" {
-			q = q.Where("platform = ?", platform)
+		if platform := strings.TrimSpace(q.Platform); platform != "" {
+			db = db.Where("platform = ?", platform)
 		}
-		return q
+		if kw := strings.TrimSpace(q.Keyword); kw != "" {
+			// 名称或 contest_id 模糊匹配
+			like := "%" + kw + "%"
+			db = db.Where("(contest_name ILIKE ? OR contest_id ILIKE ?)", like, like)
+		}
+		if q.TimeFrom > 0 {
+			db = db.Where("time >= ?", time.Unix(q.TimeFrom, 0))
+		}
+		if q.TimeTo > 0 {
+			db = db.Where("time <= ?", time.Unix(q.TimeTo, 0))
+		}
+		return db
 	}
 
 	// 1. 按 (platform, contest_id) 去重计数（力扣 weekly-contest-N 与其它平台 id 不能并）
@@ -251,7 +277,7 @@ func (s *SpiderDal) GetContestListScoped(ctx context.Context, userId int64, offs
 	)
 	if err := s.db.WithContext(ctx).Table("(?) AS ranked", ranked).
 		Where("row_num = 1").Order("time DESC, id DESC").
-		Offset(int(offset)).Limit(int(limit)).Scan(&contestLogs).Error; err != nil {
+		Offset(int(q.Offset)).Limit(int(q.Limit)).Scan(&contestLogs).Error; err != nil {
 		return nil, 0, err
 	}
 	return contestLogs, total, nil

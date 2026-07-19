@@ -46,3 +46,11 @@ func ACProblemKeyFromLog(l *SubmitLog) string {
 	}
 	return ACProblemKey(l.Platform, l.ExternalID, l.Problem, l.ProblemID)
 }
+
+// 力扣官方合成 AC 去重键前缀（spider 写入 e:LeetCode:ac-0..acTotal-1，对应官方 acTotal）
+const LeetCodeOfficialACKeyPrefix = "e:LeetCode:ac-"
+
+// IsLeetCodeOfficialACKey 是否为力扣官方合成过题键（非 recentAC 明细 slug）
+func IsLeetCodeOfficialACKey(problemKey string) bool {
+	return strings.HasPrefix(problemKey, LeetCodeOfficialACKeyPrefix)
+}

@@ -635,6 +635,253 @@ func (p NewLeetCode) FetchContestLog(userId int64, username string, needAll bool
 	return mapLeetCodeContestHistory(userId, pr.Data.UserContestRankingHistory, needAll), nil
 }
 
+// FetchContestDetails 用公开 ranking API（按 history.rank 定位页）拉每题 AC 时间与 fail_count。
+func (p NewLeetCode) FetchContestDetails(userId int64, username string, needAll bool) ([]spider.ContestProblemCell, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, fmt.Errorf("leetcode username 为空")
+	}
+	// 先取 history（含 ranking / startTime / slug）
+	payload := map[string]interface{}{
+		"query": `query userContestRankingHistory($userSlug: String!) {
+			userContestRankingHistory(userSlug: $userSlug) {
+				attended
+				ranking
+				score
+				totalProblems
+				contest { title titleCn startTime }
+			}
+		}`,
+		"variables": map[string]string{"userSlug": username},
+	}
+	b, _ := json.Marshal(payload)
+	req, err := http.NewRequest(http.MethodPost, lcGraphQLNoj, bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	setLCHeaders(req, username)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ojhttp.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	var pr lcContestHistoryResp
+	if err := json.Unmarshal(body, &pr); err != nil {
+		return nil, err
+	}
+	if pr.Data.UserContestRankingHistory == nil {
+		return nil, nil
+	}
+	items := pr.Data.UserContestRankingHistory
+	// 与 map 一致：只 attended；needAll=false 最近 10 场
+	type attended struct {
+		slug    string
+		rank    int
+		start   int64
+		title   string
+	}
+	var list []attended
+	for _, it := range items {
+		if !it.Attended || it.Contest == nil {
+			continue
+		}
+		title := strings.TrimSpace(it.Contest.TitleCn)
+		if title == "" {
+			title = strings.TrimSpace(it.Contest.Title)
+		}
+		slug := leetCodeContestSlug(it.Contest.Title)
+		if slug == "" {
+			slug = leetCodeContestSlug(it.Contest.TitleCn)
+		}
+		if slug == "" {
+			continue
+		}
+		list = append(list, attended{slug: slug, rank: it.Ranking, start: it.Contest.StartTime, title: title})
+	}
+	sort.SliceStable(list, func(i, j int) bool { return list[i].start > list[j].start })
+	if !needAll && len(list) > 10 {
+		list = list[:10]
+	}
+
+	out := make([]spider.ContestProblemCell, 0, len(list)*4)
+	for i, a := range list {
+		if i > 0 {
+			time.Sleep(150 * time.Millisecond)
+		}
+		cells, err := fetchLeetCodeUserContestCells(a.slug, username, a.rank, a.start)
+		if err != nil {
+			// 单场失败不阻断
+			continue
+		}
+		out = append(out, cells...)
+	}
+	_ = userId
+	return out, nil
+}
+
+// fetchLeetCodeUserContestCells 按 rank 估算页码，从 ranking API 取该用户 submissions。
+func fetchLeetCodeUserContestCells(slug, userSlug string, rank int, contestStart int64) ([]spider.ContestProblemCell, error) {
+	slug = strings.TrimSpace(slug)
+	userSlug = strings.TrimSpace(userSlug)
+	if slug == "" || userSlug == "" {
+		return nil, fmt.Errorf("empty slug/user")
+	}
+	const pageSize = 25
+	// rank 可能是 0-based 或 1-based；多试相邻页
+	pages := []int{1}
+	if rank > 0 {
+		// rank_v2 多为从 1 开始
+		p := (rank-1)/pageSize + 1
+		if p < 1 {
+			p = 1
+		}
+		pages = []int{p, p - 1, p + 1, 1}
+	}
+	seenPage := map[int]struct{}{}
+	for _, page := range pages {
+		if page < 1 {
+			continue
+		}
+		if _, ok := seenPage[page]; ok {
+			continue
+		}
+		seenPage[page] = struct{}{}
+		cells, found, err := fetchLeetCodeRankingPage(slug, userSlug, page, contestStart)
+		if err != nil {
+			continue
+		}
+		if found {
+			return cells, nil
+		}
+	}
+	return nil, fmt.Errorf("leetcode ranking: user %s not found in nearby pages for %s", userSlug, slug)
+}
+
+func fetchLeetCodeRankingPage(slug, userSlug string, page int, contestStart int64) (cells []spider.ContestProblemCell, found bool, err error) {
+	url := fmt.Sprintf(
+		"https://leetcode.cn/contest/api/ranking/%s/?pagination=%d&region=local",
+		slug, page,
+	)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; GoAlgo/1.0)")
+	req.Header.Set("Referer", "https://leetcode.cn/contest/"+slug+"/")
+	resp, err := ojhttp.Do(req)
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, false, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, false, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	var out struct {
+		Questions []struct {
+			TitleSlug string `json:"title_slug"`
+			Credit    int    `json:"credit"`
+			// question_id 与 submissions 的 key 可能是 question_id
+			QuestionID int `json:"question_id"`
+			ID         int `json:"id"`
+		} `json:"questions"`
+		TotalRank []struct {
+			UserSlug string `json:"user_slug"`
+			Username string `json:"username"`
+			Score    int    `json:"score"`
+			RankV2   int    `json:"rank_v2"`
+		} `json:"total_rank"`
+		Submissions []map[string]struct {
+			Date       int64 `json:"date"`
+			FailCount  int   `json:"fail_count"`
+			Status     int   `json:"status"`
+			QuestionID int   `json:"question_id"`
+		} `json:"submissions"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, false, err
+	}
+	// question_id / id → title_slug + credit + label
+	type qmeta struct {
+		slug   string
+		credit int
+		label  string
+	}
+	qidMap := map[string]qmeta{}
+	for i, q := range out.Questions {
+		label := string(rune('A' + i))
+		if i >= 26 {
+			label = strconv.Itoa(i + 1)
+		}
+		ts := strings.TrimSpace(q.TitleSlug)
+		meta := qmeta{slug: ts, credit: q.Credit, label: label}
+		if q.QuestionID > 0 {
+			qidMap[strconv.Itoa(q.QuestionID)] = meta
+		}
+		if q.ID > 0 {
+			qidMap[strconv.Itoa(q.ID)] = meta
+		}
+		// 也用 title_slug 作 key（部分响应）
+		if ts != "" {
+			qidMap[ts] = meta
+		}
+	}
+
+	userSlugLower := strings.ToLower(userSlug)
+	for i, r := range out.TotalRank {
+		if strings.ToLower(strings.TrimSpace(r.UserSlug)) != userSlugLower &&
+			strings.ToLower(strings.TrimSpace(r.Username)) != userSlugLower {
+			continue
+		}
+		if i >= len(out.Submissions) {
+			return nil, true, nil
+		}
+		subMap := out.Submissions[i]
+		cells = make([]spider.ContestProblemCell, 0, len(subMap))
+		for key, sub := range subMap {
+			meta, ok := qidMap[key]
+			if !ok {
+				meta, ok = qidMap[strconv.Itoa(sub.QuestionID)]
+			}
+			if !ok || meta.slug == "" {
+				// 仍写入，external 用 key
+				meta = qmeta{slug: key, label: key}
+			}
+			// status 10 = AC
+			if sub.Status != 10 && sub.Date == 0 {
+				continue
+			}
+			cell := spider.ContestProblemCell{
+				ContestID:  slug,
+				Label:      meta.label,
+				ExternalID: meta.slug,
+				Attempts:   sub.FailCount,
+				ScoreDelta: meta.credit,
+				Status:     model.ContestCellAC,
+			}
+			if sub.Date > 0 {
+				t := time.Unix(sub.Date, 0)
+				cell.FirstACAt = &t
+				if contestStart > 0 && sub.Date >= contestStart {
+					rel := int(sub.Date - contestStart)
+					cell.RelativeSec = &rel
+				}
+			}
+			cells = append(cells, cell)
+		}
+		return cells, true, nil
+	}
+	return nil, false, nil
+}
+
 func init() {
 	spider.Register(NewLeetCode{})
 }

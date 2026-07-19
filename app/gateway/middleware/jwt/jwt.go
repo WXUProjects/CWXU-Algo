@@ -96,6 +96,7 @@ var publicExact = map[string]struct{}{
 	"/v1/core/contest/list":         {},
 	"/v1/core/contest/ranking":      {},
 	"/v1/core/contest/problems":     {},
+	"/v1/core/contest/board":        {},
 	"/v1/core/statistic/heatmap":    {},
 	"/v1/core/statistic/period":     {},
 	"/v1/core/statistic/rank":       {},

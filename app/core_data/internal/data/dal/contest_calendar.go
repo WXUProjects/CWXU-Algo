@@ -74,7 +74,9 @@ func (d *ContestCalendarDal) CleanupEnded(keepBeforeUnix int64) (int64, error) {
 type CalendarListQuery struct {
 	Platform string
 	Keyword  string
-	Status   string // upcoming | ongoing | all
+	Status   string // upcoming | ongoing | ended | all
+	TimeFrom int64  // 开赛时间下界（unix 秒，含）；0=不限
+	TimeTo   int64  // 开赛时间上界（unix 秒，含）；0=不限
 	Limit    int
 	Offset   int
 }
@@ -91,10 +93,19 @@ func (d *ContestCalendarDal) List(q CalendarListQuery) ([]model.ContestCalendar,
 	switch strings.ToLower(strings.TrimSpace(q.Status)) {
 	case "ongoing":
 		db = db.Where("start_time <= ? AND end_time > ?", now, now)
+	case "ended":
+		db = db.Where("end_time <= ?", now)
 	case "all":
-		// no time filter
+		// no status time filter
 	default: // upcoming
 		db = db.Where("start_time > ?", now)
+	}
+	// 自定义时间窗：按开赛时间 start_time 过滤（与 status 叠加）
+	if q.TimeFrom > 0 {
+		db = db.Where("start_time >= ?", q.TimeFrom)
+	}
+	if q.TimeTo > 0 {
+		db = db.Where("start_time <= ?", q.TimeTo)
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
@@ -112,7 +123,13 @@ func (d *ContestCalendarDal) List(q CalendarListQuery) ([]model.ContestCalendar,
 		offset = 0
 	}
 	var list []model.ContestCalendar
-	err := db.Order("start_time ASC").Limit(limit).Offset(offset).Find(&list).Error
+	// 已结束 / 全部：新近在前；即将开始 / 进行中：开赛近的在前
+	order := "start_time ASC"
+	st := strings.ToLower(strings.TrimSpace(q.Status))
+	if st == "ended" || st == "all" {
+		order = "start_time DESC"
+	}
+	err := db.Order(order).Limit(limit).Offset(offset).Find(&list).Error
 	return list, total, err
 }
 

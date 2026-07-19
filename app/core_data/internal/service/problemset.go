@@ -599,22 +599,32 @@ func (s *ProblemsetService) handleAdd(ctx khttp.Context) error {
 		return nil
 	}
 	var req struct {
+		// ProblemsetID 可选：0 表示仅向题库入库，不加入题单
 		ProblemsetID uint   `json:"problemsetId"`
 		ProblemID    uint   `json:"problemId"`
 		URL          string `json:"url"`
 	}
-	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ProblemsetID == 0 {
+	if err := readJSONBody(ctx.Request(), &req); err != nil {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
 		return nil
 	}
-	var ps model.Problemset
-	if err := s.db.First(&ps, req.ProblemsetID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题单不存在"})
+	// 仅按 problemId 加入题单时必须带 problemsetId；按 url 入库时 problemsetId 可省略
+	if req.ProblemsetID == 0 && req.ProblemID > 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "请提供题单 id"})
 		return nil
 	}
-	if ps.OwnerID != uid {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能向自己的题单加题"})
-		return nil
+	var ps *model.Problemset
+	if req.ProblemsetID > 0 {
+		var row model.Problemset
+		if err := s.db.First(&row, req.ProblemsetID).Error; err != nil {
+			writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题单不存在"})
+			return nil
+		}
+		if row.OwnerID != uid {
+			writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能向自己的题单加题"})
+			return nil
+		}
+		ps = &row
 	}
 
 	var problemID uint
@@ -676,9 +686,11 @@ func (s *ProblemsetService) handleAdd(ctx khttp.Context) error {
 		return nil
 	}
 
-	if err := s.linkProblemToSet(ps.ID, problemID); err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加入失败"})
-		return nil
+	if ps != nil {
+		if err := s.linkProblemToSet(ps.ID, problemID); err != nil {
+			writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加入失败"})
+			return nil
+		}
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "ok",
@@ -689,7 +701,8 @@ func (s *ProblemsetService) handleAdd(ctx khttp.Context) error {
 	return nil
 }
 
-// handleAddManual 链接无法识别时：用户手动建题并加入题单（无需审核）
+// handleAddManual 链接无法识别时：用户手动建题；可选加入题单（无需审核）
+// problemsetId 为 0 时仅向题库入库。
 func (s *ProblemsetService) handleAddManual(ctx khttp.Context) error {
 	uid := s.viewerID(ctx)
 	if uid == 0 {
@@ -697,24 +710,29 @@ func (s *ProblemsetService) handleAddManual(ctx khttp.Context) error {
 		return nil
 	}
 	var req struct {
+		// ProblemsetID 可选：0 表示仅向题库入库
 		ProblemsetID uint     `json:"problemsetId"`
 		Title        string   `json:"title"`
 		ContentMD    string   `json:"contentMd"`
 		Tags         []string `json:"tags"`
 		SourceURL    string   `json:"sourceUrl"`
 	}
-	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ProblemsetID == 0 {
+	if err := readJSONBody(ctx.Request(), &req); err != nil {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
 		return nil
 	}
-	var ps model.Problemset
-	if err := s.db.First(&ps, req.ProblemsetID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题单不存在"})
-		return nil
-	}
-	if ps.OwnerID != uid {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能向自己的题单加题"})
-		return nil
+	var ps *model.Problemset
+	if req.ProblemsetID > 0 {
+		var row model.Problemset
+		if err := s.db.First(&row, req.ProblemsetID).Error; err != nil {
+			writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题单不存在"})
+			return nil
+		}
+		if row.OwnerID != uid {
+			writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能向自己的题单加题"})
+			return nil
+		}
+		ps = &row
 	}
 	if s.uc == nil {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "服务未就绪"})
@@ -729,9 +747,11 @@ func (s *ProblemsetService) handleAddManual(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": msg})
 		return nil
 	}
-	if err := s.linkProblemToSet(ps.ID, p.ID); err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加入题单失败"})
-		return nil
+	if ps != nil {
+		if err := s.linkProblemToSet(ps.ID, p.ID); err != nil {
+			writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加入题单失败"})
+			return nil
+		}
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "ok",

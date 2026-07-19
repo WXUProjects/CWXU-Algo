@@ -15,7 +15,8 @@ import (
 
 // 画像缓存：ver 精确失效 + latest 兜底（爬虫后仍可读旧画像，同时 MQ 刷新）
 const (
-	userProfileCacheSchema = "1"
+	// s2：平台过题 / TotalAC 力扣改走官方 acTotal 合成键（不再 JOIN 题库漏计）
+	userProfileCacheSchema = "2"
 	userProfileLatestTTL   = 30 * 24 * time.Hour
 	userProfileVerTTL      = 7 * 24 * time.Hour
 )
@@ -215,7 +216,7 @@ func unpackProfile(snap *UserProfileSnapshot) (radar []struct {
 	return
 }
 
-// computeUserProfile 雷达读 user_tag_ac；平台/难度仍 JOIN 预聚合 AC 表
+// computeUserProfile 雷达读 user_tag_ac；平台过题力扣走官方 acTotal；难度仍 JOIN 题库
 func (uc *ProblemUseCase) computeUserProfile(userID int64) (*UserProfileSnapshot, error) {
 	snap := &UserProfileSnapshot{BuiltAt: time.Now().Unix()}
 
@@ -242,6 +243,19 @@ func (uc *ProblemUseCase) computeUserProfile(userID int64) (*UserProfileSnapshot
 		}
 	}
 
+	// 平台过题：直接读 user_ac_problems；力扣优先官方 acTotal 合成键（e:LeetCode:ac-*）
+	// 不再 JOIN problems——力扣明细爬不全且合成 AC 不进题库，JOIN 会严重漏计。
+	if plats, e := dal.ListUserPlatformAC(uc.data.DB, userID); e != nil {
+		log.Errorf("platforms sql user=%d: %v", userID, e)
+	} else {
+		for _, p := range plats {
+			snap.Platforms = append(snap.Platforms, struct {
+				Name  string
+				Count int64
+			}{p.Name, p.Count})
+		}
+	}
+
 	const userACJoinProblems = `
 		FROM user_ac_problems u
 		JOIN problems p ON (
@@ -257,22 +271,6 @@ func (uc *ProblemUseCase) computeUserProfile(userID int64) (*UserProfileSnapshot
 		Name  string
 		Count int64
 	}
-	var plats []nc
-	if e := uc.data.DB.Raw(`
-		SELECT COALESCE(NULLIF(btrim(u.platform), ''), p.platform) AS name, COUNT(DISTINCT p.id) AS count
-		`+userACJoinProblems+`
-		WHERE u.user_id = ?
-		GROUP BY 1
-	`, userID).Scan(&plats).Error; e != nil {
-		log.Errorf("platforms sql user=%d: %v", userID, e)
-	}
-	for _, p := range plats {
-		snap.Platforms = append(snap.Platforms, struct {
-			Name  string
-			Count int64
-		}{p.Name, p.Count})
-	}
-
 	var diffs []nc
 	if e := uc.data.DB.Raw(`
 		SELECT p.difficulty AS name, COUNT(DISTINCT p.id) AS count
@@ -291,9 +289,12 @@ func (uc *ProblemUseCase) computeUserProfile(userID int64) (*UserProfileSnapshot
 		}{d.Name, d.Count})
 	}
 
-	_ = uc.data.DB.Raw(`
-		SELECT COUNT(*) FROM user_ac_problems WHERE user_id = ?
-	`, userID).Scan(&snap.TotalAC).Error
+	// 生涯 total 与 period.ac.total / 平台合计一致：力扣用官方合成键
+	if n, e := dal.CountUserLifetimeAC(uc.data.DB, userID); e != nil {
+		log.Errorf("totalAC sql user=%d: %v", userID, e)
+	} else {
+		snap.TotalAC = n
+	}
 
 	return snap, nil
 }

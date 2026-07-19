@@ -389,6 +389,117 @@ func fetchCFContestACFromStatus(username string, needAll bool) (map[int]int, map
 	return acByContest, participateTime, nil
 }
 
+// FetchContestDetails 正式参赛提交 → 每题 AC/TRIED + 尝试次数 + 首次 AC 相对开赛时间。
+func (p NewCodeforces) FetchContestDetails(userId int64, username string, needAll bool) ([]spider.ContestProblemCell, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, fmt.Errorf("codeforces handle 为空")
+	}
+	subs, err := fetchCFUserStatusPaged(username, needAll)
+	if err != nil {
+		return nil, err
+	}
+	startBy := map[int]int64{}
+	if meta, mErr := fetchCFContestListMap(); mErr == nil {
+		for id, e := range meta {
+			if e.StartTimeSeconds > 0 {
+				startBy[id] = e.StartTimeSeconds
+			}
+		}
+	}
+
+	// contestId -> index -> agg
+	type agg struct {
+		attempts  int
+		ac        bool
+		firstAC   int64
+		label     string
+	}
+	byContest := map[int]map[string]*agg{}
+
+	// 按时间升序，便于统计 AC 前尝试
+	sorted := make([]cfJson, len(subs))
+	copy(sorted, subs)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].CreationTimeSeconds < sorted[j].CreationTimeSeconds
+	})
+
+	for _, s := range sorted {
+		if s.ContestID <= 0 {
+			continue
+		}
+		pt := strings.ToUpper(strings.TrimSpace(s.Author.ParticipantType))
+		if pt != "CONTESTANT" && pt != "OUT_OF_COMPETITION" {
+			continue
+		}
+		idx := strings.TrimSpace(s.Problem.Index)
+		if idx == "" {
+			continue
+		}
+		m := byContest[s.ContestID]
+		if m == nil {
+			m = map[string]*agg{}
+			byContest[s.ContestID] = m
+		}
+		a := m[idx]
+		if a == nil {
+			a = &agg{label: idx}
+			m[idx] = a
+		}
+		if a.ac {
+			continue // AC 后提交不计
+		}
+		verdict := strings.ToUpper(strings.TrimSpace(s.Verdict))
+		if verdict == "OK" {
+			a.ac = true
+			a.firstAC = s.CreationTimeSeconds
+			// attempts = AC 前错误次数（不含本次 AC）
+			continue
+		}
+		// 忽略排队中
+		if verdict == "" || verdict == "TESTING" || verdict == "IN_QUEUE" {
+			continue
+		}
+		// COMPILATION_ERROR 不计罚（ICPC 惯例）
+		if verdict == "COMPILATION_ERROR" {
+			continue
+		}
+		a.attempts++
+	}
+
+	out := make([]spider.ContestProblemCell, 0, 64)
+	for cid, m := range byContest {
+		cidStr := strconv.Itoa(cid)
+		start := startBy[cid]
+		for idx, a := range m {
+			if a.attempts == 0 && !a.ac {
+				continue
+			}
+			ext := cidStr + idx
+			cell := spider.ContestProblemCell{
+				ContestID:  cidStr,
+				Label:      a.label,
+				ExternalID: ext,
+				Attempts:   a.attempts,
+			}
+			if a.ac {
+				cell.Status = model.ContestCellAC
+				t := time.Unix(a.firstAC, 0)
+				cell.FirstACAt = &t
+				if start > 0 && a.firstAC >= start {
+					rel := int(a.firstAC - start)
+					cell.RelativeSec = &rel
+				}
+			} else {
+				cell.Status = model.ContestCellTried
+			}
+			_ = userId // 写入层填 UserID
+			out = append(out, cell)
+		}
+	}
+	return out, nil
+}
+
 func fetchCFContestListMap() (map[int]cfContestListEntry, error) {
 	url := "https://codeforces.com/api/contest.list?gym=false"
 	resp, err := ojhttp.Get(url)

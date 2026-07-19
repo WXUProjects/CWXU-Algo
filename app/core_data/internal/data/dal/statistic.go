@@ -413,7 +413,8 @@ func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endT
 	var scoreSelect string
 	if useLifetime {
 		base = d.db.WithContext(ctx).Table("user_ac_problems")
-		scoreSelect = "user_id, COUNT(*) AS score"
+		// 力扣优先官方 acTotal 合成键，与 period.ac.total / 平台过题一致
+		scoreSelect = "user_id, (" + lifetimeACScoreSQL + ") AS score"
 	} else {
 		base = d.db.WithContext(ctx).Table("user_ac_problem_days").
 			Where("day >= ?::date AND day <= ?::date", startDay.Format("2006-01-02"), endDay.Format("2006-01-02"))

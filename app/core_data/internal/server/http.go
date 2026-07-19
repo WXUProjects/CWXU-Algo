@@ -65,7 +65,8 @@ func NewWhiteListMatcher() selector.MatchFunc {
 			strings.Contains(operation, "activity/feed") ||
 			strings.Contains(operation, "user/recent-comments") ||
 			strings.Contains(operation, "user/recent-solutions") ||
-			strings.Contains(operation, "contest/problems") {
+			strings.Contains(operation, "contest/problems") ||
+			strings.Contains(operation, "contest/board") {
 			return false
 		}
 		if _, ok := whiteList[operation]; ok {
