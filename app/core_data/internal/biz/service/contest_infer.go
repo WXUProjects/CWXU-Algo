@@ -492,8 +492,159 @@ type ContestCellSubmit struct {
 
 const contestCellSubmitLimit = 200
 
-// ListContestCellSubmits 查询某用户在本场某题的赛时提交（与 Infer 同时间窗/归属逻辑）。
-// label / externalID 至少一个非空；优先 externalID。
+// resolveCellSubmitWindow 站内榜格子弹窗专用时间窗。
+//
+// 注意 contest_logs.time 语义因平台而异，不能一律当「开赛」：
+//   - AtCoder history：结束时间
+//   - Codeforces rating：出分/结算时间（赛后）
+//   - 日历：可信 start/end
+//   - 格子 FirstACAt − RelativeSec：可反推开赛
+//
+// 返回 start 供相对赛时展示；end 含短缓冲。
+func resolveCellSubmitWindow(db *gorm.DB, platform, contestID string, hintTime time.Time) (start, end time.Time) {
+	platform = strings.TrimSpace(platform)
+	contestID = strings.TrimSpace(contestID)
+	dur := defaultContestDuration[platform]
+	if dur <= 0 {
+		dur = 5 * time.Hour
+	}
+
+	// 1) 日历最可信
+	if cal, found := lookupContestCalendar(db, platform, contestID); found {
+		start = time.Unix(cal.StartTime, 0)
+		if cal.EndTime > cal.StartTime {
+			end = time.Unix(cal.EndTime, 0).Add(contestInferEndBuffer)
+		} else {
+			end = start.Add(dur + contestInferEndBuffer)
+		}
+		return start, end
+	}
+
+	// 2) 用本场格子 FirstACAt − RelativeSec 反推开赛
+	if db != nil && contestID != "" {
+		var cells []model.ContestUserProblem
+		_ = db.Where("platform = ? AND contest_id = ? AND first_ac_at IS NOT NULL AND relative_sec IS NOT NULL",
+			platform, contestID).
+			Limit(50).Find(&cells).Error
+		var derivedStart time.Time
+		for _, c := range cells {
+			if c.FirstACAt == nil || c.RelativeSec == nil || *c.RelativeSec < 0 {
+				continue
+			}
+			s := c.FirstACAt.Add(-time.Duration(*c.RelativeSec) * time.Second)
+			if s.IsZero() {
+				continue
+			}
+			if derivedStart.IsZero() || s.Before(derivedStart) {
+				derivedStart = s
+			}
+		}
+		if !derivedStart.IsZero() {
+			// 略放宽开赛前 2min，避免边界
+			start = derivedStart.Add(-2 * time.Minute)
+			end = derivedStart.Add(dur + contestInferEndBuffer)
+			// 若 hint 更晚且像结束/出分时间，把 end 拉到 hint+buffer
+			if !hintTime.IsZero() && hintTime.After(end) {
+				end = hintTime.Add(contestInferEndBuffer)
+			}
+			return start, end
+		}
+	}
+
+	// 3) 无日历：按平台理解 hint
+	if !hintTime.IsZero() {
+		switch platform {
+		case spider.AtCoder:
+			// history JSON 的 EndTime → contest_logs.time
+			end = hintTime.Add(contestInferEndBuffer)
+			start = hintTime.Add(-dur)
+			return start, end
+		case spider.CodeForces, "Codeforces":
+			// rating 结算时间在赛后；向前多看一段覆盖赛时
+			// 默认赛长 2h，结算可能再晚几小时
+			start = hintTime.Add(-(dur + 3*time.Hour))
+			end = hintTime.Add(contestInferEndBuffer)
+			return start, end
+		default:
+			// 多数平台 hint 当开赛
+			start = hintTime
+			end = hintTime.Add(dur + contestInferEndBuffer)
+			return start, end
+		}
+	}
+
+	// 4) 兜底
+	return ResolveContestWindow(db, platform, contestID, hintTime)
+}
+
+// collectWantExternalIDs 格子 externalId + 题号 label → 要匹配的 external_id 集合。
+func collectWantExternalIDs(db *gorm.DB, platform, contestID, label, externalID string) (want []string, outLabel, outExt string) {
+	label = strings.TrimSpace(label)
+	externalID = strings.TrimSpace(externalID)
+	outLabel, outExt = label, externalID
+	seen := map[string]struct{}{}
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		want = append(want, s)
+	}
+	add(externalID)
+
+	probSet := loadContestProblemSet(db, platform, contestID)
+	if externalID == "" && label != "" {
+		for ext, lb := range probSet {
+			if strings.EqualFold(lb, label) || strings.EqualFold(ext, label) {
+				add(ext)
+				if outExt == "" {
+					outExt = ext
+				}
+				if outLabel == "" {
+					outLabel = lb
+				}
+			}
+		}
+	}
+	if label != "" {
+		for ext, lb := range probSet {
+			if strings.EqualFold(lb, label) {
+				add(ext)
+			}
+		}
+	}
+	if outLabel == "" && externalID != "" {
+		if lb, ok := probSet[externalID]; ok {
+			outLabel = lb
+		} else if lb, ok := probSet[strings.ToLower(externalID)]; ok {
+			outLabel = lb
+		}
+	}
+	// 无目录时 CF 常见 external = contestId+label
+	if externalID == "" && label != "" && contestID != "" {
+		if platform == spider.CodeForces || platform == "Codeforces" {
+			add(contestID + label)
+			if outExt == "" {
+				outExt = contestID + label
+			}
+		}
+		if platform == spider.AtCoder {
+			// abc467 + A → abc467_a
+			add(strings.ToLower(contestID + "_" + label))
+			if outExt == "" {
+				outExt = strings.ToLower(contestID + "_" + label)
+			}
+		}
+	}
+	return want, outLabel, outExt
+}
+
+// ListContestCellSubmits 按 external_id 反查 submit_logs，再筛赛时窗口。
+// label / externalID 至少一个非空；优先 externalID（与 contest_user_problems 一致）。
 func ListContestCellSubmits(
 	db *gorm.DB,
 	platform, contestID string,
@@ -506,132 +657,88 @@ func ListContestCellSubmits(
 	}
 	platform = strings.TrimSpace(platform)
 	contestID = strings.TrimSpace(contestID)
-	label = strings.TrimSpace(label)
-	externalID = strings.TrimSpace(externalID)
-	if platform == "" || contestID == "" || (label == "" && externalID == "") {
+	if platform == "" || contestID == "" {
+		return nil, time.Time{}, time.Time{}, nil
+	}
+	wantExt, _, _ := collectWantExternalIDs(db, platform, contestID, label, externalID)
+	if len(wantExt) == 0 && strings.TrimSpace(label) == "" {
 		return nil, time.Time{}, time.Time{}, nil
 	}
 
-	// 展示用开赛时间（无缓冲）；查询窗含赛后缓冲
-	startDisp, _, ok := ResolveContestDisplayWindow(db, platform, contestID, hintTime)
-	qStart, qEnd := ResolveContestWindow(db, platform, contestID, hintTime)
-	if ok && !startDisp.IsZero() {
-		start = startDisp
-	} else {
-		start = qStart
-	}
-	end = qEnd
+	start, end = resolveCellSubmitWindow(db, platform, contestID, hintTime)
 
-	// 目录里补全 external / label
-	probSet := loadContestProblemSet(db, platform, contestID)
-	if externalID == "" && label != "" {
-		for ext, lb := range probSet {
-			if strings.EqualFold(lb, label) || strings.EqualFold(ext, label) {
-				externalID = ext
-				if label == "" {
-					label = lb
-				}
-				break
-			}
-		}
-	}
-	if label == "" && externalID != "" {
-		if lb, ok := probSet[externalID]; ok {
-			label = lb
-		} else if lb, ok := probSet[strings.ToLower(externalID)]; ok {
-			label = lb
-		}
-	}
-
-	wantExt := map[string]struct{}{}
-	if externalID != "" {
-		wantExt[externalID] = struct{}{}
-		wantExt[strings.ToLower(externalID)] = struct{}{}
-	}
-	// 目录中 label 对应的所有 external（避免大小写/别名）
-	if label != "" {
-		for ext, lb := range probSet {
-			if strings.EqualFold(lb, label) {
-				wantExt[ext] = struct{}{}
-				wantExt[strings.ToLower(ext)] = struct{}{}
-			}
-		}
+	// 大小写不敏感匹配 external_id
+	lowerExt := make([]string, 0, len(wantExt))
+	for _, e := range wantExt {
+		lowerExt = append(lowerExt, strings.ToLower(e))
 	}
 
 	var rows []model.SubmitLog
 	q := db.Model(&model.SubmitLog{}).
 		Where("platform = ? AND user_id = ?", platform, userID).
-		Where("time >= ? AND time <= ?", qStart, qEnd).
-		Where("problem <> '' AND problem IS NOT NULL")
+		Where("time >= ? AND time <= ?", start, end)
 	if platform == spider.LeetCode {
 		q = q.Where("submit_id LIKE ?", "lc-prob-%")
 	}
-	if err = q.Order("time ASC").Limit(contestCellSubmitLimit * 3).Find(&rows).Error; err != nil {
+
+	// 主路径：external_id 反查；辅：本场 contest + 题号（历史行未写 external_id）
+	// 用 LOWER/LIKE 兼容 Postgres 与单测 SQLite
+	label = strings.TrimSpace(label)
+	if len(wantExt) > 0 && label != "" {
+		q = q.Where(
+			`(LOWER(external_id) IN ?)
+			 OR (
+			   (contest = ? OR contest = ?)
+			   AND (external_id = '' OR external_id IS NULL)
+			   AND (problem = ? OR problem LIKE ? OR problem LIKE ? OR problem LIKE ?)
+			 )`,
+			lowerExt,
+			contestID, "-"+contestID,
+			label, label+"-%", label+" %", label+".%",
+		)
+	} else if len(wantExt) > 0 {
+		q = q.Where("LOWER(external_id) IN ?", lowerExt)
+	} else {
+		q = q.Where(
+			`(contest = ? OR contest = ?)
+			 AND (problem = ? OR problem LIKE ? OR problem LIKE ? OR problem LIKE ?)`,
+			contestID, "-"+contestID,
+			label, label+"-%", label+" %", label+".%",
+		)
+	}
+
+	if err = q.Order("time ASC").Limit(contestCellSubmitLimit).Find(&rows).Error; err != nil {
 		return nil, start, end, err
 	}
 
-	out := make([]ContestCellSubmit, 0, 16)
+	// 二次确认：external_id / 解析后的 external 必须落在 wantExt（防 contest ILIKE 误伤）
+	wantSet := map[string]struct{}{}
+	for _, e := range lowerExt {
+		wantSet[e] = struct{}{}
+	}
+
+	out := make([]ContestCellSubmit, 0, len(rows))
 	for _, r := range rows {
 		if model.IsLeetCodeSyntheticSubmit(platform, r.SubmitID) {
 			continue
 		}
-		ext, lb := resolveSubmitExternal(platform, contestID, r.Contest, r.Problem, r.ExternalID)
-		match := false
-		if ext != "" {
-			if _, ok := wantExt[ext]; ok {
-				match = true
-			} else if _, ok := wantExt[strings.ToLower(ext)]; ok {
-				match = true
-			}
-		}
-		if !match && label != "" {
-			if strings.EqualFold(lb, label) || strings.EqualFold(ext, label) {
-				match = true
-			}
-			// problem 串以 label 开头（如 "B - Title"）
-			p := strings.TrimSpace(r.Problem)
-			if !match && (strings.HasPrefix(p, label+" ") || strings.HasPrefix(p, label+"-") ||
-				strings.EqualFold(p, label) || strings.HasPrefix(strings.ToUpper(p), strings.ToUpper(label)+".")) {
-				// 仍需本场归属
+		ext, _ := resolveSubmitExternal(platform, contestID, r.Contest, r.Problem, r.ExternalID)
+		extKey := strings.ToLower(strings.TrimSpace(firstNonEmpty(ext, r.ExternalID)))
+		if len(wantSet) > 0 {
+			if _, ok := wantSet[extKey]; !ok {
+				// 允许 problem 前缀匹配 label 且 contest 精确为本场
+				p := strings.TrimSpace(r.Problem)
 				cField := strings.TrimSpace(r.Contest)
-				if cField == "" || cField == contestID || cField == "-"+contestID ||
-					strings.EqualFold(cField, contestID) || strings.Contains(cField, contestID) {
-					match = true
-				} else if len(wantExt) > 0 {
-					// 有目标 external 时不靠纯 label 猜
-					match = false
+				labelOK := label != "" && (
+					strings.EqualFold(p, label) ||
+						strings.HasPrefix(p, label+"-") ||
+						strings.HasPrefix(p, label+" ") ||
+						strings.HasPrefix(strings.ToUpper(p), strings.ToUpper(label)+"."))
+				contestOK := cField == contestID || cField == "-"+contestID || strings.EqualFold(cField, contestID)
+				if !(labelOK && contestOK) {
+					continue
 				}
 			}
-		}
-		if !match && externalID != "" {
-			if strings.EqualFold(r.ExternalID, externalID) ||
-				strings.EqualFold(r.Problem, externalID) ||
-				strings.Contains(strings.ToLower(r.Problem), strings.ToLower(externalID)) {
-				cField := strings.TrimSpace(r.Contest)
-				if cField == "" || cField == contestID || strings.Contains(cField, contestID) ||
-					strings.EqualFold(cField, contestID) {
-					match = true
-				}
-			}
-		}
-		// 本场 contest 字段归属（与 Infer 一致）
-		if match {
-			// 有题目集时：ext 必须在集合内或 wantExt 命中
-			if len(probSet) > 0 && ext != "" {
-				if _, ok := probSet[ext]; !ok {
-					if _, ok2 := probSet[strings.ToLower(ext)]; !ok2 {
-						// 仍允许 wantExt 精确命中（目录未收录变体）
-						if _, ok3 := wantExt[ext]; !ok3 {
-							if _, ok4 := wantExt[strings.ToLower(ext)]; !ok4 {
-								match = false
-							}
-						}
-					}
-				}
-			}
-		}
-		if !match {
-			continue
 		}
 		item := ContestCellSubmit{
 			ID:         r.ID,
@@ -652,9 +759,6 @@ func ListContestCellSubmits(
 			item.RelativeSec = &sec
 		}
 		out = append(out, item)
-		if len(out) >= contestCellSubmitLimit {
-			break
-		}
 	}
 	return out, start, end, nil
 }

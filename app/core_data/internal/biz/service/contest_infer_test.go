@@ -14,7 +14,9 @@ import (
 
 func testInferDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:contest_infer?mode=memory&cache=shared"), &gorm.Config{
+	// 每测独立内存库，避免 submit_id 唯一约束互相污染
+	dsn := "file:contest_infer_" + t.Name() + "?mode=memory&cache=shared"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
@@ -176,5 +178,91 @@ func TestInferContestUserProblems_NoProblemSetRequiresContestField(t *testing.T)
 	}
 	if n != 1 {
 		t.Fatalf("n=%d want 1 (only contest-tagged)", n)
+	}
+}
+
+// AtCoder contest_logs.time 是结束时间；按 external_id 反查应落在 end−赛长 窗内。
+func TestListContestCellSubmits_AtCoderByExternalIDEndHint(t *testing.T) {
+	db := testInferDB(t)
+	// ABC 开赛 12:00 UTC，结束 13:40（100min）——与线上 history EndTime 一致
+	endHint := time.Date(2026, 7, 18, 13, 40, 0, 0, time.UTC)
+	logs := []model.SubmitLog{
+		{Platform: spider.AtCoder, UserID: 13, SubmitID: "1", Contest: "abc467",
+			Problem: "abc467_a", ExternalID: "abc467_a", Status: "WA",
+			Time: time.Date(2026, 7, 18, 12, 3, 52, 0, time.UTC)},
+		{Platform: spider.AtCoder, UserID: 13, SubmitID: "2", Contest: "abc467",
+			Problem: "abc467_a", ExternalID: "abc467_a", Status: "WA",
+			Time: time.Date(2026, 7, 18, 12, 4, 37, 0, time.UTC)},
+		{Platform: spider.AtCoder, UserID: 13, SubmitID: "3", Contest: "abc467",
+			Problem: "abc467_a", ExternalID: "abc467_a", Status: "AC",
+			Time: time.Date(2026, 7, 18, 12, 13, 3, 0, time.UTC)},
+		// 赛后练习：不应计入
+		{Platform: spider.AtCoder, UserID: 13, SubmitID: "4", Contest: "abc467",
+			Problem: "abc467_a", ExternalID: "abc467_a", Status: "AC",
+			Time: time.Date(2026, 7, 18, 15, 0, 0, 0, time.UTC)},
+		// 他题
+		{Platform: spider.AtCoder, UserID: 13, SubmitID: "5", Contest: "abc467",
+			Problem: "abc467_b", ExternalID: "abc467_b", Status: "AC",
+			Time: time.Date(2026, 7, 18, 12, 16, 57, 0, time.UTC)},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	list, start, end, err := ListContestCellSubmits(
+		db, spider.AtCoder, "abc467", 13, "A", "abc467_a", endHint,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start.After(time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)) {
+		t.Fatalf("start=%v should cover 12:00", start)
+	}
+	if end.Before(endHint) {
+		t.Fatalf("end=%v want >= %v", end, endHint)
+	}
+	if len(list) != 3 {
+		t.Fatalf("list=%d want 3 (exclude practice+other), got %+v", len(list), list)
+	}
+	if list[2].Status != "AC" || list[2].SubmitID != "3" {
+		t.Fatalf("last in-contest=%+v", list[2])
+	}
+}
+
+// CF：external_id=2230A + 结算时间 hint，应扫到赛时 WA/OK。
+func TestListContestCellSubmits_CodeforcesByExternalID(t *testing.T) {
+	db := testInferDB(t)
+	ratingUpdate := time.Date(2026, 5, 18, 16, 35, 0, 0, time.UTC)
+	logs := []model.SubmitLog{
+		{Platform: spider.CodeForces, UserID: 13, SubmitID: "a1", Contest: "2230",
+			Problem: "A-Optimal Purchase", ExternalID: "2230A", Status: "WA",
+			Time: time.Date(2026, 5, 18, 14, 43, 47, 0, time.UTC)},
+		{Platform: spider.CodeForces, UserID: 13, SubmitID: "a2", Contest: "2230",
+			Problem: "A-Optimal Purchase", ExternalID: "2230A", Status: "OK",
+			Time: time.Date(2026, 5, 18, 14, 47, 33, 0, time.UTC)},
+		{Platform: spider.CodeForces, UserID: 13, SubmitID: "b1", Contest: "2230",
+			Problem: "B-Digit String", ExternalID: "2230B", Status: "OK",
+			Time: time.Date(2026, 5, 18, 16, 18, 43, 0, time.UTC)},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	// 用格子 relative 反推开赛更准
+	rel := 753
+	first := time.Date(2026, 5, 18, 14, 47, 33, 0, time.UTC)
+	_ = db.Create(&model.ContestUserProblem{
+		Platform: spider.CodeForces, ContestID: "2230", UserID: 13,
+		Label: "A", ExternalID: "2230A", Status: model.ContestCellAC,
+		Attempts: 1, FirstACAt: &first, RelativeSec: &rel,
+	}).Error
+
+	list, _, _, err := ListContestCellSubmits(
+		db, spider.CodeForces, "2230", 13, "A", "2230A", ratingUpdate,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("list=%d want 2, %+v", len(list), list)
 	}
 }
