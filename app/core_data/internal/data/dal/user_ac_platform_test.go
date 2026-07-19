@@ -44,7 +44,7 @@ func TestListUserPlatformACSourceHasNoQuestionMarkLiteral(t *testing.T) {
 	if !strings.Contains(body, "unknown") {
 		t.Fatal("expected empty-platform label 'unknown'")
 	}
-	// 牛客饼图拆分：主站 UUID → 牛客Tracker，AC 站数字 id → 竞赛站
+	// 牛客饼图拆分 + 分段查询（避免一整段 UNION 失败导致 platforms 全空）
 	if !strings.Contains(body, "PlatformACNowCoderTracker") {
 		t.Fatal("expected PlatformACNowCoderTracker in ListUserPlatformAC")
 	}
@@ -54,7 +54,9 @@ func TestListUserPlatformACSourceHasNoQuestionMarkLiteral(t *testing.T) {
 	if !strings.Contains(body, "tracker") || !strings.Contains(body, "NowCoder") {
 		t.Fatal("expected NowCoder site-kind split in ListUserPlatformAC")
 	}
-	// 常量定义在同文件，展示名不可为空
+	if !strings.Contains(body, "firstErr") {
+		t.Fatal("expected resilient multi-query path (firstErr)")
+	}
 	if PlatformACNowCoderTracker == "" || PlatformACNowCoderContest == "" {
 		t.Fatal("NowCoder pie labels must be non-empty")
 	}

@@ -15,8 +15,8 @@ import (
 
 // 画像缓存：ver 精确失效 + latest 兜底（爬虫后仍可读旧画像，同时 MQ 刷新）
 const (
-	// s4：NowCoder 平台过题拆成「竞赛站 / 牛客Tracker」（主站 UUID vs AC 站数字 id）
-	userProfileCacheSchema = "4"
+	// s5：平台过题三段查询（牛客失败不拖垮其它平台）+ 安全 JOIN
+	userProfileCacheSchema = "5"
 	userProfileLatestTTL   = 30 * 24 * time.Hour
 	userProfileVerTTL      = 7 * 24 * time.Hour
 )

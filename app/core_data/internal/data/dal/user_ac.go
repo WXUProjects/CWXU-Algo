@@ -138,7 +138,8 @@ const (
 
 // ListUserPlatformAC 按平台生涯过题数（力扣优先官方合成键）
 // NowCoder 拆成「竞赛站」(数字 external_id) + 「牛客Tracker」(32 hex UUID)，饼图可区分主站/AC 站。
-// 注意：GORM Raw 会把 SQL 里任意问号（含作字符串字面量的问号）当绑定占位符，空平台回落用 unknown 而非问号。
+// 三段独立查询：牛客 JOIN 失败时仍返回其它平台，避免整段 UNION 挂掉导致饼图全空。
+// 注意：GORM Raw 会把 SQL 里任意问号当绑定占位符，空平台回落用 unknown。
 func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 	if db == nil || userID <= 0 {
 		return nil, nil
@@ -147,20 +148,32 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 		Name  string `gorm:"column:name"`
 		Count int64  `gorm:"column:cnt"`
 	}
-	var rows []nc
-	// 非力扣非牛客：按 platform 聚合
-	// 牛客：p: 键 JOIN problems.external_id 判 UUID/数字；e:NowCoder: 直接看后缀
-	// 力扣：有官方合成则只计 ac-*，否则计全部
-	// 展示名用拼接插入（不可写在 raw string 内部当“假拼接”）
-	q := `
+	out := make([]PlatformACCount, 0, 8)
+	var firstErr error
+
+	// 1) 其它平台（非力扣、非牛客）
+	var others []nc
+	if err := db.Raw(`
+		SELECT COALESCE(NULLIF(btrim(platform), ''), 'unknown') AS name, COUNT(*)::bigint AS cnt
+		FROM user_ac_problems
+		WHERE user_id = ?
+		  AND platform IS DISTINCT FROM 'LeetCode'
+		  AND platform IS DISTINCT FROM 'NowCoder'
+		GROUP BY 1
+		HAVING COUNT(*) > 0
+	`, userID).Scan(&others).Error; err != nil {
+		firstErr = err
+	} else {
+		for _, r := range others {
+			out = append(out, PlatformACCount{Name: r.Name, Count: r.Count})
+		}
+	}
+
+	// 2) 牛客：p: 键用 'p:'||id 等值 JOIN（避免 CAST+正则在部分数据上整句失败）
+	//    e:NowCoder: + 32hex → Tracker；题库 external_id 为 32hex → Tracker；其余 → 竞赛站
+	var ncRows []nc
+	ncSQL := `
 		SELECT name, cnt FROM (
-			SELECT COALESCE(NULLIF(btrim(platform), ''), 'unknown') AS name, COUNT(*)::bigint AS cnt
-			FROM user_ac_problems
-			WHERE user_id = ?
-			  AND platform IS DISTINCT FROM 'LeetCode'
-			  AND platform IS DISTINCT FROM 'NowCoder'
-			GROUP BY 1
-			UNION ALL
 			SELECT
 				CASE
 					WHEN kind = 'tracker' THEN '` + PlatformACNowCoderTracker + `'
@@ -170,44 +183,79 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 			FROM (
 				SELECT
 					CASE
-						WHEN u.problem_key LIKE 'e:NowCoder:%'
-							AND length(substr(u.problem_key, 12)) = 32
-							AND lower(substr(u.problem_key, 12)) ~ '^[0-9a-f]+$'
-						THEN 'tracker'
-						WHEN u.problem_key ~ '^p:[0-9]+$'
-							AND p.external_id IS NOT NULL
-							AND length(btrim(p.external_id)) = 32
-							AND lower(btrim(p.external_id)) ~ '^[0-9a-f]+$'
-						THEN 'tracker'
+						WHEN length(ext) = 32 AND ext ~ '^[0-9a-f]+$' THEN 'tracker'
 						ELSE 'contest'
 					END AS kind
-				FROM user_ac_problems u
-				LEFT JOIN problems p
-					ON u.problem_key ~ '^p:[0-9]+$'
-					AND p.id = CAST(substr(u.problem_key, 3) AS bigint)
-				WHERE u.user_id = ? AND u.platform = 'NowCoder'
-			) nc
+				FROM (
+					SELECT
+						CASE
+							WHEN u.problem_key LIKE 'e:NowCoder:%' THEN lower(substr(u.problem_key, 12))
+							WHEN p.external_id IS NOT NULL AND btrim(p.external_id) <> '' THEN lower(btrim(p.external_id))
+							WHEN u.problem_key LIKE 'n:NowCoder:%' THEN lower(substr(u.problem_key, 12))
+							ELSE ''
+						END AS ext
+					FROM user_ac_problems u
+					LEFT JOIN problems p
+						ON u.problem_key = ('p:' || p.id::text)
+					WHERE u.user_id = ? AND u.platform = 'NowCoder'
+				) x
+			) y
 			GROUP BY 1
-			UNION ALL
-			SELECT 'LeetCode' AS name,
-				CASE
-					WHEN COUNT(*) FILTER (WHERE problem_key LIKE 'e:LeetCode:ac-%') > 0
-					THEN COUNT(*) FILTER (WHERE problem_key LIKE 'e:LeetCode:ac-%')
-					ELSE COUNT(*)
-				END::bigint AS cnt
-			FROM user_ac_problems
-			WHERE user_id = ? AND platform = 'LeetCode'
-		) t
+		) z
 		WHERE cnt > 0
-		ORDER BY cnt DESC
 	`
-	err := db.Raw(q, userID, userID, userID).Scan(&rows).Error
-	if err != nil {
-		return nil, err
+	if err := db.Raw(ncSQL, userID).Scan(&ncRows).Error; err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+		// 降级：牛客整包计为竞赛站，保证饼图有扇区
+		var n int64
+		if e2 := db.Table("user_ac_problems").
+			Where("user_id = ? AND platform = ?", userID, "NowCoder").
+			Count(&n).Error; e2 == nil && n > 0 {
+			out = append(out, PlatformACCount{Name: PlatformACNowCoderContest, Count: n})
+		}
+	} else {
+		for _, r := range ncRows {
+			out = append(out, PlatformACCount{Name: r.Name, Count: r.Count})
+		}
 	}
-	out := make([]PlatformACCount, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, PlatformACCount{Name: r.Name, Count: r.Count})
+
+	// 3) 力扣：有官方合成键 e:LeetCode:ac-* 时只计这些
+	var lc []nc
+	if err := db.Raw(`
+		SELECT 'LeetCode' AS name,
+			CASE
+				WHEN COUNT(*) FILTER (WHERE problem_key LIKE 'e:LeetCode:ac-%') > 0
+				THEN COUNT(*) FILTER (WHERE problem_key LIKE 'e:LeetCode:ac-%')
+				ELSE COUNT(*)
+			END::bigint AS cnt
+		FROM user_ac_problems
+		WHERE user_id = ? AND platform = 'LeetCode'
+	`, userID).Scan(&lc).Error; err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+	} else {
+		for _, r := range lc {
+			if r.Count > 0 {
+				out = append(out, PlatformACCount{Name: r.Name, Count: r.Count})
+			}
+		}
+	}
+
+	// 按题量降序
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].Count > out[i].Count {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+
+	// 有任一段成功则返回数据；全失败才把 error 抛给上层
+	if len(out) == 0 && firstErr != nil {
+		return nil, firstErr
 	}
 	return out, nil
 }
