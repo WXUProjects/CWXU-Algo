@@ -55,7 +55,7 @@ func TestCleanNowCoderTitleContest(t *testing.T) {
 }
 
 func TestNowcoderShouldTryNextURL(t *testing.T) {
-	if !nowcoderShouldTryNextURL(fmtErr("NowCoder 题面暂无访问权限，请稍后重试")) {
+	if !nowcoderShouldTryNextURL(fmtErr("NowCoder 题面暂无访问权限")) {
 		t.Fatal("permission should try next")
 	}
 	if !nowcoderShouldTryNextURL(fmtErr("NowCoder 未找到题面 DOM，请稍后重试")) {

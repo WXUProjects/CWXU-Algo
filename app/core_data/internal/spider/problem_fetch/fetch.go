@@ -880,8 +880,8 @@ func nowcoderFetchHTML(problemURL string) (string, error) {
 		return "", fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")
 	}
 	if isNowCoderNoPermission(html) {
-		// 链接通常正确（/acm/problem/{id}），只是比赛未公开 / 需登录 / 暂不可匿名访问
-		return "", fmt.Errorf("NowCoder 题面暂无访问权限，请稍后重试")
+		// 题库页常无匿名权限；立刻 FAILED_PERM，后补 contest 映射后走比赛页再爬
+		return "", fmt.Errorf("NowCoder 题面暂无访问权限")
 	}
 	if strings.Contains(html, "请先登录") &&
 		!strings.Contains(html, "subject-question") &&
@@ -962,7 +962,7 @@ func parseNowCoderMainHTML(html string) (*FetchedContent, error) {
 	}
 	if root == nil {
 		if isNowCoderNoPermission(html) {
-			return nil, fmt.Errorf("NowCoder 题面暂无访问权限，请稍后重试")
+			return nil, fmt.Errorf("NowCoder 题面暂无访问权限")
 		}
 		if isNowCoderWAF(html) {
 			return nil, fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")
@@ -1051,7 +1051,7 @@ func parseNowCoderACHHTML(html string) (*FetchedContent, error) {
 	}
 	if q.Length() == 0 {
 		if isNowCoderNoPermission(html) {
-			return nil, fmt.Errorf("NowCoder 题面暂无访问权限，请稍后重试")
+			return nil, fmt.Errorf("NowCoder 题面暂无访问权限")
 		}
 		if isNowCoderWAF(html) {
 			return nil, fmt.Errorf("NowCoder 被 WAF 拦截，请稍后重试")

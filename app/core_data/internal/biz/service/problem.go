@@ -1251,17 +1251,21 @@ func (uc *ProblemUseCase) RetryFailed(limit int, includePermanent bool) (scanned
 	pipelineControl.SetAnalyzePaused(false)
 	pipelineControl.SetFetchPaused(false)
 
-	// 解除误标：WAF/登录墙/DOM/暂无权限 不应进黑名单（历史曾标 FAILED_PERM）
+	// 解除误标：WAF/登录墙/DOM 类不应进黑名单（历史曾标 FAILED_PERM）
+	// 注意：暂无访问权限是真永久（题库页不可访），不在此解除；有 contest 路径时另开再爬
 	if res := uc.data.DB.Model(&model.Problem{}).
 		Where("status = ?", model.ProblemStatusFailedPerm).
 		Where(
-			"error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ?",
+			"error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ?",
 			"%需要登录%", "%被拦截%", "%WAF%",
-			"%未找到题面%", "%题面为空%", "%暂无访问权限%", "%请稍后重试%",
+			"%未找到题面%", "%题面为空%",
 		).
+		// 排除牛客题库无权限（真永久，等 contest 模式再爬）
+		Where("error_msg NOT LIKE ? AND error_msg NOT LIKE ?",
+			"%暂无访问权限%", "%没有查看题目的权限%").
 		Updates(map[string]interface{}{
 			"status":           model.ProblemStatusFailed,
-			"error_msg":        "retry: was false permanent (WAF/login/DOM/permission)",
+			"error_msg":        "retry: was false permanent (WAF/login/DOM)",
 			"fetch_attempts":   0,
 			"fetch_fail_since": nil,
 		}); res.Error == nil && res.RowsAffected > 0 {
@@ -2335,18 +2339,21 @@ func transientBackoff(attempts int) time.Duration {
 	}
 }
 
-// isTransientFetchError 瞬时/风控/暂不可读类错误：退避重试，满 24h 才升 FAILED_PERM
-// 含：WAF、登录墙、牛客暂无权限、DOM 未找到（常为权限壳/空页误判）等
+// isTransientFetchError 瞬时/风控类错误：退避重试，满 24h 才升 FAILED_PERM
+// 含：WAF、登录墙、DOM 未找到（常为权限壳/空页误判）等
+// 注意：NowCoder「暂无访问权限」不是瞬时——立刻 FAILED_PERM；有 contest 路径时再爬
 func isTransientFetchError(msg string) bool {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
 		return false
 	}
+	// 权限类已永久：勿被同句「请稍后重试」误判为瞬时
+	if isNowCoderNoAccessError(msg) {
+		return false
+	}
 	// 历史误标永久失败的文案也当可退避（管理员重试 / 消费者再爬）
 	if strings.Contains(msg, "未找到题面") ||
-		strings.Contains(msg, "题面为空") ||
-		strings.Contains(msg, "暂无访问权限") ||
-		strings.Contains(msg, "没有查看题目的权限") {
+		strings.Contains(msg, "题面为空") {
 		return true
 	}
 	return strings.Contains(msg, "Cloudflare") ||
@@ -2364,9 +2371,21 @@ func isTransientFetchError(msg string) bool {
 		strings.Contains(msg, "瞬时失败")
 }
 
+// isNowCoderNoAccessError 题库页无权限（赛后 /acm/problem/{id} 常不可匿名访问）
+// 立刻 FAILED_PERM 不退避；后补 contest_problems 后 ProcessFetch 走比赛页再给机会
+func isNowCoderNoAccessError(msg string) bool {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return false
+	}
+	return strings.Contains(msg, "暂无访问权限") ||
+		strings.Contains(msg, "没有查看题目的权限")
+}
+
 // isPermanentFetchError 真正不可恢复：立刻 FAILED_PERM，不入退避窗口
-// 注意：未找到题面 DOM / 题面为空 / 暂无权限 一律走瞬时退避（满 24h 才永久）
-// 例外：QOJ 403 = 无权限（比赛/私有题），直接永久失效
+// - NowCoder 题库无权限：立刻永久；有比赛页映射时 Force/hasContestPath 仍可再爬
+// - QOJ 403 = 无权限：直接永久
+// - DOM/空题面：走瞬时退避（满 24h 才永久）
 func isPermanentFetchError(msg string) bool {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
@@ -2374,6 +2393,10 @@ func isPermanentFetchError(msg string) bool {
 	}
 	// QOJ 无权限：优先判定，避免被通用「status 403」瞬时规则吞掉
 	if isQOJForbiddenError(msg) {
+		return true
+	}
+	// 牛客题库无权限：立刻永久（不再 24h 退避）；contest 模式另开路径
+	if isNowCoderNoAccessError(msg) {
 		return true
 	}
 	if isTransientFetchError(msg) {
