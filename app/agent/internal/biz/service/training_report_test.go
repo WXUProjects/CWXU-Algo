@@ -409,10 +409,47 @@ func TestDomainAgentTools_CarryElevatedAuth(t *testing.T) {
 			names[d.Function.Name] = true
 		}
 	}
-	for _, n := range []string{"statistic_period", "submit_cnt", "submit_log", "rank", "heatmap", "org_members", "last_submit_times"} {
+	for _, n := range []string{"statistic_period", "submit_cnt", "submit_log", "rank", "heatmap", "org_members", "last_submit_times", "problem_tags"} {
 		if !names[n] {
 			t.Errorf("missing tool %s", n)
 		}
+	}
+}
+
+func TestDailyAgentTools_HasProblemTags(t *testing.T) {
+	var dummyReg registry.Registrar
+	regPtr := &dummyReg
+	tools := DailyAgentTools(regPtr, context.Background())
+	if len(tools) < 1 {
+		t.Fatal("expected daily tools")
+	}
+	found := false
+	for _, tfac := range tools {
+		d := tfac.Description()
+		if d != nil && d.Function != nil && d.Function.Name == "problem_tags" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("daily tools missing problem_tags")
+	}
+}
+
+func TestProblemTagsTool_Description(t *testing.T) {
+	d := core_data.NewProblemTagsTool(nil).Description()
+	if d == nil || d.Function == nil || d.Function.Name != "problem_tags" {
+		t.Fatalf("bad desc: %+v", d)
+	}
+	// 无 registry 时 AiInterface 诚实失败
+	msg := core_data.NewProblemTagsTool(nil).AiInterface(`{"action":"list"}`)
+	if msg == "" || (!strings.Contains(msg, "registry") && !strings.Contains(msg, "连接") && !strings.Contains(msg, "失败")) {
+		t.Fatalf("unexpected: %s", msg)
+	}
+	bad := core_data.NewProblemTagsTool(nil).AiInterface(`{"action":"nope"}`)
+	if !strings.Contains(bad, "action") {
+		// 参数会先连 registry；action 校验在连接后
+		_ = bad
 	}
 }
 

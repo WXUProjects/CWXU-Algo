@@ -85,10 +85,18 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 			},
 		},
 	}
-	html, err := uc.chat.Complete(ctx, msgs)
+	// 日报开放题目标签 function calling（与周报/训练报告同一套 problem_tags 工具）
+	toolCtx, terr := ContextWithElevatedAgent(ctx, 0)
+	if terr != nil {
+		log.Warnf("daily elevated agent: %v", terr)
+		toolCtx = ctx
+	}
+	tools := DailyAgentTools(uc.reg, toolCtx)
+	html, err := uc.chat.Chat(ctx, msgs, tools...)
 	if err != nil {
 		return fmt.Errorf("生成日报失败: %w", err)
 	}
+	html = stripCodeFence(html)
 
 	subject := fmt.Sprintf("【%s 日报】%s · %s", uc.brandTitle(ctx), formatCNDate(data.Yesterday), data.Name)
 	if err := uc.sendHTMLEmail(data.Email, subject, html); err != nil {

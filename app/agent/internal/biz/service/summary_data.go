@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"cwxu-algo/api/core/v1/problem"
 	"cwxu-algo/api/core/v1/statistic"
 	"cwxu-algo/api/core/v1/submit_log"
 	profile2 "cwxu-algo/api/user/v1/profile"
@@ -27,11 +28,22 @@ type DayCount struct {
 }
 
 type SubmitItem struct {
-	Platform string `json:"platform"`
-	Problem  string `json:"problem"`
-	Status   string `json:"status"`
-	Lang     string `json:"lang"`
-	Time     string `json:"time"`
+	Platform   string   `json:"platform"`
+	Problem    string   `json:"problem"`
+	Status     string   `json:"status"`
+	Lang       string   `json:"lang"`
+	Time       string   `json:"time"`
+	ProblemID  uint32   `json:"problemId,omitempty"`
+	Title      string   `json:"title,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
+	Difficulty string   `json:"difficulty,omitempty"`
+}
+
+// TagACBrief 用户标签 AC 摘要（日报/周报给 AI）
+type TagACBrief struct {
+	Tag     string  `json:"tag"`
+	Score   float64 `json:"score"`
+	ACCount int64   `json:"acCount"`
 }
 
 type RankEntry struct {
@@ -50,6 +62,10 @@ type DailyReportData struct {
 	ConsecutiveZeros int          `json:"consecutiveZeroDays"`
 	Last7Days        []DayCount   `json:"last7Days"`
 	YesterdayLogs    []SubmitItem `json:"yesterdayLogs"`
+	// 用户标签画像（预取；亦可 function call problem_tags）
+	TagRadar []TagACBrief `json:"tagRadar,omitempty"`
+	// 昨日提交涉及的标签聚合 count
+	YesterdayTagHits map[string]int `json:"yesterdayTagHits,omitempty"`
 }
 
 type RecentReportData struct {
@@ -331,15 +347,74 @@ func (uc *SummaryUseCase) fetchSubmitLogs(ctx context.Context, userId int64, end
 		if t.Before(dayStart) || !t.Before(dayEnd) {
 			continue
 		}
-		out = append(out, SubmitItem{
-			Platform: v.Platform,
-			Problem:  v.Problem,
-			Status:   v.Status,
-			Lang:     v.Lang,
-			Time:     t.Format("15:04"),
-		})
+		item := SubmitItem{
+			Platform:   v.Platform,
+			Problem:    v.Problem,
+			Status:     v.Status,
+			Lang:       v.Lang,
+			Time:       t.Format("15:04"),
+			ProblemID:  v.GetProblemId(),
+			Title:      v.GetProblemTitle(),
+			Tags:       append([]string(nil), v.GetProblemTags()...),
+			Difficulty: v.GetProblemDifficulty(),
+		}
+		out = append(out, item)
 	}
 	return out, nil
+}
+
+func (uc *SummaryUseCase) fetchUserTagRadar(ctx context.Context, userId int64) []TagACBrief {
+	if userId <= 0 {
+		return nil
+	}
+	conn, err := uc.dialCoreData(ctx)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	cli := problem.NewProblemClient(conn)
+	res, err := cli.UserProfile(ctx, &problem.UserProfileReq{UserId: userId})
+	if err != nil || res == nil {
+		log.Warnf("fetchUserTagRadar user=%d: %v", userId, err)
+		return nil
+	}
+	radar := res.GetRadar()
+	out := make([]TagACBrief, 0, len(radar))
+	for _, t := range radar {
+		if t == nil || strings.TrimSpace(t.GetTag()) == "" {
+			continue
+		}
+		out = append(out, TagACBrief{
+			Tag:     t.GetTag(),
+			Score:   t.GetScore(),
+			ACCount: t.GetAcCount(),
+		})
+	}
+	// 按 ac 降序，日报只带前 20
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].ACCount != out[j].ACCount {
+			return out[i].ACCount > out[j].ACCount
+		}
+		return out[i].Score > out[j].Score
+	})
+	if len(out) > 20 {
+		out = out[:20]
+	}
+	return out
+}
+
+func aggregateTagHits(logs []SubmitItem) map[string]int {
+	m := map[string]int{}
+	for _, l := range logs {
+		for _, tag := range l.Tags {
+			tag = strings.TrimSpace(tag)
+			if tag == "" {
+				continue
+			}
+			m[tag]++
+		}
+	}
+	return m
 }
 
 func (uc *SummaryUseCase) fetchRank(ctx context.Context, start, end time.Time, scoreType string, pageSize int64) ([]RankEntry, error) {
@@ -435,6 +510,7 @@ func (uc *SummaryUseCase) loadDailyReportData(ctx context.Context, userId int64)
 		log.Warnf("拉取昨日提交明细失败 user=%d: %v", userId, err)
 		logs = []SubmitItem{}
 	}
+	radar := uc.fetchUserTagRadar(ctx, userId)
 
 	return &DailyReportData{
 		UserID:           userId,
@@ -445,6 +521,8 @@ func (uc *SummaryUseCase) loadDailyReportData(ctx context.Context, userId int64)
 		ConsecutiveZeros: consecutiveZeroFromEnd(days),
 		Last7Days:        days,
 		YesterdayLogs:    logs,
+		TagRadar:         radar,
+		YesterdayTagHits: aggregateTagHits(logs),
 	}, nil
 }
 

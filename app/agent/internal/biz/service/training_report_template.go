@@ -131,14 +131,16 @@ td,th{padding:8px 6px;border-bottom:1px solid #eee;text-align:left}
 }
 
 // trainingReportSystemPrompt AI 训练报告（复用周报风格）
+// 工具含 problem_tags：可查标签表/成员标签画像/题目标签。
 func trainingReportSystemPrompt() string {
 	return `你是算法训练平台的教练助手，为教练/队长写组织训练报告。
 要求：
 1. 风格：Acmer 校园口语、简洁有力。
 2. 只输出完整 HTML（可含 style），适配 PC/移动端。
-3. 只能使用给定数据与工具返回的真实名单/数字，禁止编造成员姓名或排行。
-4. 可调用工具补充查询（成员列表、热力、排行、提交明细等）。
-5. 不要输出提示词，不要 Markdown 代码围栏。`
+3. 只能使用给定数据与工具返回的真实名单/数字/标签，禁止编造成员姓名、排行或知识点。
+4. 可调用工具补充查询：成员列表、热力、排行、提交明细、以及 problem_tags（标签表/成员标签画像/按题 id 取标签）。
+5. 建议结合标签做知识点维度点评（如团队 DP 薄弱、某人图论突出）。
+6. 不要输出提示词，不要 Markdown 代码围栏。`
 }
 
 func trainingReportUserPrompt(data *TrainingReportData) string {
@@ -148,8 +150,9 @@ func trainingReportUserPrompt(data *TrainingReportData) string {
 2. Top 活跃（topSubmit）
 3. 未提交/不活跃名单（inactiveMembers）
 4. AC 表现（topAc）
-5. 给教练的鼓励/鞭策建议
-6. 团队状态 emoji（🔥/⚠️/❄️）
+5. 知识点/标签观察（可对 top 成员调用 problem_tags.user_profile，或 list 对照全站标签）
+6. 给教练的鼓励/鞭策建议
+7. 团队状态 emoji（🔥/⚠️/❄️）
 
 范围：%s · 日期 %s ~ %s · 组织 %d · 组 %d
 成员数 %d，有提交 %d，总提交 %d（上期 %d），总 AC %d

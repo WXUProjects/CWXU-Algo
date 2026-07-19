@@ -323,6 +323,22 @@ func DomainAgentTools(reg *registry.Registrar, orgID uint, toolCtx context.Conte
 		core_data.NewGroupMembersTool(reg, ctx),
 		core_data.NewLastSubmitTool(reg, ctx),
 		core_data.NewPeriodACTool(reg, ctx),
+		// 题目标签：全站标签表 / 用户标签画像 / 按 problemId 取标签
+		core_data.NewProblemTagsTool(reg, ctx),
+	}
+}
+
+// DailyAgentTools 个人日报 AI 工具：标签 + 提交明细 + 热力（轻量）。
+func DailyAgentTools(reg *registry.Registrar, toolCtx context.Context) []agenttool.AgentToolFactory {
+	if reg == nil {
+		return nil
+	}
+	ctx := toolCtx
+	return []agenttool.AgentToolFactory{
+		core_data.NewProblemTagsTool(reg, ctx),
+		core_data.NewSubmitLog(reg, ctx),
+		core_data.NewHeatmapTool(reg, ctx),
+		core_data.NewPeriodACTool(reg, ctx),
 	}
 }
 
