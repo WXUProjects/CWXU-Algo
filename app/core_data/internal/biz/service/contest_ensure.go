@@ -183,29 +183,30 @@ func (uc *ProblemUseCase) listContestProblemsFromSubmits(platform, contestID str
 	}
 	// CF 提交 contest 字段为数字 id；problem 形如 "A-Title"
 	type row struct {
-		Contest string
-		Problem string
+		Contest string `gorm:"column:contest"`
+		Problem string `gorm:"column:problem"`
 	}
 	var rows []row
 	q := uc.data.DB.Model(&model.SubmitLog{}).
-		Select("DISTINCT contest, problem").
+		Select("contest, problem").
 		Where("platform = ?", platform).
-		Where("problem <> ''")
+		Where("problem <> '' AND problem IS NOT NULL")
 	// contest 精确或 gym 前缀
 	if platform == "CodeForces" || platform == "Codeforces" {
 		q = q.Where("contest = ? OR contest = ? OR contest = ?", contestID, "-"+contestID, "gym"+contestID)
 	} else {
 		q = q.Where("contest = ?", contestID)
 	}
-	if err := q.Limit(80).Find(&rows).Error; err != nil {
+	if err := q.Group("contest, problem").Limit(80).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {
 		// 部分平台 contest 为空，problem 自带 id：再试 contest 模糊
 		_ = uc.data.DB.Model(&model.SubmitLog{}).
-			Select("DISTINCT contest, problem").
+			Select("contest, problem").
 			Where("platform = ? AND (contest = ? OR contest LIKE ?)", platform, contestID, "%"+contestID+"%").
-			Where("problem <> ''").
+			Where("problem <> '' AND problem IS NOT NULL").
+			Group("contest, problem").
 			Limit(80).Find(&rows).Error
 	}
 	seen := map[string]struct{}{}

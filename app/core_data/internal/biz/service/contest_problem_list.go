@@ -58,14 +58,15 @@ func contestHTTPGet(rawURL string) ([]byte, int, error) {
 	// CF 要求 standings 匿名 GET：不要塞 Cookie / 鉴权头
 	req.Header.Set("User-Agent", `Mozilla/5.0 (compatible; GoAlgo/1.0; +https://algo.zhiyuansofts.cn)`)
 	req.Header.Set("Accept", "application/json,text/html,*/*")
-	client := &http.Client{Timeout: 45 * time.Second}
+	// 机房访问 CF 常慢/失败，短超时以便尽快走提交兜底
+	client := &http.Client{Timeout: 12 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	// standings 全榜可能较大，放宽到 16MB（我们只解析 problems 数组）
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	// standings 全榜可能较大；截断读取足够解析 problems 即可
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, resp.StatusCode, err
 	}

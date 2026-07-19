@@ -382,27 +382,29 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 		return nil
 	}
 
-	// ensure：done 直接读库；running/空/failed 走 EnsureContestProblemsOnce
-	// （failed 会 CAS 重试；done 内部短路，不会重复打 OJ）
-	ensureStatus := ""
-	if c.prob != nil {
-		st, err := c.prob.EnsureContestProblemsOnce(cl.Platform, cl.ContestId)
-		if err != nil {
-			log.Warnf("ensure contest problems %s/%s: %v", cl.Platform, cl.ContestId, err)
-		}
-		ensureStatus = st
-	}
-
+	// 先读目录；未完成则异步 ensure（避免 CF standings 阻塞 HTTP 网关）
 	list := []map[string]interface{}{}
+	ensureStatus := ""
 	ensureError := ""
 	if c.prob != nil {
 		items, st, errMsg, err := c.prob.ListContestProblems(cl.Platform, cl.ContestId)
 		if err == nil {
 			list = items
-			if st != "" {
-				ensureStatus = st
-			}
+			ensureStatus = st
 			ensureError = errMsg
+		}
+		// done 且已有题：不再触发
+		needEnsure := ensureStatus != model.ContestEnsureDone || len(list) == 0
+		if needEnsure && ensureStatus != model.ContestEnsureRunning {
+			plat, cid := cl.Platform, cl.ContestId
+			go func() {
+				if _, e := c.prob.EnsureContestProblemsOnce(plat, cid); e != nil {
+					log.Warnf("ensure contest problems async %s/%s: %v", plat, cid, e)
+				}
+			}()
+			if ensureStatus == "" || ensureStatus == model.ContestEnsureFailed {
+				ensureStatus = model.ContestEnsureRunning
+			}
 		}
 	}
 
