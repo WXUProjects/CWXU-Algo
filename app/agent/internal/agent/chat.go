@@ -129,6 +129,7 @@ func (c *Chat) Chat(ctx context.Context, messages []*model.ChatCompletionMessage
 				toolMsg = fmt.Sprintf("工具不存在: %s", name)
 				log.Warnf("未知工具调用: %s", name)
 			}
+			toolMsg = sanitizeToolResult(toolMsg)
 			log.Infof("工具结果 %s: %s", name, truncate(toolMsg, 500))
 			messages = append(messages, &model.ChatCompletionMessage{
 				Role:       model.ChatMessageRoleTool,
@@ -145,4 +146,24 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// sanitizeToolResult 工具失败时避免模型把错误写进用户可见报告
+func sanitizeToolResult(msg string) string {
+	m := strings.TrimSpace(msg)
+	if m == "" {
+		return "无数据。请仅使用用户消息中的预置 JSON，不要在最终 HTML 中提及工具。"
+	}
+	lower := strings.ToLower(m)
+	failHints := []string{"服务不可用", "连接失败", "registry", "查询失败", "内部服务器错误", "unavailable", "timeout", "deadline"}
+	for _, h := range failHints {
+		if strings.Contains(lower, strings.ToLower(h)) || strings.Contains(m, h) {
+			return "工具暂不可用，忽略本工具结果。请仅使用用户消息预置 JSON 生成完整 HTML，不要在输出中提及工具或错误。"
+		}
+	}
+	// 控制工具回传体积，防止挤掉最终 HTML
+	if len(m) > 6000 {
+		return m[:6000] + "\n...(truncated) 请优先使用预置 JSON。"
+	}
+	return m
 }

@@ -431,36 +431,45 @@ func firstRankName(rows []RankEntry) string {
 }
 
 func trainingReportSystemPrompt(mode string) string {
+	return trainingReportSystemPromptStrict(mode)
+}
+
+func trainingReportSystemPromptStrict(mode string) string {
 	compact := mode == DetailModeCompact
-	depth := "详版：activeRanking 全表；不活跃单独一节；标签/做题/动态/博客/比赛齐全。"
+	depth := "详版：activeRanking 全表列出有提交成员；不活跃单独一节；标签/做题/动态/博客/比赛都要有实质内容（无数据则写暂无）。"
 	if compact {
-		depth = "简版：活跃榜可截前 15 并注明总数；维度齐全、篇幅短。"
+		depth = "简版：活跃榜最多 15 行并写「共 N 人」；八个章节都要有，每节简短。"
 	}
-	return fmt.Sprintf(`你是教练助手，输出组织训练报告 HTML。
+	return fmt.Sprintf(`你是 HTML 报告生成器，不是聊天助手。
 
-【兼容性（极重要）】
-1. 只输出完整 HTML。必须适配手机 QQ / 微信内置浏览器 / 邮件：
-   - 使用 table 布局 + 大量 inline style（style="..."）
-   - 禁止依赖 CSS Grid / Flex / clamp / backdrop-filter / 复杂 media query
-   - 字号用 px；宽度 max-width:640px；表格可横向滚动用 overflow 的简单容器
-2. 禁止 Markdown 围栏、禁止编造数据。
+【输出格式 — 违反即失败】
+1. 你的回复必须且只能是一份完整 HTML 文档。
+2. 第一个非空白字符必须是「<」（推荐以 <!DOCTYPE html> 或 <html 开头）。
+3. 禁止输出：思考过程、分析说明、工具调用说明、「现在我已获取…」、Markdown、`+"```"+` 代码围栏、任何 HTML 之外的文字。
+4. 禁止输出半截标签、未闭合的主要结构；必须以 </html> 结束（若以片段输出则至少含完整 table 结构与 8 个章节标题）。
 
-【数据规则】
-- activeRanking：全部活跃成员（已剔除教练与 0 提交），排行榜必须用它
-- inactiveMembers：不活跃，不得进榜
-- teamTags / problemOverview / orgSubmitSample / recentBlogs / contests
-- 教练不计入任何统计（数据侧已剔除）
+【版式 — QQ/邮件兼容】
+- table 布局 + 元素上写 style="..." 内联样式
+- 禁止 CSS Grid / Flex / clamp / 复杂 @media
+- 外层 max-width:640px；字号用 px
+
+【数据 — 只用用户消息里的 JSON】
+- activeRanking：活跃榜（已剔除教练与 0 提交），禁止只写 Top5 假装全员
+- inactiveMembers：不活跃，禁止进榜
+- teamTags / problemOverview / orgSubmitSample / recentBlogs / contests / dailyTrend
+- 数字与姓名必须与 JSON 一致，禁止编造
+- 若某字段为空数组，对应章节写「暂无」并给主站链接，不要编造比赛/博客
 
 【链接】
-- 姓名链到 profileUrl 或 https://algo.zhiyuansofts.cn/profile/{username}
-- 列表写不开时加「更多」链到：
-  动态 https://algo.zhiyuansofts.cn/all-activities
-  比赛 https://algo.zhiyuansofts.cn/contest
-  博客 https://algo.zhiyuansofts.cn/blog-plaza
+- 姓名：profileUrl 或 https://algo.zhiyuansofts.cn/profile/{username}
+- 更多：动态 /all-activities · 比赛 /contest · 博客 /blog-plaza（域名 https://algo.zhiyuansofts.cn）
 
-【章节】1活跃 2活跃榜 3标签 4做题+动态 5比赛 6博客 7不活跃 8综合评价
+【必须 8 节（h2 或加粗标题文字需包含关键词）】
+1 活跃度与趋势  2 活跃成员排行榜  3 知识点  4 做题概览与提交动态
+5 比赛表现  6 知识沉淀  7 不活跃成员  8 综合维度评价
 %s
-可调 problem_tags / contest_list / contest_ranking / org_submit_feed / org_blogs。`, depth)
+
+可选：仅当 JSON 标签为空时，可调用 problem_tags；工具失败则忽略，继续用 JSON，不要在 HTML 里写工具错误。`, depth)
 }
 
 func trainingReportUserPrompt(data *TrainingReportData, mode string) string {
@@ -468,20 +477,24 @@ func trainingReportUserPrompt(data *TrainingReportData, mode string) string {
 	if mode == DetailModeCompact {
 		label = "简版教练周报"
 	}
-	return fmt.Sprintf(`生成 %s（table+inline style，QQ 可渲染）。
+	// 压缩 JSON：去掉过长 memberIds 减少跑题
+	payload := *data
+	payload.MemberIDs = nil
 
-activeRanking=%d 人 | inactive=%d | tags=%d | problems=%d | feed=%d | blogs=%d | contests=%d
-范围 %s %s~%s org=%d
-提交 %d（上期 %d）AC %d
+	return fmt.Sprintf(`请直接输出 %s 的完整 HTML（从 <!DOCTYPE html> 开始，到 </html> 结束）。
 
-JSON：
+【禁止】任何前言、后记、Markdown、代码围栏、工具状态说明。
+【必须使用下列真实数据】activeRanking=%d inactive=%d tags=%d problems=%d feed=%d blogs=%d contests=%d
+范围 %s %s~%s org=%d 提交%d(上期%d) AC%d
+
+数据 JSON：
 %s`,
 		label,
 		len(data.ActiveRanking), len(data.InactiveMembers), len(data.TeamTags),
 		len(data.ProblemOverview), len(data.OrgSubmitSample), len(data.RecentBlogs), len(data.Contests),
 		data.ScopeLabel, data.StartDate, data.EndDate, data.OrgID,
 		data.TotalSubmits, data.PrevTotalSubmits, data.TotalAC,
-		mustJSON(data))
+		mustJSON(payload))
 }
 
 func mustJSON(v interface{}) string {
@@ -490,4 +503,122 @@ func mustJSON(v interface{}) string {
 		return "{}"
 	}
 	return b
+}
+
+// SanitizeAndValidateReportHTML 清洗 LLM 输出并校验是否为可用报告 HTML。
+// 返回 ok=false 时 reason 说明失败原因（供重试/回退规则模板）。
+func SanitizeAndValidateReportHTML(raw string) (htmlOut string, ok bool, reason string) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", false, "空输出"
+	}
+	// 先抽代码围栏，再去前言（顺序很重要：结尾的 ``` 不能当起点）
+	s = extractHTMLDocument(s)
+	s = stripCodeFence(s)
+	s = stripLLMPreamble(s)
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", false, "清洗后为空"
+	}
+	// 必须以标签开头
+	if !strings.HasPrefix(s, "<") {
+		return "", false, "未以 HTML 标签开头"
+	}
+	lower := strings.ToLower(s)
+	// 禁止残留围栏/明显前言
+	if strings.Contains(s, "```") {
+		return "", false, "仍含 Markdown 代码围栏"
+	}
+	for _, bad := range []string{"现在我已获取", "开始生成", "工具返回", "服务不可用", "预置 json", "function call"} {
+		if strings.Contains(lower, strings.ToLower(bad)) {
+			// 允许出现在正文数据里的极少情况；若出现在文档前 200 字则判失败
+			head := lower
+			if len(head) > 400 {
+				head = head[:400]
+			}
+			if strings.Contains(head, strings.ToLower(bad)) {
+				return "", false, "含模型废话: " + bad
+			}
+		}
+	}
+	// 结构：至少有 table 或完整 html
+	hasTable := strings.Contains(lower, "<table")
+	hasHTML := strings.Contains(lower, "<html") || strings.HasPrefix(lower, "<!doctype")
+	if !hasTable && !hasHTML {
+		return "", false, "缺少 table/html 结构"
+	}
+	// 关键章节关键词（至少命中 5/8）
+	keys := []string{"活跃", "排行", "标签", "做题", "动态", "比赛", "博客", "不活跃", "综合"}
+	hit := 0
+	for _, k := range keys {
+		if strings.Contains(s, k) {
+			hit++
+		}
+	}
+	if hit < 5 {
+		return "", false, fmt.Sprintf("章节不全(命中%d)", hit)
+	}
+	// 长度：过短视为残缺
+	if len(s) < 800 {
+		return "", false, fmt.Sprintf("HTML 过短(%d)", len(s))
+	}
+	// 未闭合的明显残缺：以 </ 中间切断
+	if strings.HasSuffix(strings.TrimSpace(s), "</") || strings.Contains(s, "</\n") {
+		return "", false, "疑似截断的闭合标签"
+	}
+	// 若无 html 外壳，包一层保证邮件可读
+	if !hasHTML {
+		s = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f0f2f5;">` +
+			s + `</body></html>`
+	}
+	return s, true, ""
+}
+
+// stripLLMPreamble 去掉「现在我…」「分析如下」等直到第一个 HTML 标签
+func stripLLMPreamble(s string) string {
+	s = strings.TrimSpace(s)
+	// 找第一个 <!DOCTYPE / <html / <table / <div / <body
+	lower := strings.ToLower(s)
+	markers := []string{"<!doctype", "<html", "<table", "<div", "<body", "<meta"}
+	pos := -1
+	for _, m := range markers {
+		if i := strings.Index(lower, m); i >= 0 {
+			if pos < 0 || i < pos {
+				pos = i
+			}
+		}
+	}
+	if pos > 0 {
+		return strings.TrimSpace(s[pos:])
+	}
+	return s
+}
+
+// extractHTMLDocument 从 ```html ... ``` 围栏中抽出 HTML；无围栏则原样返回。
+func extractHTMLDocument(s string) string {
+	s = strings.TrimSpace(s)
+	open := strings.Index(s, "```")
+	if open < 0 {
+		return s
+	}
+	rest := s[open+3:]
+	// 可选语言行：html / htm / 空
+	if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+		lang := strings.ToLower(strings.TrimSpace(rest[:nl]))
+		if lang == "html" || lang == "htm" || lang == "" {
+			rest = rest[nl+1:]
+		}
+	} else {
+		// 单行围栏无意义
+		return s
+	}
+	if close := strings.Index(rest, "```"); close >= 0 {
+		rest = rest[:close]
+	}
+	out := strings.TrimSpace(rest)
+	if out == "" {
+		// 若抽空（例如只匹配到结尾围栏），回退原文
+		return s
+	}
+	return out
 }

@@ -223,13 +223,7 @@ func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *Tr
 	if uc.chat == nil {
 		return "", fmt.Errorf("chat 未初始化")
 	}
-	// 工具使用 elevated agent 身份上下文（org 写入 token）
-	toolCtx, err := ContextWithElevatedAgent(ctx, uint(data.OrgID))
-	if err != nil {
-		log.Warnf("elevated agent token: %v", err)
-		toolCtx = ctx
-	}
-	tools := DomainAgentTools(uc.reg, uint(data.OrgID), toolCtx)
+	// 预置 JSON 已含全量统计：首轮不用工具（工具失败会诱发模型写废话/残缺 HTML）。
 	msgs := []*model.ChatCompletionMessage{
 		{
 			Role: model.ChatMessageRoleSystem,
@@ -244,7 +238,41 @@ func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *Tr
 			},
 		},
 	}
-	return uc.chat.Chat(ctx, msgs, tools...)
+
+	raw, err := uc.chat.Complete(ctx, msgs)
+	if err != nil {
+		return "", err
+	}
+	html, ok, reason := SanitizeAndValidateReportHTML(raw)
+	if ok {
+		return html, nil
+	}
+	log.Warnf("training report AI output invalid: %s; retry strict", reason)
+
+	// 严格重试：禁止工具、禁止任何非 HTML
+	retryMsgs := []*model.ChatCompletionMessage{
+		{
+			Role: model.ChatMessageRoleSystem,
+			Content: &model.ChatCompletionMessageContent{
+				StringValue: volcengine.String(trainingReportSystemPromptStrict(mode)),
+			},
+		},
+		{
+			Role: model.ChatMessageRoleUser,
+			Content: &model.ChatCompletionMessageContent{
+				StringValue: volcengine.String(trainingReportUserPrompt(data, mode) + "\n\n【重试】上次输出无效（" + reason + "）。本次必须从 <!DOCTYPE html> 或 <html 起笔，直接输出完整 HTML，禁止任何前言、Markdown、代码围栏。"),
+			},
+		},
+	}
+	raw2, err2 := uc.chat.Complete(ctx, retryMsgs)
+	if err2 != nil {
+		return "", fmt.Errorf("AI 重试失败: %w（首次校验: %s）", err2, reason)
+	}
+	html2, ok2, reason2 := SanitizeAndValidateReportHTML(raw2)
+	if !ok2 {
+		return "", fmt.Errorf("AI 输出校验失败: %s；重试仍失败: %s", reason, reason2)
+	}
+	return html2, nil
 }
 
 // BuildNotifyEmail 纯函数：构造通知邮件主题/正文/附件名（可单测，不依赖 SMTP）

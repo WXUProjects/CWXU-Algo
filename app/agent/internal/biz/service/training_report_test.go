@@ -950,7 +950,7 @@ func TestDailyAgentTools_HasContest(t *testing.T) {
 
 func TestTrainingReportPrompts_Dimensions(t *testing.T) {
 	sys := trainingReportSystemPrompt(DetailModeFull)
-	for _, s := range []string{"activeRanking", "inline", "teamTags", "problemOverview", "QQ"} {
+	for _, s := range []string{"activeRanking", "禁止", "HTML", "teamTags"} {
 		if !strings.Contains(sys, s) {
 			t.Fatalf("system prompt missing %q", s)
 		}
@@ -962,6 +962,31 @@ func TestTrainingReportPrompts_Dimensions(t *testing.T) {
 	up := trainingReportUserPrompt(fixtureTrainingData(), DetailModeFull)
 	if !strings.Contains(up, "详版") || !strings.Contains(up, "activeRanking") {
 		t.Fatal("user prompt")
+	}
+}
+
+func TestSanitizeAndValidateReportHTML(t *testing.T) {
+	// 带前言 + 围栏
+	raw := "现在我已获取所有必需的数据，开始生成：\n```html\n<!DOCTYPE html><html><body><table>" +
+		"<tr><td>活跃度</td></tr></table>" +
+		strings.Repeat("<p>排行榜标签做题动态比赛博客不活跃综合评价内容填充足够长度</p>", 20) +
+		"</body></html>\n```"
+	html, ok, reason := SanitizeAndValidateReportHTML(raw)
+	if !ok {
+		t.Fatalf("should pass: %s", reason)
+	}
+	if strings.Contains(html, "```") || strings.Contains(html, "现在我已") {
+		t.Fatal("preamble/fence not stripped")
+	}
+	// 垃圾输出
+	_, ok, _ = SanitizeAndValidateReportHTML("分析如下：很好")
+	if ok {
+		t.Fatal("garbage should fail")
+	}
+	// 残缺
+	_, ok, _ = SanitizeAndValidateReportHTML("<table><tr><td>活跃</td></tr>")
+	if ok {
+		t.Fatal("too short should fail")
 	}
 }
 
