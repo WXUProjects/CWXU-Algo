@@ -445,6 +445,11 @@ func contestMap(cl model.ContestLog) map[string]interface{} {
 
 // handleContestBoard GET ?id=|contestId= contest_logs 行 id
 // 返回 XCPCIO 风格：problems[] + rows[{cells}]；组织成员过滤与 ranking 一致。
+//
+// 数据路径：
+//  1. Redis 整包缓存（~90s，随 contest list global ver 失效）——热路径不扫库
+//  2. 回源：contest_logs + contest_problems + contest_user_problems（已入库格子）
+//  3. 仅当格子为空：异步 Infer（扫 submit 一次写回）；Redis SETNX 防并发扫
 func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 	idStr := strings.TrimSpace(ctx.Query().Get("id"))
 	if idStr == "" {
@@ -463,19 +468,24 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 
 	// 组织成员范围（与 list userId=-1 一致）
 	var memberIDs []int64
-	if ids, _, unrestricted, err := ResolveOrgMemberIDs(ctx, c.reg, 0, false); err == nil && !unrestricted {
-		memberIDs = ids
+	var resolvedOrg uint
+	if ids, orgID, unrestricted, err := ResolveOrgMemberIDs(ctx, c.reg, 0, false); err == nil {
+		resolvedOrg = orgID
+		if !unrestricted {
+			memberIDs = ids
+		}
 	}
 
 	// followingOnly：与 ranking 一致
 	followingOnly := strings.EqualFold(ctx.Query().Get("followingOnly"), "true") ||
 		ctx.Query().Get("followingOnly") == "1"
+	viewerID := int64(0)
 	if followingOnly {
-		viewer := auth.GetCurrentUserId(ctx)
-		if viewer == 0 {
+		viewerID = int64(auth.GetCurrentUserId(ctx))
+		if viewerID == 0 {
 			memberIDs = []int64{}
 		} else {
-			following := fetchFollowingIDs(ctx, c.reg, int64(viewer))
+			following := fetchFollowingIDs(ctx, c.reg, viewerID)
 			if memberIDs == nil {
 				memberIDs = following
 			} else {
@@ -485,8 +495,10 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 	}
 
 	// groupId 可选
+	var groupID int64
 	if gStr := strings.TrimSpace(ctx.Query().Get("groupId")); gStr != "" {
 		if gid, err := strconv.ParseInt(gStr, 10, 64); err == nil {
+			groupID = gid
 			if cli, err := userrpc.ProfileClient(c.reg); err == nil {
 				if res, err := cli.GetUserIdsByGroup(ctx, &profile.GetUserIdsByGroupReq{GroupId: gid}); err == nil {
 					if memberIDs == nil {
@@ -509,6 +521,31 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		}
 	}
 
+	// --- Redis 整包 JSON 缓存（following 个性化不缓存）---
+	boardCacheKey := ""
+	reqCtx := context.Background()
+	if c.rdb != nil && !followingOnly {
+		ver := "0"
+		if v, e := c.rdb.Get(reqCtx, "core:contest:list:global:ver").Result(); e == nil && v != "" {
+			ver = v
+		}
+		scope := fmt.Sprintf("org%d", resolvedOrg)
+		if groupID > 0 {
+			scope = fmt.Sprintf("org%d:g%d", resolvedOrg, groupID)
+		} else if memberIDs != nil {
+			scope = fmt.Sprintf("org%d:n%d", resolvedOrg, len(memberIDs))
+		}
+		boardCacheKey = fmt.Sprintf("core:contest:board:%s:%s:%s:v%s",
+			seed.Platform, seed.ContestId, scope, ver)
+		if b, e := c.rdb.Get(reqCtx, boardCacheKey).Bytes(); e == nil && len(b) > 0 {
+			var cached map[string]interface{}
+			if json.Unmarshal(b, &cached) == nil && cached != nil {
+				writeContestJSON(ctx, 200, cached)
+				return nil
+			}
+		}
+	}
+
 	// 本场全部站内参赛行
 	var logs []model.ContestLog
 	q := c.db.Where("platform = ? AND contest_id = ?", seed.Platform, seed.ContestId)
@@ -523,7 +560,7 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		_ = q.Order("CASE WHEN rank > 0 THEN 0 ELSE 1 END, rank ASC, ac_count DESC, id ASC").Find(&logs).Error
 	}
 
-	// 题目目录
+	// 题目目录（表内目录；ensure 只跑一次）
 	problems := []map[string]interface{}{}
 	if c.prob != nil {
 		items, st, _, err := c.prob.ListContestProblems(seed.Platform, seed.ContestId)
@@ -538,7 +575,7 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		}
 	}
 
-	// 题级格子
+	// 题级格子：只读 contest_user_problems（爬虫/Infer 已入库），不扫 submit_logs
 	userIDs := make([]int64, 0, len(logs))
 	for _, l := range logs {
 		userIDs = append(userIDs, l.UserID)
@@ -553,11 +590,23 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		}
 	}
 
-	// 缺明细时：全平台通用「题目集 ∩ 时间窗 ∩ 提交」反推（异步；下一轮轮询可见）
+	// 缺明细：异步 Infer 一次写回；SETNX 防多人同时打开反复扫提交
 	if len(cellsByUser) == 0 && len(logs) > 0 {
 		plat, cid, uids, hint := seed.Platform, seed.ContestId, append([]int64(nil), userIDs...), seed.Time
 		go func() {
-			_, _ = bizservice.InferContestUserProblems(c.db, plat, cid, uids, hint)
+			if c.rdb != nil {
+				lockKey := fmt.Sprintf("core:contest:infer:lock:%s:%s", plat, cid)
+				ok, err := c.rdb.SetNX(context.Background(), lockKey, "1", 2*time.Minute).Result()
+				if err != nil || !ok {
+					return // 已有任务在跑
+				}
+				defer c.rdb.Del(context.Background(), lockKey)
+			}
+			n, _ := bizservice.InferContestUserProblems(c.db, plat, cid, uids, hint)
+			if n > 0 && c.rdb != nil {
+				// 写回后 bump ver，使 board 缓存失效
+				_ = c.rdb.Incr(context.Background(), "core:contest:list:global:ver").Err()
+			}
 		}()
 	}
 
@@ -584,11 +633,11 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 	}
 
 	type rowDraft struct {
-		log        model.ContestLog
-		solved     int
-		penalty    int
-		score      int
-		cellMaps   []map[string]interface{}
+		log      model.ContestLog
+		solved   int
+		penalty  int
+		score    int
+		cellMaps []map[string]interface{}
 	}
 	drafts := make([]rowDraft, 0, len(logs))
 	for _, l := range logs {
@@ -720,7 +769,7 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		})
 	}
 
-	writeContestJSON(ctx, 200, map[string]interface{}{
+	resp := map[string]interface{}{
 		"success": true,
 		"message": "ok",
 		"data": map[string]interface{}{
@@ -730,7 +779,18 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 			"rows":     rows,
 			"total":    len(rows),
 		},
-	})
+	}
+	// 有格子或无人参赛时缓存 90s；空格子 Infer 中则 15s，避免长期空缓存
+	if boardCacheKey != "" && c.rdb != nil {
+		ttl := 90 * time.Second
+		if len(cellsByUser) == 0 && len(logs) > 0 {
+			ttl = 15 * time.Second
+		}
+		if b, e := json.Marshal(resp); e == nil {
+			_ = c.rdb.Set(reqCtx, boardCacheKey, b, ttl).Err()
+		}
+	}
+	writeContestJSON(ctx, 200, resp)
 	return nil
 }
 
