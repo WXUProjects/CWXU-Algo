@@ -378,20 +378,34 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		}
 		return nil
 	}
-	// 永久失败：直接丢弃消息，不再爬
-	if p.Status == model.ProblemStatusFailedPerm {
+	// 永久失败：非 Force 直接丢弃；Force（比赛 ensure / 管理员）允许再爬
+	if p.Status == model.ProblemStatusFailedPerm && !ev.Force {
 		return nil
 	}
-	if p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg) {
+	if p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg) && !ev.Force {
 		_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusFailedPerm).Error
 		return nil
 	}
 	if p.Status == model.ProblemStatusSkipped {
 		return nil
 	}
+	if ev.Force && (p.Status == model.ProblemStatusFailedPerm || p.Status == model.ProblemStatusFailed) {
+		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+			"status":           model.ProblemStatusPending,
+			"error_msg":        "",
+			"fetch_attempts":   0,
+			"fetch_fail_since": nil,
+		}).Error
+		p.Status = model.ProblemStatusPending
+	}
 
 	res := uc.data.DB.Model(&model.Problem{}).
-		Where("id = ? AND status IN ?", p.ID, []string{model.ProblemStatusPending, model.ProblemStatusFailed, model.ProblemStatusFetching}).
+		Where("id = ? AND status IN ?", p.ID, []string{
+			model.ProblemStatusPending,
+			model.ProblemStatusFailed,
+			model.ProblemStatusFetching,
+			model.ProblemStatusFailedPerm, // Force 刚重置前的竞态
+		}).
 		Update("status", model.ProblemStatusFetching)
 	if res.Error != nil {
 		return res.Error
