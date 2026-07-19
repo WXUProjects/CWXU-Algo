@@ -546,6 +546,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.BackfillRes'
+    /v1/core/problem/clear-nowcoder-content:
+        post:
+            tags:
+                - Problem
+            description: 清空牛客题面并强制重爬：只清 content_md，保留 tags / solutions_meta
+            operationId: Problem_ClearNowCoderContent
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.ClearNowCoderContentReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ClearNowCoderContentRes'
     /v1/core/problem/clear-recent-failed:
         post:
             tags:
@@ -2790,6 +2809,25 @@ components:
                 enqueuedFetch:
                     type: string
                 enqueuedAnalyze:
+                    type: string
+        api.core.v1.problem.ClearNowCoderContentReq:
+            type: object
+            properties:
+                requeue:
+                    type: boolean
+                    description: true（默认）：清空后入队强制重爬题面；false：只清空
+                requeueSet:
+                    type: boolean
+        api.core.v1.problem.ClearNowCoderContentRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                cleared:
+                    type: string
+                enqueued:
                     type: string
         api.core.v1.problem.ClearRecentFailedReq:
             type: object

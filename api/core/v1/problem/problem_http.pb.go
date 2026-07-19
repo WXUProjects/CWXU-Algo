@@ -21,6 +21,7 @@ const _ = http.SupportPackageIsVersion1
 
 const OperationProblemAdminUpdate = "/api.core.v1.problem.Problem/AdminUpdate"
 const OperationProblemBackfill = "/api.core.v1.problem.Problem/Backfill"
+const OperationProblemClearNowCoderContent = "/api.core.v1.problem.Problem/ClearNowCoderContent"
 const OperationProblemClearRecentFailed = "/api.core.v1.problem.Problem/ClearRecentFailed"
 const OperationProblemEmergencyStop = "/api.core.v1.problem.Problem/EmergencyStop"
 const OperationProblemFollowingStatus = "/api.core.v1.problem.Problem/FollowingStatus"
@@ -47,6 +48,8 @@ type ProblemHTTPServer interface {
 	// AdminUpdate 站点管理员：直接修改标签/题面（无需审核）
 	AdminUpdate(context.Context, *AdminUpdateProblemReq) (*AdminUpdateProblemRes, error)
 	Backfill(context.Context, *BackfillReq) (*BackfillRes, error)
+	// ClearNowCoderContent 清空牛客题面并强制重爬：只清 content_md，保留 tags / solutions_meta
+	ClearNowCoderContent(context.Context, *ClearNowCoderContentReq) (*ClearNowCoderContentRes, error)
 	// ClearRecentFailed 清空近期失败：近 6 月 FAILED → FAILED_PERM，停止自动退避重试
 	ClearRecentFailed(context.Context, *ClearRecentFailedReq) (*ClearRecentFailedRes, error)
 	// EmergencyStop 紧急停止：暂停 AI 并清空分析队列（兼容）
@@ -103,6 +106,7 @@ func RegisterProblemHTTPServer(s *http.Server, srv ProblemHTTPServer) {
 	r.POST("/v1/core/problem/resume", _Problem_Resume0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/retry-failed", _Problem_RetryFailed0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/clear-recent-failed", _Problem_ClearRecentFailed0_HTTP_Handler(srv))
+	r.POST("/v1/core/problem/clear-nowcoder-content", _Problem_ClearNowCoderContent0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/toggle-analyze", _Problem_ToggleAnalyze0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/toggle-fetch", _Problem_ToggleFetch0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/reset-queues", _Problem_ResetQueues0_HTTP_Handler(srv))
@@ -416,6 +420,28 @@ func _Problem_ClearRecentFailed0_HTTP_Handler(srv ProblemHTTPServer) func(ctx ht
 	}
 }
 
+func _Problem_ClearNowCoderContent0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ClearNowCoderContentReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemClearNowCoderContent)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ClearNowCoderContent(ctx, req.(*ClearNowCoderContentReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ClearNowCoderContentRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 func _Problem_ToggleAnalyze0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in TogglePipelineReq
@@ -590,6 +616,8 @@ type ProblemHTTPClient interface {
 	// AdminUpdate 站点管理员：直接修改标签/题面（无需审核）
 	AdminUpdate(ctx context.Context, req *AdminUpdateProblemReq, opts ...http.CallOption) (rsp *AdminUpdateProblemRes, err error)
 	Backfill(ctx context.Context, req *BackfillReq, opts ...http.CallOption) (rsp *BackfillRes, err error)
+	// ClearNowCoderContent 清空牛客题面并强制重爬：只清 content_md，保留 tags / solutions_meta
+	ClearNowCoderContent(ctx context.Context, req *ClearNowCoderContentReq, opts ...http.CallOption) (rsp *ClearNowCoderContentRes, err error)
 	// ClearRecentFailed 清空近期失败：近 6 月 FAILED → FAILED_PERM，停止自动退避重试
 	ClearRecentFailed(ctx context.Context, req *ClearRecentFailedReq, opts ...http.CallOption) (rsp *ClearRecentFailedRes, err error)
 	// EmergencyStop 紧急停止：暂停 AI 并清空分析队列（兼容）
@@ -656,6 +684,20 @@ func (c *ProblemHTTPClientImpl) Backfill(ctx context.Context, in *BackfillReq, o
 	pattern := "/v1/core/problem/backfill"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProblemBackfill))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ClearNowCoderContent 清空牛客题面并强制重爬：只清 content_md，保留 tags / solutions_meta
+func (c *ProblemHTTPClientImpl) ClearNowCoderContent(ctx context.Context, in *ClearNowCoderContentReq, opts ...http.CallOption) (*ClearNowCoderContentRes, error) {
+	var out ClearNowCoderContentRes
+	pattern := "/v1/core/problem/clear-nowcoder-content"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemClearNowCoderContent))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

@@ -441,12 +441,14 @@ func (uc *ProblemUseCase) ForceEnqueueFetchContest(problemID uint, contestFallba
 		}
 		return nil
 	}
-	if p.Status == model.ProblemStatusCompleted || p.Status == model.ProblemStatusSkipped {
+	if p.Status == model.ProblemStatusSkipped {
 		return nil
 	}
-	// 赛后题库暂无权限曾误标永久失败：允许比赛 ensure 再试
-	if p.Status == model.ProblemStatusFailedPerm ||
-		(p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg)) {
+	// 无题面时允许从 COMPLETED / FAILED_PERM / FAILED 重置再爬（只补 content_md）
+	if p.Status == model.ProblemStatusCompleted ||
+		p.Status == model.ProblemStatusFailedPerm ||
+		p.Status == model.ProblemStatusFailed ||
+		p.Status == model.ProblemStatusFetching {
 		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
 			"status":           model.ProblemStatusPending,
 			"error_msg":        "",

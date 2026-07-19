@@ -664,6 +664,40 @@ func (s *ProblemService) ClearRecentFailed(ctx context.Context, req *problem.Cle
 	}, nil
 }
 
+func (s *ProblemService) ClearNowCoderContent(ctx context.Context, req *problem.ClearNowCoderContentReq) (*problem.ClearNowCoderContentRes, error) {
+	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+		return &problem.ClearNowCoderContentRes{Code: 1, Message: "仅管理员可操作"}, nil
+	}
+	if ok, running := s.uc.TryStartAdminOp("clear-nowcoder-content"); !ok {
+		return &problem.ClearNowCoderContentRes{Code: 1, Message: "已有任务在执行：" + running + "，请稍后再试"}, nil
+	}
+	requeue := true
+	if req != nil && req.RequeueSet {
+		requeue = req.Requeue
+	}
+	// 恢复爬取，避免清空后队列不消费
+	if s.uc != nil {
+		s.uc.ResumeFetch()
+	}
+	go func() {
+		defer s.uc.FinishAdminOp()
+		cleared, enqueued, err := s.uc.ClearNowCoderContentAndRefetch(requeue)
+		if err != nil {
+			log.Errorf("ClearNowCoderContent failed: %v", err)
+			return
+		}
+		log.Infof("ClearNowCoderContent done cleared=%d enqueued=%d", cleared, enqueued)
+	}()
+	msg := "已开始清空全部牛客题面（保留标签与 AI 分析）"
+	if requeue {
+		msg += "，并强制重新拉取题面"
+	}
+	return &problem.ClearNowCoderContentRes{
+		Code:    0,
+		Message: msg,
+	}, nil
+}
+
 func (s *ProblemService) RetryFailed(ctx context.Context, req *problem.RetryFailedReq) (*problem.RetryFailedRes, error) {
 	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
 		return &problem.RetryFailedRes{Code: 1, Message: "仅管理员可操作"}, nil

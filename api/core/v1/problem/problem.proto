@@ -98,6 +98,13 @@ service Problem {
       body: "*"
     };
   }
+  // 清空牛客题面并强制重爬：只清 content_md，保留 tags / solutions_meta
+  rpc ClearNowCoderContent (ClearNowCoderContentReq) returns (ClearNowCoderContentRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/clear-nowcoder-content"
+      body: "*"
+    };
+  }
   // 暂停/恢复 AI 分析（仅停消费，不清空队列）
   rpc ToggleAnalyze (TogglePipelineReq) returns (TogglePipelineRes) {
     option (google.api.http) = {
@@ -504,6 +511,19 @@ message ClearRecentFailedRes {
   string message = 2;
   // 停止自动重试的题目数（FAILED → FAILED_PERM）
   int64 cleared = 3;
+}
+
+message ClearNowCoderContentReq {
+  // true（默认）：清空后入队强制重爬题面；false：只清空
+  bool requeue = 1;
+  bool requeue_set = 2;
+}
+
+message ClearNowCoderContentRes {
+  int64 code = 1;
+  string message = 2;
+  int64 cleared = 3;
+  int64 enqueued = 4;
 }
 
 // pause=true 暂停（保留队列）；pause=false 恢复；未设置时按当前状态翻转

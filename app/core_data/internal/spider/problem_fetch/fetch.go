@@ -1009,61 +1009,10 @@ func parseNowCoderMainHTML(html string) (*FetchedContent, error) {
 		}
 	}
 
-	// 输入 / 输出描述：h5
-	root.Find("h5").Each(func(_ int, h *goquery.Selection) {
-		ht := strings.TrimSpace(h.Text())
-		pre := strings.TrimSpace(h.NextFiltered("pre").Text())
-		if pre == "" {
-			pre = strings.TrimSpace(h.Next().Text())
-		}
-		if strings.Contains(ht, "输入") {
-			b.WriteString("## 输入描述\n\n")
-			b.WriteString(normalizeNowCoderText(pre))
-			b.WriteString("\n\n")
-		} else if strings.Contains(ht, "输出") {
-			b.WriteString("## 输出描述\n\n")
-			b.WriteString(normalizeNowCoderText(pre))
-			b.WriteString("\n\n")
-		}
-	})
-
+	// 输入 / 输出描述：仅 h5「输入描述/输出描述」，勿把样例「输入」「输出」当成描述
+	appendNowCoderIODescFromHeadings(&b, root.Find("h5"))
 	// 样例：.question-oi
-	root.Find(".question-oi").Each(func(_ int, oi *goquery.Selection) {
-		hd := strings.TrimSpace(oi.Find(".question-oi-hd").First().Text())
-		if hd == "" {
-			hd = "示例"
-		}
-		b.WriteString("## ")
-		b.WriteString(hd)
-		b.WriteString("\n\n")
-		oi.Find(".question-oi-mod").Each(func(_ int, mod *goquery.Selection) {
-			h2 := strings.TrimSpace(mod.Find("h2").First().Text())
-			cont := mod.Find(".question-oi-cont").First()
-			replaceNowCoderMath(cont)
-			pre := cont.Find("pre").First()
-			body := ""
-			if pre.Length() > 0 {
-				body = strings.TrimRight(pre.Text(), "\n")
-			} else {
-				body = normalizeNowCoderText(cont.Text())
-			}
-			if h2 != "" {
-				b.WriteString("### ")
-				b.WriteString(h2)
-				b.WriteString("\n\n")
-			}
-			if body != "" {
-				if pre.Length() > 0 {
-					b.WriteString("```\n")
-					b.WriteString(body)
-					b.WriteString("\n```\n\n")
-				} else {
-					b.WriteString(body)
-					b.WriteString("\n\n")
-				}
-			}
-		})
-	})
+	appendNowCoderSamples(&b, root)
 
 	md := collapseBlankLines(strings.TrimSpace(b.String()))
 	md = strings.ReplaceAll(md, "$$$", "$")
@@ -1073,8 +1022,17 @@ func parseNowCoderMainHTML(html string) (*FetchedContent, error) {
 	return &FetchedContent{Title: title, ContentMD: md}, nil
 }
 
-// parseNowCoderACHHTML AC 站 /acm/problem/{id}
+// parseNowCoderACHHTML AC 站 /acm/problem/{id} 与 /acm/contest/{cid}/{A}
 // 规范 URL：https://ac.nowcoder.com/acm/problem/{数字 external_id}
+//
+// DOM 结构（赛题）：
+//
+//	div.subject-question  → 题目描述（公式为 equation?tex= img）
+//	h2 输入描述: + pre
+//	h2 输出描述: + pre
+//	div.question-oi       → 示例（h2 输入/输出 + a.复制 + pre）
+//
+// 旧逻辑用 Contains("输入") 匹配到样例 h2，且 next 文本是「复制」，会生成空的重复输入/输出描述。
 func parseNowCoderACHHTML(html string) (*FetchedContent, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
@@ -1117,45 +1075,9 @@ func parseNowCoderACHHTML(html string) (*FetchedContent, error) {
 	b.WriteString(bodyText)
 	b.WriteString("\n\n")
 
-	sectionSel := doc.Find("h2, h3, .question-oi-cont h2, .question-oi-cont h3")
-	sectionSel.Each(func(_ int, h *goquery.Selection) {
-		ht := strings.TrimSpace(h.Text())
-		if ht == "" {
-			return
-		}
-		next := h.Next()
-		content := strings.TrimSpace(next.Text())
-		if content == "" {
-			content = strings.TrimSpace(h.Parent().Contents().Not("h2,h3").Text())
-		}
-		preNodes := h.Parent().Find("pre")
-		if preNodes.Length() == 0 {
-			preNodes = next.Find("pre")
-		}
-		if strings.Contains(ht, "输入") && !strings.Contains(ht, "输出") {
-			b.WriteString("## 输入描述\n\n")
-			b.WriteString(normalizeNowCoderText(content))
-			b.WriteString("\n\n")
-		} else if strings.Contains(ht, "输出") {
-			b.WriteString("## 输出描述\n\n")
-			b.WriteString(normalizeNowCoderText(content))
-			b.WriteString("\n\n")
-		} else if strings.Contains(ht, "示例") || strings.Contains(ht, "样例") {
-			b.WriteString("## ")
-			b.WriteString(ht)
-			b.WriteString("\n\n")
-			if preNodes.Length() > 0 {
-				preNodes.Each(func(_ int, pre *goquery.Selection) {
-					b.WriteString("```\n")
-					b.WriteString(strings.TrimRight(pre.Text(), "\n"))
-					b.WriteString("\n```\n\n")
-				})
-			} else if content != "" {
-				b.WriteString(normalizeNowCoderText(content))
-				b.WriteString("\n\n")
-			}
-		}
-	})
+	// 仅「输入描述 / 输出描述」标题；样例区的「输入」「输出」交给 question-oi
+	appendNowCoderIODescFromHeadings(&b, doc.Find("h2, h3"))
+	appendNowCoderSamples(&b, doc.Find("body"))
 
 	md := collapseBlankLines(strings.TrimSpace(b.String()))
 	md = strings.ReplaceAll(md, "$$$", "$")
@@ -1163,6 +1085,148 @@ func parseNowCoderACHHTML(html string) (*FetchedContent, error) {
 		return nil, fmt.Errorf("NowCoder 题面为空，请稍后重试")
 	}
 	return &FetchedContent{Title: title, ContentMD: md}, nil
+}
+
+// nowcoderHeadingKind 归一化标题：输入描述 / 输出描述 / 其它。
+// 样例区 h2 仅为「输入」「输出」，不得当成描述（否则会吃到旁边的「复制」按钮文案）。
+func nowcoderHeadingKind(ht string) string {
+	ht = strings.TrimSpace(ht)
+	ht = strings.TrimRight(ht, ":： \t")
+	ht = strings.Join(strings.Fields(ht), " ")
+	switch {
+	case ht == "输入描述" || strings.EqualFold(ht, "Input Description") || strings.EqualFold(ht, "InputDescription"):
+		return "input_desc"
+	case ht == "输出描述" || strings.EqualFold(ht, "Output Description") || strings.EqualFold(ht, "OutputDescription"):
+		return "output_desc"
+	default:
+		return ""
+	}
+}
+
+func isNowCoderCopyOnlyText(s string) bool {
+	s = strings.TrimSpace(s)
+	return s == "" || s == "复制" || strings.EqualFold(s, "Copy") || strings.EqualFold(s, "Copy code")
+}
+
+// nowcoderSectionBodyAfter 取标题后紧跟的 pre / 文本块，并替换公式 img；忽略「复制」按钮。
+func nowcoderSectionBodyAfter(h *goquery.Selection) string {
+	var target *goquery.Selection
+	n := h.Next()
+	for n.Length() > 0 {
+		name := goquery.NodeName(n)
+		if name == "h2" || name == "h3" || name == "h5" {
+			break
+		}
+		if name == "div" {
+			if n.HasClass("question-oi") || n.HasClass("subject-question") {
+				break
+			}
+		}
+		// 跳过复制按钮 / 隐藏 textarea
+		if name == "a" || name == "button" || name == "textarea" || name == "script" || name == "style" {
+			n = n.Next()
+			continue
+		}
+		if name == "pre" {
+			target = n
+			break
+		}
+		// 包装层里找 pre
+		if pre := n.Find("pre").First(); pre.Length() > 0 {
+			target = pre
+			break
+		}
+		// 纯文本块
+		if t := strings.TrimSpace(n.Text()); t != "" && !isNowCoderCopyOnlyText(t) {
+			target = n
+			break
+		}
+		n = n.Next()
+	}
+	if target == nil || target.Length() == 0 {
+		return ""
+	}
+	replaceNowCoderMath(target)
+	target.Find("br").Each(func(_ int, br *goquery.Selection) {
+		br.ReplaceWithHtml("\n")
+	})
+	// 去掉复制按钮残留
+	target.Find("a.code-copy-btn, .js-clipboard, .code-copy-btn").Remove()
+	text := normalizeNowCoderText(target.Text())
+	if isNowCoderCopyOnlyText(text) {
+		return ""
+	}
+	return text
+}
+
+func appendNowCoderIODescFromHeadings(b *strings.Builder, headings *goquery.Selection) {
+	headings.Each(func(_ int, h *goquery.Selection) {
+		kind := nowcoderHeadingKind(h.Text())
+		if kind == "" {
+			return
+		}
+		body := nowcoderSectionBodyAfter(h)
+		if body == "" {
+			return
+		}
+		switch kind {
+		case "input_desc":
+			b.WriteString("## 输入描述\n\n")
+		case "output_desc":
+			b.WriteString("## 输出描述\n\n")
+		default:
+			return
+		}
+		b.WriteString(body)
+		b.WriteString("\n\n")
+	})
+}
+
+func appendNowCoderSamples(b *strings.Builder, root *goquery.Selection) {
+	root.Find(".question-oi").Each(func(_ int, oi *goquery.Selection) {
+		hd := strings.TrimSpace(oi.Find(".question-oi-hd").First().Text())
+		if hd == "" {
+			hd = "示例"
+		}
+		b.WriteString("## ")
+		b.WriteString(hd)
+		b.WriteString("\n\n")
+		oi.Find(".question-oi-mod").Each(func(_ int, mod *goquery.Selection) {
+			// 去掉复制按钮，避免文案污染
+			mod.Find("a.code-copy-btn, .js-clipboard, .code-copy-btn, textarea[data-clipboard-text-id]").Remove()
+			h2 := strings.TrimSpace(mod.Find("h2, h3, h5").First().Text())
+			cont := mod.Find(".question-oi-cont").First()
+			if cont.Length() == 0 {
+				cont = mod
+			}
+			replaceNowCoderMath(cont)
+			pre := cont.Find("pre").First()
+			body := ""
+			if pre.Length() > 0 {
+				body = strings.TrimRight(pre.Text(), "\n")
+			} else {
+				body = normalizeNowCoderText(cont.Text())
+			}
+			if isNowCoderCopyOnlyText(body) {
+				return
+			}
+			if h2 != "" && !isNowCoderCopyOnlyText(h2) {
+				b.WriteString("### ")
+				b.WriteString(h2)
+				b.WriteString("\n\n")
+			}
+			if body != "" {
+				if pre.Length() > 0 {
+					b.WriteString("```\n")
+					b.WriteString(body)
+					b.WriteString("\n```\n\n")
+				} else {
+					b.WriteString(body)
+					b.WriteString("\n\n")
+				}
+			}
+		})
+	})
 }
 
 func replaceNowCoderMath(q *goquery.Selection) {

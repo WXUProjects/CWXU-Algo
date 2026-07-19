@@ -19,29 +19,30 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Problem_List_FullMethodName              = "/api.core.v1.problem.Problem/List"
-	Problem_ListTags_FullMethodName          = "/api.core.v1.problem.Problem/ListTags"
-	Problem_Hot_FullMethodName               = "/api.core.v1.problem.Problem/Hot"
-	Problem_Get_FullMethodName               = "/api.core.v1.problem.Problem/Get"
-	Problem_RelatedContests_FullMethodName   = "/api.core.v1.problem.Problem/RelatedContests"
-	Problem_ListSubmissions_FullMethodName   = "/api.core.v1.problem.Problem/ListSubmissions"
-	Problem_FollowingStatus_FullMethodName   = "/api.core.v1.problem.Problem/FollowingStatus"
-	Problem_UserProfile_FullMethodName       = "/api.core.v1.problem.Problem/UserProfile"
-	Problem_Progress_FullMethodName          = "/api.core.v1.problem.Problem/Progress"
-	Problem_Backfill_FullMethodName          = "/api.core.v1.problem.Problem/Backfill"
-	Problem_EmergencyStop_FullMethodName     = "/api.core.v1.problem.Problem/EmergencyStop"
-	Problem_ResetAll_FullMethodName          = "/api.core.v1.problem.Problem/ResetAll"
-	Problem_Resume_FullMethodName            = "/api.core.v1.problem.Problem/Resume"
-	Problem_RetryFailed_FullMethodName       = "/api.core.v1.problem.Problem/RetryFailed"
-	Problem_ClearRecentFailed_FullMethodName = "/api.core.v1.problem.Problem/ClearRecentFailed"
-	Problem_ToggleAnalyze_FullMethodName     = "/api.core.v1.problem.Problem/ToggleAnalyze"
-	Problem_ToggleFetch_FullMethodName       = "/api.core.v1.problem.Problem/ToggleFetch"
-	Problem_ResetQueues_FullMethodName       = "/api.core.v1.problem.Problem/ResetQueues"
-	Problem_AdminUpdate_FullMethodName       = "/api.core.v1.problem.Problem/AdminUpdate"
-	Problem_ProposeEdit_FullMethodName       = "/api.core.v1.problem.Problem/ProposeEdit"
-	Problem_ListEditRequests_FullMethodName  = "/api.core.v1.problem.Problem/ListEditRequests"
-	Problem_ReviewEdit_FullMethodName        = "/api.core.v1.problem.Problem/ReviewEdit"
-	Problem_MyPendingEdit_FullMethodName     = "/api.core.v1.problem.Problem/MyPendingEdit"
+	Problem_List_FullMethodName                 = "/api.core.v1.problem.Problem/List"
+	Problem_ListTags_FullMethodName             = "/api.core.v1.problem.Problem/ListTags"
+	Problem_Hot_FullMethodName                  = "/api.core.v1.problem.Problem/Hot"
+	Problem_Get_FullMethodName                  = "/api.core.v1.problem.Problem/Get"
+	Problem_RelatedContests_FullMethodName      = "/api.core.v1.problem.Problem/RelatedContests"
+	Problem_ListSubmissions_FullMethodName      = "/api.core.v1.problem.Problem/ListSubmissions"
+	Problem_FollowingStatus_FullMethodName      = "/api.core.v1.problem.Problem/FollowingStatus"
+	Problem_UserProfile_FullMethodName          = "/api.core.v1.problem.Problem/UserProfile"
+	Problem_Progress_FullMethodName             = "/api.core.v1.problem.Problem/Progress"
+	Problem_Backfill_FullMethodName             = "/api.core.v1.problem.Problem/Backfill"
+	Problem_EmergencyStop_FullMethodName        = "/api.core.v1.problem.Problem/EmergencyStop"
+	Problem_ResetAll_FullMethodName             = "/api.core.v1.problem.Problem/ResetAll"
+	Problem_Resume_FullMethodName               = "/api.core.v1.problem.Problem/Resume"
+	Problem_RetryFailed_FullMethodName          = "/api.core.v1.problem.Problem/RetryFailed"
+	Problem_ClearRecentFailed_FullMethodName    = "/api.core.v1.problem.Problem/ClearRecentFailed"
+	Problem_ClearNowCoderContent_FullMethodName = "/api.core.v1.problem.Problem/ClearNowCoderContent"
+	Problem_ToggleAnalyze_FullMethodName        = "/api.core.v1.problem.Problem/ToggleAnalyze"
+	Problem_ToggleFetch_FullMethodName          = "/api.core.v1.problem.Problem/ToggleFetch"
+	Problem_ResetQueues_FullMethodName          = "/api.core.v1.problem.Problem/ResetQueues"
+	Problem_AdminUpdate_FullMethodName          = "/api.core.v1.problem.Problem/AdminUpdate"
+	Problem_ProposeEdit_FullMethodName          = "/api.core.v1.problem.Problem/ProposeEdit"
+	Problem_ListEditRequests_FullMethodName     = "/api.core.v1.problem.Problem/ListEditRequests"
+	Problem_ReviewEdit_FullMethodName           = "/api.core.v1.problem.Problem/ReviewEdit"
+	Problem_MyPendingEdit_FullMethodName        = "/api.core.v1.problem.Problem/MyPendingEdit"
 )
 
 // ProblemClient is the client API for Problem service.
@@ -72,6 +73,8 @@ type ProblemClient interface {
 	RetryFailed(ctx context.Context, in *RetryFailedReq, opts ...grpc.CallOption) (*RetryFailedRes, error)
 	// 清空近期失败：近 6 月 FAILED → FAILED_PERM，停止自动退避重试
 	ClearRecentFailed(ctx context.Context, in *ClearRecentFailedReq, opts ...grpc.CallOption) (*ClearRecentFailedRes, error)
+	// 清空牛客题面并强制重爬：只清 content_md，保留 tags / solutions_meta
+	ClearNowCoderContent(ctx context.Context, in *ClearNowCoderContentReq, opts ...grpc.CallOption) (*ClearNowCoderContentRes, error)
 	// 暂停/恢复 AI 分析（仅停消费，不清空队列）
 	ToggleAnalyze(ctx context.Context, in *TogglePipelineReq, opts ...grpc.CallOption) (*TogglePipelineRes, error)
 	// 暂停/恢复题面爬取（仅停消费，不清空队列）
@@ -248,6 +251,16 @@ func (c *problemClient) ClearRecentFailed(ctx context.Context, in *ClearRecentFa
 	return out, nil
 }
 
+func (c *problemClient) ClearNowCoderContent(ctx context.Context, in *ClearNowCoderContentReq, opts ...grpc.CallOption) (*ClearNowCoderContentRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClearNowCoderContentRes)
+	err := c.cc.Invoke(ctx, Problem_ClearNowCoderContent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *problemClient) ToggleAnalyze(ctx context.Context, in *TogglePipelineReq, opts ...grpc.CallOption) (*TogglePipelineRes, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TogglePipelineRes)
@@ -356,6 +369,8 @@ type ProblemServer interface {
 	RetryFailed(context.Context, *RetryFailedReq) (*RetryFailedRes, error)
 	// 清空近期失败：近 6 月 FAILED → FAILED_PERM，停止自动退避重试
 	ClearRecentFailed(context.Context, *ClearRecentFailedReq) (*ClearRecentFailedRes, error)
+	// 清空牛客题面并强制重爬：只清 content_md，保留 tags / solutions_meta
+	ClearNowCoderContent(context.Context, *ClearNowCoderContentReq) (*ClearNowCoderContentRes, error)
 	// 暂停/恢复 AI 分析（仅停消费，不清空队列）
 	ToggleAnalyze(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error)
 	// 暂停/恢复题面爬取（仅停消费，不清空队列）
@@ -426,6 +441,9 @@ func (UnimplementedProblemServer) RetryFailed(context.Context, *RetryFailedReq) 
 }
 func (UnimplementedProblemServer) ClearRecentFailed(context.Context, *ClearRecentFailedReq) (*ClearRecentFailedRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClearRecentFailed not implemented")
+}
+func (UnimplementedProblemServer) ClearNowCoderContent(context.Context, *ClearNowCoderContentReq) (*ClearNowCoderContentRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClearNowCoderContent not implemented")
 }
 func (UnimplementedProblemServer) ToggleAnalyze(context.Context, *TogglePipelineReq) (*TogglePipelineRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method ToggleAnalyze not implemented")
@@ -742,6 +760,24 @@ func _Problem_ClearRecentFailed_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Problem_ClearNowCoderContent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClearNowCoderContentReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).ClearNowCoderContent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_ClearNowCoderContent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).ClearNowCoderContent(ctx, req.(*ClearNowCoderContentReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Problem_ToggleAnalyze_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TogglePipelineReq)
 	if err := dec(in); err != nil {
@@ -952,6 +988,10 @@ var Problem_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ClearRecentFailed",
 			Handler:    _Problem_ClearRecentFailed_Handler,
+		},
+		{
+			MethodName: "ClearNowCoderContent",
+			Handler:    _Problem_ClearNowCoderContent_Handler,
 		},
 		{
 			MethodName: "ToggleAnalyze",

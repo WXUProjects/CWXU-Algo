@@ -483,11 +483,17 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if fetched.Title != "" {
 		title = fetched.Title
 	}
+	// 已有标签/AI 解法：只补题面，不重跑分析、不碰 tags/solutions_meta
+	hasAnalysis := len(nonEmptyTags(p.Tags)) > 0 || len(p.SolutionsMeta) > 0
+	nextStatus := model.ProblemStatusTagging
+	if hasAnalysis {
+		nextStatus = model.ProblemStatusCompleted
+	}
 	updates := map[string]interface{}{
 		"content_md":       fetched.ContentMD,
 		"title":            title,
 		"error_msg":        "",
-		"status":           model.ProblemStatusTagging,
+		"status":           nextStatus,
 		"fetch_attempts":   0,
 		"fetch_fail_since": nil,
 	}
@@ -502,11 +508,16 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		return err
 	}
 	uc.BumpProblemDetailVer(p.ID)
-	uc.progressMoveStatus(p.Status, model.ProblemStatusTagging)
+	uc.progressMoveStatus(p.Status, nextStatus)
 	// 爬取成功后入 AI：
+	// - 已有标签/分析：绝不重跑 AI（保留既有 tags / solutions_meta）
 	// - SkipAnalyze：仅爬不分析
 	// - ActorUserID>0：用户主动场景，按操作者 AI 资格（绕过 submitter/6 月窗）
 	// - 否则：走 enqueueAnalyzePrio（近 6 月 + AI 资格提交者）
+	if hasAnalysis {
+		log.Infof("ProcessFetch keep existing tags/solutions id=%d", p.ID)
+		return nil
+	}
 	if ev.SkipAnalyze {
 		log.Infof("ProcessFetch skip analyze (fetch-only) id=%d", p.ID)
 		return nil
@@ -1152,6 +1163,56 @@ func (uc *ProblemUseCase) ResetQueues() (purgedFetch, purgedAnalyze, enqueuedFet
 	log.Infof("ResetQueues: purged_fetch=%d purged_analyze=%d enq_fetch=%d enq_analyze=%d",
 		purgedFetch, purgedAnalyze, enqueuedFetch, enqueuedAnalyze)
 	return
+}
+
+// ClearNowCoderContentAndRefetch 清空全部 NowCoder 题面（content_md），
+// 保留 tags / solutions_meta / difficulty / problem_type。
+// requeue=true 时强制入队重爬；已有标签/分析的题爬回后不会重跑 AI。
+func (uc *ProblemUseCase) ClearNowCoderContentAndRefetch(requeue bool) (cleared, enqueued int64, err error) {
+	if uc == nil || uc.data == nil || uc.data.DB == nil {
+		return 0, 0, fmt.Errorf("usecase not ready")
+	}
+	// 只清题面字段与爬取状态；绝不碰 tags / solutions_meta
+	res := uc.data.DB.Model(&model.Problem{}).
+		Where("platform = ?", spider.NowCoder).
+		Updates(map[string]interface{}{
+			"content_md":       "",
+			"status":           model.ProblemStatusPending,
+			"error_msg":        "",
+			"fetch_attempts":   0,
+			"fetch_fail_since": nil,
+		})
+	if res.Error != nil {
+		return 0, 0, res.Error
+	}
+	cleared = res.RowsAffected
+	log.Infof("ClearNowCoderContent: cleared content_md for %d NowCoder problems (tags/solutions kept)", cleared)
+	go uc.rebuildProgressCounters()
+
+	if !requeue || cleared == 0 {
+		return cleared, 0, nil
+	}
+	// 强制重爬：带比赛路径；SkipAnalyze 由 ProcessFetch 根据是否已有标签决定
+	var list []model.Problem
+	_ = uc.data.DB.Select("id, platform, external_id, url, tags, solutions_meta").
+		Where("platform = ?", spider.NowCoder).
+		Find(&list).Error
+	for _, p := range list {
+		// ForceEnqueueFetchContest 对无题面强制入队；有比赛映射会走比赛页
+		fb := uc.nowcoderContestFetchURLs(p.ExternalID, p.ID)
+		if e := uc.ForceEnqueueFetchContest(p.ID, fb...); e == nil {
+			enqueued++
+		} else {
+			// 兜底：普通强制入队（SkipAnalyze 当已有标签）
+			skip := len(nonEmptyTags(p.Tags)) > 0 || len(p.SolutionsMeta) > 0
+			if e2 := uc.enqueueFetchForced(p.ID, p.Platform, p.ExternalID, p.URL, skip, 0); e2 == nil {
+				// enqueueFetchForced 需要 Force=true — check
+				enqueued++
+			}
+		}
+	}
+	log.Infof("ClearNowCoderContent: enqueued fetch %d / %d", enqueued, len(list))
+	return cleared, enqueued, nil
 }
 
 // ClearRecentFailed 清空近期失败：近 6 月有提交且状态为 FAILED 的题 → FAILED_PERM，
