@@ -38,6 +38,7 @@ func (d *StatisticDal) HeatmapQuery(ctx context.Context, startDate, endDate stri
 
 // HeatmapQueryScoped userId=0 时 memberIDs 限制组织；nil 表示不限制（全站）
 // 优先读 daily_user_stats（1w 日活友好）；表无数据时回退 submit_logs。
+// 只返回有提交/AC 的日期（稀疏），前端按格子补 0；多年生涯热力才扛得住。
 func (d *StatisticDal) HeatmapQueryScoped(ctx context.Context, startDate, endDate string, userId int64, isAc bool, memberIDs []int64) ([]DailyCount, error) {
 	if userId == 0 && memberIDs != nil && len(memberIDs) == 0 {
 		return []DailyCount{}, nil
@@ -48,86 +49,59 @@ func (d *StatisticDal) HeatmapQueryScoped(ctx context.Context, startDate, endDat
 	if isAc {
 		cntCol = "ac_cnt"
 	}
-	agg := d.db.WithContext(ctx).
+	q := d.db.WithContext(ctx).
 		Table("daily_user_stats").
 		Select("day, SUM("+cntCol+") AS cnt").
 		Where("day >= ?::date AND day <= ?::date", startDate, endDate)
 	if userId != 0 {
-		agg = agg.Where("user_id = ?", userId)
+		q = q.Where("user_id = ?", userId)
 	} else if memberIDs != nil {
-		agg = agg.Where("user_id IN ?", memberIDs)
+		q = q.Where("user_id IN ?", memberIDs)
 	}
-	agg = agg.Group("day")
-
 	var result []DailyCount
-	err := d.db.WithContext(ctx).Raw(`
-		SELECT days.day, COALESCE(s.cnt, 0) AS cnt
-		FROM (
-			SELECT generate_series(
-				?::date,
-				?::date,
-				INTERVAL '1 day'
-			)::date AS day
-		) days
-		LEFT JOIN (?) s ON s.day = days.day
-		ORDER BY days.day
-	`, startDate, endDate, agg).Scan(&result).Error
+	err := q.Group("day").Having("SUM("+cntCol+") > 0").Order("day").Scan(&result).Error
 	if err != nil {
 		return nil, err
 	}
-	// 汇总表尚未回填时可能全 0：仅当该用户/范围完全无预聚合行时回退 submit_logs
-	if heatmapAllZero(result) {
-		var n int64
-		probe := d.db.WithContext(ctx).Table("daily_user_stats")
+	// 汇总表尚未回填时可能全空：仅当该用户完全无预聚合行时回退 submit_logs。
+	// EXISTS（Limit 1）代替 COUNT(*)，空结果探测更轻。
+	if len(result) == 0 {
+		probe := d.db.WithContext(ctx).Table("daily_user_stats").Select("1")
 		if userId != 0 {
 			probe = probe.Where("user_id = ?", userId)
 		} else if memberIDs != nil {
 			probe = probe.Where("user_id IN ?", memberIDs)
 		}
-		_ = probe.Limit(1).Count(&n).Error
-		if n == 0 {
+		var one int
+		_ = probe.Limit(1).Scan(&one).Error
+		if one == 0 {
 			return d.heatmapFromSubmitLogs(ctx, startDate, endDate, userId, isAc, memberIDs)
 		}
 	}
 	return result, nil
 }
 
-func heatmapAllZero(rows []DailyCount) bool {
-	for _, r := range rows {
-		if r.Cnt != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-// heatmapFromSubmitLogs 回退路径（汇总表空）
+// heatmapFromSubmitLogs 回退路径（汇总表空）；同样只返回 cnt>0 的天
 func (d *StatisticDal) heatmapFromSubmitLogs(ctx context.Context, startDate, endDate string, userId int64, isAc bool, memberIDs []int64) ([]DailyCount, error) {
-	agg := d.db.WithContext(ctx).
+	q := d.db.WithContext(ctx).
 		Table("submit_logs").
 		Select("date_trunc('day', time)::date AS day, COUNT(*) AS cnt").
 		Where("time >= ?::date AND time < (?::date + INTERVAL '1 day')", startDate, endDate)
 	if isAc {
-		agg = agg.Where("is_ac = true")
+		q = q.Where("is_ac = true")
 	} else {
-		agg = agg.Where(model.SQLExcludeLeetCodeNonSubmit)
+		q = q.Where(model.SQLExcludeLeetCodeNonSubmit)
 	}
 	if userId != 0 {
-		agg = agg.Where("user_id = ?", userId)
+		q = q.Where("user_id = ?", userId)
 	} else if memberIDs != nil {
-		agg = agg.Where("user_id IN ?", memberIDs)
+		q = q.Where("user_id IN ?", memberIDs)
 	}
-	agg = agg.Group("date_trunc('day', time)::date")
-
 	var result []DailyCount
-	err := d.db.WithContext(ctx).Raw(`
-		SELECT days.day, COALESCE(s.cnt, 0) AS cnt
-		FROM (
-			SELECT generate_series(?::date, ?::date, INTERVAL '1 day')::date AS day
-		) days
-		LEFT JOIN (?) s ON s.day = days.day
-		ORDER BY days.day
-	`, startDate, endDate, agg).Scan(&result).Error
+	err := q.Group("date_trunc('day', time)::date").
+		Having("COUNT(*) > 0").
+		Order("day").
+		Scan(&result).Error
 	return result, err
 }
 

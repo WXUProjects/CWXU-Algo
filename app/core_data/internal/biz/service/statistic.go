@@ -58,11 +58,16 @@ func (uc *StatisticUseCase) redisVer(ctx context.Context, key string) string {
 	return "0"
 }
 
-// heatmapMaxDays 2c4g / 1w 日活：热力最大跨度（约 13 个月），防止 2023→今 的超长 series
-const heatmapMaxDays = 400
+// 热力跨度上限：个人可拉生涯（稀疏日行）；组织/全站仍约 13 个月防大聚合
+const (
+	heatmapMaxDaysPersonal  = 365 * 20 // ~20 年
+	heatmapMaxDaysAggregate = 400
+	// heatmapCacheSchema 稀疏日行 + 个人稳定 career key；改序列化/语义时 bump
+	heatmapCacheSchema = "2"
+)
 
 // clampHeatmapRange 规范化并限制日期跨度；入参支持 20060102 / 2006-01-02
-func clampHeatmapRange(startS, endS string) (start, end string, err error) {
+func clampHeatmapRange(startS, endS string, maxDays int) (start, end string, err error) {
 	parse := func(s string) (time.Time, error) {
 		if t, e := time.ParseInLocation("2006-01-02", s, time.Local); e == nil {
 			return t, nil
@@ -77,68 +82,140 @@ func clampHeatmapRange(startS, endS string) (start, end string, err error) {
 	if en.Before(st) {
 		st, en = en, st
 	}
-	if int(en.Sub(st).Hours()/24) > heatmapMaxDays {
-		st = en.AddDate(0, 0, -heatmapMaxDays)
+	if maxDays < 1 {
+		maxDays = heatmapMaxDaysAggregate
+	}
+	if int(en.Sub(st).Hours()/24) > maxDays {
+		st = en.AddDate(0, 0, -maxDays)
 	}
 	return st.Format("2006-01-02"), en.Format("2006-01-02"), nil
 }
 
+// personalHeatmapCareerRange 个人缓存固定窗口：今天往前 ~20 年（与 end 日期解耦，避免每日 cache key 漂移）
+func personalHeatmapCareerRange() (start, end string) {
+	now := time.Now()
+	endT := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	startT := endT.AddDate(0, 0, -heatmapMaxDaysPersonal)
+	return startT.Format("2006-01-02"), endT.Format("2006-01-02")
+}
+
+// filterDailyCountsInRange 从已排序/未排序的稀疏日行中裁剪 [start,end]（含）
+func filterDailyCountsInRange(rows []dal.DailyCount, start, end string) []dal.DailyCount {
+	if len(rows) == 0 || (start == "" && end == "") {
+		return rows
+	}
+	st, e1 := time.ParseInLocation("2006-01-02", start, time.Local)
+	en, e2 := time.ParseInLocation("2006-01-02", end, time.Local)
+	if e1 != nil || e2 != nil {
+		return rows
+	}
+	out := make([]dal.DailyCount, 0, len(rows))
+	for _, r := range rows {
+		d := time.Date(r.Day.Year(), r.Day.Month(), r.Day.Day(), 0, 0, 0, 0, time.Local)
+		if d.Before(st) || d.After(en) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
 // Heatmap 获取热力图数据
+//
+// 缓存与即时性：
+//   - 个人 userId>0：稳定 key（schema+user+isAc+userVer），爬虫写入后 INCR statistic:user:{id}:ver 即 miss 回源；
+//     不把 start/end 写进 key，避免「每天 end=今天」导致日更 miss / 旧 ver 键膨胀。
+//   - 组织/全站：短 TTL + global ver（爬虫侧有 2min 节流，可接受略延迟）。
+//   - 回源只查稀疏日行（daily_user_stats），多年生涯可扛。
 func (uc *StatisticUseCase) Heatmap(ctx context.Context, req *statistic.HeatmapReq) (*statistic.HeatmapResp, error) {
 	if req.StartDate == "" || req.EndDate == "" {
 		return nil, errors.BadRequest("参数错误", "日期参数错误")
-	}
-	startDate, endDate, err := clampHeatmapRange(req.StartDate, req.EndDate)
-	if err != nil {
-		return nil, err
 	}
 
 	var memberIDs []int64
 	queryUserId := req.UserId
 	ttl := data2.DefaultCacheTTL
 	var cacheKey string
+	// 实际回源区间（个人=生涯全窗；聚合=请求 clamp）
+	var queryStart, queryEnd string
+	// 响应对客户端请求的裁剪区间
+	var respStart, respEnd string
 
 	if req.UserId > 0 {
-		// 个人：用用户级 ver，其它用户爬虫不会失效本缓存
+		maxDays := heatmapMaxDaysPersonal
+		respStart, respEnd, err := clampHeatmapRange(req.StartDate, req.EndDate, maxDays)
+		if err != nil {
+			return nil, err
+		}
+		// 固定生涯窗回源 + 稳定缓存；再按请求区间裁剪返回
+		queryStart, queryEnd = personalHeatmapCareerRange()
 		userVer := uc.redisVer(ctx, fmt.Sprintf("statistic:user:%d:ver", req.UserId))
-		cacheKey = fmt.Sprintf("statistic:heatmap:u%d:%s:%s:%t:v%s", req.UserId, startDate, endDate, req.IsAc, userVer)
-	} else if req.UserId == 0 || isSiteWideUserId(req.UserId) {
-		// -2=全站公开聚合；0=当前组织热力
+		cacheKey = fmt.Sprintf("statistic:heatmap:s%s:u%d:%t:v%s", heatmapCacheSchema, req.UserId, req.IsAc, userVer)
+		// 访问热度：供爬虫后预热 heatmap/period
+		TouchUserHeat(ctx, uc.rdb, req.UserId)
+
+		result, _, err := data2.GetCacheDalTTL[[]dal.DailyCount](ctx, uc.rdb, cacheKey, ttl, func(data *[]dal.DailyCount) error {
+			rows, err := uc.dal.HeatmapQueryScoped(ctx, queryStart, queryEnd, req.UserId, req.IsAc, nil)
+			if err != nil {
+				return err
+			}
+			*data = rows
+			return nil
+		})
+		if err != nil {
+			return nil, errors.InternalServer("内部错误", err.Error())
+		}
+		rows := filterDailyCountsInRange(*result, respStart, respEnd)
+		return heatmapRespFromRows(rows), nil
+	}
+
+	// 组织 / 全站 / 其它
+	respStart, respEnd, err := clampHeatmapRange(req.StartDate, req.EndDate, heatmapMaxDaysAggregate)
+	if err != nil {
+		return nil, err
+	}
+	queryStart, queryEnd = respStart, respEnd
+
+	if req.UserId == 0 || isSiteWideUserId(req.UserId) {
 		siteWide := isSiteWideUserId(req.UserId)
 		var resolvedOrgID uint
 		memberIDs, resolvedOrgID = uc.resolveMembers(ctx, siteWide)
-		queryUserId = 0 // 聚合查询
+		queryUserId = 0
 		globalVer := uc.redisVer(ctx, "statistic:heatmap:global:ver")
-		ttl = data2.OrgStatsCacheTTL
+		ttl = data2.OrgStatsCacheTTL // 短 TTL，补 global ver 节流下的即时性
 		if siteWide {
-			cacheKey = fmt.Sprintf("statistic:heatmap:site:%s:%s:%t:v%s", startDate, endDate, req.IsAc, globalVer)
+			cacheKey = fmt.Sprintf("statistic:heatmap:s%s:site:%s:%s:%t:v%s", heatmapCacheSchema, queryStart, queryEnd, req.IsAc, globalVer)
 		} else {
-			cacheKey = fmt.Sprintf("statistic:heatmap:org%d:%s:%s:%t:v%s", resolvedOrgID, startDate, endDate, req.IsAc, globalVer)
+			cacheKey = fmt.Sprintf("statistic:heatmap:s%s:org%d:%s:%s:%t:v%s", heatmapCacheSchema, resolvedOrgID, queryStart, queryEnd, req.IsAc, globalVer)
 		}
 	} else {
-		// 兼容其它 userId（如历史 -1 等）：走全局 ver
 		globalVer := uc.redisVer(ctx, "statistic:heatmap:global:ver")
-		cacheKey = fmt.Sprintf("statistic:heatmap:%d:%s:%s:%t:v%s", req.UserId, startDate, endDate, req.IsAc, globalVer)
+		cacheKey = fmt.Sprintf("statistic:heatmap:s%s:%d:%s:%s:%t:v%s", heatmapCacheSchema, req.UserId, queryStart, queryEnd, req.IsAc, globalVer)
 	}
 
 	result, _, err := data2.GetCacheDalTTL[[]dal.DailyCount](ctx, uc.rdb, cacheKey, ttl, func(data *[]dal.DailyCount) error {
-		var err error
-		*data, err = uc.dal.HeatmapQueryScoped(ctx, startDate, endDate, queryUserId, req.IsAc, memberIDs)
-		return err
+		rows, err := uc.dal.HeatmapQueryScoped(ctx, queryStart, queryEnd, queryUserId, req.IsAc, memberIDs)
+		if err != nil {
+			return err
+		}
+		*data = rows
+		return nil
 	})
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
+	return heatmapRespFromRows(*result), nil
+}
 
-	items := make([]*statistic.HeatmapResp_HeatmapItem, len(*result))
-	for i, v := range *result {
+func heatmapRespFromRows(rows []dal.DailyCount) *statistic.HeatmapResp {
+	items := make([]*statistic.HeatmapResp_HeatmapItem, len(rows))
+	for i, v := range rows {
 		items[i] = &statistic.HeatmapResp_HeatmapItem{
 			Date:  v.Day.Format("2006-01-02"),
 			Count: v.Cnt,
 		}
 	}
-
-	return &statistic.HeatmapResp{Code: 0, Data: items}, nil
+	return &statistic.HeatmapResp{Code: 0, Data: items}
 }
 
 // Rank 按日期区间获取排行

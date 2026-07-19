@@ -24,6 +24,11 @@ const (
 	TypeCommentLike       = "comment_like"
 	TypeBlogReport        = "blog_report"
 	TypeCommunityReport   = "community_report"
+	// 站点运营
+	TypeUserRegistered = "user_registered"
+	TypeUserFrozen     = "user_frozen"
+	TypeUserUnfrozen   = "user_unfrozen"
+	TypeReviewPending  = "review_pending"
 )
 
 // Row 与 user.notifications 表对齐（避免 core 依赖 user 包）

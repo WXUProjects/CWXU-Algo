@@ -224,7 +224,36 @@ func (uc *ProblemUseCase) ProposeProblemEdit(userID, problemID uint, updateTags 
 	if err := uc.data.DB.Create(&req).Error; err != nil {
 		return 0, err
 	}
+	// 首次提交待审核：通知站管（站内信 + 可配置邮件）
+	uc.notifyReviewPendingProblemEdit(userID, problemID, req.ID, &p)
 	return req.ID, nil
+}
+
+// notifyReviewPendingProblemEdit 题面/标签修改进入待审
+func (uc *ProblemUseCase) notifyReviewPendingProblemEdit(userID, problemID, editID uint, p *model.Problem) {
+	if uc.data == nil || uc.data.UserDB == nil || userID == 0 {
+		return
+	}
+	titleLabel := ""
+	if p != nil {
+		titleLabel = strings.TrimSpace(p.Title)
+	}
+	body := "有用户提交了题面或标签修改，等待审核"
+	if titleLabel != "" {
+		body = fmt.Sprintf("有用户提交了题目「%s」的修改，等待审核", titleLabel)
+	}
+	payload := fmt.Sprintf(`{"editRequestId":%d,"problemId":%d,"problemTitle":%q}`, editID, problemID, titleLabel)
+	html := fmt.Sprintf("<p>%s</p><p>题目 id=%d · 申请 id=%d</p>", body, problemID, editID)
+	notify.NotifySiteAdminsWithEmail(uc.data.UserDB, notify.AdminNotif{
+		Type:      notify.TypeReviewPending,
+		Title:     "有内容待审核",
+		Body:      body,
+		ActorID:   userID,
+		RefType:   "problem_edit",
+		RefID:     editID,
+		ProblemID: problemID,
+		Payload:   payload,
+	}, "有内容待审核", html)
 }
 
 // ListProblemEditRequests 审核列表

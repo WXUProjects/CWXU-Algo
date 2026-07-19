@@ -25,6 +25,9 @@ func TestDefaultSummary(t *testing.T) {
 	if !strings.Contains(got, "数位 DP") {
 		t.Fatalf("expected content-derived brief, got %q", got)
 	}
+	if strings.Contains(got, "$") {
+		t.Fatalf("math delimiters should be stripped: %q", got)
+	}
 	if len([]rune(got)) > DefaultSummaryMaxRunes+len([]rune(defaultSummaryEllipsis)) {
 		t.Fatalf("too long: %d", len([]rune(got)))
 	}
@@ -35,6 +38,24 @@ func TestDefaultSummary(t *testing.T) {
 	}
 	if !strings.Contains(s2, "前言") || !strings.Contains(s2, "后记") {
 		t.Fatalf("kept prose: %q", s2)
+	}
+}
+
+func TestDefaultSummary_stripsHeadingLinkAndBold(t *testing.T) {
+	src := `# [Digit Circus](https://vjudge.net/problem/AtCoder-abc465_e)
+**涉及知识点：** [[数位DP]]、状态压缩
+请你计算满足以下三个条件中恰好一个的整数 $x$ 的个数。
+`
+	got := DefaultSummary(src)
+	if strings.Contains(got, "http") || strings.Contains(got, "**") || strings.Contains(got, "[[") {
+		t.Fatalf("noise: %q", got)
+	}
+	if !strings.Contains(got, "Digit Circus") || !strings.Contains(got, "请你计算") {
+		t.Fatalf("body: %q", got)
+	}
+	// Excerpt / DefaultSummary 同一实现
+	if Excerpt(src, DefaultSummaryMaxRunes) != got {
+		t.Fatal("Excerpt must match DefaultSummary at default max")
 	}
 }
 

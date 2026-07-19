@@ -603,6 +603,8 @@ func (s *BlogService) handleAdminModerate(ctx khttp.Context) error {
 		bodyText += "已标记为待审核"
 	}
 	if a.UserID != pd.UserID {
+		var author model.User
+		_ = s.db.Select("id", "username").First(&author, a.UserID).Error
 		_ = CreateNotification(s.db, model.Notification{
 			UserID:  a.UserID,
 			Type:    "blog_moderation",
@@ -612,7 +614,8 @@ func (s *BlogService) handleAdminModerate(ctx khttp.Context) error {
 			RefType: "blog_article",
 			RefID:   a.ID,
 			Payload: mustJSON(map[string]interface{}{
-				"slug": a.Slug, "moderationStatus": status,
+				"slug": a.Slug, "blogSlug": a.Slug, "blogUsername": author.Username,
+				"moderationStatus": status,
 			}),
 		})
 	}

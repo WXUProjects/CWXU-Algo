@@ -16,6 +16,10 @@ const (
 	NotifTypeCommentLike         = "comment_like"
 	NotifTypeBlogReport          = "blog_report"
 	NotifTypeCommunityReport     = "community_report"
+	NotifTypeUserRegistered      = "user_registered"
+	NotifTypeUserFrozen          = "user_frozen"
+	NotifTypeUserUnfrozen        = "user_unfrozen"
+	NotifTypeReviewPending       = "review_pending"
 )
 
 // Notification 站内信（按接收用户存储）

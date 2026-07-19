@@ -205,9 +205,11 @@ type GetAdminConfigRes struct {
 	// 页脚
 	FooterIcp string `protobuf:"bytes,19,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
 	// 不活跃天数阈值（默认 14）
-	InactiveDays  int32 `protobuf:"varint,20,opt,name=inactive_days,json=inactiveDays,proto3" json:"inactive_days,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	InactiveDays int32 `protobuf:"varint,20,opt,name=inactive_days,json=inactiveDays,proto3" json:"inactive_days,omitempty"`
+	// 审核/举报邮件收件人（逗号或换行分隔）；空则发给全部站管账号邮箱
+	AdminNotifyEmails string `protobuf:"bytes,21,opt,name=admin_notify_emails,json=adminNotifyEmails,proto3" json:"admin_notify_emails,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *GetAdminConfigRes) Reset() {
@@ -380,6 +382,13 @@ func (x *GetAdminConfigRes) GetInactiveDays() int32 {
 	return 0
 }
 
+func (x *GetAdminConfigRes) GetAdminNotifyEmails() string {
+	if x != nil {
+		return x.AdminNotifyEmails
+	}
+	return ""
+}
+
 type UpdateConfigReq struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SiteTitle string                 `protobuf:"bytes,1,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
@@ -407,8 +416,10 @@ type UpdateConfigReq struct {
 	InactiveDays int32 `protobuf:"varint,18,opt,name=inactive_days,json=inactiveDays,proto3" json:"inactive_days,omitempty"`
 	// 是否写入 inactive_days（与间隔覆盖同一套语义）
 	SetInactiveDays bool `protobuf:"varint,19,opt,name=set_inactive_days,json=setInactiveDays,proto3" json:"set_inactive_days,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// 审核/举报邮件收件人；始终覆盖保存（可清空）
+	AdminNotifyEmails string `protobuf:"bytes,20,opt,name=admin_notify_emails,json=adminNotifyEmails,proto3" json:"admin_notify_emails,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *UpdateConfigReq) Reset() {
@@ -572,6 +583,13 @@ func (x *UpdateConfigReq) GetSetInactiveDays() bool {
 		return x.SetInactiveDays
 	}
 	return false
+}
+
+func (x *UpdateConfigReq) GetAdminNotifyEmails() string {
+	if x != nil {
+		return x.AdminNotifyEmails
+	}
+	return ""
 }
 
 type UpdateConfigRes struct {
@@ -1505,7 +1523,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1d\n" +
 	"\n" +
 	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\"\x13\n" +
-	"\x11GetAdminConfigReq\"\xf6\x05\n" +
+	"\x11GetAdminConfigReq\"\xa6\x06\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -1530,7 +1548,8 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x15ai_analyze_secret_set\x18\x12 \x01(\bR\x12aiAnalyzeSecretSet\x12\x1d\n" +
 	"\n" +
 	"footer_icp\x18\x13 \x01(\tR\tfooterIcp\x12#\n" +
-	"\rinactive_days\x18\x14 \x01(\x05R\finactiveDays\"\xd7\x05\n" +
+	"\rinactive_days\x18\x14 \x01(\x05R\finactiveDays\x12.\n" +
+	"\x13admin_notify_emails\x18\x15 \x01(\tR\x11adminNotifyEmails\"\x87\x06\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
 	"site_title\x18\x01 \x01(\tR\tsiteTitle\x12\x1b\n" +
@@ -1554,7 +1573,8 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\n" +
 	"footer_icp\x18\x11 \x01(\tR\tfooterIcp\x12#\n" +
 	"\rinactive_days\x18\x12 \x01(\x05R\finactiveDays\x12*\n" +
-	"\x11set_inactive_days\x18\x13 \x01(\bR\x0fsetInactiveDays\"\xb4\x01\n" +
+	"\x11set_inactive_days\x18\x13 \x01(\bR\x0fsetInactiveDays\x12.\n" +
+	"\x13admin_notify_emails\x18\x14 \x01(\tR\x11adminNotifyEmails\"\xb4\x01\n" +
 	"\x0fUpdateConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +

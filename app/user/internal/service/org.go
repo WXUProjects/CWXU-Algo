@@ -383,10 +383,135 @@ func RegisterOrgRoutes(srv *khttp.Server, org *OrgService) {
 	r.POST("/v1/user/org/members/set-display-name", org.handleSetDisplayName)
 	r.GET("/v1/user/org/member-ids", org.handleMemberIds)
 	r.GET("/v1/user/org/invite", org.handleInviteGet)
+	r.GET("/v1/user/org/invite/preview", org.handleInvitePreview)
 	r.POST("/v1/user/org/invite/rotate", org.handleInviteRotate)
 	r.GET("/v1/user/org/join-requests", org.handleJoinRequests)
 	r.POST("/v1/user/org/join-requests/review", org.handleJoinReview)
 	r.POST("/v1/user/platform/set-site-admin", org.handleSetSiteAdmin)
+}
+
+// handleInvitePreview 公开：按识别码预览组织欢迎信息（不含敏感配置）
+func (s *OrgService) handleInvitePreview(ctx khttp.Context) error {
+	code := strings.TrimSpace(strings.ToUpper(ctx.Request().URL.Query().Get("code")))
+	if code == "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请提供邀请识别码"})
+		return nil
+	}
+	var o model.Org
+	if err := s.db.Where("UPPER(invite_code) = ? AND status = ?", code, model.OrgStatusActive).First(&o).Error; err != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "邀请链接无效或已失效"})
+		return nil
+	}
+	if o.IsSystem || o.Slug == model.PublicOrgSlug {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "公共域无需邀请加入"})
+		return nil
+	}
+	displayName := strings.TrimSpace(o.BrandTitle)
+	if displayName == "" {
+		displayName = o.Name
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "success",
+		"orgId": o.ID, "orgName": displayName, "name": o.Name,
+		"brandTitle": o.BrandTitle, "brandLogo": o.BrandLogo,
+		"joinMode": o.JoinMode,
+	})
+	return nil
+}
+
+// applyInviteOnRegister 注册成功后按识别码加入组织。
+// auto：直接成为成员并设为默认组织；review：提交待审批（仍属公共域默认）。
+// 返回给用户看的补充说明；识别码无效时返回非空 error 文案但不阻断注册。
+func applyInviteOnRegister(db *gorm.DB, userID uint, inviteCode, displayName string) string {
+	code := strings.TrimSpace(strings.ToUpper(inviteCode))
+	if code == "" || userID == 0 {
+		return ""
+	}
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return ""
+	}
+	if len([]rune(displayName)) > 32 {
+		displayName = string([]rune(displayName)[:32])
+	}
+	var o model.Org
+	if err := db.Where("UPPER(invite_code) = ? AND status = ?", code, model.OrgStatusActive).First(&o).Error; err != nil {
+		return "账号已创建，但邀请识别码无效，未能加入组织"
+	}
+	if o.IsSystem || o.Slug == model.PublicOrgSlug {
+		return ""
+	}
+	orgLabel := strings.TrimSpace(o.BrandTitle)
+	if orgLabel == "" {
+		orgLabel = o.Name
+	}
+	var existing model.OrgMember
+	if db.Where("org_id = ? AND user_id = ?", o.ID, userID).First(&existing).Error == nil {
+		_ = db.Model(&model.User{}).Where("id = ?", userID).Update("current_org_id", o.ID).Error
+		return fmt.Sprintf("已加入「%s」", orgLabel)
+	}
+	if o.JoinMode == model.OrgJoinReview {
+		var jr model.OrgJoinRequest
+		err := db.Where("org_id = ? AND user_id = ?", o.ID, userID).First(&jr).Error
+		if err == nil {
+			if jr.Status != model.JoinReqPending {
+				_ = db.Model(&jr).Updates(map[string]interface{}{
+					"status": model.JoinReqPending, "code_used": code,
+					"org_display_name": displayName, "reviewed_by": nil,
+				}).Error
+			}
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			if createErr := db.Create(&model.OrgJoinRequest{
+				OrgID: o.ID, UserID: userID, Status: model.JoinReqPending,
+				CodeUsed: code, OrgDisplayName: displayName,
+			}).Error; createErr != nil {
+				log.Errorf("register invite join-request: %v", createErr)
+				return "账号已创建，但提交加入申请失败，请稍后在「我的组织」用识别码重试"
+			}
+		} else {
+			log.Errorf("register invite join-request lookup: %v", err)
+			return "账号已创建，但提交加入申请失败，请稍后重试"
+		}
+		return fmt.Sprintf("账号已创建，已申请加入「%s」，等待管理员通过", orgLabel)
+	}
+	// auto：席位 + 成员 + 默认组织
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var locked model.Org
+		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, o.ID).Error; e != nil {
+			return e
+		}
+		if locked.Status != model.OrgStatusActive {
+			return errors.New("该组织当前已暂停")
+		}
+		if msg := seatFullMessage(tx, &locked); msg != "" {
+			return errors.New(msg)
+		}
+		var group model.Group
+		gerr := tx.Where("org_id = ? AND name IN ?", locked.ID, []string{model.DefaultGroupName, "未分组"}).
+			Order("id ASC").First(&group).Error
+		if errors.Is(gerr, gorm.ErrRecordNotFound) {
+			n := model.DefaultGroupName
+			group = model.Group{Name: &n, Describe: model.DefaultGroupDesc, OrgID: locked.ID}
+			if gerr = tx.Create(&group).Error; gerr != nil {
+				return gerr
+			}
+		} else if gerr != nil {
+			return gerr
+		}
+		gid := group.ID
+		if e := tx.Create(&model.OrgMember{
+			OrgID: locked.ID, UserID: userID, Role: model.OrgRoleMember, GroupID: &gid,
+			OrgDisplayName: displayName, JoinedAt: time.Now(),
+		}).Error; e != nil {
+			return e
+		}
+		return tx.Model(&model.User{}).Where("id = ?", userID).Update("current_org_id", locked.ID).Error
+	})
+	if err != nil {
+		log.Errorf("register invite auto-join: %v", err)
+		return fmt.Sprintf("账号已创建，但未能加入「%s」：%s", orgLabel, err.Error())
+	}
+	return fmt.Sprintf("注册成功，已加入「%s」", orgLabel)
 }
 
 // handleDiscover 组织广场：仅公开字段（名/logo/人数），无识别码与成员明细

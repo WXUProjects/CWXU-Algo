@@ -1,0 +1,179 @@
+// Package notify — site-admin broadcast + configurable ops email.
+package notify
+
+import (
+	"fmt"
+	"net/mail"
+	"strings"
+
+	"cwxu-algo/app/common/sitesettings"
+
+	"gorm.io/gorm"
+)
+
+// AdminNotif 站管站内信字段（UserID 由 helper 填）
+type AdminNotif struct {
+	Type      string
+	Title     string
+	Body      string
+	ActorID   uint
+	RefType   string
+	RefID     uint
+	ProblemID uint
+	Payload   string
+	// SkipUserID 不给此人发站内信（例如举报者本人是站管）
+	SkipUserID uint
+}
+
+type siteAdminRow struct {
+	ID    uint   `gorm:"column:id"`
+	Email string `gorm:"column:email"`
+}
+
+// ListSiteAdminIDs 全部站管 user id
+func ListSiteAdminIDs(db *gorm.DB) []uint {
+	if db == nil {
+		return nil
+	}
+	var rows []siteAdminRow
+	_ = db.Table("users").Select("id, email").Where("is_site_admin = ?", true).Find(&rows).Error
+	out := make([]uint, 0, len(rows))
+	for _, r := range rows {
+		if r.ID > 0 {
+			out = append(out, r.ID)
+		}
+	}
+	return out
+}
+
+// NotifySiteAdmins 给全部站管写站内信（跳过 SkipUserID）
+func NotifySiteAdmins(db *gorm.DB, n AdminNotif) {
+	if db == nil || strings.TrimSpace(n.Type) == "" {
+		return
+	}
+	var rows []siteAdminRow
+	_ = db.Table("users").Select("id, email").Where("is_site_admin = ?", true).Find(&rows).Error
+	for _, adm := range rows {
+		if adm.ID == 0 || adm.ID == n.SkipUserID {
+			continue
+		}
+		_ = Create(db, Row{
+			UserID:    adm.ID,
+			Type:      n.Type,
+			Title:     n.Title,
+			Body:      n.Body,
+			ActorID:   n.ActorID,
+			RefType:   n.RefType,
+			RefID:     n.RefID,
+			ProblemID: n.ProblemID,
+			Payload:   n.Payload,
+		})
+	}
+}
+
+// ParseEmailList 解析逗号/分号/空白/换行分隔的邮箱列表，去重校验
+func ParseEmailList(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	// 统一分隔符
+	replacer := strings.NewReplacer(",", " ", ";", " ", "\n", " ", "\r", " ", "\t", " ")
+	parts := strings.Fields(replacer.Replace(raw))
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		addr, err := mail.ParseAddress(p)
+		if err != nil || addr == nil || addr.Address == "" {
+			// 宽松：无尖括号的纯邮箱
+			if !strings.Contains(p, "@") || strings.ContainsAny(p, " <>") {
+				continue
+			}
+			addr = &mail.Address{Address: p}
+		}
+		key := strings.ToLower(strings.TrimSpace(addr.Address))
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
+}
+
+// ResolveAdminNotifyEmails 可配置收件人；空配置则 fallback 全部站管邮箱
+func ResolveAdminNotifyEmails(db *gorm.DB) []string {
+	if db == nil {
+		return nil
+	}
+	var raw string
+	_ = db.Table("site_configs").Select("admin_notify_emails").Where("id = ?", 1).Scan(&raw).Error
+	if list := ParseEmailList(raw); len(list) > 0 {
+		return list
+	}
+	var rows []siteAdminRow
+	_ = db.Table("users").Select("id, email").Where("is_site_admin = ?", true).Find(&rows).Error
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		e := strings.ToLower(strings.TrimSpace(r.Email))
+		if e == "" || !strings.Contains(e, "@") {
+			continue
+		}
+		if _, ok := seen[e]; ok {
+			continue
+		}
+		seen[e] = struct{}{}
+		out = append(out, e)
+	}
+	return out
+}
+
+// EmailConfiguredRecipients 按站点配置（或站管 fallback）发邮件；SMTP 未配则静默跳过
+func EmailConfiguredRecipients(db *gorm.DB, subject, html string) {
+	if db == nil {
+		return
+	}
+	emails := ResolveAdminNotifyEmails(db)
+	if len(emails) == 0 {
+		return
+	}
+	rt, err := sitesettings.LoadFromDB(db)
+	if err != nil || rt == nil {
+		return
+	}
+	sender := rt.MailSender()
+	if sender == nil || !sender.Configured() {
+		return
+	}
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		subject = "[GoAlgo] 通知"
+	}
+	if !strings.HasPrefix(subject, "[GoAlgo]") {
+		subject = "[GoAlgo] " + subject
+	}
+	for _, email := range emails {
+		_ = sender.Send(email, subject, html)
+	}
+}
+
+// NotifySiteAdminsWithEmail 站内信给全体站管 + 邮件给可配置收件人（审核/举报）
+func NotifySiteAdminsWithEmail(db *gorm.DB, n AdminNotif, emailSubject, emailHTML string) {
+	NotifySiteAdmins(db, n)
+	if strings.TrimSpace(emailHTML) == "" {
+		emailHTML = fmt.Sprintf("<p>%s</p>", n.Body)
+	}
+	subj := emailSubject
+	if strings.TrimSpace(subj) == "" {
+		subj = n.Title
+	}
+	EmailConfiguredRecipients(db, subj, emailHTML)
+}

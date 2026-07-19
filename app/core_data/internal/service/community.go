@@ -15,9 +15,9 @@ import (
 
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/blogsync"
+	"cwxu-algo/app/common/blogtext"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/notify"
-	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -33,7 +33,6 @@ const (
 	maxCommentRunes  = 2000
 	maxSolutionRunes = 100000
 	maxSolutionTitle = 120
-	maxExcerptRunes  = 120
 	maxReportReason  = 500
 )
 
@@ -315,7 +314,7 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 
 	// 仅题目顶层评论写发现流（题解评论不进组织动态，避免刷屏）
 	if row.ParentID == 0 && row.SolutionID == 0 {
-		ex := excerpt(content, maxExcerptRunes)
+		ex := blogtext.DefaultSummary(content)
 		if pd.OrgID > 0 {
 			_ = s.db.Create(&model.ActivityFeed{
 				OrgID:     pd.OrgID,
@@ -468,7 +467,7 @@ func (s *CommunityService) handleSolutionList(ctx khttp.Context) error {
 			"avatar":    u.avatar,
 			"title":     sol.Title,
 			// 列表不回全文，减轻体积
-			"excerpt":      excerpt(sol.ContentMD, maxExcerptRunes),
+			"excerpt":      blogtext.DefaultSummary(sol.ContentMD),
 			"likeCount":    sol.LikeCount,
 			"viewCount":    sol.ViewCount,
 			"commentCount": sol.CommentCount,
@@ -602,7 +601,7 @@ func (s *CommunityService) handleSolutionCreate(ctx khttp.Context) error {
 	// 同步到个人博客默认分类（失败不阻断发布）
 	s.syncSolutionToBlog(&row)
 	// 题解发现流：写入作者所属全部组织（含公共域 + 各私有域），便于各域可见
-	ex := excerpt(content, maxExcerptRunes)
+	ex := blogtext.DefaultSummary(content)
 	for _, oid := range s.authorOrgIDs(pd.UserID, pd.OrgID) {
 		_ = s.db.Create(&model.ActivityFeed{
 			OrgID:     oid,
@@ -674,7 +673,7 @@ func (s *CommunityService) handleSolutionUpdate(ctx khttp.Context) error {
 	_ = s.db.Model(&model.ActivityFeed{}).
 		Where("type = ? AND ref_id = ?", model.ActivityTypeSolution, row.ID).
 		Updates(map[string]interface{}{
-			"title": title, "excerpt": excerpt(content, maxExcerptRunes),
+			"title": title, "excerpt": blogtext.DefaultSummary(content),
 		}).Error
 	// 同步更新博客镜像
 	s.syncSolutionToBlog(&row)
@@ -917,10 +916,41 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 	}
 	users := s.batchUsers(ctx, uids)
 	probs := s.batchProblems(pids)
+	// 题解动态：用正文现算摘要（库里旧 excerpt 常是「未剥 MD 就截断」，只剩一行废字）
+	solRefIDs := make([]uint, 0, len(list))
+	seenSol := map[uint]struct{}{}
+	for _, a := range list {
+		if a.Type != model.ActivityTypeSolution || a.RefID == 0 {
+			continue
+		}
+		if _, ok := seenSol[a.RefID]; ok {
+			continue
+		}
+		seenSol[a.RefID] = struct{}{}
+		solRefIDs = append(solRefIDs, a.RefID)
+	}
+	solMD := map[uint]string{}
+	if len(solRefIDs) > 0 {
+		var sols []model.ProblemUserSolution
+		_ = s.db.Select("id", "content_md").Where("id IN ?", solRefIDs).Find(&sols).Error
+		for _, sol := range sols {
+			solMD[sol.ID] = sol.ContentMD
+		}
+	}
 	items := make([]map[string]interface{}, 0, len(list))
 	for _, a := range list {
 		u := users[a.UserID]
 		p := probs[a.ProblemID]
+		ex := a.Excerpt
+		if a.Type == model.ActivityTypeSolution {
+			if md, ok := solMD[a.RefID]; ok && strings.TrimSpace(md) != "" {
+				ex = blogtext.DefaultSummary(md)
+			} else {
+				ex = blogtext.DefaultSummary(a.Excerpt)
+			}
+		} else {
+			ex = blogtext.DefaultSummary(a.Excerpt)
+		}
 		items = append(items, map[string]interface{}{
 			"id":           a.ID,
 			"orgId":        a.OrgID,
@@ -934,7 +964,7 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 			"problemTitle": p.title,
 			"platform":     p.platform,
 			"title":        a.Title,
-			"excerpt":      a.Excerpt,
+			"excerpt":      ex,
 			"createdAt":    a.CreatedAt.Unix(),
 		})
 	}
@@ -1068,7 +1098,7 @@ func (s *CommunityService) handleUserRecentSolutions(ctx khttp.Context) error {
 		p := probs[sol.ProblemID]
 		items = append(items, map[string]interface{}{
 			"id": sol.ID, "problemId": sol.ProblemID, "problemTitle": p.title, "platform": p.platform,
-			"title": sol.Title, "excerpt": excerpt(sol.ContentMD, maxExcerptRunes),
+			"title": sol.Title, "excerpt": blogtext.DefaultSummary(sol.ContentMD),
 			"createdAt": sol.CreatedAt.Unix(),
 		})
 	}
@@ -1162,7 +1192,7 @@ func communityVisitorKey(ctx khttp.Context, viewerID uint) string {
 	return "a:" + hex.EncodeToString(sum[:8])
 }
 
-// notifyAdminsCommunityReport 站内通知站管 + 邮件
+// notifyAdminsCommunityReport 站内通知站管 + 可配置收件人邮件
 func (s *CommunityService) notifyAdminsCommunityReport(pd *auth.JwtPayload, tt string, targetID uint, reason string, reportID uint) {
 	if pd == nil || s.udb == nil {
 		return
@@ -1172,46 +1202,38 @@ func (s *CommunityService) notifyAdminsCommunityReport(pd *auth.JwtPayload, tt s
 		actorName = pd.Username
 	}
 	label := "内容"
+	var problemID uint
 	switch tt {
 	case model.CommunityTargetSolution:
 		label = "题解"
+		var sol model.ProblemUserSolution
+		if s.db.Select("id", "problem_id").First(&sol, targetID).Error == nil {
+			problemID = sol.ProblemID
+		}
 	case model.CommunityTargetComment:
 		label = "评论"
+		var c model.ProblemComment
+		if s.db.Select("id", "problem_id").First(&c, targetID).Error == nil {
+			problemID = c.ProblemID
+		}
 	}
 	title := "社区内容举报"
 	body := fmt.Sprintf("%s 举报了%s #%d：%s", actorName, label, targetID, reason)
-	// site admins from user DB
-	type adminRow struct {
-		ID    uint
-		Email string
-	}
-	var admins []adminRow
-	_ = s.udb.Table("users").Select("id, email").Where("is_site_admin = ?", true).Find(&admins).Error
-	for _, adm := range admins {
-		if adm.ID == 0 || adm.ID == pd.UserID {
-			continue
-		}
-		_ = notify.Create(s.udb, notify.Row{
-			UserID:  adm.ID,
-			Type:    notify.TypeCommunityReport,
-			Title:   title,
-			Body:    body,
-			ActorID: pd.UserID,
-			RefType: tt,
-			RefID:   targetID,
-			Payload: fmt.Sprintf(`{"reportId":%d,"reason":%q}`, reportID, reason),
-		})
-		email := strings.TrimSpace(adm.Email)
-		if email == "" {
-			continue
-		}
-		if rt, err := sitesettings.LoadFromDB(s.udb); err == nil && rt != nil {
-			if sender := rt.MailSender(); sender != nil && sender.Configured() {
-				_ = sender.Send(email, "[GoAlgo] "+title,
-					fmt.Sprintf("<p>%s</p><p>类型=%s id=%d</p>", body, tt, targetID))
-			}
-		}
-	}
+	payloadBytes, _ := json.Marshal(map[string]interface{}{
+		"reportId": reportID, "reason": reason, "targetType": tt, "targetId": targetID, "problemId": problemID,
+	})
+	html := fmt.Sprintf("<p>%s</p><p>类型=%s id=%d</p>", body, tt, targetID)
+	notify.NotifySiteAdminsWithEmail(s.udb, notify.AdminNotif{
+		Type:       notify.TypeCommunityReport,
+		Title:      title,
+		Body:       body,
+		ActorID:    pd.UserID,
+		RefType:    tt,
+		RefID:      targetID,
+		ProblemID:  problemID,
+		Payload:    string(payloadBytes),
+		SkipUserID: pd.UserID,
+	}, title, html)
 }
 
 // blogSlugFor 解析题解对应的博客 slug（优先缓存 article id，再按 source_solution_id）。
@@ -1589,14 +1611,13 @@ func userIDsFromSolutions(list []model.ProblemUserSolution) []uint {
 	return out
 }
 
+// excerpt 统一走 blogtext（与博客简述 / 题解镜像同一套）：剥 MD 后截断。
+// max 参数保留兼容旧调用，<=0 时用 DefaultSummaryMaxRunes。
 func excerpt(s string, max int) string {
-	s = strings.TrimSpace(s)
-	s = strings.ReplaceAll(s, "\n", " ")
-	if utf8.RuneCountInString(s) <= max {
-		return s
+	if max <= 0 {
+		return blogtext.DefaultSummary(s)
 	}
-	r := []rune(s)
-	return string(r[:max]) + "…"
+	return blogtext.Excerpt(s, max)
 }
 
 func queryUint(ctx khttp.Context, key string) uint {

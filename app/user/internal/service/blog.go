@@ -16,7 +16,7 @@ import (
 
 	"cwxu-algo/app/common/blogsync"
 	_const "cwxu-algo/app/common/const"
-	"cwxu-algo/app/common/sitesettings"
+	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/biz/blogaccess"
 	"cwxu-algo/app/user/internal/data"
@@ -1806,7 +1806,7 @@ func (s *BlogService) handleReport(ctx khttp.Context) error {
 	return nil
 }
 
-// notifyAdminsBlogReport 站内通知全部站管 + 尝试发邮件
+// notifyAdminsBlogReport 站内通知全部站管 + 可配置收件人邮件
 func (s *BlogService) notifyAdminsBlogReport(pd *auth.JwtPayload, a *model.BlogArticle, reason string, reportID uint) {
 	if a == nil || pd == nil {
 		return
@@ -1817,42 +1817,30 @@ func (s *BlogService) notifyAdminsBlogReport(pd *auth.JwtPayload, a *model.BlogA
 	}
 	var author model.User
 	_ = s.db.Select("id", "username", "name").First(&author, a.UserID).Error
-	var admins []model.User
-	_ = s.db.Select("id", "email", "username", "name").Where("is_site_admin = ?", true).Find(&admins).Error
 	title := "博客文章举报"
 	bodyText := fmt.Sprintf("%s 举报了文章《%s》（作者 @%s）：%s",
 		actorName, a.Title, author.Username, reason)
 	payload := mustJSON(map[string]interface{}{
-		"articleId": a.ID, "slug": a.Slug, "authorUsername": author.Username,
-		"reportId": reportID, "reason": reason,
+		"articleId":      a.ID,
+		"slug":           a.Slug,
+		"blogSlug":       a.Slug,
+		"blogUsername":   author.Username,
+		"authorUsername": author.Username,
+		"reportId":       reportID,
+		"reason":         reason,
 	})
-	for _, adm := range admins {
-		if adm.ID == 0 || adm.ID == pd.UserID {
-			continue
-		}
-		_ = CreateNotification(s.db, model.Notification{
-			UserID:  adm.ID,
-			Type:    model.NotifTypeBlogReport,
-			Title:   title,
-			Body:    bodyText,
-			ActorID: pd.UserID,
-			RefType: "blog_article",
-			RefID:   a.ID,
-			Payload: payload,
-		})
-		// email best-effort
-		email := strings.TrimSpace(adm.Email)
-		if email == "" {
-			continue
-		}
-		if rt, err := sitesettings.LoadFromDB(s.db); err == nil && rt != nil {
-			if sender := rt.MailSender(); sender != nil && sender.Configured() {
-				_ = sender.Send(email, "[GoAlgo] "+title,
-					fmt.Sprintf("<p>%s</p><p>文章 id=%d slug=%s</p><p>原因：%s</p>",
-						bodyText, a.ID, a.Slug, reason))
-			}
-		}
-	}
+	html := fmt.Sprintf("<p>%s</p><p>文章 id=%d slug=%s</p><p>原因：%s</p>",
+		bodyText, a.ID, a.Slug, reason)
+	notify.NotifySiteAdminsWithEmail(s.db, notify.AdminNotif{
+		Type:       notify.TypeBlogReport,
+		Title:      title,
+		Body:       bodyText,
+		ActorID:    pd.UserID,
+		RefType:    "blog_article",
+		RefID:      a.ID,
+		Payload:    payload,
+		SkipUserID: pd.UserID,
+	}, title, html)
 }
 
 // ---------- theme ----------

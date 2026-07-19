@@ -18,6 +18,7 @@ import (
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/mail"
+	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/common/utils/clientip"
@@ -295,6 +296,7 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 		res.Message = "注册失败，请稍后重试"
 		return res, nil
 	}
+	var newUserID uint
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var public model.Org
 		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("slug = ?", model.PublicOrgSlug).First(&public).Error; e != nil {
@@ -322,6 +324,7 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 		if e := tx.Create(newUser).Error; e != nil {
 			return e
 		}
+		newUserID = newUser.ID
 		groupID := defG.ID
 		return tx.Create(&model.OrgMember{
 			OrgID: public.ID, UserID: newUser.ID, Role: model.OrgRoleMember,
@@ -339,6 +342,29 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterReq) (res *p
 			res.Message = "注册失败，请稍后重试"
 		}
 		return res, nil
+	}
+
+	// 可选邀请识别码：注册后自动加入组织（auto 则设为默认组织）
+	if extra := applyInviteOnRegister(s.db.WithContext(ctx), newUserID, req.GetInviteCode(), name); extra != "" {
+		res.Message = extra
+	}
+
+	// 站管站内信：新用户注册（与网站通知共享同一 inbox）
+	if newUserID > 0 {
+		display := name
+		if display == "" {
+			display = username
+		}
+		payload := fmt.Sprintf(`{"userId":%d,"username":%q,"name":%q}`, newUserID, username, name)
+		notify.NotifySiteAdmins(s.db.WithContext(ctx), notify.AdminNotif{
+			Type:    notify.TypeUserRegistered,
+			Title:   "新用户注册",
+			Body:    fmt.Sprintf("%s（@%s）刚完成注册", display, username),
+			ActorID: newUserID,
+			RefType: "user",
+			RefID:   newUserID,
+			Payload: payload,
+		})
 	}
 
 	return

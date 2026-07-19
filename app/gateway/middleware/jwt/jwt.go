@@ -89,8 +89,9 @@ var publicExact = map[string]struct{}{
 	"/v1/user/social/search":    {},
 	"/v1/user/social/identity":  {},
 	"/v1/user/privacy/status":   {},
-	// 组织广场公开
-	"/v1/user/org/discover": {},
+	// 组织广场 / 邀请链接预览公开
+	"/v1/user/org/discover":       {},
+	"/v1/user/org/invite/preview": {},
 	// Core 公开读
 	"/v1/core/submit-log/get-by-id": {},
 	"/v1/core/contest/list":         {},

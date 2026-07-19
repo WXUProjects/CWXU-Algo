@@ -25,7 +25,9 @@ type SiteConfig struct {
 	AiAnalyzeSecret   string `gorm:"size:512;column:ai_analyze_secret"`
 	// InactiveDays 超过该天数未活跃则休眠后台任务；默认 14
 	InactiveDays int `gorm:"column:inactive_days;default:14;comment:不活跃天数阈值"`
-	UpdatedAt    time.Time `gorm:"autoUpdateTime"`
+	// AdminNotifyEmails 审核/举报邮件收件人（逗号或换行分隔）；空则发给全部站管账号邮箱
+	AdminNotifyEmails string `gorm:"type:text;column:admin_notify_emails;comment:审核举报邮件收件人"`
+	UpdatedAt         time.Time `gorm:"autoUpdateTime"`
 }
 
 func (SiteConfig) TableName() string { return "site_configs" }

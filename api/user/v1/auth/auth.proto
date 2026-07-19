@@ -75,6 +75,8 @@ message RegisterReq {
   int64 groupId = 5;
   // 邮箱验证码
   string code = 6;
+  // 可选：组织邀请识别码；注册成功后自动加入该组织（自动通过则设为默认组织）
+  string inviteCode = 7;
 }
 message RegisterRes {
   bool success = 1;

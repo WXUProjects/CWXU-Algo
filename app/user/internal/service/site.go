@@ -228,6 +228,7 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		AiAnalyzeSecretSet:    strings.TrimSpace(rt.AiAnalyzeSecret) != "",
 		FooterIcp:             row.FooterIcp,
 		InactiveDays:          int32(dormancy.ClampInactiveDays(row.InactiveDays)),
+		AdminNotifyEmails:     row.AdminNotifyEmails,
 	}, nil
 }
 
@@ -268,6 +269,8 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 	if req.SetInactiveDays {
 		updates["inactive_days"] = dormancy.ClampInactiveDays(int(req.InactiveDays))
 	}
+	// 审核/举报邮件收件人：整页保存时始终覆盖（允许清空）
+	updates["admin_notify_emails"] = strings.TrimSpace(req.AdminNotifyEmails)
 
 	if req.ClearSmtpPassword {
 		updates["smtp_password"] = ""

@@ -12,6 +12,7 @@ import (
 	"cwxu-algo/api/core/v1/submit_log"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/common/permission"
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/common/utils/auth"
@@ -28,6 +29,7 @@ import (
 	"github.com/go-kratos/kratos/v2/transport/grpc"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	grpc2 "google.golang.org/grpc"
+	"gorm.io/gorm"
 )
 
 // queryBoolTrue 从 HTTP query 解析布尔（1/true/yes）；非 HTTP 上下文返回 false。
@@ -95,6 +97,7 @@ type ProfileService struct {
 	profileDal     *dal.ProfileDal
 	profileUseCase *biz.ProfileUseCase
 	socialDal      *dal.SocialDal
+	db             *gorm.DB
 }
 
 func (p *ProfileService) GetByName(ctx context.Context, req *profile.GetByNameReq) (*profile.GetByNameRes, error) {
@@ -588,11 +591,16 @@ func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*
 }
 
 func NewProfileService(profileDal *dal.ProfileDal, reg *discovery.Register, profileUseCase *biz.ProfileUseCase, d *data.Data) *ProfileService {
+	var db *gorm.DB
+	if d != nil {
+		db = d.DB
+	}
 	return &ProfileService{
 		profileDal:     profileDal,
 		reg:            reg,
 		profileUseCase: profileUseCase,
 		socialDal:      dal.NewSocialDal(d),
+		db:             db,
 	}
 }
 
@@ -686,6 +694,22 @@ func (p *ProfileService) ClearDormant(ctx context.Context, req *profile.ClearDor
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
+	// 站内信通知被解冻用户
+	if n > 0 && p.db != nil {
+		for _, id := range req.UserIds {
+			if id <= 0 {
+				continue
+			}
+			_ = notify.Create(p.db, notify.Row{
+				UserID:  uint(id),
+				Type:    notify.TypeUserUnfrozen,
+				Title:   "账号已恢复活跃",
+				Body:    "站点管理员已解除你的不活跃状态，自动同步等功能将按规则恢复",
+				RefType: "user",
+				RefID:   uint(id),
+			})
+		}
+	}
 	return &profile.ClearDormantRes{
 		Code:    0,
 		Message: fmt.Sprintf("已解除 %d 人的不活跃状态", n),
@@ -750,9 +774,29 @@ func (p *ProfileService) ForceDormant(ctx context.Context, req *profile.ForceDor
 	// 回拨到「超过站点阈值 1 天」，进入休眠；之后仍走 IsDormant / 登录唤醒 / 解除不活跃
 	siteDays := p.profileDal.GetInactiveDays(ctx)
 	at := time.Now().Add(-time.Duration(siteDays+1) * 24 * time.Hour)
+	// 先解析实际可冻用户，便于站内信与 Updated 一致
+	freezable, ferr := p.profileDal.FilterFreezableUserIDs(ctx, targetIDs)
+	if ferr != nil {
+		return nil, errors.InternalServer("内部错误", ferr.Error())
+	}
 	n, err := p.profileDal.ForceDormantBatch(ctx, targetIDs, at)
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	if n > 0 && p.db != nil {
+		for _, id := range freezable {
+			if id <= 0 {
+				continue
+			}
+			_ = notify.Create(p.db, notify.Row{
+				UserID:  uint(id),
+				Type:    notify.TypeUserFrozen,
+				Title:   "账号同步已暂停",
+				Body:    "站点管理员已将你的账号设为不活跃，自动同步与部分后台任务已暂停",
+				RefType: "user",
+				RefID:   uint(id),
+			})
+		}
 	}
 	skipped := int32(requested) - int32(n)
 	if skipped < 0 {

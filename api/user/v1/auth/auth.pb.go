@@ -170,7 +170,9 @@ type RegisterReq struct {
 	Email    string                 `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
 	GroupId  int64                  `protobuf:"varint,5,opt,name=groupId,proto3" json:"groupId,omitempty"`
 	// 邮箱验证码
-	Code          string `protobuf:"bytes,6,opt,name=code,proto3" json:"code,omitempty"`
+	Code string `protobuf:"bytes,6,opt,name=code,proto3" json:"code,omitempty"`
+	// 可选：组织邀请识别码；注册成功后自动加入该组织（自动通过则设为默认组织）
+	InviteCode    string `protobuf:"bytes,7,opt,name=inviteCode,proto3" json:"inviteCode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -243,6 +245,13 @@ func (x *RegisterReq) GetGroupId() int64 {
 func (x *RegisterReq) GetCode() string {
 	if x != nil {
 		return x.Code
+	}
+	return ""
+}
+
+func (x *RegisterReq) GetInviteCode() string {
+	if x != nil {
+		return x.InviteCode
 	}
 	return ""
 }
@@ -673,14 +682,17 @@ const file_user_v1_auth_auth_proto_rawDesc = "" +
 	"\vwas_dormant\x18\x04 \x01(\bR\n" +
 	"wasDormant\x12!\n" +
 	"\fsync_started\x18\x05 \x01(\bR\vsyncStarted\x12#\n" +
-	"\rinactive_days\x18\x06 \x01(\x05R\finactiveDays\"\x9d\x01\n" +
+	"\rinactive_days\x18\x06 \x01(\x05R\finactiveDays\"\xbd\x01\n" +
 	"\vRegisterReq\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
 	"\x05email\x18\x04 \x01(\tR\x05email\x12\x18\n" +
 	"\agroupId\x18\x05 \x01(\x03R\agroupId\x12\x12\n" +
-	"\x04code\x18\x06 \x01(\tR\x04code\"A\n" +
+	"\x04code\x18\x06 \x01(\tR\x04code\x12\x1e\n" +
+	"\n" +
+	"inviteCode\x18\a \x01(\tR\n" +
+	"inviteCode\"A\n" +
 	"\vRegisterRes\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\f\n" +

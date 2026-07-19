@@ -4227,6 +4227,9 @@ components:
                 code:
                     type: string
                     description: 邮箱验证码
+                inviteCode:
+                    type: string
+                    description: 可选：组织邀请识别码；注册成功后自动加入该组织（自动通过则设为默认组织）
         api.user.v1.RegisterRes:
             type: object
             properties:
@@ -4601,6 +4604,9 @@ components:
                     type: integer
                     description: 不活跃天数阈值（默认 14）
                     format: int32
+                adminNotifyEmails:
+                    type: string
+                    description: 审核/举报邮件收件人（逗号或换行分隔）；空则发给全部站管账号邮箱
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -4691,6 +4697,9 @@ components:
                 setInactiveDays:
                     type: boolean
                     description: 是否写入 inactive_days（与间隔覆盖同一套语义）
+                adminNotifyEmails:
+                    type: string
+                    description: 审核/举报邮件收件人；始终覆盖保存（可清空）
         api.user.v1.site.UpdateConfigRes:
             type: object
             properties:
