@@ -101,21 +101,18 @@ func TestRenderRuleTemplateHTML_UsesFixtureNumbers(t *testing.T) {
 	if html == "" {
 		t.Fatal("empty html")
 	}
-	// 必须包含真实数字与名单，禁止编造
+	// 必须包含真实数字与名单，禁止编造；QQ 兼容用 table + inline style
 	mustContain := []string{
 		"42", "18", "Alice", "Bob", "Carol", "Dave", "Eve",
 		"2026-07-06", "2026-07-12", "整组织", "30",
 		"viewport", "活跃成员排行榜", "题目标签", "做题概览", "不活跃成员",
-		"综合维度评价", "dp", "A+B",
+		"综合维度评价", "dp", "A+B", "<table", "style=",
+		"algo.zhiyuansofts.cn",
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(html, s) {
 			t.Errorf("template missing %q", s)
 		}
-	}
-	// 响应式媒体查询
-	if !strings.Contains(html, "@media") {
-		t.Error("expected responsive @media")
 	}
 	// 不应出现未在数据中的假成员
 	if strings.Contains(html, "FakeUser999") {
@@ -126,13 +123,20 @@ func TestRenderRuleTemplateHTML_UsesFixtureNumbers(t *testing.T) {
 func TestBuildActiveRanking_ExcludesZero(t *testing.T) {
 	submit := map[int64]int64{1: 10, 2: 0, 3: 5}
 	ac := map[int64]int64{1: 4, 2: 0, 3: 5}
-	names := map[int64]string{1: "A", 2: "B", 3: "C"}
-	r := buildActiveRanking(submit, ac, names)
+	idMap := map[int64]userIdentity{
+		1: {Name: "A", Username: "a"},
+		2: {Name: "B", Username: "b"},
+		3: {Name: "C", Username: "c"},
+	}
+	r := buildActiveRanking(submit, ac, idMap)
 	if len(r) != 2 {
 		t.Fatalf("want 2 active, got %+v", r)
 	}
 	if r[0].Name != "A" || r[1].Name != "C" {
 		t.Fatalf("%+v", r)
+	}
+	if r[0].ProfileURL == "" || !strings.Contains(r[0].ProfileURL, "/profile/") {
+		t.Fatalf("profile url %s", r[0].ProfileURL)
 	}
 }
 
@@ -891,7 +895,7 @@ func TestRenderRuleTemplate_CompactAndFull(t *testing.T) {
 	full := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeFull)
 	compact := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeCompact)
 	for _, html := range []string{full, compact} {
-		for _, s := range []string{"综合维度评价", "比赛表现", "知识沉淀", "做题概览", "活跃成员排行榜", "活跃度", "viewport", "@media"} {
+		for _, s := range []string{"综合维度评价", "比赛表现", "知识沉淀", "做题概览", "活跃成员排行榜", "活跃度", "viewport", "<table"} {
 			if !strings.Contains(html, s) {
 				t.Errorf("missing dim %q", s)
 			}
@@ -946,7 +950,7 @@ func TestDailyAgentTools_HasContest(t *testing.T) {
 
 func TestTrainingReportPrompts_Dimensions(t *testing.T) {
 	sys := trainingReportSystemPrompt(DetailModeFull)
-	for _, s := range []string{"综合维度评价", "activeRanking", "viewport", "响应式", "teamTags", "problemOverview"} {
+	for _, s := range []string{"activeRanking", "inline", "teamTags", "problemOverview", "QQ"} {
 		if !strings.Contains(sys, s) {
 			t.Fatalf("system prompt missing %q", s)
 		}

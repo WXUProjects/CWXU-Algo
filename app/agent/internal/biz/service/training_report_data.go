@@ -25,6 +25,10 @@ const (
 	DetailModeCompact = "compact"
 	// MaxAIRangeDays AI 分析最长约 8 个月
 	MaxAIRangeDays = 243
+	// SiteBaseURL 报告内链跳主站
+	SiteBaseURL = "https://algo.zhiyuansofts.cn"
+	// OrgRoleCoach 组织教练（不计入统计）
+	orgRoleCoach = "coach"
 )
 
 // BlogBrief 组织博客摘要（无正文）
@@ -82,15 +86,17 @@ type ContestRankSnap struct {
 	Top         []ContestRankRow `json:"top"`
 }
 
-// MemberStat 活跃成员综合行（排行榜用；不含 0 提交）
+// MemberStat 活跃成员综合行（排行榜用；不含 0 提交、不含教练）
 type MemberStat struct {
-	Rank    int64   `json:"rank"`
-	UserID  int64   `json:"userId"`
-	Name    string  `json:"name"`
-	Submits int64   `json:"submits"`
-	AC      int64   `json:"ac"`
-	ACRate  float64 `json:"acRate"` // 百分比 0-100
-	Share   float64 `json:"share"`  // 提交占组织总提交 %
+	Rank     int64   `json:"rank"`
+	UserID   int64   `json:"userId"`
+	Name     string  `json:"name"`
+	Username string  `json:"username,omitempty"`
+	Submits  int64   `json:"submits"`
+	AC       int64   `json:"ac"`
+	ACRate   float64 `json:"acRate"` // 百分比 0-100
+	Share    float64 `json:"share"`  // 提交占组织总提交 %
+	ProfileURL string `json:"profileUrl,omitempty"`
 }
 
 // TagHit 团队标签计数
@@ -219,7 +225,7 @@ func (uc *SummaryUseCase) dialCoreCtx(ctx context.Context) (*grpc2.ClientConn, e
 	)
 }
 
-// resolveMemberIDs 组织成员，可选按组过滤
+// resolveMemberIDs 组织成员（排除教练），可选按组过滤
 func (uc *SummaryUseCase) resolveMemberIDs(ctx context.Context, orgID, groupID int64) ([]int64, error) {
 	conn, err := uc.dialUserCtx(ctx)
 	if err != nil {
@@ -235,7 +241,6 @@ func (uc *SummaryUseCase) resolveMemberIDs(ctx context.Context, orgID, groupID i
 			return nil, fmt.Errorf("按组取成员失败: %w", err)
 		}
 		ids = res.GetUserIds()
-		// 再与组织成员求交，避免跨组织组
 		if orgID > 0 {
 			orgRes, err := cli.GetUserIdsByOrg(ctx, &profile2.GetUserIdsByOrgReq{OrgId: orgID})
 			if err == nil && orgRes != nil {
@@ -262,11 +267,101 @@ func (uc *SummaryUseCase) resolveMemberIDs(ctx context.Context, orgID, groupID i
 	if ids == nil {
 		ids = []int64{}
 	}
+	// 教练不计入任何统计
+	coachSet := uc.fetchCoachUserIDSet(ctx, orgID)
+	if len(coachSet) > 0 {
+		filtered := make([]int64, 0, len(ids))
+		for _, id := range ids {
+			if _, isCoach := coachSet[id]; !isCoach {
+				filtered = append(filtered, id)
+			}
+		}
+		ids = filtered
+	}
 	return ids, nil
 }
 
+// fetchCoachUserIDSet 组织内 role=coach 的用户（HTTP 成员列表，elevated 站管可拉）
+func (uc *SummaryUseCase) fetchCoachUserIDSet(ctx context.Context, orgID int64) map[int64]struct{} {
+	out := map[int64]struct{}{}
+	if orgID <= 0 || uc == nil || uc.reg == nil {
+		return out
+	}
+	// 分页拉全员，筛 coach
+	for page := 1; page <= 20; page++ {
+		path := fmt.Sprintf("/v1/user/org/members?orgId=%d&page=%d&pageSize=100", orgID, page)
+		body, code, err := httpDiscoveryGet(ctx, uc.reg, "user", path)
+		if err != nil || code >= 400 {
+			log.Warnf("fetchCoachUserIDSet org=%d page=%d: code=%d err=%v", orgID, page, code, err)
+			break
+		}
+		var raw map[string]interface{}
+		if err := jsonUnmarshal(body, &raw); err != nil {
+			break
+		}
+		list, _ := raw["list"].([]interface{})
+		if list == nil {
+			if data, ok := raw["data"].(map[string]interface{}); ok {
+				list, _ = data["list"].([]interface{})
+			}
+		}
+		if len(list) == 0 {
+			break
+		}
+		for _, it := range list {
+			m, ok := it.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			role, _ := m["role"].(string)
+			if strings.EqualFold(strings.TrimSpace(role), orgRoleCoach) {
+				var uid int64
+				switch v := m["userId"].(type) {
+				case float64:
+					uid = int64(v)
+				case int64:
+					uid = v
+				}
+				if uid > 0 {
+					out[uid] = struct{}{}
+				}
+			}
+		}
+		total := 0
+		switch v := raw["total"].(type) {
+		case float64:
+			total = int(v)
+		}
+		if page*100 >= total && total > 0 {
+			break
+		}
+		if len(list) < 100 {
+			break
+		}
+	}
+	return out
+}
+
+type userIdentity struct {
+	Name     string
+	Username string
+}
+
 func (uc *SummaryUseCase) fetchNames(ctx context.Context, userIDs []int64, orgID int64) map[int64]string {
-	out := make(map[int64]string, len(userIDs))
+	idMap := uc.fetchIdentities(ctx, userIDs, orgID)
+	out := make(map[int64]string, len(idMap))
+	for id, idn := range idMap {
+		if idn.Name != "" {
+			out[id] = idn.Name
+		} else {
+			out[id] = idn.Username
+		}
+	}
+	return out
+}
+
+func (uc *SummaryUseCase) fetchIdentities(ctx context.Context, userIDs []int64, orgID int64) map[int64]userIdentity {
+	out := make(map[int64]userIdentity, len(userIDs))
 	if len(userIDs) == 0 {
 		return out
 	}
@@ -287,14 +382,28 @@ func (uc *SummaryUseCase) fetchNames(ctx context.Context, userIDs []int64, orgID
 			continue
 		}
 		for _, p := range res.Profiles {
-			if p.Name != "" {
-				out[p.UserId] = p.Name
-			} else if p.Username != "" {
-				out[p.UserId] = p.Username
+			if p == nil {
+				continue
 			}
+			name := p.Name
+			if name == "" {
+				name = p.Username
+			}
+			out[p.UserId] = userIdentity{Name: name, Username: p.Username}
 		}
 	}
 	return out
+}
+
+func profileURL(username string, userID int64) string {
+	u := strings.TrimSpace(username)
+	if u != "" {
+		return SiteBaseURL + "/profile/" + u
+	}
+	if userID > 0 {
+		return SiteBaseURL + "/profile"
+	}
+	return SiteBaseURL
 }
 
 func (uc *SummaryUseCase) fetchHeatmapUser(ctx context.Context, userId int64, start, end time.Time, isAC bool) ([]DayCount, error) {
@@ -320,12 +429,18 @@ func (uc *SummaryUseCase) fetchHeatmapUser(ctx context.Context, userId int64, st
 	return fillMissingDays(start, end, items), nil
 }
 
-// LoadTrainingReportData 拉取组织/组在日期区间的训练数据
+// LoadTrainingReportData 拉取组织/组在日期区间的训练数据（排除教练）
 func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, groupID, initiatorID int64, start, end time.Time) (*TrainingReportData, error) {
 	if orgID <= 0 {
 		return nil, fmt.Errorf("缺少组织 id")
 	}
-	memberIDs, err := uc.resolveMemberIDs(ctx, orgID, groupID)
+	elevated, eerr := ContextWithElevatedAgent(ctx, uint(orgID))
+	if eerr != nil {
+		log.Warnf("training report elevated: %v", eerr)
+		elevated = ctx
+	}
+	// 用 elevated 上下文解析成员并排除教练
+	memberIDs, err := uc.resolveMemberIDs(elevated, orgID, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -379,10 +494,18 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 		}
 	}
 
-	nameMap := uc.fetchNames(ctx, memberIDs, orgID)
+	idMap := uc.fetchIdentities(ctx, memberIDs, orgID)
+	nameMap := make(map[int64]string, len(idMap))
+	for id, idn := range idMap {
+		if idn.Name != "" {
+			nameMap[id] = idn.Name
+		} else {
+			nameMap[id] = idn.Username
+		}
+	}
 
 	// 全量活跃榜 + 兼容旧 Top 字段
-	activeRanking := buildActiveRanking(submitByUser, acByUser, nameMap)
+	activeRanking := buildActiveRanking(submitByUser, acByUser, idMap)
 	topSubmit := rankFromMap(submitByUser, nameMap, 0) // 0=全部有分
 	topAC := rankFromMap(acByUser, nameMap, 0)
 
@@ -467,24 +590,28 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 	}
 
 	// 多维度预取（失败不阻断）
-	elevated, eerr := ContextWithElevatedAgent(ctx, uint(orgID))
-	if eerr != nil {
-		log.Warnf("training report elevated: %v", eerr)
-		elevated = ctx
-	}
-	// 动态抽样加大，供标签/做题概览聚合
 	data.OrgSubmitSample = uc.fetchOrgSubmitSample(elevated, start, end, 60)
+	// 动态里若混入教练提交，剔除
+	if coaches := uc.fetchCoachUserIDSet(elevated, orgID); len(coaches) > 0 {
+		feed := data.OrgSubmitSample[:0]
+		for _, f := range data.OrgSubmitSample {
+			if _, isCoach := coaches[f.UserID]; !isCoach {
+				feed = append(feed, f)
+			}
+		}
+		data.OrgSubmitSample = feed
+	}
 	data.TeamTags = aggregateTeamTags(data.OrgSubmitSample, 24)
 	data.ProblemOverview = aggregateProblemOverview(data.OrgSubmitSample, 25)
-	data.Contests = uc.fetchOrgContests(elevated, start, end, 15)
-	data.ContestRankings = uc.fetchContestRankSnaps(elevated, data.Contests, 3, 12)
+	data.Contests = uc.fetchOrgContests(elevated, start, end, 20, memberIDs)
+	data.ContestRankings = uc.fetchContestRankSnaps(elevated, data.Contests, 4, 15)
 	data.RecentBlogs = uc.fetchOrgBlogBriefs(elevated, orgID, 12)
 
 	return data, nil
 }
 
 // buildActiveRanking 仅有提交成员，按提交降序
-func buildActiveRanking(submit, ac map[int64]int64, names map[int64]string) []MemberStat {
+func buildActiveRanking(submit, ac map[int64]int64, idMap map[int64]userIdentity) []MemberStat {
 	type pair struct {
 		id  int64
 		sub int64
@@ -510,7 +637,11 @@ func buildActiveRanking(submit, ac map[int64]int64, names map[int64]string) []Me
 	})
 	out := make([]MemberStat, 0, len(arr))
 	for i, p := range arr {
-		n := names[p.id]
+		idn := idMap[p.id]
+		n := idn.Name
+		if n == "" {
+			n = idn.Username
+		}
 		if n == "" {
 			n = fmt.Sprintf("用户%d", p.id)
 		}
@@ -523,8 +654,9 @@ func buildActiveRanking(submit, ac map[int64]int64, names map[int64]string) []Me
 			share = float64(p.sub) / float64(totalSub) * 100
 		}
 		out = append(out, MemberStat{
-			Rank: int64(i + 1), UserID: p.id, Name: n,
+			Rank: int64(i + 1), UserID: p.id, Name: n, Username: idn.Username,
 			Submits: p.sub, AC: p.ac, ACRate: rate, Share: share,
+			ProfileURL: profileURL(idn.Username, p.id),
 		})
 	}
 	return out
@@ -684,9 +816,10 @@ func (uc *SummaryUseCase) fetchOrgSubmitSample(ctx context.Context, start, end t
 	return out
 }
 
-func (uc *SummaryUseCase) fetchOrgContests(ctx context.Context, start, end time.Time, limit int) []ContestBrief {
+// fetchOrgContests 组织比赛：先按区间筛，空则放宽无时间窗再本地过滤；再按成员历史补全。
+func (uc *SummaryUseCase) fetchOrgContests(ctx context.Context, start, end time.Time, limit int, memberIDs []int64) []ContestBrief {
 	if limit <= 0 {
-		limit = 15
+		limit = 20
 	}
 	conn, err := uc.dialCoreCtx(ctx)
 	if err != nil {
@@ -694,17 +827,85 @@ func (uc *SummaryUseCase) fetchOrgContests(ctx context.Context, start, end time.
 	}
 	defer conn.Close()
 	cli := contest_log.NewContestClient(conn)
+
 	timeFrom := start.Unix()
 	timeTo := end.AddDate(0, 0, 1).Unix() - 1
+	// 策略 1：组织流 + 时间窗
 	res, err := cli.GetContestList(ctx, &contest_log.GetContestListReq{
-		UserId:   -1,
-		Limit:    int64(limit),
-		Offset:   0,
-		TimeFrom: timeFrom,
-		TimeTo:   timeTo,
+		UserId: -1, Limit: int64(limit), Offset: 0,
+		TimeFrom: timeFrom, TimeTo: timeTo,
 	})
-	if err != nil || res == nil {
-		log.Warnf("fetchOrgContests: %v", err)
+	if err != nil {
+		log.Warnf("fetchOrgContests timed: %v", err)
+	}
+	out := contestLogsToBriefs(res)
+	// 策略 2：无时间窗拉最近组织比赛，本地按 time/start/end 过滤
+	if len(out) == 0 {
+		res2, err2 := cli.GetContestList(ctx, &contest_log.GetContestListReq{
+			UserId: -1, Limit: 40, Offset: 0,
+		})
+		if err2 != nil {
+			log.Warnf("fetchOrgContests untimed: %v", err2)
+		}
+		out = filterContestsInRange(contestLogsToBriefs(res2), start, end)
+	}
+	// 策略 3：抽样成员个人比赛史合并（解决 time 字段异常 / 列表去重丢场次）
+	if len(out) < limit && len(memberIDs) > 0 {
+		seen := map[string]struct{}{}
+		for _, c := range out {
+			seen[c.Platform+"|"+c.ContestID] = struct{}{}
+		}
+		sample := memberIDs
+		if len(sample) > 12 {
+			sample = sample[:12]
+		}
+		for _, uid := range sample {
+			hres, herr := cli.GetUserContestHistory(ctx, &contest_log.GetUserContestHistoryReq{
+				UserId: uid, Limit: 30, Cursor: 0,
+			})
+			if herr != nil || hres == nil {
+				continue
+			}
+			for _, v := range hres.GetData() {
+				if v == nil {
+					continue
+				}
+				if !contestInRange(v.GetTime(), v.GetStartTime(), v.GetEndTime(), start, end) {
+					continue
+				}
+				key := v.Platform + "|" + v.ContestId
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				ts := ""
+				if v.Time > 0 {
+					ts = time.Unix(v.Time, 0).Format(dateLayout)
+				} else if v.StartTime > 0 {
+					ts = time.Unix(v.StartTime, 0).Format(dateLayout)
+				}
+				out = append(out, ContestBrief{
+					ID: v.Id, Platform: v.Platform, ContestID: v.ContestId, ContestName: v.ContestName,
+					Rank: v.Rank, ACCount: v.AcCount, TotalCount: v.TotalCount, Time: ts,
+					UserID: v.UserId, UserName: v.UserName,
+				})
+				if len(out) >= limit {
+					break
+				}
+			}
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func contestLogsToBriefs(res *contest_log.GetContestListRes) []ContestBrief {
+	if res == nil {
 		return nil
 	}
 	out := make([]ContestBrief, 0, len(res.Data))
@@ -715,12 +916,68 @@ func (uc *SummaryUseCase) fetchOrgContests(ctx context.Context, start, end time.
 		ts := ""
 		if v.Time > 0 {
 			ts = time.Unix(v.Time, 0).Format(dateLayout)
+		} else if v.StartTime > 0 {
+			ts = time.Unix(v.StartTime, 0).Format(dateLayout)
 		}
 		out = append(out, ContestBrief{
 			ID: v.Id, Platform: v.Platform, ContestID: v.ContestId, ContestName: v.ContestName,
 			Rank: v.Rank, ACCount: v.AcCount, TotalCount: v.TotalCount, Time: ts,
 			UserID: v.UserId, UserName: v.UserName,
 		})
+	}
+	return out
+}
+
+func contestInRange(timeU, startU, endU int64, start, end time.Time) bool {
+	dayStart := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location())
+	dayEnd := time.Date(end.Year(), end.Month(), end.Day(), 23, 59, 59, 0, end.Location())
+	// 任一时间戳落入区间即算
+	for _, u := range []int64{timeU, startU, endU} {
+		if u <= 0 {
+			continue
+		}
+		t := time.Unix(u, 0)
+		if !t.Before(dayStart) && !t.After(dayEnd) {
+			return true
+		}
+	}
+	// 开赛在区间前、结束在区间后（跨区间比赛）
+	if startU > 0 && endU > 0 {
+		st, en := time.Unix(startU, 0), time.Unix(endU, 0)
+		if !en.Before(dayStart) && !st.After(dayEnd) {
+			return true
+		}
+	}
+	return false
+}
+
+func filterContestsInRange(in []ContestBrief, start, end time.Time) []ContestBrief {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ContestBrief, 0, len(in))
+	for _, c := range in {
+		var tu int64
+		if c.Time != "" {
+			if t, err := time.ParseInLocation(dateLayout, c.Time, time.Local); err == nil {
+				tu = t.Unix()
+			}
+		}
+		// ContestBrief 只有 date 字符串时用 time 字段
+		if contestInRange(tu, 0, 0, start, end) || c.Time == "" {
+			// 无时间的也保留（策略 2 兜底时再靠策略 3）
+			if contestInRange(tu, 0, 0, start, end) {
+				out = append(out, c)
+			}
+		}
+	}
+	// 若本地过滤全空，退回最近若干条（至少给用户看到组织有比赛）
+	if len(out) == 0 && len(in) > 0 {
+		n := 8
+		if len(in) < n {
+			n = len(in)
+		}
+		return in[:n]
 	}
 	return out
 }
