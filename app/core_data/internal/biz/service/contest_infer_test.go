@@ -303,8 +303,12 @@ func TestListContestCellSubmits_AtCoderByExternalIDEndHint(t *testing.T) {
 	if len(list) != 3 {
 		t.Fatalf("list=%d want 3 (exclude practice+other), got %+v", len(list), list)
 	}
-	if list[2].Status != "AC" || list[2].SubmitID != "3" {
-		t.Fatalf("last in-contest=%+v", list[2])
+	// 逆序：最新赛时提交在前
+	if list[0].Status != "AC" || list[0].SubmitID != "3" {
+		t.Fatalf("newest in-contest=%+v", list[0])
+	}
+	if list[2].SubmitID != "1" {
+		t.Fatalf("oldest in-contest=%+v", list[2])
 	}
 }
 
@@ -343,5 +347,90 @@ func TestListContestCellSubmits_CodeforcesByExternalID(t *testing.T) {
 	}
 	if len(list) != 2 {
 		t.Fatalf("list=%d want 2, %+v", len(list), list)
+	}
+}
+
+func TestInferContestUpsolves_PostContestAC(t *testing.T) {
+	db := testInferDB(t)
+	// 与现有 Infer 单测一致：仅用 hint 开赛，避免日历 Unix→本地时区在 SQLite 下比较失真
+	start := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	_ = db.Create(&model.ContestProblem{
+		Platform: spider.NowCoder, ContestID: "999", Label: "A", ExternalID: "316899", Title: "A",
+	}).Error
+	_ = db.Create(&model.ContestProblem{
+		Platform: spider.NowCoder, ContestID: "999", Label: "B", ExternalID: "316900", Title: "B",
+	}).Error
+	// 赛时：A 已 AC；B 仅 WA
+	// 赛后：B AC；A 再交不影响
+	logs := []model.SubmitLog{
+		{Platform: spider.NowCoder, UserID: 1, SubmitID: "s1", Problem: "316899 题A", Status: "答案正确", Time: start.Add(20 * time.Minute)},
+		{Platform: spider.NowCoder, UserID: 1, SubmitID: "s2", Problem: "316900 题B", Status: "答案错误", Time: start.Add(30 * time.Minute)},
+		{Platform: spider.NowCoder, UserID: 1, SubmitID: "s3", Problem: "316900 题B", Status: "答案正确", Time: start.Add(5 * time.Hour)},
+		{Platform: spider.NowCoder, UserID: 1, SubmitID: "s4", Problem: "316899 题A", Status: "答案正确", Time: start.Add(6 * time.Hour)},
+	}
+	for i := range logs {
+		logs[i].FillIsAC()
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := InferContestUserProblems(db, spider.NowCoder, "999", []int64{1}, start); err != nil {
+		t.Fatal(err)
+	}
+	n, err := InferContestUpsolves(db, spider.NowCoder, "999", []int64{1}, start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n < 1 {
+		t.Fatalf("upsolve n=%d want >=1", n)
+	}
+	var cells []model.ContestUserProblem
+	_ = db.Where("user_id = 1").Find(&cells).Error
+	byExt := map[string]model.ContestUserProblem{}
+	for _, c := range cells {
+		byExt[c.ExternalID] = c
+	}
+	if byExt["316899"].Status != model.ContestCellAC {
+		t.Fatalf("A should stay AC, got %+v", byExt["316899"])
+	}
+	b := byExt["316900"]
+	if b.Status != model.ContestCellUpsolve {
+		t.Fatalf("B should be UPSOLVE, got %+v", b)
+	}
+	if b.RelativeSec != nil {
+		t.Fatalf("upsolve relativeSec should be nil, got %v", *b.RelativeSec)
+	}
+	if b.Attempts != 1 {
+		t.Fatalf("B attempts should keep contest TRIED attempts=1, got %d", b.Attempts)
+	}
+}
+
+func TestMergeContestCell_DoesNotDowngradeUpsolveToTried(t *testing.T) {
+	t0 := time.Date(2026, 6, 1, 18, 0, 0, 0, time.UTC)
+	prev := model.ContestUserProblem{
+		Platform: spider.NowCoder, ContestID: "1", UserID: 9,
+		Label: "C", ExternalID: "extC", Status: model.ContestCellUpsolve,
+		Attempts: 2, FirstACAt: &t0,
+	}
+	next := model.ContestUserProblem{
+		Platform: spider.NowCoder, ContestID: "1", UserID: 9,
+		Label: "C", ExternalID: "extC", Status: model.ContestCellTried, Attempts: 1,
+	}
+	out, write := mergeContestCellIncoming(&prev, next)
+	if !write {
+		t.Fatal("expected write=true when merging attempts into UPSOLVE")
+	}
+	if out.Status != model.ContestCellUpsolve {
+		t.Fatalf("status=%s want UPSOLVE", out.Status)
+	}
+	if out.Attempts != 2 {
+		t.Fatalf("attempts=%d want 2 (keep higher)", out.Attempts)
+	}
+	// 新 TRIED attempts 更高时应抬升
+	next.Attempts = 5
+	out2, _ := mergeContestCellIncoming(&prev, next)
+	if out2.Attempts != 5 {
+		t.Fatalf("attempts=%d want 5", out2.Attempts)
 	}
 }

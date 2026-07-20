@@ -679,7 +679,8 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		} else if memberIDs != nil {
 			scope = fmt.Sprintf("org%d:n%d", resolvedOrg, len(memberIDs))
 		}
-		boardCacheKey = fmt.Sprintf("core:contest:board:%s:%s:%s:v%s",
+		// v2：格子含 UPSOLVE（补题，不计分）
+		boardCacheKey = fmt.Sprintf("core:contest:board:v2:%s:%s:%s:v%s",
 			seed.Platform, seed.ContestId, scope, ver)
 		if b, e := c.rdb.Get(reqCtx, boardCacheKey).Bytes(); e == nil && len(b) > 0 {
 			var cached map[string]interface{}
@@ -758,11 +759,11 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		hasDetail bool
 		cellMaps  []map[string]interface{}
 	}
-	// 全场是否有任意逐题明细（无则前端只展示 AC 题数，不画空格子）
+	// 全场是否有任意逐题明细（含补题；无则前端只展示 AC 题数，不画空格子）
 	boardHasDetail := false
 	for _, cells := range cellsByUser {
 		for _, cell := range cells {
-			if cell.Status == model.ContestCellAC || cell.Status == model.ContestCellTried {
+			if model.ContestCellHasDetail(cell.Status) {
 				boardHasDetail = true
 				break
 			}
@@ -783,7 +784,7 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 			if cell.Label != "" {
 				byLabel[cell.Label] = cell
 			}
-			if cell.Status == model.ContestCellAC || cell.Status == model.ContestCellTried {
+			if model.ContestCellHasDetail(cell.Status) {
 				rowHasDetail = true
 			}
 		}

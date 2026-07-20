@@ -13,7 +13,7 @@ import (
 
 // RepairContestCellSubmitData 修复站内榜 cell-submits 相关脏数据：
 //  1. AtCoder submit_logs 空 external_id → problem
-//  2. 赛后练习误入 contest_user_problems 的 AC 格
+//  2. 赛后练习误标为 AC 的格子 → UPSOLVE（不计分展示），并清空 relative_sec
 //  3. AtCoder relative_sec 按 history 结束时间 − 100min 重算
 //
 // 可安全重复执行（幂等）。
@@ -46,11 +46,12 @@ func RepairContestCellSubmitData(db *gorm.DB) (map[string]int64, error) {
 	}
 	out["submit_external_id"] = res.RowsAffected
 
-	// 2) 赛后练习格：first_ac 明显晚于本场 contest_logs 结束时间
+	// 2) 赛后误标 AC → UPSOLVE（展示补题，不进罚时）
 	// Postgres: 子查询 max(time)
 	res = db.Exec(`
-		DELETE FROM contest_user_problems AS cup
-		USING (
+		UPDATE contest_user_problems AS cup
+		SET status = ?, relative_sec = NULL, updated_at = NOW()
+		FROM (
 			SELECT platform, contest_id, MAX(time) AS end_t
 			FROM contest_logs
 			WHERE platform = ?
@@ -58,21 +59,22 @@ func RepairContestCellSubmitData(db *gorm.DB) (map[string]int64, error) {
 		) AS e
 		WHERE cup.platform = e.platform
 		  AND cup.contest_id = e.contest_id
+		  AND cup.status = ?
 		  AND cup.first_ac_at IS NOT NULL
 		  AND cup.first_ac_at > e.end_t + INTERVAL '15 minutes'
-	`, spider.AtCoder)
+	`, model.ContestCellUpsolve, spider.AtCoder, model.ContestCellAC)
 	if res.Error != nil {
-		// SQLite / 无 USING：逐场清理
-		n, err := repairDeletePracticeCellsSQLite(db)
+		// SQLite / 无 FROM 更新：逐场改写
+		n, err := repairDowngradePracticeCellsSQLite(db)
 		if err != nil {
-			return out, fmt.Errorf("delete practice cells: %w", err)
+			return out, fmt.Errorf("downgrade practice cells: %w", err)
 		}
-		out["practice_cells_deleted"] = n
+		out["practice_cells_to_upsolve"] = n
 	} else {
-		out["practice_cells_deleted"] = res.RowsAffected
+		out["practice_cells_to_upsolve"] = res.RowsAffected
 	}
 
-	// 3) 重算 AtCoder relative_sec（end − 100min 为开赛）
+	// 3) 重算 AtCoder relative_sec（end − 100min 为开赛；仅赛时 AC）
 	nRel, err := repairAtCoderRelativeSec(db)
 	if err != nil {
 		return out, fmt.Errorf("relative_sec: %w", err)
@@ -83,7 +85,7 @@ func RepairContestCellSubmitData(db *gorm.DB) (map[string]int64, error) {
 	return out, nil
 }
 
-func repairDeletePracticeCellsSQLite(db *gorm.DB) (int64, error) {
+func repairDowngradePracticeCellsSQLite(db *gorm.DB) (int64, error) {
 	type endRow struct {
 		Platform  string
 		ContestID string
@@ -100,10 +102,13 @@ func repairDeletePracticeCellsSQLite(db *gorm.DB) (int64, error) {
 	var total int64
 	for _, e := range ends {
 		cutoff := e.EndT.Add(15 * time.Minute)
-		res := db.Where(
-			"platform = ? AND contest_id = ? AND first_ac_at IS NOT NULL AND first_ac_at > ?",
-			e.Platform, e.ContestID, cutoff,
-		).Delete(&model.ContestUserProblem{})
+		res := db.Model(&model.ContestUserProblem{}).Where(
+			"platform = ? AND contest_id = ? AND status = ? AND first_ac_at IS NOT NULL AND first_ac_at > ?",
+			e.Platform, e.ContestID, model.ContestCellAC, cutoff,
+		).Updates(map[string]interface{}{
+			"status":       model.ContestCellUpsolve,
+			"relative_sec": nil,
+		})
 		if res.Error != nil {
 			return total, res.Error
 		}

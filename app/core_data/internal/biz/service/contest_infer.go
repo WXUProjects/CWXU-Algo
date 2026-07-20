@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +27,8 @@ const (
 	contestInferEndBuffer = 15 * time.Minute
 	// contestInferSubmitLimit 单次反推最多扫提交条数
 	contestInferSubmitLimit = 8000
+	// contestUpsolveMaxHorizon 补题回填：赛后最多扫多久（避免全历史）
+	contestUpsolveMaxHorizon = 30 * 24 * time.Hour
 )
 
 // calendarPlatformAliases 赛程表 platform 与爬虫 platform 不一致（cpolar 小写）。
@@ -527,6 +530,286 @@ func InferContestUserProblems(db *gorm.DB, platform, contestID string, userIDs [
 	if len(upserts) == 0 {
 		return 0, nil
 	}
+	// 合并已有格子：禁止把 UPSOLVE 降级成 TRIED、禁止覆盖赛时 AC
+	upserts = mergeContestCellUpserts(db, platform, contestID, upserts)
+	if len(upserts) == 0 {
+		return 0, nil
+	}
+	err := db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "platform"}, {Name: "contest_id"}, {Name: "user_id"}, {Name: "external_id"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"label", "status", "attempts", "first_ac_at", "relative_sec", "updated_at",
+		}),
+	}).CreateInBatches(&upserts, 100).Error
+	if err != nil {
+		return 0, err
+	}
+	return len(upserts), nil
+}
+
+// cupKey 内存索引键：external_id + user
+func cupKey(userID int64, externalID string) string {
+	return strings.ToLower(strings.TrimSpace(externalID)) + "\x00" + strconv.FormatInt(userID, 10)
+}
+
+// loadContestUserProblemIndex 本场若干用户已有格子。
+func loadContestUserProblemIndex(db *gorm.DB, platform, contestID string, userIDs []int64) map[string]model.ContestUserProblem {
+	out := map[string]model.ContestUserProblem{}
+	if db == nil || len(userIDs) == 0 {
+		return out
+	}
+	var rows []model.ContestUserProblem
+	_ = db.Where("platform = ? AND contest_id = ? AND user_id IN ?", platform, contestID, userIDs).
+		Find(&rows).Error
+	for _, r := range rows {
+		out[cupKey(r.UserID, r.ExternalID)] = r
+	}
+	return out
+}
+
+// mergeContestCellIncoming 合并「即将写入」与「已有」：
+// AC 最高；UPSOLVE 不被 TRIED 覆盖；赛时 AC 不被补题覆盖。
+func mergeContestCellIncoming(prev *model.ContestUserProblem, next model.ContestUserProblem) (model.ContestUserProblem, bool) {
+	if prev == nil {
+		return next, true
+	}
+	// 已有赛时 AC：仅允许用新的赛时 AC 刷新，禁止降级
+	if prev.Status == model.ContestCellAC {
+		if next.Status == model.ContestCellAC {
+			return next, true
+		}
+		return *prev, false
+	}
+	// 新赛时 AC：覆盖 TRIED / UPSOLVE
+	if next.Status == model.ContestCellAC {
+		return next, true
+	}
+	// 已有补题：TRIED 只合并 attempts，不改 status
+	if prev.Status == model.ContestCellUpsolve {
+		if next.Status == model.ContestCellTried {
+			out := *prev
+			if next.Attempts > out.Attempts {
+				out.Attempts = next.Attempts
+			}
+			if strings.TrimSpace(next.Label) != "" {
+				out.Label = next.Label
+			}
+			out.RelativeSec = nil
+			return out, true
+		}
+		if next.Status == model.ContestCellUpsolve {
+			out := next
+			// 保留更早的补题 AC
+			if prev.FirstACAt != nil && (out.FirstACAt == nil || prev.FirstACAt.Before(*out.FirstACAt)) {
+				out.FirstACAt = prev.FirstACAt
+			}
+			if next.Attempts < prev.Attempts {
+				out.Attempts = prev.Attempts
+			}
+			out.RelativeSec = nil
+			return out, true
+		}
+	}
+	// 新补题覆盖 TRIED / 空
+	if next.Status == model.ContestCellUpsolve {
+		out := next
+		out.RelativeSec = nil
+		if prev.Status == model.ContestCellTried && prev.Attempts > out.Attempts {
+			out.Attempts = prev.Attempts
+		}
+		if strings.TrimSpace(out.Label) == "" {
+			out.Label = prev.Label
+		}
+		return out, true
+	}
+	// 默认：用 next
+	return next, true
+}
+
+// mergeContestCellUpserts 对一批待写入格子做已有行合并；丢弃无需写入的项。
+func mergeContestCellUpserts(db *gorm.DB, platform, contestID string, incoming []model.ContestUserProblem) []model.ContestUserProblem {
+	if len(incoming) == 0 {
+		return nil
+	}
+	uids := make([]int64, 0, len(incoming))
+	seen := map[int64]struct{}{}
+	for _, r := range incoming {
+		if _, ok := seen[r.UserID]; ok {
+			continue
+		}
+		seen[r.UserID] = struct{}{}
+		uids = append(uids, r.UserID)
+	}
+	idx := loadContestUserProblemIndex(db, platform, contestID, uids)
+	out := make([]model.ContestUserProblem, 0, len(incoming))
+	for _, next := range incoming {
+		var prevPtr *model.ContestUserProblem
+		if p, ok := idx[cupKey(next.UserID, next.ExternalID)]; ok {
+			pp := p
+			prevPtr = &pp
+		}
+		merged, write := mergeContestCellIncoming(prevPtr, next)
+		if !write {
+			continue
+		}
+		// 与已有完全一致则跳过（减少无意义 upsert）
+		if prevPtr != nil &&
+			prevPtr.Status == merged.Status &&
+			prevPtr.Attempts == merged.Attempts &&
+			prevPtr.Label == merged.Label &&
+			((prevPtr.RelativeSec == nil && merged.RelativeSec == nil) ||
+				(prevPtr.RelativeSec != nil && merged.RelativeSec != nil && *prevPtr.RelativeSec == *merged.RelativeSec)) &&
+			((prevPtr.FirstACAt == nil && merged.FirstACAt == nil) ||
+				(prevPtr.FirstACAt != nil && merged.FirstACAt != nil && prevPtr.FirstACAt.Equal(*merged.FirstACAt))) {
+			continue
+		}
+		out = append(out, merged)
+	}
+	return out
+}
+
+// InferContestUpsolves 赛后补题：submit_logs 在赛时窗外的首次 AC → status=UPSOLVE。
+// 不计分；不覆盖已有赛时 AC。horizon 默认赛后 30 天。
+func InferContestUpsolves(db *gorm.DB, platform, contestID string, userIDs []int64, hintTime time.Time) (int, error) {
+	if db == nil || len(userIDs) == 0 {
+		return 0, nil
+	}
+	platform = strings.TrimSpace(platform)
+	contestID = strings.TrimSpace(contestID)
+	if platform == "" || contestID == "" {
+		return 0, nil
+	}
+
+	_, end := ResolveContestWindow(db, platform, contestID, hintTime)
+	if end.IsZero() {
+		return 0, nil
+	}
+	// 严格晚于赛时窗（含缓冲）才算补题
+	upsolveStart := end.Add(time.Second)
+	upsolveEnd := end.Add(contestUpsolveMaxHorizon)
+	if now := time.Now(); now.Before(upsolveEnd) {
+		upsolveEnd = now
+	}
+	if !upsolveEnd.After(upsolveStart) {
+		return 0, nil
+	}
+
+	probSet := loadContestProblemSet(db, platform, contestID)
+	hasProbSet := len(probSet) > 0
+
+	type row struct {
+		UserID     int64     `gorm:"column:user_id"`
+		Contest    string    `gorm:"column:contest"`
+		Problem    string    `gorm:"column:problem"`
+		Status     string    `gorm:"column:status"`
+		SubmitID   string    `gorm:"column:submit_id"`
+		ExternalID string    `gorm:"column:external_id"`
+		Time       time.Time `gorm:"column:time"`
+	}
+	var rows []row
+	q := db.Model(&model.SubmitLog{}).
+		Select("user_id, contest, problem, status, submit_id, external_id, time").
+		Where("platform = ? AND user_id IN ?", platform, userIDs).
+		Where("time > ? AND time <= ?", end, upsolveEnd).
+		Where("problem <> '' AND problem IS NOT NULL")
+	if platform == spider.LeetCode {
+		q = q.Where("submit_id LIKE ?", "lc-prob-%")
+	}
+	if err := q.Order("time ASC").Limit(contestInferSubmitLimit).Find(&rows).Error; err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+
+	// 每用户每题首次赛后 AC
+	type firstAC struct {
+		label string
+		ext   string
+		at    time.Time
+	}
+	byUser := map[int64]map[string]*firstAC{}
+	for _, r := range rows {
+		if platform == spider.LeetCode && model.IsLeetCodeSyntheticSubmit(platform, r.SubmitID) {
+			continue
+		}
+		if !model.IsAcceptedStatus(r.Status) {
+			continue
+		}
+		ext, label := resolveSubmitExternal(platform, contestID, r.Contest, r.Problem, r.ExternalID)
+		if ext == "" {
+			continue
+		}
+		belong := false
+		if hasProbSet {
+			if _, ok := probSet[ext]; ok {
+				belong = true
+			} else if _, ok := probSet[strings.ToLower(ext)]; ok {
+				belong = true
+			}
+			if belong {
+				if lb := probSet[ext]; lb != "" {
+					label = lb
+				} else if lb := probSet[strings.ToLower(ext)]; lb != "" {
+					label = lb
+				}
+			}
+		}
+		cField := strings.TrimSpace(r.Contest)
+		if !belong && cField != "" {
+			if cField == contestID || cField == "-"+contestID ||
+				strings.EqualFold(cField, contestID) ||
+				strings.Contains(cField, contestID) {
+				belong = true
+			}
+		}
+		if !belong {
+			continue
+		}
+		if label == "" {
+			if lb, ok := probSet[ext]; ok {
+				label = lb
+			} else {
+				label = ext
+			}
+		}
+		m := byUser[r.UserID]
+		if m == nil {
+			m = map[string]*firstAC{}
+			byUser[r.UserID] = m
+		}
+		if _, ok := m[ext]; ok {
+			continue // 已记首次
+		}
+		m[ext] = &firstAC{label: label, ext: ext, at: r.Time}
+	}
+
+	var upserts []model.ContestUserProblem
+	for uid, m := range byUser {
+		for _, a := range m {
+			t := a.at
+			upserts = append(upserts, model.ContestUserProblem{
+				Platform:    platform,
+				ContestID:   contestID,
+				UserID:      uid,
+				Label:       a.label,
+				ExternalID:  a.ext,
+				Status:      model.ContestCellUpsolve,
+				Attempts:    0,
+				FirstACAt:   &t,
+				RelativeSec: nil,
+			})
+		}
+	}
+	if len(upserts) == 0 {
+		return 0, nil
+	}
+	upserts = mergeContestCellUpserts(db, platform, contestID, upserts)
+	if len(upserts) == 0 {
+		return 0, nil
+	}
 	err := db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "platform"}, {Name: "contest_id"}, {Name: "user_id"}, {Name: "external_id"},
@@ -640,6 +923,14 @@ func InferContestUserProblemsForUser(db *gorm.DB, platform, contestID string, us
 		return 0, nil
 	}
 	return InferContestUserProblems(db, platform, contestID, []int64{userID}, hintTime)
+}
+
+// InferContestUpsolvesForUser 爬虫路径：单用户补题回填。
+func InferContestUpsolvesForUser(db *gorm.DB, platform, contestID string, userID int64, hintTime time.Time) (int, error) {
+	if userID == 0 {
+		return 0, nil
+	}
+	return InferContestUpsolves(db, platform, contestID, []int64{userID}, hintTime)
 }
 
 // ContestCellSubmit 站内榜格子弹窗：单条赛时提交。
@@ -815,6 +1106,7 @@ func collectWantExternalIDs(db *gorm.DB, platform, contestID, label, externalID 
 
 // ListContestCellSubmits 按 external_id 反查 submit_logs，再筛赛时窗口。
 // label / externalID 至少一个非空；优先 externalID（与 contest_user_problems 一致）。
+// 返回按提交时间逆序（新→旧）。
 func ListContestCellSubmits(
 	db *gorm.DB,
 	platform, contestID string,
@@ -888,7 +1180,7 @@ func ListContestCellSubmits(
 		)
 	}
 
-	if err = q.Order("time ASC").Limit(contestCellSubmitLimit).Find(&rows).Error; err != nil {
+	if err = q.Order("time DESC").Limit(contestCellSubmitLimit).Find(&rows).Error; err != nil {
 		return nil, start, end, err
 	}
 
