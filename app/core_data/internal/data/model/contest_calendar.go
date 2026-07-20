@@ -59,8 +59,9 @@ func ValidCalendarAdvance(m int) bool {
 }
 
 const (
-	CalScopePlatform = "platform"
-	CalScopeContest  = "contest"
-	CalSourceCpolar  = "cpolar"
+	CalScopePlatform  = "platform"
+	CalScopeContest   = "contest"
+	CalSourceCpolar   = "cpolar"
 	CalSourceLeetCode = "leetcode"
+	CalSourceNowCoder = "nowcoder" // 比赛页/参赛历史官方起止时间
 )

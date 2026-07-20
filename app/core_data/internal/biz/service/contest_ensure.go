@@ -9,6 +9,7 @@ import (
 
 	"cwxu-algo/app/common/event"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/spider"
 	"cwxu-algo/app/core_data/internal/spider/problem_fetch"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -171,6 +172,21 @@ func (uc *ProblemUseCase) ensureContestProblems(platform, contestID string, forc
 }
 
 func (uc *ProblemUseCase) runContestEnsure(platform, contestID string) error {
+	// 牛客：ensure 题目时同步官方赛时（校赛常不在 cpolar，默认 3h 会错）
+	if NormalizeCalendarPlatform(platform) == spider.NowCoder && uc.data != nil && uc.data.DB != nil {
+		var hintStart, hintEnd time.Time
+		var name, url string
+		var cl model.ContestLog
+		if uc.data.DB.Where("platform IN ? AND contest_id = ?", calendarPlatformAliases(spider.NowCoder), contestID).
+			Order("time DESC").First(&cl).Error == nil {
+			hintStart, hintEnd = cl.Time, cl.EndTime
+			name, url = cl.ContestName, cl.ContestUrl
+		}
+		if _, _, ok := EnsureNowCoderContestCalendar(uc.data.DB, contestID, name, url, hintStart, hintEnd); ok {
+			log.Infof("contest ensure %s/%s: nowcoder calendar window ready", platform, contestID)
+		}
+	}
+
 	specs, err := ListContestProblemSpecs(platform, contestID)
 	if err != nil || len(specs) == 0 {
 		// OJ 拉列表失败（CF 机房 400/Cloudflare 等）：用站内提交反推题目目录

@@ -1,417 +1,47 @@
 package platform
 
 import (
-	"cwxu-algo/app/common/utils/ojhttp"
-	"cwxu-algo/app/core_data/internal/data/model"
-	"cwxu-algo/app/core_data/internal/spider"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strconv"
 	"strings"
-	"time"
+
+	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/spider"
 
 	"github.com/PuerkitoBio/goquery"
 )
 
-type Submission struct {
-	RunID      string
-	Problem    string // 展示用：优先 "数字题号 标题"
-	ProblemID  string // 牛客题库数字 id（/acm/problem/{id}）
-	Result     string
-	Score      string
-	TimeMS     string
-	MemoryKB   string
-	CodeLen    string
-	Language   string
-	SubmitTime string
-}
+// NewNowCoder 牛客竞赛站爬虫。
+// 绑定 username = 竞赛 UID（数字）。
+//
+// 能力拆分：
+//   - FetchSubmitLog → nowcoder_submit.go（practice-coding + 训练 history）
+//   - FetchContestLog → nowcoder_contest.go（参赛历史，真实 start/end）
+//   - 比赛页时间 → nowcoder_contest_time.go
+//   - 题号身份 → nowcoder_identity.go
 type NewNowCoder struct{}
-
-// getSubLogResp 获取submissionLog信息
-func getSubLogResp(url string) (*goquery.Document, error) {
-	// 发起 Get 请求
-	resp, err := ojhttp.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("发起http请求失败: %s", err.Error())
-	}
-	defer resp.Body.Close()
-	// 校验状态码
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("请求响应码错误 %d, %s", resp.StatusCode, string(body))
-	}
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("解析html失败")
-	}
-	return doc, nil
-}
-
-// analysisSubs 解析submission
-func analysisSubs(doc *goquery.Document) []Submission {
-	var subs []Submission
-	doc.Find("table.table-hover tbody tr").Each(func(i int, tr *goquery.Selection) {
-		tds := tr.Find("td")
-		if tds.Length() < 9 {
-			return
-		}
-		probCell := tds.Eq(1)
-		title := strings.TrimSpace(probCell.Text())
-		// 从链接提取稳定数字题号：/acm/problem/316899
-		problemID := ""
-		probCell.Find("a").Each(func(_ int, a *goquery.Selection) {
-			if problemID != "" {
-				return
-			}
-			href, _ := a.Attr("href")
-			if i := strings.LastIndex(href, "/problem/"); i >= 0 {
-				id := strings.Trim(href[i+len("/problem/"):], "/")
-				// 去掉 query
-				if j := strings.IndexAny(id, "?#"); j >= 0 {
-					id = id[:j]
-				}
-				if id != "" && isDigits(id) {
-					problemID = id
-				}
-			}
-		})
-		problem := title
-		if problemID != "" {
-			// 统一 "id 标题"，供 parseNowCoder 使用
-			if !strings.HasPrefix(title, problemID) {
-				problem = problemID + " " + title
-			}
-		}
-		sub := Submission{
-			RunID:      strings.TrimSpace(tds.Eq(0).Text()),
-			Problem:    problem,
-			ProblemID:  problemID,
-			Result:     strings.TrimSpace(tds.Eq(2).Text()),
-			Score:      strings.TrimSpace(tds.Eq(3).Text()),
-			TimeMS:     strings.TrimSpace(tds.Eq(4).Text()),
-			MemoryKB:   strings.TrimSpace(tds.Eq(5).Text()),
-			CodeLen:    strings.TrimSpace(tds.Eq(6).Text()),
-			Language:   strings.TrimSpace(tds.Eq(7).Text()),
-			SubmitTime: strings.TrimSpace(tds.Eq(8).Text()),
-		}
-		subs = append(subs, sub)
-	})
-	return subs
-}
-
-func isDigits(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// normalizeNowCoderUUID 主站 questionUuid：32 位 hex（可带连字符）
-func normalizeNowCoderUUID(s string) string {
-	s = strings.TrimSpace(strings.ToLower(s))
-	s = strings.ReplaceAll(s, "-", "")
-	if len(s) != 32 {
-		return ""
-	}
-	for _, r := range s {
-		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
-			return ""
-		}
-	}
-	return s
-}
-
-func (nc NewNowCoder) fetchSub(userId int64, username string, needAll bool) []model.SubmitLog {
-	// ===== record 定义（必须是命名类型）=====
-	type Record struct {
-		Problem struct {
-			// AC 站：id = 题库数字 id → https://ac.nowcoder.com/acm/problem/{id}
-			// 主站：questionUuid = 32 位 hex → https://www.nowcoder.com/practice/{uuid}
-			// questionNum 可能是 "309177" 或 "ACM413"（展示号，不能当 external_id）
-			ID           int64  `json:"id"`
-			QuestionID   int64  `json:"questionId"`
-			QuestionNum  string `json:"questionNum"`
-			QuestionUUID string `json:"questionUuid"`
-			Title        string `json:"title"`
-		} `json:"problem"`
-		Submission struct {
-			ID          int64 `json:"id"`
-			CreatedDate int64 `json:"createdDate"`
-		} `json:"submission"`
-		Language string `json:"language"`
-		Status   struct {
-			Desc string `json:"desc"`
-		} `json:"status"`
-	}
-
-	type Resp struct {
-		Success bool `json:"success"`
-		Data    struct {
-			TotalPage int      `json:"totalPage"`
-			Records   []Record `json:"records"`
-		} `json:"data"`
-	}
-
-	const api = "https://gw-c.nowcoder.com/api/sparta/user/question-training/submission-history"
-
-	pageSize := 50
-	limit := 150
-	if needAll {
-		// 硬顶：约 1 万条，避免无界翻页占满 worker
-		limit = 10000
-	}
-
-	doReq := func(page int) (*Resp, error) {
-		body := fmt.Sprintf(`{"pageNo":%d,"pageSize":%d,"userId":%s}`, page, pageSize, username)
-		req, err := http.NewRequest("POST", api, strings.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := ojhttp.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-
-		bs, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, err
-		}
-
-		var r Resp
-		if err := json.Unmarshal(bs, &r); err != nil {
-			return nil, err
-		}
-		return &r, nil
-	}
-
-	result := make([]model.SubmitLog, 0)
-
-	handle := func(records []Record) bool {
-		for _, it := range records {
-			// 优先 problem.id（= AC 站数字题号），勿优先 UUID，否则与 practice-coding 双计
-			// 不用 questionId：与 ac.nowcoder.com/acm/problem/{id} 不是同一命名空间
-			problem := nowcoderProblemLabel(
-				it.Problem.ID,
-				it.Problem.QuestionUUID,
-				it.Problem.QuestionNum,
-				it.Problem.Title,
-			)
-			result = append(result, model.SubmitLog{
-				UserID:   userId,
-				Platform: spider.NowCoder,
-				SubmitID: strconv.FormatInt(it.Submission.ID, 10),
-				// 练习题不写 contest，避免 parse 时用 main|uid 污染 external_id
-				Contest: "",
-				Problem: problem,
-				Lang:    it.Language,
-				Status:  it.Status.Desc,
-				Time:    time.Unix(it.Submission.CreatedDate/1000, 0),
-			})
-			if len(result) >= limit {
-				return false
-			}
-		}
-		return true
-	}
-
-	// ===== 第 1 页 =====
-	first, err := doReq(1)
-	if err != nil {
-		return result
-	}
-
-	totalPage := first.Data.TotalPage
-	if !handle(first.Data.Records) {
-		return result
-	}
-
-	// ===== 后续分页（页间短歇，降风控）=====
-	for page := 2; page <= totalPage; page++ {
-		time.Sleep(200 * time.Millisecond)
-		r, err := doReq(page)
-		if err != nil {
-			break
-		}
-		if len(r.Data.Records) == 0 {
-			break
-		}
-		if !handle(r.Data.Records) {
-			break
-		}
-	}
-	return result
-}
-
-func (nc NewNowCoder) FetchSubmitLog(userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
-	url := fmt.Sprintf(
-		"https://ac.nowcoder.com/acm/contest/profile/%s/practice-coding?pageSize=100&page=1",
-		username,
-	)
-	doc, err := getSubLogResp(url)
-	if err != nil {
-		return nil, err
-	}
-	totalSubmit := ""
-	doc.Find(".my-state-item").Each(func(i int, s *goquery.Selection) {
-		label := strings.TrimSpace(s.Find("span").Text())
-		if label == "次提交" {
-			totalSubmit = strings.TrimSpace(s.Find(".state-num").Text())
-		}
-	})
-	totalS, _ := strconv.Atoi(totalSubmit)
-	// 先把当前这些数据怼进来
-	var subs []Submission
-	subs = append(subs, analysisSubs(doc)...)
-	if needAll {
-		// 再获取其他页；硬顶 100 页（1 万条）+ 页间短歇
-		totPage := (totalS + 99) / 100
-		if totPage > 100 {
-			totPage = 100
-		}
-		for i := 2; i <= totPage; i++ {
-			time.Sleep(200 * time.Millisecond)
-			url := fmt.Sprintf(
-				"https://ac.nowcoder.com/acm/contest/profile/%s/practice-coding?pageSize=100&page=%d",
-				username, i,
-			)
-			doc, err := getSubLogResp(url)
-			if err != nil {
-				return nil, err
-			}
-			subs = append(subs, analysisSubs(doc)...)
-		}
-	}
-	// 转为model类型
-	res := make([]model.SubmitLog, 0)
-	for _, v := range subs {
-		loc, _ := time.LoadLocation("Asia/Shanghai")
-		timeParse, _ := time.ParseInLocation("2006-01-02 15:04:05", v.SubmitTime, loc)
-		tmp := model.SubmitLog{
-			UserID:   userId,
-			Platform: spider.NowCoder,
-			SubmitID: v.RunID,
-			Contest:  "",
-			Problem:  v.Problem,
-			Lang:     v.Language,
-			Status:   v.Result,
-			Time:     timeParse,
-		}
-		res = append(res, tmp)
-	}
-	res = append(res, nc.fetchSub(userId, username, needAll)...)
-	return res, nil
-}
-
-// ContestHistoryItem 比赛记录项
-type ContestHistoryItem struct {
-	ContestId   json.Number `json:"contestId"`     // 比赛ID
-	ContestName string      `json:"contestName"`   // 比赛名称
-	Rank        int         `json:"rank"`          // 排名
-	TotalCount  int         `json:"problemCount"`  // 总题数
-	AcCount     int         `json:"acceptedCount"` // 过题数
-	Rating      json.Number `json:"rating"`        // 评分
-	ChangeValue json.Number `json:"changeValue"`   // 分数变化值
-	StartTime   json.Number `json:"startTime"`     // 开始时间戳（毫秒）
-	EndTime     json.Number `json:"endTime"`       // 结束时间戳（毫秒）
-	ColorLevel  json.Number `json:"colorLevel"`    // 颜色等级
-}
-
-// ContestHistoryPageInfo 分页信息
-type ContestHistoryPageInfo struct {
-	PageCount    int `json:"pageCount"`
-	PageSize     int `json:"pageSize"`
-	ElementCount int `json:"elementCount"`
-	TotalCount   int `json:"totalCount"`
-	PageCurrent  int `json:"pageCurrent"`
-}
-
-// ContestHistoryData 响应数据
-type ContestHistoryData struct {
-	DataList  []ContestHistoryItem   `json:"dataList"`
-	PageInfo  ContestHistoryPageInfo `json:"pageInfo"`
-	BasicInfo map[string]interface{} `json:"basicInfo"`
-}
-
-// ResponseContest 外层响应结构体
-type ResponseContest struct {
-	Msg  string             `json:"msg"`  // 响应信息
-	Code int                `json:"code"` // 响应码
-	Data ContestHistoryData `json:"data"` // 比赛记录数据
-}
-
-// FetchContestLog 获取比赛日志
-func (nc NewNowCoder) FetchContestLog(userId int64, username string, needAll bool) ([]model.ContestLog, error) {
-	const baseURL = "https://ac.nowcoder.com/acm-heavy/acm/contest/profile/contest-joined-history"
-
-	result := make([]model.ContestLog, 0)
-
-	page := 1
-
-	for {
-		url := fmt.Sprintf("%s?token=&uid=%s&page=%d&onlyJoinedFilter=true&searchContestName=&onlyRatingFilter=false&contestEndFilter=true",
-			baseURL, username, page)
-
-		resp, err := ojhttp.Get(url)
-		if err != nil {
-			return nil, err
-		}
-		respData, err := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if err != nil {
-			return nil, err
-		}
-
-		var contestResp ResponseContest
-		if err := json.Unmarshal(respData, &contestResp); err != nil {
-			return nil, err
-		}
-
-		if contestResp.Code != 0 {
-			return nil, fmt.Errorf("nowcoder api error: code=%d, msg=%s", contestResp.Code, contestResp.Msg)
-		}
-
-		for _, item := range contestResp.Data.DataList {
-			contestId, _ := item.ContestId.Int64()
-			startTimeMs, _ := item.StartTime.Int64()
-
-			result = append(result, model.ContestLog{
-				Platform:    spider.NowCoder,
-				UserID:      userId,
-				Rank:        item.Rank,
-				TotalCount:  item.TotalCount,
-				AcCount:     item.AcCount,
-				ContestId:   strconv.FormatInt(contestId, 10),
-				ContestName: item.ContestName,
-				ContestUrl:  "https://ac.nowcoder.com/acm/contest/" + strconv.FormatInt(contestId, 10),
-				Time:        time.Unix(startTimeMs/1000, 0),
-			})
-		}
-
-		// 判断是否需要继续翻页
-		if !needAll || page >= contestResp.Data.PageInfo.PageCount {
-			break
-		}
-		page++
-	}
-
-	return result, nil
-}
 
 func (nc NewNowCoder) Name() string {
 	return spider.NowCoder
 }
 
-// FetchRating 从牛客竞赛主页 HTML 解析 Rating 数字（未参赛显示「暂无」）
+// FetchSubmitLog 合并竞赛练习提交与主站训练提交。
+// username 为牛客竞赛 uid（数字），与绑定 platforms.username 一致。
+func (nc NewNowCoder) FetchSubmitLog(userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+	practice, err := fetchPracticeCodingLogs(userId, username, needAll)
+	if err != nil {
+		return nil, err
+	}
+	training := fetchTrainingHistoryLogs(userId, username, needAll)
+	out := make([]model.SubmitLog, 0, len(practice)+len(training))
+	out = append(out, practice...)
+	out = append(out, training...)
+	return out, nil
+}
+
+// FetchContestLog 见 nowcoder_contest.go。
+
+// FetchRating 从竞赛主页 HTML 解析 Rating（未参赛显示「暂无」→ hasRating=false）。
 func (nc NewNowCoder) FetchRating(username string) (int, bool, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
@@ -422,17 +52,7 @@ func (nc NewNowCoder) FetchRating(username string) (int, bool, error) {
 	if err != nil {
 		return 0, false, err
 	}
-	var ratingText string
-	doc.Find(".my-state-item").Each(func(_ int, s *goquery.Selection) {
-		if ratingText != "" {
-			return
-		}
-		label := strings.TrimSpace(s.Find("span").First().Text())
-		if label != "Rating" {
-			return
-		}
-		ratingText = strings.TrimSpace(s.Find(".state-num").First().Text())
-	})
+	ratingText := extractProfileStateNum(doc, "Rating")
 	if ratingText == "" || ratingText == "暂无" || ratingText == "-" {
 		return 0, false, nil
 	}
@@ -443,6 +63,22 @@ func (nc NewNowCoder) FetchRating(username string) (int, bool, error) {
 		return 0, false, nil
 	}
 	return r, true, nil
+}
+
+// extractProfileStateNum 读 .my-state-item 中 label 对应的 .state-num。
+func extractProfileStateNum(doc *goquery.Document, labelWant string) string {
+	var out string
+	doc.Find(".my-state-item").Each(func(_ int, s *goquery.Selection) {
+		if out != "" {
+			return
+		}
+		label := strings.TrimSpace(s.Find("span").First().Text())
+		if label != labelWant {
+			return
+		}
+		out = strings.TrimSpace(s.Find(".state-num").First().Text())
+	})
+	return out
 }
 
 func init() {

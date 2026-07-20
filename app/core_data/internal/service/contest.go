@@ -238,10 +238,15 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 	_ = c.db.Where("id = ?", req.ContestId).First(&contest)
 
 	contestProto := contestLogToProto(contest)
-	if start, end, ok := bizservice.ResolveContestDisplayWindow(c.db, contest.Platform, contest.ContestId, contest.Time); ok {
-		contestProto.StartTime = start.Unix()
-		contestProto.EndTime = end.Unix()
-		contestProto.Time = contestProto.StartTime
+	// 与 contestMapWithTimes 一致：牛客可拉官方页补全赛时
+	if m := contestMapWithTimes(c.db, contest); m != nil {
+		if v, ok := m["startTime"].(int64); ok && v > 0 {
+			contestProto.StartTime = v
+			contestProto.Time = v
+		}
+		if v, ok := m["endTime"].(int64); ok && v > 0 {
+			contestProto.EndTime = v
+		}
 	}
 
 	// 复用进程内 user 长连接
@@ -575,9 +580,19 @@ func contestMap(cl model.ContestLog) map[string]interface{} {
 	return m
 }
 
-// contestMapWithTimes 附带开赛/结束时间（日历优先）
+// contestMapWithTimes 附带开赛/结束时间。
+// 牛客：Resolve 内会拉参赛历史/比赛页实时 start+end（各场真实赛长），不写死 3h。
 func contestMapWithTimes(db *gorm.DB, cl model.ContestLog) map[string]interface{} {
 	m := contestMap(cl)
+	// 爬虫内存 EndTime 优先塞进 Ensure（展示路径 cl 可能仍带 gorm:"-" 字段）
+	if bizservice.NormalizeCalendarPlatform(cl.Platform) == "NowCoder" && cl.EndTime.After(cl.Time) {
+		if s, e, ok2 := bizservice.EnsureNowCoderContestCalendar(db, cl.ContestId, cl.ContestName, cl.ContestUrl, cl.Time, cl.EndTime); ok2 {
+			m["startTime"] = s.Unix()
+			m["endTime"] = e.Unix()
+			m["time"] = s.Unix()
+			return m
+		}
+	}
 	start, end, ok := bizservice.ResolveContestDisplayWindow(db, cl.Platform, cl.ContestId, cl.Time)
 	if ok {
 		m["startTime"] = start.Unix()

@@ -13,10 +13,12 @@ import (
 )
 
 // 平台默认赛长（无日历/官方 duration 时用）；宁可略宽避免漏 AC。
+// 牛客赛长不固定（2h/3h/4h/5h…），正常路径必须用参赛历史/比赛页实时 start+end，
+// 写入 contest_calendars 后展示与 Infer 都走真实赛长；此处仅作拉官方失败时的最后兜底。
 var defaultContestDuration = map[string]time.Duration{
 	spider.CodeForces: 2 * time.Hour,
 	spider.AtCoder:    100 * time.Minute,
-	spider.NowCoder:   3 * time.Hour,
+	spider.NowCoder:   3 * time.Hour, // 仅兜底，禁止当真实赛长展示；见 EnsureNowCoderContestCalendar
 	spider.LeetCode:   90 * time.Minute,
 	spider.LuoGu:      3 * time.Hour,
 	spider.QOJ:        5 * time.Hour,
@@ -138,22 +140,9 @@ func minContestFirstAC(db *gorm.DB, platform, contestID string) (time.Time, bool
 	return *t, true
 }
 
-// calendarWindowPlausible 日历开赛不应明显晚于本场最早 AC（否则多半是脏数据或平台名撞库）。
-func calendarWindowPlausible(db *gorm.DB, platform, contestID string, start, end time.Time) bool {
-	if start.IsZero() || !end.After(start) {
-		return false
-	}
-	// 赛长过长不可信（AHC 等超长赛另议，cell-submits 宁可走 hint）
-	if end.Sub(start) > 12*time.Hour {
-		return false
-	}
-	if minAC, ok := minContestFirstAC(db, platform, contestID); ok {
-		// 日历开赛比最早 AC 晚 5min 以上 → 偏晚（常见：把结束时间当开始）
-		if start.After(minAC.Add(5 * time.Minute)) {
-			return false
-		}
-	}
-	return true
+// calendarWindowValid 日历窗最低合法性：有开赛且 end>start。爬到多少用多少，不做赛长/最早 AC 二次否决。
+func calendarWindowValid(start, end time.Time) bool {
+	return !start.IsZero() && end.After(start)
 }
 
 // platformDuration 平台默认赛长。
@@ -206,13 +195,14 @@ func windowFromHint(platform string, hintTime time.Time, withEndBuffer bool) (st
 }
 
 // ResolveContestDisplayWindow 给人看的起止时间（无赛后缓冲）。
-// 优先可信日历；否则按平台语义解释 hint（AtCoder=结束时间，多数平台=开赛）。
+// 1) 日历 2) 牛客官方实时 start/end 3) hint/粗估。
 // 返回的 ok 表示至少有可信开赛时间。
 func ResolveContestDisplayWindow(db *gorm.DB, platform, contestID string, hintTime time.Time) (start, end time.Time, ok bool) {
 	platform = strings.TrimSpace(platform)
 	contestID = strings.TrimSpace(contestID)
 	dur := platformDuration(platform)
 
+	// 1) 已有日历（含爬虫写入的 source=nowcoder 真实赛长；爬多少用多少）
 	if cal, found := lookupContestCalendar(db, platform, contestID); found {
 		cs := time.Unix(cal.StartTime, 0)
 		var ce time.Time
@@ -221,8 +211,16 @@ func ResolveContestDisplayWindow(db *gorm.DB, platform, contestID string, hintTi
 		} else {
 			ce = cs.Add(dur)
 		}
-		if calendarWindowPlausible(db, platform, contestID, cs, ce) {
+		if calendarWindowValid(cs, ce) {
 			return cs, ce, true
+		}
+	}
+
+	// 2) 牛客：无日历时拉官方实时（history end / 比赛页），禁止直接用固定 3h 当真相
+	if NormalizeCalendarPlatform(platform) == spider.NowCoder && contestID != "" {
+		name, url, hintEnd := nowCoderHintsFromLogs(db, contestID, &hintTime)
+		if s, e, okNC := EnsureNowCoderContestCalendar(db, contestID, name, url, hintTime, hintEnd); okNC {
+			return s, e, true
 		}
 	}
 
@@ -245,12 +243,13 @@ func ResolveContestDisplayWindow(db *gorm.DB, platform, contestID string, hintTi
 
 // ResolveContestWindow 解析比赛时间窗 [start, end]（end 含赛后缓冲，供 Infer 扫提交）。
 // hintTime：contest_logs.time 等提示；AtCoder 为结束时间，不可当开赛。
+// 牛客：日历/官方实时优先；默认 3h 仅在拉官方失败时兜底。
 func ResolveContestWindow(db *gorm.DB, platform, contestID string, hintTime time.Time) (start, end time.Time) {
 	platform = strings.TrimSpace(platform)
 	contestID = strings.TrimSpace(contestID)
 	dur := platformDuration(platform)
 
-	// 1) 可信日历
+	// 1) 日历（爬多少用多少，不做赛长二次否决）
 	if cal, found := lookupContestCalendar(db, platform, contestID); found {
 		cs := time.Unix(cal.StartTime, 0)
 		var ce time.Time
@@ -259,17 +258,25 @@ func ResolveContestWindow(db *gorm.DB, platform, contestID string, hintTime time
 		} else {
 			ce = cs.Add(dur)
 		}
-		if calendarWindowPlausible(db, platform, contestID, cs, ce) {
+		if calendarWindowValid(cs, ce) {
 			return cs, ce.Add(contestInferEndBuffer)
 		}
 	}
 
-	// 2) hint（平台语义）
+	// 2) 牛客：无日历 → 官方实时 start/end（再加缓冲）
+	if NormalizeCalendarPlatform(platform) == spider.NowCoder && contestID != "" {
+		name, url, hintEnd := nowCoderHintsFromLogs(db, contestID, &hintTime)
+		if s, e, okNC := EnsureNowCoderContestCalendar(db, contestID, name, url, hintTime, hintEnd); okNC {
+			return s, e.Add(contestInferEndBuffer)
+		}
+	}
+
+	// 3) hint（平台语义；牛客仅为拉官方失败后的最后兜底）
 	if !hintTime.IsZero() {
 		return windowFromHint(platform, hintTime, true)
 	}
 
-	// 3) contest_logs.time 兜底
+	// 4) contest_logs.time 兜底
 	if db != nil && contestID != "" {
 		var cl model.ContestLog
 		plats := calendarPlatformAliases(platform)
@@ -279,20 +286,40 @@ func ResolveContestWindow(db *gorm.DB, platform, contestID string, hintTime time
 		}
 	}
 
-	// 4) 仍无：用 now-dur 宽窗
+	// 5) 仍无：用 now-dur 宽窗
 	end = time.Now()
 	start = end.Add(-dur)
 	end = end.Add(contestInferEndBuffer)
 	return start, end
 }
 
+// nowCoderHintsFromLogs 从已有参赛记录取名称/链接；hintStart 为空时补开赛时间。
+// EndTime 不落库，hintEnd 一般为零，依赖 history 内存或比赛页。
+func nowCoderHintsFromLogs(db *gorm.DB, contestID string, hintStart *time.Time) (name, url string, hintEnd time.Time) {
+	if db == nil || contestID == "" {
+		return "", "", time.Time{}
+	}
+	var cl model.ContestLog
+	if db.Where("platform IN ? AND contest_id = ?", calendarPlatformAliases(spider.NowCoder), contestID).
+		Order("time DESC").First(&cl).Error != nil {
+		return "", "", time.Time{}
+	}
+	if hintStart != nil && hintStart.IsZero() && !cl.Time.IsZero() {
+		*hintStart = cl.Time
+	}
+	return cl.ContestName, cl.ContestUrl, cl.EndTime
+}
+
 // BatchContestDisplayTimes 批量解析 (platform, contestId) → (start, end) unix。
 // 先一次查出相关日历行，缺的再按默认赛长用 hint 估算。
+// 牛客缺官方窗时限量补日历（history endTime / 比赛页），避免默认 3h 截断 4h 赛。
 func BatchContestDisplayTimes(db *gorm.DB, logs []model.ContestLog) map[string][2]int64 {
 	out := map[string][2]int64{}
 	if len(logs) == 0 {
 		return out
 	}
+	ensureNowCoderCalendarsFromContestLogs(db, logs, 8)
+
 	type key struct{ p, c string }
 	need := map[key]time.Time{}
 	for _, l := range logs {
@@ -334,7 +361,7 @@ func BatchContestDisplayTimes(db *gorm.DB, logs []model.ContestLog) map[string][
 			if cal.EndTime <= cal.StartTime {
 				ce = cs.Add(platformDuration(k.p))
 			}
-			if calendarWindowPlausible(db, k.p, k.c, cs, ce) {
+			if calendarWindowValid(cs, ce) {
 				out[mapKey] = [2]int64{cs.Unix(), ce.Unix()}
 				continue
 			}
@@ -1115,7 +1142,7 @@ const contestCellSubmitLimit = 200
 // 注意 contest_logs.time 语义因平台而异，不能一律当「开赛」：
 //   - AtCoder history：结束时间
 //   - Codeforces rating：出分/结算时间（赛后）
-//   - 日历：可信 start/end（且与 earliest AC 交叉校验）
+//   - 日历：start/end（爬多少用多少）
 //   - 格子 FirstACAt − RelativeSec：仅多样本一致时采用（单条脏 relative_sec 会污染全场）
 //
 // 返回 start 供相对赛时展示；end 含短缓冲。
@@ -1124,7 +1151,7 @@ func resolveCellSubmitWindow(db *gorm.DB, platform, contestID string, hintTime t
 	contestID = strings.TrimSpace(contestID)
 	dur := platformDuration(platform)
 
-	// 1) 可信日历
+	// 1) 日历（爬多少用多少）
 	if cal, found := lookupContestCalendar(db, platform, contestID); found {
 		cs := time.Unix(cal.StartTime, 0)
 		var ce time.Time
@@ -1133,7 +1160,7 @@ func resolveCellSubmitWindow(db *gorm.DB, platform, contestID string, hintTime t
 		} else {
 			ce = cs.Add(dur)
 		}
-		if calendarWindowPlausible(db, platform, contestID, cs, ce) {
+		if calendarWindowValid(cs, ce) {
 			return cs, ce.Add(contestInferEndBuffer)
 		}
 	}

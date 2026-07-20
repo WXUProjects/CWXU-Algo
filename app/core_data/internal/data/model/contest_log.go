@@ -14,4 +14,6 @@ type ContestLog struct {
 	TotalCount  int       `gorm:"comment:总题数"`
 	AcCount     int       `gorm:"comment:过题数"`
 	Time        time.Time `gorm:"comment:比赛时间;index"`
+	// EndTime 仅爬虫内存传递官方结束时间（不落库）；写入 contest_calendars 后供展示/Infer 使用
+	EndTime time.Time `gorm:"-"`
 }

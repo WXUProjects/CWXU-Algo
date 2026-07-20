@@ -69,6 +69,97 @@ func TestResolveContestWindow_FromCalendar(t *testing.T) {
 	}
 }
 
+func TestUpsertNowCoderContestCalendar_FourHour(t *testing.T) {
+	db := testInferDB(t)
+	// 模拟官方 4h（非固定默认）
+	startSec := int64(1784523600) // 2026-07-20 13:00 CST
+	endSec := int64(1784538000)   // 2026-07-20 17:00 CST
+	if err := UpsertNowCoderContestCalendar(db, "137658", "河南萌新", "", startSec, endSec); err != nil {
+		t.Fatal(err)
+	}
+	s, e, ok := ResolveContestDisplayWindow(db, spider.NowCoder, "137658", time.Time{})
+	if !ok {
+		t.Fatal("expected window")
+	}
+	if s.Unix() != startSec || e.Unix() != endSec {
+		t.Fatalf("window %v–%v want %d–%d", s, e, startSec, endSec)
+	}
+	if e.Sub(s) != 4*time.Hour {
+		t.Fatalf("dur=%v want 4h", e.Sub(s))
+	}
+	// Ensure 不应在官方源下再刷新为默认
+	s2, e2, ok2 := EnsureNowCoderContestCalendar(db, "137658", "", "", time.Time{}, time.Time{})
+	if !ok2 || s2.Unix() != startSec || e2.Unix() != endSec {
+		t.Fatalf("ensure got %v–%v ok=%v", s2, e2, ok2)
+	}
+}
+
+// 长赛（>12h）须被日历/展示接受，禁止再被 calendarWindowPlausible 否决。
+func TestResolveContestDisplayWindow_LongContest24h(t *testing.T) {
+	db := testInferDB(t)
+	startSec := int64(1700000000)
+	endSec := startSec + 24*3600
+	if err := UpsertNowCoderContestCalendar(db, "nc-24h", "长赛", "", startSec, endSec); err != nil {
+		t.Fatal(err)
+	}
+	s, e, ok := ResolveContestDisplayWindow(db, spider.NowCoder, "nc-24h", time.Time{})
+	if !ok {
+		t.Fatal("24h calendar must be accepted")
+	}
+	if e.Sub(s) != 24*time.Hour {
+		t.Fatalf("dur=%v want 24h", e.Sub(s))
+	}
+	start, end := ResolveContestWindow(db, spider.NowCoder, "nc-24h", time.Time{})
+	if end.Sub(start) < 24*time.Hour {
+		t.Fatalf("infer window too short: %v", end.Sub(start))
+	}
+}
+
+func TestCalendarWindowValid(t *testing.T) {
+	if calendarWindowValid(time.Time{}, time.Now()) {
+		t.Fatal("zero start")
+	}
+	s := time.Unix(100, 0)
+	if calendarWindowValid(s, s) {
+		t.Fatal("end==start")
+	}
+	if !calendarWindowValid(s, s.Add(24*time.Hour)) {
+		t.Fatal("24h must be valid")
+	}
+}
+
+func TestEnsureNowCoderContestCalendar_HistoryVariableDuration(t *testing.T) {
+	db := testInferDB(t)
+	// 模拟爬虫带回的 2h 场（非 3h）
+	start := time.Unix(1700000000, 0)
+	end := start.Add(2 * time.Hour)
+	s, e, ok := EnsureNowCoderContestCalendar(db, "nc-2h", "两小时赛", "", start, end)
+	if !ok {
+		t.Fatal("expected ok from history end")
+	}
+	if e.Sub(s) != 2*time.Hour {
+		t.Fatalf("dur=%v want 2h", e.Sub(s))
+	}
+	// 再来一场 5h
+	start5 := time.Unix(1700100000, 0)
+	end5 := start5.Add(5 * time.Hour)
+	s5, e5, ok5 := EnsureNowCoderContestCalendar(db, "nc-5h", "五小时赛", "", start5, end5)
+	if !ok5 || e5.Sub(s5) != 5*time.Hour {
+		t.Fatalf("5h got %v ok=%v", e5.Sub(s5), ok5)
+	}
+	// 批量：history 全量写入
+	logs := []model.ContestLog{
+		{Platform: spider.NowCoder, ContestId: "nc-batch-a", Time: start, EndTime: end, ContestName: "A"},
+		{Platform: spider.NowCoder, ContestId: "nc-batch-b", Time: start5, EndTime: end5, ContestName: "B"},
+	}
+	ensureNowCoderCalendarsFromContestLogs(db, logs, 0)
+	for _, id := range []string{"nc-batch-a", "nc-batch-b"} {
+		if !nowCoderHasOfficialCalendar(db, id) {
+			t.Fatalf("missing official calendar %s", id)
+		}
+	}
+}
+
 func TestInferContestUserProblems_NowCoderByProblemSetAndWindow(t *testing.T) {
 	db := testInferDB(t)
 	start := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)

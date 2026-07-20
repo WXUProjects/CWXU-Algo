@@ -260,6 +260,15 @@ func (uc *SpiderUseCase) fetchAndSaveContest(userId int64, plat model.Platform, 
 	if err != nil {
 		return true, err
 	}
+	// 牛客：用参赛历史/比赛页实时 start+end 写入日历（各场真实赛长，非固定 3h）
+	// history 有 end 的场次全量写入；缺 end 再限量抓页
+	if NormalizeCalendarPlatform(plat.Platform) == spider.NowCoder {
+		pageCap := 30
+		if needAll {
+			pageCap = 80
+		}
+		ensureNowCoderCalendarsFromContestLogs(uc.data.DB, tmp, pageCap)
+	}
 	// 题级明细（XCPCIO 格子）；失败不阻断场级写入
 	detailOK := false
 	if df, ok := p.(spider.ContestDetailFetcher); ok {
