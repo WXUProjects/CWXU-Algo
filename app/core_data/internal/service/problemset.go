@@ -637,7 +637,7 @@ func (s *ProblemsetService) handleAdd(ctx khttp.Context) error {
 		}
 		problemID = p.ID
 		if s.uc != nil {
-			needFetch := strings.TrimSpace(p.ContentMD) == ""
+			needFetch := strings.TrimSpace(p.ContentMD) == "" || biz.ContentLooksBroken(p.ContentMD)
 			if err := s.uc.ForceEnqueueFetch(p.ID, uid); err != nil {
 				log.Warnf("problemset add force fetch id=%d: %v", p.ID, err)
 			} else if needFetch {
@@ -679,7 +679,8 @@ func (s *ProblemsetService) handleAdd(ctx khttp.Context) error {
 				return nil
 			}
 			problemID = p.ID
-			fetchTriggered = strings.TrimSpace(p.ContentMD) == ""
+			// 空题面或损坏题面都会触发后台最高优先级补爬（Upsert 内 ForceEnqueueFetch）
+			fetchTriggered = strings.TrimSpace(p.ContentMD) == "" || biz.ContentLooksBroken(p.ContentMD)
 		}
 	} else {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "请提供题目 id 或链接"})

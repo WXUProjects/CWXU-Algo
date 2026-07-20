@@ -512,12 +512,14 @@ func (uc *ProblemUseCase) ForceEnqueueFetchContest(problemID uint, contestFallba
 	if err := uc.declareProblemQueue("problem_fetch"); err != nil {
 		return err
 	}
-	return uc.mq.Publish("", "problem_fetch", false, false, amqp.Publishing{
+	// 异步入队：比赛 ensure 批量加题时勿同步等 confirm（易拖死 HTTP）
+	uc.mq.PublishAsync("", "problem_fetch", false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		Body:         body,
 		DeliveryMode: amqp.Persistent,
 		Priority:     mqPriorityIncremental,
 	})
+	return nil
 }
 
 // ListContestProblems 读目录 + 关联 problem 状态。返回 ensureStatus、ensureError。

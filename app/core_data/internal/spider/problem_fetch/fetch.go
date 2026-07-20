@@ -440,7 +440,7 @@ func fetchCodeforces(externalID, problemURL string) (*FetchedContent, error) {
 }
 
 func selectionToMD(s *goquery.Selection) string {
-	// 处理常见子节点
+	// 处理常见子节点（CF / AtCoder 等 HTML 题面共用）
 	var b strings.Builder
 	s.Contents().Each(func(_ int, n *goquery.Selection) {
 		if goquery.NodeName(n) == "#text" {
@@ -450,12 +450,23 @@ func selectionToMD(s *goquery.Selection) string {
 		name := goquery.NodeName(n)
 		switch name {
 		case "p":
-			b.WriteString(normalizeSpace(n.Text()))
+			b.WriteString(normalizeSpace(inlineToMD(n)))
+			b.WriteString("\n\n")
+		case "h1", "h2", "h3", "h4", "h5", "h6":
+			// AtCoder 用 <h3>Problem Statement</h3><p>... 紧挨，必须换行
+			level := int(name[1] - '0')
+			if level < 1 {
+				level = 3
+			}
+			b.WriteString("\n")
+			b.WriteString(strings.Repeat("#", level))
+			b.WriteString(" ")
+			b.WriteString(normalizeSpace(inlineToMD(n)))
 			b.WriteString("\n\n")
 		case "ul", "ol":
 			n.Find("li").Each(func(_ int, li *goquery.Selection) {
 				b.WriteString("- ")
-				b.WriteString(normalizeSpace(li.Text()))
+				b.WriteString(normalizeSpace(inlineToMD(li)))
 				b.WriteString("\n")
 			})
 			b.WriteString("\n")
@@ -463,15 +474,27 @@ func selectionToMD(s *goquery.Selection) string {
 			b.WriteString("\n```\n")
 			b.WriteString(strings.TrimRight(n.Text(), "\n"))
 			b.WriteString("\n```\n\n")
+		case "section", "article":
+			b.WriteString(selectionToMD(n))
+			b.WriteString("\n")
 		case "div":
 			// section-title 等
 			if n.HasClass("section-title") {
 				b.WriteString("### ")
-				b.WriteString(normalizeSpace(n.Text()))
+				b.WriteString(normalizeSpace(inlineToMD(n)))
 				b.WriteString("\n\n")
 			} else {
 				b.WriteString(selectionToMD(n))
 			}
+		case "var":
+			// AtCoder 公式节点
+			b.WriteString("$")
+			b.WriteString(strings.TrimSpace(n.Text()))
+			b.WriteString("$")
+		case "code":
+			b.WriteString("`")
+			b.WriteString(n.Text())
+			b.WriteString("`")
 		case "span":
 			// tex math often in span
 			if alt, ok := n.Attr("class"); ok && strings.Contains(alt, "tex") {
@@ -479,15 +502,56 @@ func selectionToMD(s *goquery.Selection) string {
 				b.WriteString(normalizeSpace(n.Text()))
 				b.WriteString("$")
 			} else {
-				b.WriteString(n.Text())
+				b.WriteString(inlineToMD(n))
 			}
 		case "br":
 			b.WriteString("\n")
+		case "hr":
+			b.WriteString("\n\n---\n\n")
 		default:
-			b.WriteString(n.Text())
+			b.WriteString(inlineToMD(n))
 		}
 	})
 	return strings.TrimSpace(b.String())
+}
+
+// inlineToMD 行内节点：保留 var/code/tex，避免整段 Text() 把公式标签剥光又粘连标题。
+func inlineToMD(s *goquery.Selection) string {
+	var b strings.Builder
+	s.Contents().Each(func(_ int, n *goquery.Selection) {
+		name := goquery.NodeName(n)
+		switch name {
+		case "#text":
+			b.WriteString(n.Text())
+		case "var":
+			b.WriteString("$")
+			b.WriteString(strings.TrimSpace(n.Text()))
+			b.WriteString("$")
+		case "code":
+			b.WriteString("`")
+			b.WriteString(n.Text())
+			b.WriteString("`")
+		case "span":
+			if cls, ok := n.Attr("class"); ok && strings.Contains(cls, "tex") {
+				b.WriteString("$")
+				b.WriteString(normalizeSpace(n.Text()))
+				b.WriteString("$")
+			} else {
+				b.WriteString(inlineToMD(n))
+			}
+		case "br":
+			b.WriteString("\n")
+		case "a":
+			// Editorial 等页内链接：标题区已 clean，正文忽略纯链接噪音
+			t := strings.TrimSpace(n.Text())
+			if t != "" && !strings.EqualFold(t, "Editorial") && t != "解説" {
+				b.WriteString(t)
+			}
+		default:
+			b.WriteString(inlineToMD(n))
+		}
+	})
+	return b.String()
 }
 
 // splitCF 解析 external_id：
@@ -559,13 +623,20 @@ func fetchAtCoderWithID(problemURL, externalID string) (*FetchedContent, error) 
 	}
 	// AtCoder 页头 h2 常夹带 "Editorial" 与换行，再清一次
 	title = cleanProblemTitle(title)
+	// 优先英文块；AtCoder 是 span.lang-en 嵌套，Each 只取最外层避免重复
 	var mdParts []string
-	doc.Find("#task-statement span.lang-en, #task-statement .lang-en").Each(func(_ int, s *goquery.Selection) {
-		t := selectionToMD(s)
-		if t != "" {
+	if en := doc.Find("#task-statement span.lang-en").First(); en.Length() > 0 {
+		if t := selectionToMD(en); t != "" {
 			mdParts = append(mdParts, t)
 		}
-	})
+	}
+	if len(mdParts) == 0 {
+		if ja := doc.Find("#task-statement span.lang-ja").First(); ja.Length() > 0 {
+			if t := selectionToMD(ja); t != "" {
+				mdParts = append(mdParts, t)
+			}
+		}
+	}
 	if len(mdParts) == 0 {
 		t := selectionToMD(doc.Find("#task-statement"))
 		if t != "" {
@@ -575,8 +646,30 @@ func fetchAtCoderWithID(problemURL, externalID string) (*FetchedContent, error) 
 	if len(mdParts) == 0 {
 		return nil, fmt.Errorf("AtCoder 未找到题面")
 	}
-	md := "# " + title + "\n\n" + collapseBlankLines(strings.Join(mdParts, "\n\n"))
+	body := collapseBlankLines(strings.Join(mdParts, "\n\n"))
+	// 去掉正文里误带的 Editorial 行
+	body = stripEditorialNoise(body)
+	md := body
+	if title != "" && !strings.HasPrefix(strings.TrimSpace(body), "# ") {
+		md = "# " + title + "\n\n" + body
+	}
 	return &FetchedContent{Title: title, ContentMD: md}, nil
+}
+
+func stripEditorialNoise(md string) string {
+	var lines []string
+	for _, line := range strings.Split(md, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" {
+			lines = append(lines, line)
+			continue
+		}
+		if strings.EqualFold(t, "Editorial") || t == "解説" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {

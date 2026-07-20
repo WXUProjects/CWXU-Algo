@@ -264,7 +264,12 @@ func (r *RabbitMQ) dropPubCh() {
 	}
 }
 
-// Publish 线程安全发布；失败时丢弃 pub channel 并尝试重连再发一次
+// pubConfirmWait 同步 Publish 等 confirm 的上限。
+// 交互 HTTP 路径严禁长时间阻塞：5s×2 次重试 ≈ 网关 10s 504。
+const pubConfirmWait = 1500 * time.Millisecond
+
+// Publish 线程安全发布；失败时丢弃 pub channel 并尝试重连再发一次。
+// confirm 超时缩短为 1.5s，避免 MQ 半开时拖死 HTTP。
 func (r *RabbitMQ) Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error {
 	if r == nil {
 		return fmt.Errorf("mq not ready")
@@ -292,7 +297,7 @@ func (r *RabbitMQ) Publish(exchange, key string, mandatory, immediate bool, msg 
 				return fmt.Errorf("mq publisher confirm rejected")
 			}
 			return nil
-		case <-time.After(5 * time.Second):
+		case <-time.After(pubConfirmWait):
 			return fmt.Errorf("mq publisher confirm timeout")
 		}
 	}
@@ -303,6 +308,27 @@ func (r *RabbitMQ) Publish(exchange, key string, mandatory, immediate bool, msg 
 		return try()
 	}
 	return nil
+}
+
+// PublishAsync 后台投递：HTTP 路径请用此方法，绝不阻塞调用方。
+// 失败只打日志；业务侧应另有直爬/重试兜底。
+func (r *RabbitMQ) PublishAsync(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) {
+	if r == nil {
+		return
+	}
+	// 拷贝 body，避免调用方复用底层缓冲
+	body := append([]byte(nil), msg.Body...)
+	msg.Body = body
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Errorf("PublishAsync panic: %v", rec)
+			}
+		}()
+		if err := r.Publish(exchange, key, mandatory, immediate, msg); err != nil {
+			log.Warnf("PublishAsync %s: %v", key, err)
+		}
+	}()
 }
 
 // QueueDeclare 线程安全声明队列（发布前）

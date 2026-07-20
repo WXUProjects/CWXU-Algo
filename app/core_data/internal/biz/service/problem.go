@@ -55,10 +55,12 @@ func NewProblemUseCase(data *data.Data, mq *event.RabbitMQ, tagger *ProblemTagge
 	return &ProblemUseCase{data: data, mq: mq, tagger: tagger, reg: r, profileTask: profileTask}
 }
 
-// MQ 优先级：队列需 x-max-priority；增量爬虫入队最高，回填/重置队列为 bulk
+// MQ 优先级：队列需 x-max-priority
+// bulk=回填/重置；incremental=爬虫增量；user=题单/用户主动加题（顶）
 const (
 	mqPriorityBulk        uint8 = 1
 	mqPriorityIncremental uint8 = 9
+	mqPriorityUser        uint8 = 10
 	mqMaxPriority         int32 = 10
 )
 
@@ -372,15 +374,16 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	}
 	pipelineControl.TrackStart("fetch", p.ID, p.Platform, p.ExternalID, p.Title)
 	defer pipelineControl.TrackEnd("fetch", p.ID)
-	// 已识别完成：跳过
-	if p.Status == model.ProblemStatusCompleted {
+	// 已识别完成且有题面：跳过。无题面的 COMPLETED/TAGGING 必须允许补爬（全平台）。
+	hasContent := strings.TrimSpace(p.ContentMD) != ""
+	if p.Status == model.ProblemStatusCompleted && hasContent {
 		return nil
 	}
 	// 无爬取资格用户近窗提交：不爬题面（旧消息防御；前端显示「题面准备中」）
 	// Force：题单加题等主动场景可忽略资格
 	if !ev.Force && !uc.shouldEnqueueFetch(p.ID) {
 		log.Infof("ProcessFetch skip no fetch-eligible submitters id=%d", p.ID)
-		if strings.TrimSpace(p.ContentMD) == "" && p.Status != model.ProblemStatusSkipped {
+		if !hasContent && p.Status != model.ProblemStatusSkipped {
 			_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
 				"status":    model.ProblemStatusPending,
 				"error_msg": "无题面爬取资格用户提交，暂不爬取题面",
@@ -389,7 +392,8 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		return nil
 	}
 	// 已有题面：不再爬取；入 AI（主动路径按 actor，否则窗口 + submitter 闸门）
-	if strings.TrimSpace(p.ContentMD) != "" || p.Status == model.ProblemStatusTagging {
+	// 注意：不得因 status=TAGGING 且 content 空而跳过爬取
+	if hasContent {
 		if p.Status != model.ProblemStatusCompleted {
 			_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
 			if !ev.SkipAnalyze {
@@ -441,12 +445,15 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		p.Status = model.ProblemStatusPending
 	}
 
+	// 无题面时允许从 TAGGING / COMPLETED 进入 FETCHING（补爬）
 	res := uc.data.DB.Model(&model.Problem{}).
 		Where("id = ? AND status IN ?", p.ID, []string{
 			model.ProblemStatusPending,
 			model.ProblemStatusFailed,
 			model.ProblemStatusFetching,
 			model.ProblemStatusFailedPerm, // 恢复竞态
+			model.ProblemStatusTagging,    // 空题面误标
+			model.ProblemStatusCompleted,  // 有标签无题面
 		}).
 		Update("status", model.ProblemStatusFetching)
 	if res.Error != nil {
@@ -535,9 +542,54 @@ func (uc *ProblemUseCase) ForceEnqueueFetchOnly(problemID uint) error {
 	return uc.ForceEnqueueFetch(problemID, 0)
 }
 
-// ForceEnqueueFetch 强制入队题面爬取（忽略爬取资格）。
-// actorUID>0 且具备 AI 资格时，爬取成功后按操作者入 AI；否则仅爬取。
-// ContentMD 已有时：若可分析则直接 enqueueAnalyzeForUser，否则 no-op。
+// ContentLooksBroken 历史坏题面（HTML→MD 粘连章节标题等），用户主动加题时应强制重爬。
+// 全平台通用启发式：章节名与正文粘连、页头 Editorial 残留。
+func ContentLooksBroken(md string) bool {
+	return contentLooksBroken(md)
+}
+
+func contentLooksBroken(md string) bool {
+	s := strings.TrimSpace(md)
+	if s == "" {
+		return false
+	}
+	// AtCoder 旧解析：h3 未换行 → "Problem StatementYou are..."
+	glued := []string{
+		"Problem StatementYou", "Problem StatementThere", "Problem StatementGiven",
+		"Constraints1", "Constraints0", "ConstraintsN",
+		"InputThe", "InputFrom", "OutputIf", "OutputPrint",
+		"Sample Input 1\n", // keep normal
+	}
+	for _, g := range glued {
+		if g == "Sample Input 1\n" {
+			continue
+		}
+		if strings.Contains(s, g) {
+			return true
+		}
+	}
+	if strings.Contains(s, "\tEditorial") || strings.Contains(s, "\n\t\t\tEditorial") {
+		return true
+	}
+	// 有 "Problem Statement" 却无 markdown 标题，且紧贴大写正文
+	if strings.Contains(s, "Problem Statement") && !strings.Contains(s, "### Problem Statement") &&
+		!strings.Contains(s, "## Problem Statement") {
+		if idx := strings.Index(s, "Problem Statement"); idx >= 0 {
+			rest := s[idx+len("Problem Statement"):]
+			rest = strings.TrimLeft(rest, " \t")
+			if rest != "" && rest[0] >= 'A' && rest[0] <= 'Z' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ForceEnqueueFetch 强制题面爬取（忽略爬取资格）。
+// 用户主动路径：HTTP 不阻塞 MQ；最高优先级异步入队 + 后台直爬兜底。
+// 无论 status（含 TAGGING/COMPLETED），只要 contentMd 空都允许补爬。
+// 题面存在但明显损坏时：清空后重爬。
+// ContentMD 正常时：若可分析则异步 enqueueAnalyzeForUser，否则 no-op。
 func (uc *ProblemUseCase) ForceEnqueueFetch(problemID uint, actorUID uint) error {
 	if uc == nil || problemID == 0 {
 		return nil
@@ -546,18 +598,44 @@ func (uc *ProblemUseCase) ForceEnqueueFetch(problemID uint, actorUID uint) error
 	if err := uc.data.DB.First(&p, problemID).Error; err != nil {
 		return err
 	}
-	// 已有题面：尝试按操作者 AI 资格分析
-	if strings.TrimSpace(p.ContentMD) != "" {
+	hasContent := strings.TrimSpace(p.ContentMD) != ""
+	// 损坏题面：清空后走补爬（用户主动路径）
+	if hasContent && contentLooksBroken(p.ContentMD) {
+		log.Infof("ForceEnqueueFetch broken content id=%d platform=%s, re-fetch", p.ID, p.Platform)
+		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+			"content_md":       "",
+			"status":           model.ProblemStatusPending,
+			"error_msg":        "",
+			"fetch_attempts":   0,
+			"fetch_fail_since": nil,
+		}).Error
+		p.ContentMD = ""
+		p.Status = model.ProblemStatusPending
+		hasContent = false
+	}
+	// 已有正常题面：尝试按操作者 AI 资格分析（异步，不堵 HTTP）
+	if hasContent {
 		if actorUID > 0 && len(nonEmptyTags(p.Tags)) == 0 {
-			return uc.enqueueAnalyzeForUser(problemID, actorUID)
+			go func(id, uid uint) {
+				defer func() {
+					if rec := recover(); rec != nil {
+						log.Errorf("enqueueAnalyzeForUser panic id=%d: %v", id, rec)
+					}
+				}()
+				if err := uc.enqueueAnalyzeForUser(id, uid); err != nil {
+					log.Warnf("enqueueAnalyzeForUser id=%d: %v", id, err)
+				}
+			}(problemID, actorUID)
 		}
 		return nil
 	}
-	if p.Status == model.ProblemStatusCompleted || p.Status == model.ProblemStatusSkipped {
+	if p.Status == model.ProblemStatusSkipped {
 		return nil
 	}
-	// 用户/管理员主动重试：允许从 FAILED_PERM / 硬永久 FAILED 重置
+	// 用户/管理员主动：重置永久失败与误标 COMPLETED/TAGGING（空题面）
 	if p.Status == model.ProblemStatusFailedPerm ||
+		p.Status == model.ProblemStatusCompleted ||
+		p.Status == model.ProblemStatusTagging ||
 		(p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg)) {
 		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
 			"status":           model.ProblemStatusPending,
@@ -568,14 +646,15 @@ func (uc *ProblemUseCase) ForceEnqueueFetch(problemID uint, actorUID uint) error
 		p.Status = model.ProblemStatusPending
 	}
 	skipAnalyze := actorUID == 0 || !uc.userHasAIEligibility(actorUID)
-	return uc.enqueueFetchForced(p.ID, p.Platform, p.ExternalID, p.URL, skipAnalyze, actorUID)
+	// 用户主动：最高优先级；后台直爬 + MQ 双通道，HTTP 立即返回
+	uc.scheduleUserPriorityFetch(p.ID, p.Platform, p.ExternalID, p.URL, skipAnalyze, actorUID)
+	return nil
 }
 
-func (uc *ProblemUseCase) enqueueFetchForced(id uint, platform, externalID, url string, skipAnalyze bool, actorUID uint) error {
-	if uc.mq == nil {
-		return fmt.Errorf("mq not ready")
-	}
-	body, _ := json.Marshal(event.ProblemFetchEvent{
+// scheduleUserPriorityFetch 用户主动补爬：MQ 最高优先级异步入队 + 后台直爬。
+// 全平台通用；HTTP 路径禁止同步等 confirm。
+func (uc *ProblemUseCase) scheduleUserPriorityFetch(id uint, platform, externalID, url string, skipAnalyze bool, actorUID uint) {
+	ev := event.ProblemFetchEvent{
 		ProblemID:   id,
 		Platform:    platform,
 		ExternalID:  externalID,
@@ -583,16 +662,61 @@ func (uc *ProblemUseCase) enqueueFetchForced(id uint, platform, externalID, url 
 		Force:       true,
 		SkipAnalyze: skipAnalyze,
 		ActorUserID: actorUID,
-	})
+	}
+	// 牛客比赛页候选（与 enqueueFetchPrio 对齐）
+	if strings.EqualFold(strings.TrimSpace(platform), spider.NowCoder) {
+		if fb := uc.nowcoderContestFetchURLs(externalID, id); len(fb) > 0 {
+			ev.FallbackURLs = fb
+			if problem_fetch.IsNowCoderContestURL(fb[0]) {
+				ev.URL = fb[0]
+			}
+		}
+	}
+	go func(ev event.ProblemFetchEvent) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Errorf("scheduleUserPriorityFetch panic id=%d: %v", ev.ProblemID, rec)
+			}
+		}()
+		// 1) MQ 最高优先级（异步 confirm，失败仅日志）
+		if err := uc.enqueueFetchForcedPrio(ev, mqPriorityUser); err != nil {
+			log.Warnf("user fetch MQ id=%d: %v", ev.ProblemID, err)
+		}
+		// 2) 直爬兜底：不依赖消费者；与 MQ 并发时靠 status CAS 去重
+		if err := uc.ProcessFetch(context.Background(), ev); err != nil {
+			log.Warnf("user fetch direct id=%d: %v", ev.ProblemID, err)
+		}
+	}(ev)
+}
+
+func (uc *ProblemUseCase) enqueueFetchForced(id uint, platform, externalID, url string, skipAnalyze bool, actorUID uint) error {
+	return uc.enqueueFetchForcedPrio(event.ProblemFetchEvent{
+		ProblemID:   id,
+		Platform:    platform,
+		ExternalID:  externalID,
+		URL:         url,
+		Force:       true,
+		SkipAnalyze: skipAnalyze,
+		ActorUserID: actorUID,
+	}, mqPriorityUser)
+}
+
+func (uc *ProblemUseCase) enqueueFetchForcedPrio(ev event.ProblemFetchEvent, priority uint8) error {
+	if uc.mq == nil {
+		return fmt.Errorf("mq not ready")
+	}
+	body, _ := json.Marshal(ev)
 	if err := uc.declareProblemQueue("problem_fetch"); err != nil {
 		return err
 	}
-	return uc.mq.Publish("", "problem_fetch", false, false, amqp.Publishing{
+	// 用户路径一律 async；其它调用方（admin）也避免堵 worker
+	uc.mq.PublishAsync("", "problem_fetch", false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		Body:         body,
 		DeliveryMode: amqp.Persistent,
-		Priority:     mqPriorityIncremental,
+		Priority:     priority,
 	})
+	return nil
 }
 
 // enqueueAnalyzeForUser 用户主动场景入 AI：仅校验操作者 AI 资格，不校验 submitter/6 月窗。
@@ -639,12 +763,13 @@ func (uc *ProblemUseCase) enqueueAnalyzeForUser(problemID uint, actorUID uint) e
 	if err := uc.declareProblemQueue("problem_analyze"); err != nil {
 		return err
 	}
-	return uc.mq.Publish("", "problem_analyze", false, false, amqp.Publishing{
+	uc.mq.PublishAsync("", "problem_analyze", false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		Body:         body,
 		DeliveryMode: amqp.Persistent,
-		Priority:     mqPriorityIncremental,
+		Priority:     mqPriorityUser,
 	})
+	return nil
 }
 
 // CreateManualProblem 用户自主加题（无需审核）。platform=Manual。
