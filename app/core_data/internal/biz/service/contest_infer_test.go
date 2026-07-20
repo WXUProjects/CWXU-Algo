@@ -406,6 +406,45 @@ func TestInferContestUpsolves_PostContestAC(t *testing.T) {
 	}
 }
 
+func TestListContestPracticeCells_DerivesPassedAndTriedFromSubmitLogs(t *testing.T) {
+	db := testInferDB(t)
+	start := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	for _, p := range []model.ContestProblem{
+		{Platform: spider.NowCoder, ContestID: "999", Label: "A", ExternalID: "316899", Title: "A"},
+		{Platform: spider.NowCoder, ContestID: "999", Label: "B", ExternalID: "316900", Title: "B"},
+	} {
+		_ = db.Create(&p).Error
+	}
+	logs := []model.SubmitLog{
+		{Platform: spider.NowCoder, UserID: 1, SubmitID: "p0", Problem: "316900 B", Status: "答案正确", Time: start.Add(time.Hour)},
+		{Platform: spider.NowCoder, UserID: 1, SubmitID: "p1", Problem: "316899 A", Status: "答案错误", Time: start.Add(5 * time.Hour)},
+		{Platform: spider.NowCoder, UserID: 1, SubmitID: "p2", Problem: "316899 A", Status: "答案正确", Time: start.Add(6 * time.Hour)},
+		{Platform: spider.NowCoder, UserID: 1, SubmitID: "p2b", Problem: "316900 B", Status: "答案错误", Time: start.Add(6 * time.Hour)},
+		{Platform: spider.NowCoder, UserID: 2, SubmitID: "p3", Problem: "316900 B", Status: "答案错误", Time: start.Add(5 * time.Hour)},
+	}
+	model.FillIsACBatch(logs)
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	cells, err := ListContestPracticeCells(db, spider.NowCoder, "999", nil, start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[int64]model.ContestUserProblem{}
+	for _, cell := range cells {
+		if cell.ExternalID == "316900" && cell.UserID == 1 {
+			t.Fatalf("contest-time AC must not become practice: %+v", cell)
+		}
+		got[cell.UserID] = cell
+	}
+	if got[1].Status != model.ContestCellUpsolve || got[1].Attempts != 1 {
+		t.Fatalf("user1=%+v want UPSOLVE attempts=1", got[1])
+	}
+	if got[2].Status != model.ContestCellUpsolveTried || got[2].Attempts != 1 {
+		t.Fatalf("user2=%+v want UPSOLVE_TRIED attempts=1", got[2])
+	}
+}
+
 func TestMergeContestCell_DoesNotDowngradeUpsolveToTried(t *testing.T) {
 	t0 := time.Date(2026, 6, 1, 18, 0, 0, 0, time.UTC)
 	prev := model.ContestUserProblem{

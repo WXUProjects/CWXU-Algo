@@ -824,6 +824,160 @@ func InferContestUpsolves(db *gorm.DB, platform, contestID string, userIDs []int
 	return len(upserts), nil
 }
 
+// ListContestPracticeCells 直接从全量 submit_logs 推导赛后补题状态，不依赖再次爬取。
+// userIDs=nil 表示不限制用户；返回 UPSOLVE（已通过）或 UPSOLVE_TRIED（尝试未过）。
+func ListContestPracticeCells(db *gorm.DB, platform, contestID string, userIDs []int64, hintTime time.Time) ([]model.ContestUserProblem, error) {
+	if db == nil || strings.TrimSpace(platform) == "" || strings.TrimSpace(contestID) == "" {
+		return nil, nil
+	}
+	start, end := ResolveContestWindow(db, platform, contestID, hintTime)
+	if end.IsZero() {
+		return nil, nil
+	}
+	practiceEnd := end.Add(contestUpsolveMaxHorizon)
+	if now := time.Now(); now.Before(practiceEnd) {
+		practiceEnd = now
+	}
+	if !practiceEnd.After(end) {
+		return nil, nil
+	}
+	probSet := loadContestProblemSet(db, platform, contestID)
+	hasProbSet := len(probSet) > 0
+	type row struct {
+		UserID                                         int64 `gorm:"column:user_id"`
+		Contest, Problem, Status, SubmitID, ExternalID string
+		Time                                           time.Time
+	}
+	var rows []row
+	q := db.Model(&model.SubmitLog{}).
+		Select("user_id, contest, problem, status, submit_id, external_id, time").
+		Where("platform = ? AND time >= ? AND time <= ?", platform, start, practiceEnd).
+		Where("problem <> '' AND problem IS NOT NULL")
+	// 先在 SQL 层收窄到本场，避免热门平台其它比赛的提交挤占扫描上限。
+	if hasProbSet {
+		exts := make([]string, 0, len(probSet))
+		problemLikes := make([]string, 0, len(probSet))
+		seen := map[string]struct{}{}
+		for ext := range probSet {
+			key := strings.ToLower(strings.TrimSpace(ext))
+			if key == "" {
+				continue
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			exts = append(exts, ext)
+			problemLikes = append(problemLikes, ext+"%")
+		}
+		parts := []string{"external_id IN ?", "LOWER(contest) LIKE ?"}
+		args := []interface{}{exts, "%" + strings.ToLower(contestID) + "%"}
+		for _, like := range problemLikes {
+			parts = append(parts, "problem LIKE ?")
+			args = append(args, like)
+		}
+		q = q.Where("("+strings.Join(parts, " OR ")+")", args...)
+	} else {
+		q = q.Where("LOWER(contest) LIKE ?", "%"+strings.ToLower(contestID)+"%")
+	}
+	if userIDs != nil {
+		if len(userIDs) == 0 {
+			return nil, nil
+		}
+		q = q.Where("user_id IN ?", userIDs)
+	}
+	if platform == spider.LeetCode {
+		q = q.Where("submit_id LIKE ?", "lc-prob-%")
+	}
+	if err := q.Order("time ASC").Limit(contestInferSubmitLimit).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	type agg struct {
+		label, ext string
+		attempts   int
+		ac         bool
+		contestAC  bool
+		postSeen   bool
+		firstAC    *time.Time
+	}
+	byUser := map[int64]map[string]*agg{}
+	for _, r := range rows {
+		if platform == spider.LeetCode && model.IsLeetCodeSyntheticSubmit(platform, r.SubmitID) {
+			continue
+		}
+		ext, label := resolveSubmitExternal(platform, contestID, r.Contest, r.Problem, r.ExternalID)
+		if ext == "" {
+			continue
+		}
+		belong := false
+		if hasProbSet {
+			_, belong = probSet[ext]
+			if !belong {
+				_, belong = probSet[strings.ToLower(ext)]
+			}
+			if lb := probSet[ext]; lb != "" {
+				label = lb
+			} else if lb := probSet[strings.ToLower(ext)]; lb != "" {
+				label = lb
+			}
+		}
+		cf := strings.TrimSpace(r.Contest)
+		if !belong && cf != "" && (cf == contestID || cf == "-"+contestID || strings.EqualFold(cf, contestID) || strings.Contains(cf, contestID)) {
+			belong = true
+		}
+		if !belong {
+			continue
+		}
+		if label == "" {
+			label = ext
+		}
+		m := byUser[r.UserID]
+		if m == nil {
+			m = map[string]*agg{}
+			byUser[r.UserID] = m
+		}
+		a := m[ext]
+		if a == nil {
+			a = &agg{label: label, ext: ext}
+			m[ext] = a
+		}
+		if !r.Time.After(end) {
+			if model.IsAcceptedStatus(r.Status) {
+				a.contestAC = true
+			}
+			continue
+		}
+		a.postSeen = true
+		if a.ac {
+			continue
+		}
+		if model.IsAcceptedStatus(r.Status) {
+			a.ac = true
+			t := r.Time
+			a.firstAC = &t
+			continue
+		}
+		if !model.IsPendingSubmitStatus(r.Status) {
+			a.attempts++
+		}
+	}
+	out := []model.ContestUserProblem{}
+	for uid, m := range byUser {
+		for _, a := range m {
+			// 赛时已 AC 的题，赛后再提交也始终是赛时 AC；没有赛后提交则不生成补题格。
+			if a.contestAC || !a.postSeen {
+				continue
+			}
+			status := model.ContestCellUpsolveTried
+			if a.ac {
+				status = model.ContestCellUpsolve
+			}
+			out = append(out, model.ContestUserProblem{Platform: platform, ContestID: contestID, UserID: uid, Label: a.label, ExternalID: a.ext, Status: status, Attempts: a.attempts, FirstACAt: a.firstAC})
+		}
+	}
+	return out, nil
+}
+
 // resolveSubmitExternal 从提交行得到 external_id + 展示 label。
 func resolveSubmitExternal(platform, contestID, contestField, problem, storedExt string) (ext, label string) {
 	storedExt = strings.TrimSpace(storedExt)
@@ -1205,13 +1359,12 @@ func ListContestCellSubmits(
 				// 允许 problem 前缀匹配 label 且 contest 精确为本场
 				p := strings.TrimSpace(r.Problem)
 				cField := strings.TrimSpace(r.Contest)
-				labelOK := label != "" && (
-					strings.EqualFold(p, label) ||
-						strings.HasPrefix(p, label+"-") ||
-						strings.HasPrefix(p, label+" ") ||
-						strings.HasPrefix(strings.ToUpper(p), strings.ToUpper(label)+".") ||
-						// AtCoder: abc462_a ↔ label A
-						strings.HasSuffix(strings.ToLower(p), "_"+strings.ToLower(label)))
+				labelOK := label != "" && (strings.EqualFold(p, label) ||
+					strings.HasPrefix(p, label+"-") ||
+					strings.HasPrefix(p, label+" ") ||
+					strings.HasPrefix(strings.ToUpper(p), strings.ToUpper(label)+".") ||
+					// AtCoder: abc462_a ↔ label A
+					strings.HasSuffix(strings.ToLower(p), "_"+strings.ToLower(label)))
 				contestOK := cField == contestID || cField == "-"+contestID || strings.EqualFold(cField, contestID)
 				if !(labelOK && contestOK) {
 					continue

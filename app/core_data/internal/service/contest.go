@@ -590,10 +590,10 @@ func contestMapWithTimes(db *gorm.DB, cl model.ContestLog) map[string]interface{
 // handleContestBoard GET ?id=|contestId= contest_logs 行 id
 // 返回 XCPCIO 风格：problems[] + rows[{cells}]；组织成员过滤与 ranking 一致。
 //
-// 只读快照，不在本接口触发 ensure / Infer / 自动更新：
+// 只读快照；补题状态直接从已有 submit_logs 推导，不触发爬虫：
 //  1. Redis 整包缓存（~90s，随 contest list global ver 失效）——热路径不扫库
 //  2. 回源：contest_logs + contest_problems + contest_user_problems（已入库格子）
-//  题目 ensure 走 /contest/problems；题级明细由爬虫同步写入。
+//     题目 ensure 走 /contest/problems；题级明细由爬虫同步写入。
 func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 	idStr := strings.TrimSpace(ctx.Query().Get("id"))
 	if idStr == "" {
@@ -679,8 +679,8 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		} else if memberIDs != nil {
 			scope = fmt.Sprintf("org%d:n%d", resolvedOrg, len(memberIDs))
 		}
-		// v2：格子含 UPSOLVE（补题，不计分）
-		boardCacheKey = fmt.Sprintf("core:contest:board:v2:%s:%s:%s:v%s",
+		// v3：直接从 submit_logs 推导补题及纯补题用户
+		boardCacheKey = fmt.Sprintf("core:contest:board:v3:%s:%s:%s:v%s",
 			seed.Platform, seed.ContestId, scope, ver)
 		if b, e := c.rdb.Get(reqCtx, boardCacheKey).Bytes(); e == nil && len(b) > 0 {
 			var cached map[string]interface{}
@@ -703,6 +703,24 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 	}
 	if memberIDs == nil || len(memberIDs) > 0 {
 		_ = q.Order("CASE WHEN rank > 0 THEN 0 ELSE 1 END, rank ASC, ac_count DESC, id ASC").Find(&logs).Error
+	}
+	contestantIDs := map[int64]bool{}
+	seenUserIDs := map[int64]bool{}
+	for _, l := range logs {
+		contestantIDs[l.UserID] = true
+		seenUserIDs[l.UserID] = true
+	}
+	practiceCells, pErr := bizservice.ListContestPracticeCells(c.db, seed.Platform, seed.ContestId, memberIDs, seed.Time)
+	if pErr != nil {
+		log.Warnf("contest board practice cells %s/%s: %v", seed.Platform, seed.ContestId, pErr)
+	}
+	// 只有补题、赛时未参赛的用户追加为零分行；原赛时顺序完全不动。
+	for _, cell := range practiceCells {
+		if !seenUserIDs[cell.UserID] {
+			seenUserIDs[cell.UserID] = true
+			contestantIDs[cell.UserID] = false
+			logs = append(logs, model.ContestLog{Platform: seed.Platform, ContestId: seed.ContestId, UserID: cell.UserID, ContestName: seed.ContestName, Time: seed.Time})
+		}
 	}
 
 	// 题目目录：只读表内已有目录（ensure 由 /contest/problems 负责，榜单不触发）
@@ -728,6 +746,24 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 			cellsByUser[cell.UserID] = append(cellsByUser[cell.UserID], cell)
 		}
 	}
+	// submit_logs 是补题真源：覆盖旧补题快照，但绝不覆盖赛时 AC。
+	for _, cell := range practiceCells {
+		list := cellsByUser[cell.UserID]
+		replaced := false
+		for i := range list {
+			if strings.EqualFold(list[i].ExternalID, cell.ExternalID) {
+				if list[i].Status != model.ContestCellAC {
+					list[i] = cell
+				}
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			list = append(list, cell)
+		}
+		cellsByUser[cell.UserID] = list
+	}
 
 	// 用户资料
 	var userClient profile.ProfileClient
@@ -752,12 +788,13 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 	}
 
 	type rowDraft struct {
-		log       model.ContestLog
-		solved    int
-		penalty   int
-		score     int
-		hasDetail bool
-		cellMaps  []map[string]interface{}
+		log          model.ContestLog
+		solved       int
+		penalty      int
+		score        int
+		hasDetail    bool
+		cellMaps     []map[string]interface{}
+		isContestant bool
 	}
 	// 全场是否有任意逐题明细（含补题；无则前端只展示 AC 题数，不画空格子）
 	boardHasDetail := false
@@ -859,7 +896,7 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		}
 		drafts = append(drafts, rowDraft{
 			log: l, solved: solved, penalty: penalty, score: score,
-			hasDetail: rowHasDetail, cellMaps: cellMaps,
+			hasDetail: rowHasDetail, cellMaps: cellMaps, isContestant: contestantIDs[l.UserID],
 		})
 	}
 
@@ -899,6 +936,7 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 			"score":        d.score,
 			"acCount":      d.log.AcCount,
 			"hasDetail":    d.hasDetail,
+			"isContestant": d.isContestant,
 			"cells":        cells,
 		}
 		rows = append(rows, row)
