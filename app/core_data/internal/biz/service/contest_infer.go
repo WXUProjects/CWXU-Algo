@@ -1290,16 +1290,38 @@ func ListContestCellSubmits(
 		return nil, time.Time{}, time.Time{}, nil
 	}
 
-	start, end = resolveCellSubmitWindow(db, platform, contestID, hintTime)
+	// endBuffered：扫提交用（含 15min 排队缓冲，避免漏收延迟到站的提交）
+	// endOfficial：给人看的官方结束时间——phase 赛时/赛后分界必须用这个，
+	// 否则 22:00 结束后 22:01 会被误标成「赛时」。
+	start, endBuffered := resolveCellSubmitWindow(db, platform, contestID, hintTime)
+	endOfficial := time.Time{}
+	if ds, de, ok := ResolveContestDisplayWindow(db, platform, contestID, hintTime); ok {
+		if start.IsZero() {
+			start = ds
+		}
+		endOfficial = de
+	}
+	if endOfficial.IsZero() && !endBuffered.IsZero() {
+		// 展示窗不可用时：从缓冲窗去掉缓冲得到近似官方结束
+		endOfficial = endBuffered.Add(-contestInferEndBuffer)
+	}
+	// API 返回的 end 用官方结束时间（前端展示 / 调试）
+	end = endOfficial
+	if end.IsZero() {
+		end = endBuffered
+	}
 
-	// 查询上界：赛时 end + 补题 horizon（不超过现在）
-	queryEnd := end
-	if !end.IsZero() {
-		upsolveEnd := end.Add(contestUpsolveMaxHorizon)
+	// 查询上界：缓冲 end + 补题 horizon（不超过现在）
+	queryEnd := endBuffered
+	if queryEnd.IsZero() {
+		queryEnd = end
+	}
+	if !queryEnd.IsZero() {
+		upsolveEnd := queryEnd.Add(contestUpsolveMaxHorizon)
 		if now := time.Now(); now.Before(upsolveEnd) {
 			upsolveEnd = now
 		}
-		if upsolveEnd.After(end) {
+		if upsolveEnd.After(queryEnd) {
 			queryEnd = upsolveEnd
 		}
 	}
@@ -1392,9 +1414,9 @@ func ListContestCellSubmits(
 				}
 			}
 		}
-		// time > end 为补题；end 为零时全部视为赛时
+		// 严格按官方结束时间：time > endOfficial → 赛后（不用 15min 缓冲）
 		phase := CellSubmitPhaseContest
-		if !end.IsZero() && r.Time.After(end) {
+		if !endOfficial.IsZero() && r.Time.After(endOfficial) {
 			phase = CellSubmitPhaseUpsolve
 		}
 		item := ContestCellSubmit{

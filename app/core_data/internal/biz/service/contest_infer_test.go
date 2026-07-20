@@ -323,6 +323,46 @@ func TestListContestCellSubmits_AtCoderByExternalIDEndHint(t *testing.T) {
 	}
 }
 
+// 官方结束 22:00、提交 22:01:35 必须是赛后（不能被 15min 缓冲误判为赛时）。
+// AtCoder hint=结束时间；不用日历，避免 Unix→本地时区在 SQLite 比较失真。
+func TestListContestCellSubmits_PhaseUsesOfficialEndNotBuffer(t *testing.T) {
+	db := testInferDB(t)
+	endHint := time.Date(2026, 7, 20, 22, 0, 0, 0, time.UTC) // 官方结束
+	logs := []model.SubmitLog{
+		// 赛时内
+		{Platform: spider.AtCoder, UserID: 7, SubmitID: "in", Contest: "abc-end",
+			Problem: "abc-end_a", ExternalID: "abc-end_a", Status: "WA",
+			Time: time.Date(2026, 7, 20, 21, 59, 50, 0, time.UTC)},
+		// 结束 1 分 35 秒后——用户吐槽场景（落在旧 15min 缓冲内）
+		{Platform: spider.AtCoder, UserID: 7, SubmitID: "late", Contest: "abc-end",
+			Problem: "abc-end_a", ExternalID: "abc-end_a", Status: "AC",
+			Time: time.Date(2026, 7, 20, 22, 1, 35, 0, time.UTC)},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	list, _, end, err := ListContestCellSubmits(
+		db, spider.AtCoder, "abc-end", 7, "A", "abc-end_a", endHint,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 返回的 end 应为官方 22:00，而非 +15min
+	if !end.Equal(endHint) {
+		t.Fatalf("end=%v want official %v (no 15m buffer)", end, endHint)
+	}
+	if len(list) != 2 {
+		t.Fatalf("list=%d want 2, %+v", len(list), list)
+	}
+	// 逆序：late 在前且必须 upsolve
+	if list[0].SubmitID != "late" || list[0].Phase != CellSubmitPhaseUpsolve {
+		t.Fatalf("22:01:35 must be upsolve, got %+v", list[0])
+	}
+	if list[1].SubmitID != "in" || list[1].Phase != CellSubmitPhaseContest {
+		t.Fatalf("21:59:50 must be contest, got %+v", list[1])
+	}
+}
+
 // 赛时 WA + 赛后 AC：两条均返回且 phase 正确。
 func TestListContestCellSubmits_ContestWAThenUpsolveAC(t *testing.T) {
 	db := testInferDB(t)
