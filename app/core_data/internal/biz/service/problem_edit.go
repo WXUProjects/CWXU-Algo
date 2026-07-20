@@ -225,12 +225,12 @@ func (uc *ProblemUseCase) ProposeProblemEdit(userID, problemID uint, updateTags 
 		return 0, err
 	}
 	// 首次提交待审核：通知站管（站内信 + 可配置邮件）
-	uc.notifyReviewPendingProblemEdit(userID, problemID, req.ID, &p)
+	uc.notifyReviewPendingProblemEdit(userID, problemID, req.ID, &p, &req)
 	return req.ID, nil
 }
 
 // notifyReviewPendingProblemEdit 题面/标签修改进入待审
-func (uc *ProblemUseCase) notifyReviewPendingProblemEdit(userID, problemID, editID uint, p *model.Problem) {
+func (uc *ProblemUseCase) notifyReviewPendingProblemEdit(userID, problemID, editID uint, p *model.Problem, req *model.ProblemEditRequest) {
 	if uc.data == nil || uc.data.UserDB == nil || userID == 0 {
 		return
 	}
@@ -238,10 +238,7 @@ func (uc *ProblemUseCase) notifyReviewPendingProblemEdit(userID, problemID, edit
 	if p != nil {
 		titleLabel = strings.TrimSpace(p.Title)
 	}
-	body := "有用户提交了题面或标签修改，等待审核"
-	if titleLabel != "" {
-		body = fmt.Sprintf("有用户提交了题目「%s」的修改，等待审核", titleLabel)
-	}
+	body := problemEditPendingSummary(titleLabel, req)
 	payload := fmt.Sprintf(`{"editRequestId":%d,"problemId":%d,"problemTitle":%q}`, editID, problemID, titleLabel)
 	html := fmt.Sprintf("<p>%s</p><p>题目 id=%d · 申请 id=%d</p>", body, problemID, editID)
 	notify.NotifySiteAdminsWithEmail(uc.data.UserDB, notify.AdminNotif{
@@ -254,6 +251,47 @@ func (uc *ProblemUseCase) notifyReviewPendingProblemEdit(userID, problemID, edit
 		ProblemID: problemID,
 		Payload:   payload,
 	}, "有内容待审核", html)
+}
+
+// problemEditPendingSummary 给管理员的待审通知摘要；完整正文仍在审核详情中查看。
+func problemEditPendingSummary(problemTitle string, req *model.ProblemEditRequest) string {
+	prefix := "有用户提交了题目修改"
+	if problemTitle = strings.TrimSpace(problemTitle); problemTitle != "" {
+		prefix = fmt.Sprintf("有用户提交了题目「%s」的修改", problemTitle)
+	}
+	if req == nil {
+		return prefix + "，等待审核"
+	}
+	details := make([]string, 0, 4)
+	if title := strings.TrimSpace(req.ProposedTitle); title != "" {
+		details = append(details, fmt.Sprintf("标题改为「%s」", truncateNotificationText(title, 80)))
+	}
+	if req.HasContent {
+		details = append(details, fmt.Sprintf("题面内容（%d 字）", len([]rune(strings.TrimSpace(req.ProposedContentMD)))))
+	}
+	if req.HasTags {
+		tags := nonEmptyTags(req.ProposedTags)
+		if len(tags) == 0 {
+			details = append(details, "清空题目标签")
+		} else {
+			details = append(details, "标签改为「"+strings.Join(tags, "、")+"」")
+		}
+	}
+	if note := strings.TrimSpace(req.Note); note != "" {
+		details = append(details, "修改说明："+truncateNotificationText(note, 120))
+	}
+	if len(details) == 0 {
+		return prefix + "，等待审核"
+	}
+	return prefix + "。修改内容：" + strings.Join(details, "；") + "。请审核"
+}
+
+func truncateNotificationText(s string, maxRunes int) string {
+	runes := []rune(strings.TrimSpace(s))
+	if maxRunes <= 0 || len(runes) <= maxRunes {
+		return string(runes)
+	}
+	return string(runes[:maxRunes]) + "…"
 }
 
 // ListProblemEditRequests 审核列表
@@ -354,8 +392,8 @@ func (uc *ProblemUseCase) notifyProblemEditResult(req *model.ProblemEditRequest,
 	body := "你的题面/标签修改申请已被驳回"
 	if approved {
 		typ = notify.TypeProblemEditApproved
-		title = "题面修改申请已通过"
-		body = "你的题面/标签修改申请已通过并生效"
+		title = "你的内容贡献已通过审核"
+		body = problemEditApprovalThankYou(uc.data.DB, req)
 	}
 	if note != "" {
 		body = body + "。备注：" + note
@@ -372,6 +410,39 @@ func (uc *ProblemUseCase) notifyProblemEditResult(req *model.ProblemEditRequest,
 	}); err != nil {
 		log.Warnf("notifyProblemEditResult: %v", err)
 	}
+}
+
+// problemEditApprovalThankYou 生成面向贡献者的审核通过感谢信，并明确本次生效内容。
+func problemEditApprovalThankYou(db *gorm.DB, req *model.ProblemEditRequest) string {
+	if req == nil {
+		return "你的内容贡献已通过审核并生效。感谢你为 GoAlgo 作出贡献！"
+	}
+	items := make([]string, 0, 3)
+	if strings.TrimSpace(req.ProposedTitle) != "" {
+		items = append(items, "题目标题")
+	}
+	if req.HasContent {
+		items = append(items, "题面内容")
+	}
+	if req.HasTags {
+		items = append(items, "题目标签")
+	}
+	if len(items) == 0 {
+		items = append(items, "题目修改")
+	}
+
+	problemTitle := ""
+	if db != nil && req.ProblemID > 0 {
+		var p model.Problem
+		if err := db.Select("title").First(&p, req.ProblemID).Error; err == nil {
+			problemTitle = strings.TrimSpace(p.Title)
+		}
+	}
+	prefix := "你的内容贡献已通过审核并生效"
+	if problemTitle != "" {
+		prefix = fmt.Sprintf("你为题目「%s」提交的内容贡献已通过审核并生效", problemTitle)
+	}
+	return fmt.Sprintf("%s。本次通过：%s。感谢你为 GoAlgo 作出贡献！", prefix, strings.Join(items, "、"))
 }
 
 // MyPendingProblemEdit 当前用户对该题的待审申请
