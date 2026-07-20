@@ -1724,7 +1724,7 @@ paths:
         post:
             tags:
                 - Profile
-            description: 站点管理员：批量冻结不活跃（把最近活跃回拨到超过站点阈值；仍走豁免规则，登录/解除后恢复）
+            description: 站点管理员：批量冻结不活跃（勾选任意用户可强制冻结，不遵循组织豁免；登录/解除后恢复）
             operationId: Profile_ForceDormant
             requestBody:
                 content:
@@ -1921,6 +1921,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.GetNonPublicOrgUserIdsRes'
+    /v1/user/profile/set-disabled:
+        post:
+            tags:
+                - Profile
+            description: 站点管理员：禁用 / 启用账号（禁用后无法登录）
+            operationId: Profile_SetDisabled
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.SetDisabledReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.SetDisabledRes'
     /v1/user/profile/set-email-enabled:
         post:
             tags:
@@ -3029,6 +3048,19 @@ components:
                     type: string
                 count:
                     type: string
+        api.core.v1.problem.ProblemContributor:
+            type: object
+            properties:
+                userId:
+                    type: integer
+                    format: uint32
+                name:
+                    type: string
+                username:
+                    type: string
+                avatar:
+                    type: string
+            description: 题面/标签审核通过后的贡献者（多人全列）
         api.core.v1.problem.ProblemEditInfo:
             type: object
             properties:
@@ -3120,6 +3152,11 @@ components:
                 userStatus:
                     type: string
                     description: '当前用户对该题状态: AC / TRIED / NONE（仅 list 且传 userId 时）'
+                contributors:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.ProblemContributor'
+                    description: 审核通过的内容贡献者（按首次通过时间升序；详情 Get 填充，列表可空）
         api.core.v1.problem.ProblemRelatedContest:
             type: object
             properties:
@@ -4043,10 +4080,10 @@ components:
                     description: 一键模式：最近多少天未登录（1–365）；与 userIds 二选一，userIds 优先
                     format: int32
             description: |-
-                ForceDormantReq 批量冻结不活跃用户：回拨 last_login_at 使超过站点阈值后进入休眠
-                 - userIds 非空：只处理勾选用户（仍跳过豁免）
-                 - userIds 空且 inactiveDays>0：处理「最近 N 天未登录且可冻结」的全部用户
-                 豁免（站管 / sync_exempt / staff / force_sync / paid）一律跳过；登录或解除不活跃后仍按原规则
+                ForceDormantReq 批量冻结用户：回拨 last_login_at + 标记 admin_force_dormant
+                 - userIds 非空：站管可冻结任意勾选用户（不遵循组织约定/始终同步等豁免；不可冻结自己）
+                 - userIds 空且 inactiveDays>0：一键冻结「最近 N 天未登录」用户（同样不跳过豁免）
+                 登录或 clear-dormant 后清除强制标记，之后仍按原规则
         api.user.v1.ForceDormantRes:
             type: object
             properties:
@@ -4060,7 +4097,7 @@ components:
                     format: int32
                 skipped:
                     type: integer
-                    description: 因豁免等原因跳过的人数
+                    description: 跳过人数（如勾选了自己）
                     format: int32
         api.user.v1.GetByIdRes:
             type: object
@@ -4233,6 +4270,12 @@ components:
                 dormant:
                     type: boolean
                     description: 当前是否处于休眠（后台定时任务已停）
+                adminForceDormant:
+                    type: boolean
+                    description: 站管强制冻结同步（覆盖豁免）
+                disabled:
+                    type: boolean
+                    description: 账号是否被禁用（禁止登录）
         api.user.v1.GetListRes_OrgBrief:
             type: object
             properties:
@@ -4398,6 +4441,21 @@ components:
             properties:
                 success:
                     type: boolean
+                message:
+                    type: string
+        api.user.v1.SetDisabledReq:
+            type: object
+            properties:
+                userId:
+                    type: string
+                disabled:
+                    type: boolean
+            description: SetDisabledReq 站点管理员禁用/启用账号
+        api.user.v1.SetDisabledRes:
+            type: object
+            properties:
+                code:
+                    type: string
                 message:
                     type: string
         api.user.v1.SetEmailEnabledReq:

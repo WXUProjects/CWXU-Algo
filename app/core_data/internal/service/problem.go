@@ -59,6 +59,40 @@ func (s *ProblemService) fetchUserNames(ctx context.Context, userIDs []int64) ma
 	return out
 }
 
+// attachContributors 填充审核通过的内容贡献者（多人全列）。
+func (s *ProblemService) attachContributors(ctx context.Context, info *problem.ProblemInfo) {
+	if info == nil || info.Id == 0 {
+		return
+	}
+	uids, err := s.uc.ListProblemContributors(uint(info.Id))
+	if err != nil || len(uids) == 0 {
+		return
+	}
+	ids := make([]int64, 0, len(uids))
+	for _, id := range uids {
+		ids = append(ids, int64(id))
+	}
+	profiles := s.fetchUserProfiles(ctx, ids)
+	out := make([]*problem.ProblemContributor, 0, len(uids))
+	for _, id := range uids {
+		p := profiles[int64(id)]
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			name = strings.TrimSpace(p.Username)
+		}
+		if name == "" {
+			name = fmt.Sprintf("用户%d", id)
+		}
+		out = append(out, &problem.ProblemContributor{
+			UserId:   uint32(id),
+			Name:     name,
+			Username: strings.TrimSpace(p.Username),
+			Avatar:   strings.TrimSpace(p.Avatar),
+		})
+	}
+	info.Contributors = out
+}
+
 // cleanDisplayTitle 列表/详情展示用：去掉 AtCoder 页头夹带的 Editorial 与空白行
 func cleanDisplayTitle(title string) string {
 	title = strings.ReplaceAll(title, "\r", "\n")
@@ -253,10 +287,12 @@ func (s *ProblemService) Get(ctx context.Context, req *problem.GetProblemReq) (*
 	if err != nil {
 		return &problem.GetProblemRes{Code: 1, Message: "题目不存在"}, nil
 	}
+	info := s.toInfo(p, "")
+	s.attachContributors(ctx, info)
 	return &problem.GetProblemRes{
 		Code:    0,
 		Message: "success",
-		Data:    s.toInfo(p, ""),
+		Data:    info,
 	}, nil
 }
 

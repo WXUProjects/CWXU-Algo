@@ -46,4 +46,8 @@ type User struct {
 	LastLoginAt *time.Time `gorm:"index;comment:最近活跃时间"`
 	// SyncExempt 站管手动永不休眠（跳过不活跃判定）
 	SyncExempt bool `gorm:"default:false;comment:永不休眠(站管)"`
+	// AdminForceDormant 站管强制冻结同步（覆盖组织/个人豁免；登录或解除后清除）
+	AdminForceDormant bool `gorm:"default:false;index;comment:站管强制冻结同步"`
+	// Disabled 站管禁用账号（禁止登录；后台同步一并暂停）
+	Disabled bool `gorm:"default:false;index;comment:账号禁用禁止登录"`
 }

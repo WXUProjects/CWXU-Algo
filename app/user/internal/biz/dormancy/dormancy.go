@@ -47,8 +47,14 @@ func IsInactiveByTime(lastLogin *time.Time, inactiveDays int, now time.Time) boo
 	return lastLogin.Before(cutoff)
 }
 
-// IsDormant 是否应暂停后台任务：不活跃且无豁免
-func IsDormant(lastLogin *time.Time, inactiveDays int, f ExemptFlags, now time.Time) bool {
+// IsDormant 是否应暂停后台任务。
+// forceDormant / disabled 由站管设置，覆盖一切豁免（组织永不冻结、始终同步、付费等）。
+func IsDormant(lastLogin *time.Time, inactiveDays int, f ExemptFlags, now time.Time, forceOrDisabled ...bool) bool {
+	for _, b := range forceOrDisabled {
+		if b {
+			return true
+		}
+	}
 	if IsExempt(f) {
 		return false
 	}

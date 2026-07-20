@@ -136,6 +136,12 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 		res.Message = "用户名或密码错误"
 		return res, nil
 	}
+	// 密码正确后再提示禁用，避免用文案探测账号是否存在
+	if u.Disabled {
+		res.Success = false
+		res.Message = "账号已被禁用，请联系管理员"
+		return res, nil
+	}
 	// Legacy rows stored the replayable client SHA256 directly. Upgrade in place
 	// after a successful login without forcing a password reset.
 	if clientPasswordRe.MatchString(u.Password) {
@@ -146,16 +152,22 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 	_ = s.rdb.Del(ctx, pairAttemptKey, accountAttemptKey).Err()
 
 	// 休眠判定与「距上次登录天数」须在 touch last_login 之前
+	// 禁用账号不会走到这里；AdminForceDormant 在登录成功后清除并触发唤醒
 	wasDormant := false
 	if s.profileDal != nil {
 		wasDormant = s.profileDal.IsUserDormant(ctx, u)
 	}
 	inactiveDays := daysSinceLastActive(u)
 	now := time.Now()
-	if err := s.db.Model(u).Update("last_login_at", now).Error; err != nil {
+	// 刷新活跃并清除站管强制冻结
+	if err := s.db.Model(u).Updates(map[string]interface{}{
+		"last_login_at":       now,
+		"admin_force_dormant": false,
+	}).Error; err != nil {
 		log.Warnf("login touch last_login user=%d: %v", u.ID, err)
 	} else {
 		u.LastLoginAt = &now
+		u.AdminForceDormant = false
 	}
 
 	token, err := IssueJWT(s.db, u)
@@ -570,6 +582,11 @@ func (s *AuthService) Refresh(ctx context.Context, _ *pb.RefreshReq) (*pb.LoginR
 	if err := s.db.First(&u, pd.UserID).Error; err != nil {
 		res.Success = false
 		res.Message = "用户不存在"
+		return res, nil
+	}
+	if u.Disabled {
+		res.Success = false
+		res.Message = "账号已被禁用，请联系管理员"
 		return res, nil
 	}
 	token, err := IssueJWT(s.db, &u)

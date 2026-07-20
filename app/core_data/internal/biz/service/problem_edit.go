@@ -473,6 +473,34 @@ func problemEditApprovalThankYou(db *gorm.DB, req *model.ProblemEditRequest) str
 	return fmt.Sprintf("%s。本次通过：%s。感谢你为 GoAlgo 作出贡献！", prefix, strings.Join(items, "、"))
 }
 
+// ListProblemContributors 审核通过的贡献者 user_id（按首次通过时间升序，去重）。
+// 仅统计 problem_edit_requests.status=approved，不含站管直改。
+func (uc *ProblemUseCase) ListProblemContributors(problemID uint) ([]uint, error) {
+	if problemID == 0 || uc == nil || uc.data == nil || uc.data.DB == nil {
+		return nil, nil
+	}
+	var out []uint
+	// 用 MIN(updated_at) 作为「首次通过」近似（通过时会写 status+updated_at）
+	// 只 SELECT user_id，避免 SQLite 聚合时间类型扫描问题
+	err := uc.data.DB.Model(&model.ProblemEditRequest{}).
+		Select("user_id").
+		Where("problem_id = ? AND status = ?", problemID, model.ProblemEditApproved).
+		Group("user_id").
+		Order("MIN(updated_at) ASC").
+		Pluck("user_id", &out).Error
+	if err != nil {
+		return nil, err
+	}
+	// 过滤 0
+	clean := make([]uint, 0, len(out))
+	for _, id := range out {
+		if id > 0 {
+			clean = append(clean, id)
+		}
+	}
+	return clean, nil
+}
+
 // MyPendingProblemEdit 当前用户对该题的待审申请
 func (uc *ProblemUseCase) MyPendingProblemEdit(userID, problemID uint) (*model.ProblemEditRequest, error) {
 	if userID == 0 || problemID == 0 {

@@ -35,6 +35,7 @@ const OperationProfileGetSyncPolicies = "/api.user.v1.Profile/GetSyncPolicies"
 const OperationProfileGetUserIdsByGroup = "/api.user.v1.Profile/GetUserIdsByGroup"
 const OperationProfileGetUserIdsByOrg = "/api.user.v1.Profile/GetUserIdsByOrg"
 const OperationProfileMoveGroup = "/api.user.v1.Profile/MoveGroup"
+const OperationProfileSetDisabled = "/api.user.v1.Profile/SetDisabled"
 const OperationProfileSetEmailEnabled = "/api.user.v1.Profile/SetEmailEnabled"
 const OperationProfileSetProblemPipeline = "/api.user.v1.Profile/SetProblemPipeline"
 const OperationProfileSetSyncExempt = "/api.user.v1.Profile/SetSyncExempt"
@@ -48,7 +49,7 @@ type ProfileHTTPServer interface {
 	Delete(context.Context, *DeleteReq) (*DeleteRes, error)
 	// FilterPublicFeedUserIds 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
 	FilterPublicFeedUserIds(context.Context, *FilterPublicFeedUserIdsReq) (*FilterPublicFeedUserIdsRes, error)
-	// ForceDormant 站点管理员：批量冻结不活跃（把最近活跃回拨到超过站点阈值；仍走豁免规则，登录/解除后恢复）
+	// ForceDormant 站点管理员：批量冻结不活跃（勾选任意用户可强制冻结，不遵循组织豁免；登录/解除后恢复）
 	ForceDormant(context.Context, *ForceDormantReq) (*ForceDormantRes, error)
 	GetById(context.Context, *GetByIdReq) (*GetByIdRes, error)
 	GetByIds(context.Context, *GetByIdsReq) (*GetByIdsRes, error)
@@ -69,6 +70,8 @@ type ProfileHTTPServer interface {
 	// GetUserIdsByOrg 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(context.Context, *GetUserIdsByOrgReq) (*GetUserIdsByOrgRes, error)
 	MoveGroup(context.Context, *MoveGroupReq) (*MoveGroupRes, error)
+	// SetDisabled 站点管理员：禁用 / 启用账号（禁用后无法登录）
+	SetDisabled(context.Context, *SetDisabledReq) (*SetDisabledRes, error)
 	SetEmailEnabled(context.Context, *SetEmailEnabledReq) (*SetEmailEnabledRes, error)
 	// SetProblemPipeline 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
 	SetProblemPipeline(context.Context, *SetProblemPipelineReq) (*SetProblemPipelineRes, error)
@@ -92,6 +95,7 @@ func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r.POST("/v1/user/profile/set-sync-exempt", _Profile_SetSyncExempt0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/clear-dormant", _Profile_ClearDormant0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/force-dormant", _Profile_ForceDormant0_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/set-disabled", _Profile_SetDisabled0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-group", _Profile_GetUserIdsByGroup0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-org", _Profile_GetUserIdsByOrg0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/staff-org-ids", _Profile_GetStaffOrgIds0_HTTP_Handler(srv))
@@ -337,6 +341,28 @@ func _Profile_ForceDormant0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Co
 	}
 }
 
+func _Profile_SetDisabled0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in SetDisabledReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileSetDisabled)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.SetDisabled(ctx, req.(*SetDisabledReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*SetDisabledRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 func _Profile_GetUserIdsByGroup0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in GetUserIdsByGroupReq
@@ -546,7 +572,7 @@ type ProfileHTTPClient interface {
 	Delete(ctx context.Context, req *DeleteReq, opts ...http.CallOption) (rsp *DeleteRes, err error)
 	// FilterPublicFeedUserIds 在给定 ids 中保留「公共域动态可见」的用户（未配置隐私默认可见）
 	FilterPublicFeedUserIds(ctx context.Context, req *FilterPublicFeedUserIdsReq, opts ...http.CallOption) (rsp *FilterPublicFeedUserIdsRes, err error)
-	// ForceDormant 站点管理员：批量冻结不活跃（把最近活跃回拨到超过站点阈值；仍走豁免规则，登录/解除后恢复）
+	// ForceDormant 站点管理员：批量冻结不活跃（勾选任意用户可强制冻结，不遵循组织豁免；登录/解除后恢复）
 	ForceDormant(ctx context.Context, req *ForceDormantReq, opts ...http.CallOption) (rsp *ForceDormantRes, err error)
 	GetById(ctx context.Context, req *GetByIdReq, opts ...http.CallOption) (rsp *GetByIdRes, err error)
 	GetByIds(ctx context.Context, req *GetByIdsReq, opts ...http.CallOption) (rsp *GetByIdsRes, err error)
@@ -567,6 +593,8 @@ type ProfileHTTPClient interface {
 	// GetUserIdsByOrg 组织成员 userId 列表（供 core 数据隔离；orgId=0 用 JWT 当前组织）
 	GetUserIdsByOrg(ctx context.Context, req *GetUserIdsByOrgReq, opts ...http.CallOption) (rsp *GetUserIdsByOrgRes, err error)
 	MoveGroup(ctx context.Context, req *MoveGroupReq, opts ...http.CallOption) (rsp *MoveGroupRes, err error)
+	// SetDisabled 站点管理员：禁用 / 启用账号（禁用后无法登录）
+	SetDisabled(ctx context.Context, req *SetDisabledReq, opts ...http.CallOption) (rsp *SetDisabledRes, err error)
 	SetEmailEnabled(ctx context.Context, req *SetEmailEnabledReq, opts ...http.CallOption) (rsp *SetEmailEnabledRes, err error)
 	// SetProblemPipeline 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
 	SetProblemPipeline(ctx context.Context, req *SetProblemPipelineReq, opts ...http.CallOption) (rsp *SetProblemPipelineRes, err error)
@@ -627,7 +655,7 @@ func (c *ProfileHTTPClientImpl) FilterPublicFeedUserIds(ctx context.Context, in 
 	return &out, nil
 }
 
-// ForceDormant 站点管理员：批量冻结不活跃（把最近活跃回拨到超过站点阈值；仍走豁免规则，登录/解除后恢复）
+// ForceDormant 站点管理员：批量冻结不活跃（勾选任意用户可强制冻结，不遵循组织豁免；登录/解除后恢复）
 func (c *ProfileHTTPClientImpl) ForceDormant(ctx context.Context, in *ForceDormantReq, opts ...http.CallOption) (*ForceDormantRes, error) {
 	var out ForceDormantRes
 	pattern := "/v1/user/profile/force-dormant"
@@ -796,6 +824,20 @@ func (c *ProfileHTTPClientImpl) MoveGroup(ctx context.Context, in *MoveGroupReq,
 	pattern := "/v1/user/profile/move-group"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProfileMoveGroup))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SetDisabled 站点管理员：禁用 / 启用账号（禁用后无法登录）
+func (c *ProfileHTTPClientImpl) SetDisabled(ctx context.Context, in *SetDisabledReq, opts ...http.CallOption) (*SetDisabledRes, error) {
+	var out SetDisabledRes
+	pattern := "/v1/user/profile/set-disabled"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProfileSetDisabled))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

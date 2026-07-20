@@ -40,6 +40,13 @@ func TestIsDormant(t *testing.T) {
 	if !IsDormant(nil, 14, ExemptFlags{}, now) {
 		t.Fatal("nil last login dormant")
 	}
+	// 站管强制冻结 / 禁用：覆盖豁免
+	if !IsDormant(&recent, 14, ExemptFlags{IsSiteAdmin: true, ForceSync: true}, now, true) {
+		t.Fatal("admin force dormant overrides exempt")
+	}
+	if !IsDormant(&recent, 14, ExemptFlags{PaidPlan: true}, now, false, true) {
+		t.Fatal("disabled overrides exempt")
+	}
 }
 
 func TestIsPaidPlan(t *testing.T) {

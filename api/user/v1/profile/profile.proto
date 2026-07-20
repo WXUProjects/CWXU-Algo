@@ -68,10 +68,17 @@ service Profile {
       body: "*",
     };
   }
-  // 站点管理员：批量冻结不活跃（把最近活跃回拨到超过站点阈值；仍走豁免规则，登录/解除后恢复）
+  // 站点管理员：批量冻结不活跃（勾选任意用户可强制冻结，不遵循组织豁免；登录/解除后恢复）
   rpc ForceDormant (ForceDormantReq) returns (ForceDormantRes) {
     option (google.api.http) = {
       post: "/v1/user/profile/force-dormant",
+      body: "*",
+    };
+  }
+  // 站点管理员：禁用 / 启用账号（禁用后无法登录）
+  rpc SetDisabled (SetDisabledReq) returns (SetDisabledRes) {
+    option (google.api.http) = {
+      post: "/v1/user/profile/set-disabled",
       body: "*",
     };
   }
@@ -237,6 +244,10 @@ message GetListRes {
     int64 lastLoginAt = 24;
     // 当前是否处于休眠（后台定时任务已停）
     bool dormant = 25;
+    // 站管强制冻结同步（覆盖豁免）
+    bool adminForceDormant = 26;
+    // 账号是否被禁用（禁止登录）
+    bool disabled = 27;
   }
   repeated List list = 1;
   int64 total = 2;
@@ -332,10 +343,10 @@ message ClearDormantRes {
   int32 updated = 3;
 }
 
-// ForceDormantReq 批量冻结不活跃用户：回拨 last_login_at 使超过站点阈值后进入休眠
-// - userIds 非空：只处理勾选用户（仍跳过豁免）
-// - userIds 空且 inactiveDays>0：处理「最近 N 天未登录且可冻结」的全部用户
-// 豁免（站管 / sync_exempt / staff / force_sync / paid）一律跳过；登录或解除不活跃后仍按原规则
+// ForceDormantReq 批量冻结用户：回拨 last_login_at + 标记 admin_force_dormant
+// - userIds 非空：站管可冻结任意勾选用户（不遵循组织约定/始终同步等豁免；不可冻结自己）
+// - userIds 空且 inactiveDays>0：一键冻结「最近 N 天未登录」用户（同样不跳过豁免）
+// 登录或 clear-dormant 后清除强制标记，之后仍按原规则
 message ForceDormantReq {
   repeated int64 userIds = 1;
   // 一键模式：最近多少天未登录（1–365）；与 userIds 二选一，userIds 优先
@@ -347,8 +358,19 @@ message ForceDormantRes {
   string message = 2;
   // 实际冻结人数
   int32 updated = 3;
-  // 因豁免等原因跳过的人数
+  // 跳过人数（如勾选了自己）
   int32 skipped = 4;
+}
+
+// SetDisabledReq 站点管理员禁用/启用账号
+message SetDisabledReq {
+  int64 userId = 1;
+  bool disabled = 2;
+}
+
+message SetDisabledRes {
+  int64 code = 1;
+  string message = 2;
 }
 
 message GetUserIdsByGroupReq {

@@ -346,9 +346,14 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			SpiderIntervalOverridden:    v.SpiderIntervalMinOverride != nil && *v.SpiderIntervalMinOverride > 0,
 			AiSummaryIntervalOverridden: v.AISummaryIntervalMinOverride != nil && *v.AISummaryIntervalMinOverride > 0,
 			SyncExempt:                  v.SyncExempt,
+			AdminForceDormant:           v.AdminForceDormant,
+			Disabled:                    v.Disabled,
 			// 已暂停同步：优先策略；策略缺失时回落单用户判定
-			// last_login 为空且无豁免 → 不活跃休眠
+			// last_login 为空且无豁免 → 不活跃休眠；站管强制冻结/禁用覆盖豁免
 			Dormant: func() bool {
+				if v.Disabled || v.AdminForceDormant {
+					return true
+				}
 				if pol.UserID != 0 {
 					return !pol.SyncActive
 				}
@@ -717,7 +722,7 @@ func (p *ProfileService) ClearDormant(ctx context.Context, req *profile.ClearDor
 	}, nil
 }
 
-// ForceDormant 站点管理员：批量冻结不活跃（回拨最近活跃；豁免用户跳过；登录/解除后仍按原规则）
+// ForceDormant 站点管理员：强制冻结（不遵循组织约定/始终同步等豁免；登录或解除后恢复）
 func (p *ProfileService) ForceDormant(ctx context.Context, req *profile.ForceDormantReq) (*profile.ForceDormantRes, error) {
 	if !auth.VerifySiteAdmin(ctx) {
 		return nil, errors.Forbidden("权限不足", "仅站点管理员可操作")
@@ -726,13 +731,19 @@ func (p *ProfileService) ForceDormant(ctx context.Context, req *profile.ForceDor
 		return nil, errors.BadRequest("参数错误", "请求无效")
 	}
 	const maxBatch = 200
+	callerID := int64(auth.GetCurrentUserId(ctx))
 	var targetIDs []int64
 	var requested int
+	var skippedSelf int32
 	if len(req.UserIds) > 0 {
-		// 勾选模式
+		// 勾选模式：站管可冻任何人（除自己）
 		seen := make(map[int64]struct{}, len(req.UserIds))
 		for _, id := range req.UserIds {
 			if id <= 0 {
+				continue
+			}
+			if id == callerID {
+				skippedSelf++
 				continue
 			}
 			if _, ok := seen[id]; ok {
@@ -741,15 +752,18 @@ func (p *ProfileService) ForceDormant(ctx context.Context, req *profile.ForceDor
 			seen[id] = struct{}{}
 			targetIDs = append(targetIDs, id)
 		}
-		requested = len(targetIDs)
-		if requested == 0 {
+		requested = len(targetIDs) + int(skippedSelf)
+		if len(targetIDs) == 0 {
+			if skippedSelf > 0 {
+				return nil, errors.BadRequest("参数错误", "不能冻结自己的账号")
+			}
 			return nil, errors.BadRequest("参数错误", "请选择至少一个用户")
 		}
-		if requested > maxBatch {
+		if len(targetIDs) > maxBatch {
 			return nil, errors.BadRequest("参数错误", fmt.Sprintf("单次最多 %d 人", maxBatch))
 		}
 	} else {
-		// 一键模式：最近 N 天未登录且可冻结
+		// 一键模式：最近 N 天未登录（含原豁免用户）
 		days := int(req.GetInactiveDays())
 		if days <= 0 {
 			return nil, errors.BadRequest("参数错误", "请填写未登录天数，或勾选要冻结的用户")
@@ -759,32 +773,37 @@ func (p *ProfileService) ForceDormant(ctx context.Context, req *profile.ForceDor
 		if err != nil {
 			return nil, errors.InternalServer("内部错误", err.Error())
 		}
-		targetIDs = ids
-		requested = len(targetIDs)
-		if requested == 0 {
+		for _, id := range ids {
+			if id == callerID {
+				skippedSelf++
+				continue
+			}
+			targetIDs = append(targetIDs, id)
+		}
+		requested = len(ids)
+		if len(targetIDs) == 0 {
 			return &profile.ForceDormantRes{
 				Code:    0,
-				Message: fmt.Sprintf("没有符合「最近 %d 天未登录」且可冻结的用户", days),
+				Message: fmt.Sprintf("没有符合「最近 %d 天未登录」的用户", days),
 				Updated: 0,
-				Skipped: 0,
+				Skipped: skippedSelf,
 			}, nil
 		}
 	}
 
-	// 回拨到「超过站点阈值 1 天」，进入休眠；之后仍走 IsDormant / 登录唤醒 / 解除不活跃
+	// 回拨到「超过站点阈值 1 天」+ admin_force_dormant，覆盖豁免
 	siteDays := p.profileDal.GetInactiveDays(ctx)
 	at := time.Now().Add(-time.Duration(siteDays+1) * 24 * time.Hour)
-	// 先解析实际可冻用户，便于站内信与 Updated 一致
-	freezable, ferr := p.profileDal.FilterFreezableUserIDs(ctx, targetIDs)
+	existing, ferr := p.profileDal.FilterExistingUserIDs(ctx, targetIDs)
 	if ferr != nil {
 		return nil, errors.InternalServer("内部错误", ferr.Error())
 	}
-	n, err := p.profileDal.ForceDormantBatch(ctx, targetIDs, at)
+	n, err := p.profileDal.ForceDormantBatch(ctx, existing, at)
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
 	if n > 0 && p.db != nil {
-		for _, id := range freezable {
+		for _, id := range existing {
 			if id <= 0 {
 				continue
 			}
@@ -792,7 +811,7 @@ func (p *ProfileService) ForceDormant(ctx context.Context, req *profile.ForceDor
 				UserID:  uint(id),
 				Type:    notify.TypeUserFrozen,
 				Title:   "账号同步已暂停",
-				Body:    "站点管理员已将你的账号设为不活跃，自动同步与部分后台任务已暂停",
+				Body:    "站点管理员已暂停你的自动同步与部分后台任务",
 				RefType: "user",
 				RefID:   uint(id),
 			})
@@ -804,7 +823,7 @@ func (p *ProfileService) ForceDormant(ctx context.Context, req *profile.ForceDor
 	}
 	msg := fmt.Sprintf("已冻结 %d 人", n)
 	if skipped > 0 {
-		msg = fmt.Sprintf("已冻结 %d 人，跳过 %d 人（始终同步、组织永不冻结、教练/队长或付费组织等不受影响）", n, skipped)
+		msg = fmt.Sprintf("已冻结 %d 人，跳过 %d 人", n, skipped)
 	}
 	return &profile.ForceDormantRes{
 		Code:    0,
@@ -812,6 +831,46 @@ func (p *ProfileService) ForceDormant(ctx context.Context, req *profile.ForceDor
 		Updated: int32(n),
 		Skipped: skipped,
 	}, nil
+}
+
+// SetDisabled 站点管理员：禁用/启用账号（禁用后无法登录，后台同步一并暂停）
+func (p *ProfileService) SetDisabled(ctx context.Context, req *profile.SetDisabledReq) (*profile.SetDisabledRes, error) {
+	if !auth.VerifySiteAdmin(ctx) {
+		return nil, errors.Forbidden("权限不足", "仅站点管理员可操作")
+	}
+	if req == nil || req.UserId <= 0 {
+		return nil, errors.BadRequest("参数错误", "用户ID无效")
+	}
+	callerID := int64(auth.GetCurrentUserId(ctx))
+	if callerID == req.UserId {
+		return nil, errors.Forbidden("权限不足", "不能禁用自己的账号")
+	}
+	target, err := p.profileDal.GetById(ctx, req.UserId)
+	if err != nil {
+		return nil, errors.BadRequest("参数错误", "用户不存在")
+	}
+	// 禁止禁用其他站点管理员，避免锁死管理能力
+	if target.IsSiteAdmin || target.RoleID == permission.RoleAdmin {
+		return nil, errors.Forbidden("权限不足", "不能禁用站点管理员账号")
+	}
+	if err := p.profileDal.SetDisabled(ctx, req.UserId, req.Disabled); err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	msg := "已启用该账号"
+	if req.Disabled {
+		msg = "已禁用该账号，对方将无法登录"
+		if p.db != nil {
+			_ = notify.Create(p.db, notify.Row{
+				UserID:  uint(req.UserId),
+				Type:    notify.TypeUserFrozen,
+				Title:   "账号已被禁用",
+				Body:    "站点管理员已禁用你的账号，暂时无法登录。如有疑问请联系管理员。",
+				RefType: "user",
+				RefID:   uint(req.UserId),
+			})
+		}
+	}
+	return &profile.SetDisabledRes{Code: 0, Message: msg}, nil
 }
 
 // GetUserIdsByOrg 组织成员 ID（数据隔离）

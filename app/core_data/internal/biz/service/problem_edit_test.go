@@ -3,8 +3,14 @@ package service
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestNormalizeEditTags(t *testing.T) {
@@ -52,6 +58,43 @@ func TestHtmlEscapePlain(t *testing.T) {
 	}
 }
 
+func TestListProblemContributorsDistinctByFirstApprove(t *testing.T) {
+	dsn := "file:problem_contrib_" + t.Name() + "?mode=memory&cache=shared"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.ProblemEditRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	t1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	t3 := time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC)
+	rows := []model.ProblemEditRequest{
+		{ProblemID: 9, UserID: 2, Status: model.ProblemEditApproved, UpdatedAt: t2},
+		{ProblemID: 9, UserID: 1, Status: model.ProblemEditApproved, UpdatedAt: t1},
+		// 同一用户再次通过：仍只出现一次
+		{ProblemID: 9, UserID: 1, Status: model.ProblemEditApproved, UpdatedAt: t3},
+		{ProblemID: 9, UserID: 3, Status: model.ProblemEditRejected, UpdatedAt: t1},
+		{ProblemID: 8, UserID: 1, Status: model.ProblemEditApproved, UpdatedAt: t1},
+	}
+	for i := range rows {
+		if err := db.Create(&rows[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	uc := &ProblemUseCase{data: &data.Data{DB: db}}
+	ids, err := uc.ListProblemContributors(9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 2 {
+		t.Fatalf("ids=%v want [1 2] by first approve time", ids)
+	}
+}
+
 func TestNonEmptyTags(t *testing.T) {
 	if len(nonEmptyTags(model.StringArray{})) != 0 {
 		t.Fatal("empty should be empty")
@@ -63,3 +106,5 @@ func TestNonEmptyTags(t *testing.T) {
 		t.Fatal("expected one tag")
 	}
 }
+
+

@@ -168,6 +168,14 @@ message SolutionMeta {
   string brief_explanation = 4;
 }
 
+// 题面/标签审核通过后的贡献者（多人全列）
+message ProblemContributor {
+  uint32 user_id = 1;
+  string name = 2;
+  string username = 3;
+  string avatar = 4;
+}
+
 message ProblemInfo {
   uint32 id = 1;
   string platform = 2;
@@ -184,6 +192,8 @@ message ProblemInfo {
   int64 last_submitted_at = 13;
   // 当前用户对该题状态: AC / TRIED / NONE（仅 list 且传 userId 时）
   string user_status = 14;
+  // 审核通过的内容贡献者（按首次通过时间升序；详情 Get 填充，列表可空）
+  repeated ProblemContributor contributors = 15;
 }
 
 message ListProblemReq {
