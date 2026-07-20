@@ -15,6 +15,7 @@ import (
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
+	calspider "cwxu-algo/app/core_data/internal/spider/calendar"
 	"cwxu-algo/app/core_data/internal/userrpc"
 
 	"github.com/go-kratos/kratos/v2/errors"
@@ -207,7 +208,7 @@ func (s *ContestCalendarService) UpsertSub(ctx context.Context, req *contest_cal
 
 	var cal *model.ContestCalendar
 	if scope == model.CalScopePlatform {
-		plat := strings.ToLower(strings.TrimSpace(req.GetPlatform()))
+		plat := calspider.NormalizePlatform(req.GetPlatform())
 		if plat == "" {
 			return &contest_calendar.UpsertSubRes{Code: 5, Message: "platform 不能为空"}, nil
 		}
@@ -277,7 +278,7 @@ func (s *ContestCalendarService) DeleteSub(ctx context.Context, req *contest_cal
 	if scope != model.CalScopePlatform && scope != model.CalScopeContest {
 		return &contest_calendar.DeleteSubRes{Code: 2, Message: "scope 无效"}, nil
 	}
-	plat := strings.ToLower(strings.TrimSpace(req.GetPlatform()))
+	plat := calspider.NormalizePlatform(req.GetPlatform())
 	if err := s.dal.DeleteSub(int64(user.UserID), scope, plat, uint(req.GetCalendarId())); err != nil {
 		return nil, errors.InternalServer("删除失败", "服务暂时不可用")
 	}

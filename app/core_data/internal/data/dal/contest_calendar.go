@@ -73,21 +73,23 @@ func (d *ContestCalendarDal) UpsertItems(items []calspider.Item) (int, error) {
 	return len(rows), nil
 }
 
+// legacyPlatformPairs cpolar 小写 id → 爬虫规范名
+var legacyPlatformPairs = []struct{ from, to string }{
+	{"atcoder", "AtCoder"},
+	{"codeforces", "CodeForces"},
+	{"nowcoder", "NowCoder"},
+	{"leetcode", "LeetCode"},
+	{"luogu", "LuoGu"},
+	{"qoj", "QOJ"},
+}
+
 // NormalizeLegacyPlatformNames 将日历 platform 从 cpolar 小写 id 迁到爬虫常量名。
-// 若规范名行已存在则删掉小写重复行。
+// 若规范名行已存在则删掉小写重复行。同步修正订阅表 platform 字段。
 func (d *ContestCalendarDal) NormalizeLegacyPlatformNames() error {
 	if d.db == nil {
 		return nil
 	}
-	type pair struct{ from, to string }
-	for _, p := range []pair{
-		{"atcoder", "AtCoder"},
-		{"codeforces", "CodeForces"},
-		{"nowcoder", "NowCoder"},
-		{"leetcode", "LeetCode"},
-		{"luogu", "LuoGu"},
-		{"qoj", "QOJ"},
-	} {
+	for _, p := range legacyPlatformPairs {
 		// 无冲突：直接改名
 		if err := d.db.Exec(`
 			UPDATE contest_calendars AS c
@@ -101,6 +103,13 @@ func (d *ContestCalendarDal) NormalizeLegacyPlatformNames() error {
 		}
 		// 有冲突：丢掉小写重复
 		if err := d.db.Where("platform = ?", p.from).Delete(&model.ContestCalendar{}).Error; err != nil {
+			return err
+		}
+		// 订阅表：platform 级 / contest 级均对齐规范名（通知 byPlatform 按规范名匹配）
+		if err := d.db.Exec(`
+			UPDATE contest_calendar_subs
+			SET platform = ?
+			WHERE platform = ?`, p.to, p.from).Error; err != nil {
 			return err
 		}
 	}
@@ -127,7 +136,8 @@ func (d *ContestCalendarDal) List(q CalendarListQuery) ([]model.ContestCalendar,
 	now := time.Now().Unix()
 	db := d.db.Model(&model.ContestCalendar{})
 	if p := strings.TrimSpace(q.Platform); p != "" {
-		db = db.Where("platform = ?", strings.ToLower(p))
+		// 与入库一致：AtCoder / CodeForces …，禁止 ToLower（会与规范名失配）
+		db = db.Where("platform = ?", calspider.NormalizePlatform(p))
 	}
 	if kw := strings.TrimSpace(q.Keyword); kw != "" {
 		db = db.Where("name ILIKE ?", "%"+kw+"%")
