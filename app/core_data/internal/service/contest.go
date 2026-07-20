@@ -1000,7 +1000,7 @@ func cellToMap(cell model.ContestUserProblem) map[string]interface{} {
 }
 
 // handleContestCellSubmits GET ?id=|contestId=&userId=&label=&externalId=
-// 返回该用户在本场该题的赛时提交列表（供站内榜格子弹窗）。
+// 返回该用户在本场该题的提交列表（赛时 + 赛后补题，phase 区分；供站内榜格子弹窗）。
 func (c *ContestLogService) handleContestCellSubmits(ctx khttp.Context) error {
 	idStr := strings.TrimSpace(ctx.Query().Get("id"))
 	if idStr == "" {
@@ -1076,12 +1076,17 @@ func (c *ContestLogService) handleContestCellSubmits(ctx khttp.Context) error {
 		if contestField == "" || contestField == "leetcode" {
 			contestField = seed.ContestId
 		}
+		phase := s.Phase
+		if phase == "" {
+			phase = bizservice.CellSubmitPhaseContest
+		}
 		m := map[string]interface{}{
 			"id":         s.ID,
 			"submitId":   s.SubmitID,
 			"status":     s.Status,
 			"lang":       s.Lang,
 			"time":       s.Time.Unix(),
+			"phase":      phase, // contest | upsolve
 			"problem":    s.Problem,
 			"contest":    contestField,
 			"externalId": s.ExternalID,

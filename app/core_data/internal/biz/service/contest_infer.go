@@ -1087,14 +1087,21 @@ func InferContestUpsolvesForUser(db *gorm.DB, platform, contestID string, userID
 	return InferContestUpsolves(db, platform, contestID, []int64{userID}, hintTime)
 }
 
-// ContestCellSubmit 站内榜格子弹窗：单条赛时提交。
+// 格子提交时段（与榜单格子语义对齐，供弹窗区分展示）
+const (
+	CellSubmitPhaseContest = "contest" // 赛时（含短缓冲）
+	CellSubmitPhaseUpsolve = "upsolve" // 赛后补题
+)
+
+// ContestCellSubmit 站内榜格子弹窗：单条提交（赛时或赛后）。
 type ContestCellSubmit struct {
 	ID          uint
 	SubmitID    string
 	Status      string
 	Lang        string
 	Time        time.Time
-	RelativeSec *int
+	RelativeSec *int   // 仅 phase=contest：相对开赛秒
+	Phase       string // contest | upsolve
 	Problem     string
 	Contest     string
 	ExternalID  string
@@ -1258,7 +1265,9 @@ func collectWantExternalIDs(db *gorm.DB, platform, contestID, label, externalID 
 	return want, outLabel, outExt
 }
 
-// ListContestCellSubmits 按 external_id 反查 submit_logs，再筛赛时窗口。
+// ListContestCellSubmits 按 external_id 反查 submit_logs：
+// 含赛时窗 + 赛后补题窗（end 之后最多 contestUpsolveMaxHorizon，与 InferContestUpsolves 对齐）。
+// 每条 Phase 标记 contest|upsolve；relativeSec 仅赛时有。
 // label / externalID 至少一个非空；优先 externalID（与 contest_user_problems 一致）。
 // 返回按提交时间逆序（新→旧）。
 func ListContestCellSubmits(
@@ -1283,6 +1292,18 @@ func ListContestCellSubmits(
 
 	start, end = resolveCellSubmitWindow(db, platform, contestID, hintTime)
 
+	// 查询上界：赛时 end + 补题 horizon（不超过现在）
+	queryEnd := end
+	if !end.IsZero() {
+		upsolveEnd := end.Add(contestUpsolveMaxHorizon)
+		if now := time.Now(); now.Before(upsolveEnd) {
+			upsolveEnd = now
+		}
+		if upsolveEnd.After(end) {
+			queryEnd = upsolveEnd
+		}
+	}
+
 	// 大小写不敏感匹配 external_id
 	lowerExt := make([]string, 0, len(wantExt))
 	for _, e := range wantExt {
@@ -1292,7 +1313,7 @@ func ListContestCellSubmits(
 	var rows []model.SubmitLog
 	q := db.Model(&model.SubmitLog{}).
 		Where("platform = ? AND user_id = ?", platform, userID).
-		Where("time >= ? AND time <= ?", start, end)
+		Where("time >= ? AND time <= ?", start, queryEnd)
 	if platform == spider.LeetCode {
 		q = q.Where("submit_id LIKE ?", "lc-prob-%")
 	}
@@ -1371,18 +1392,25 @@ func ListContestCellSubmits(
 				}
 			}
 		}
+		// time > end 为补题；end 为零时全部视为赛时
+		phase := CellSubmitPhaseContest
+		if !end.IsZero() && r.Time.After(end) {
+			phase = CellSubmitPhaseUpsolve
+		}
 		item := ContestCellSubmit{
 			ID:         r.ID,
 			SubmitID:   r.SubmitID,
 			Status:     r.Status,
 			Lang:       r.Lang,
 			Time:       r.Time,
+			Phase:      phase,
 			Problem:    r.Problem,
 			Contest:    r.Contest,
 			ExternalID: firstNonEmpty(ext, r.ExternalID),
 			ProblemID:  r.ProblemID,
 		}
-		if !start.IsZero() && !r.Time.IsZero() {
+		// 相对赛时仅对赛时提交有意义
+		if phase == CellSubmitPhaseContest && !start.IsZero() && !r.Time.IsZero() {
 			sec := int(r.Time.Sub(start).Seconds())
 			if sec < 0 {
 				sec = 0

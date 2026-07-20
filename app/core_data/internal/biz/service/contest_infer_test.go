@@ -275,7 +275,7 @@ func TestListContestCellSubmits_AtCoderByExternalIDEndHint(t *testing.T) {
 		{Platform: spider.AtCoder, UserID: 13, SubmitID: "3", Contest: "abc467",
 			Problem: "abc467_a", ExternalID: "abc467_a", Status: "AC",
 			Time: time.Date(2026, 7, 18, 12, 13, 3, 0, time.UTC)},
-		// 赛后练习：不应计入
+		// 赛后补题：应计入并标 phase=upsolve
 		{Platform: spider.AtCoder, UserID: 13, SubmitID: "4", Contest: "abc467",
 			Problem: "abc467_a", ExternalID: "abc467_a", Status: "AC",
 			Time: time.Date(2026, 7, 18, 15, 0, 0, 0, time.UTC)},
@@ -300,15 +300,58 @@ func TestListContestCellSubmits_AtCoderByExternalIDEndHint(t *testing.T) {
 	if end.Before(endHint) {
 		t.Fatalf("end=%v want >= %v", end, endHint)
 	}
-	if len(list) != 3 {
-		t.Fatalf("list=%d want 3 (exclude practice+other), got %+v", len(list), list)
+	// 3 赛时 + 1 赛后；排除 B 题
+	if len(list) != 4 {
+		t.Fatalf("list=%d want 4 (3 contest + 1 upsolve), got %+v", len(list), list)
 	}
-	// 逆序：最新赛时提交在前
-	if list[0].Status != "AC" || list[0].SubmitID != "3" {
-		t.Fatalf("newest in-contest=%+v", list[0])
+	// 逆序：最新（补题）在前
+	if list[0].SubmitID != "4" || list[0].Phase != CellSubmitPhaseUpsolve {
+		t.Fatalf("newest should be upsolve submit4, got %+v", list[0])
 	}
-	if list[2].SubmitID != "1" {
-		t.Fatalf("oldest in-contest=%+v", list[2])
+	if list[0].RelativeSec != nil {
+		t.Fatalf("upsolve should not have relativeSec, got %v", *list[0].RelativeSec)
+	}
+	// 赛时 AC 次新
+	if list[1].Status != "AC" || list[1].SubmitID != "3" || list[1].Phase != CellSubmitPhaseContest {
+		t.Fatalf("newest in-contest=%+v", list[1])
+	}
+	if list[1].RelativeSec == nil {
+		t.Fatal("contest submit should have relativeSec")
+	}
+	if list[3].SubmitID != "1" || list[3].Phase != CellSubmitPhaseContest {
+		t.Fatalf("oldest in-contest=%+v", list[3])
+	}
+}
+
+// 赛时 WA + 赛后 AC：两条均返回且 phase 正确。
+func TestListContestCellSubmits_ContestWAThenUpsolveAC(t *testing.T) {
+	db := testInferDB(t)
+	endHint := time.Date(2026, 7, 18, 13, 40, 0, 0, time.UTC)
+	logs := []model.SubmitLog{
+		{Platform: spider.AtCoder, UserID: 42, SubmitID: "wa1", Contest: "abc467",
+			Problem: "abc467_c", ExternalID: "abc467_c", Status: "WA",
+			Time: time.Date(2026, 7, 18, 12, 30, 0, 0, time.UTC)},
+		{Platform: spider.AtCoder, UserID: 42, SubmitID: "ac2", Contest: "abc467",
+			Problem: "abc467_c", ExternalID: "abc467_c", Status: "AC",
+			Time: time.Date(2026, 7, 18, 20, 0, 0, 0, time.UTC)},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	list, _, _, err := ListContestCellSubmits(
+		db, spider.AtCoder, "abc467", 42, "C", "abc467_c", endHint,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("list=%d want 2, %+v", len(list), list)
+	}
+	if list[0].Phase != CellSubmitPhaseUpsolve || list[0].SubmitID != "ac2" {
+		t.Fatalf("upsolve first: %+v", list[0])
+	}
+	if list[1].Phase != CellSubmitPhaseContest || list[1].SubmitID != "wa1" {
+		t.Fatalf("contest second: %+v", list[1])
 	}
 }
 
