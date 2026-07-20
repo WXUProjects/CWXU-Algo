@@ -382,7 +382,8 @@ func (uc *ProblemUseCase) ReviewProblemEdit(requestID, reviewerID uint, approve 
 	return nil
 }
 
-// notifyProblemEditResult 审核结果站内信（写 user.notifications）
+// notifyProblemEditResult 审核结果站内信（写 user.notifications）。
+// 通过：额外给申请人邮箱发感谢信；驳回：仅站内信，不发邮件。
 func (uc *ProblemUseCase) notifyProblemEditResult(req *model.ProblemEditRequest, approved bool, note string, reviewerID uint) {
 	if req == nil || req.UserID == 0 {
 		return
@@ -410,6 +411,33 @@ func (uc *ProblemUseCase) notifyProblemEditResult(req *model.ProblemEditRequest,
 	}); err != nil {
 		log.Warnf("notifyProblemEditResult: %v", err)
 	}
+	// 仅审核通过发邮件感谢信；驳回不打扰邮箱
+	if !approved || uc.data == nil || uc.data.UserDB == nil {
+		return
+	}
+	html := fmt.Sprintf(
+		`<p>%s</p><p style="color:#666;font-size:13px">你可以在 GoAlgo 站内通知中查看同一条消息。</p>`,
+		htmlEscapePlain(body),
+	)
+	if !notify.EmailUser(uc.data.UserDB, req.UserID, title, html) {
+		log.Warnf("notifyProblemEditResult: approval email skipped or failed user=%d", req.UserID)
+	}
+}
+
+// htmlEscapePlain 将纯文本放入 HTML 段落（换行保留为 <br>）。
+func htmlEscapePlain(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		`"`, "&quot;",
+		"\n", "<br>",
+	)
+	return replacer.Replace(s)
 }
 
 // problemEditApprovalThankYou 生成面向贡献者的审核通过感谢信，并明确本次生效内容。

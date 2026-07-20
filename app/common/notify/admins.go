@@ -177,3 +177,52 @@ func NotifySiteAdminsWithEmail(db *gorm.DB, n AdminNotif, emailSubject, emailHTM
 	}
 	EmailConfiguredRecipients(db, subj, emailHTML)
 }
+
+// LookupUserEmail 查 users.email；无邮箱返回空串。
+func LookupUserEmail(db *gorm.DB, userID uint) string {
+	if db == nil || userID == 0 {
+		return ""
+	}
+	var email string
+	_ = db.Table("users").Select("email").Where("id = ?", userID).Scan(&email).Error
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" || !strings.Contains(email, "@") {
+		return ""
+	}
+	return email
+}
+
+// EmailUser 给指定用户发 HTML 邮件（读 users.email + 站点 SMTP）。
+// 无邮箱 / SMTP 未配 / 发送失败均静默跳过（调用方可再打日志）。
+// 返回 true 表示已成功调用 Send。
+func EmailUser(db *gorm.DB, userID uint, subject, html string) bool {
+	if db == nil || userID == 0 {
+		return false
+	}
+	to := LookupUserEmail(db, userID)
+	if to == "" {
+		return false
+	}
+	rt, err := sitesettings.LoadFromDB(db)
+	if err != nil || rt == nil {
+		return false
+	}
+	sender := rt.MailSender()
+	if sender == nil || !sender.Configured() {
+		return false
+	}
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		subject = "[GoAlgo] 通知"
+	}
+	if !strings.HasPrefix(subject, "[GoAlgo]") {
+		subject = "[GoAlgo] " + subject
+	}
+	if strings.TrimSpace(html) == "" {
+		html = "<p></p>"
+	}
+	if err := sender.Send(to, subject, html); err != nil {
+		return false
+	}
+	return true
+}

@@ -2,6 +2,18 @@ package notify
 
 import "testing"
 
+func TestLookupUserEmailEmpty(t *testing.T) {
+	if LookupUserEmail(nil, 1) != "" {
+		t.Fatal("nil db")
+	}
+	if LookupUserEmail(nil, 0) != "" {
+		t.Fatal("zero user")
+	}
+	if EmailUser(nil, 1, "s", "<p>x</p>") {
+		t.Fatal("nil db EmailUser")
+	}
+}
+
 func TestParseEmailList(t *testing.T) {
 	raw := "a@x.com, b@y.com; c@z.com\nA@x.com  invalid  d@ok.com"
 	got := ParseEmailList(raw)

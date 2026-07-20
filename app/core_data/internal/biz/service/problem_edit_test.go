@@ -45,6 +45,13 @@ func TestProblemEditApprovalThankYouListsApprovedFields(t *testing.T) {
 	}
 }
 
+func TestHtmlEscapePlain(t *testing.T) {
+	got := htmlEscapePlain(`a <b> & "x"`)
+	if !strings.Contains(got, "&lt;") || !strings.Contains(got, "&amp;") {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestNonEmptyTags(t *testing.T) {
 	if len(nonEmptyTags(model.StringArray{})) != 0 {
 		t.Fatal("empty should be empty")
