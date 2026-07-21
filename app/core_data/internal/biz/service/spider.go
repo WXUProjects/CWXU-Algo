@@ -23,17 +23,28 @@ const (
 	submitInsertBatchSize = 300
 	// globalCacheBumpMinInterval 1w 日活：组织 ver 更长节流，避免统计 thrash
 	globalCacheBumpMinInterval = 2 * time.Minute
+
+	// pendingVerdictRetryDelay 遇到 Judging/评测中后，延迟再做一次增量爬
+	pendingVerdictRetryDelay = 5 * time.Minute
+	// pendingVerdictMaxAge 仅对最近提交的 pending 触发重爬（赛后 system test 等）
+	pendingVerdictMaxAge = 24 * time.Hour
+	// pendingVerdictMaxRounds 单用户单平台连续重爬上限（5min×72≈6h），防 OJ 永久卡死
+	pendingVerdictMaxRounds = 72
+	// pendingVerdictScheduleTTL 调度占坑 TTL，略长于 delay，防并发叠多个 timer
+	pendingVerdictScheduleTTL = pendingVerdictRetryDelay + time.Minute
 )
 
 type SpiderUseCase struct {
-	data    *data.Data
-	problem *ProblemUseCase
+	data       *data.Data
+	problem    *ProblemUseCase
+	spiderTask *task.SpiderTask
 }
 
-func NewSpiderUseCase(data *data.Data, problem *ProblemUseCase) *SpiderUseCase {
+func NewSpiderUseCase(data *data.Data, problem *ProblemUseCase, spiderTask *task.SpiderTask) *SpiderUseCase {
 	return &SpiderUseCase{
-		data:    data,
-		problem: problem,
+		data:       data,
+		problem:    problem,
+		spiderTask: spiderTask,
 	}
 }
 
@@ -154,33 +165,126 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 	if err != nil {
 		return 0, err
 	}
-	if len(neu) == 0 {
-		return nRefresh, nil
-	}
-	// 异常大批量：多为首次全量或明细被清后重爬
-	if len(neu) >= 2000 {
-		log.Warnf("Spider: large new batch user=%d platform=%s fetched=%d new=%d needAll=%v",
-			userId, plat.Platform, len(tmp), len(neu), needAll)
+	var inserted int64
+	if len(neu) > 0 {
+		// 异常大批量：多为首次全量或明细被清后重爬
+		if len(neu) >= 2000 {
+			log.Warnf("Spider: large new batch user=%d platform=%s fetched=%d new=%d needAll=%v",
+				userId, plat.Platform, len(tmp), len(neu), needAll)
+		}
+
+		// 预聚合 + 写入 submit_logs（unique submit_id + OnConflict DoNothing）
+		err = uc.data.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := dal.ApplyDailyDeltas(ctx, tx, dal.AggregateSubmitDeltas(neu)); err != nil {
+				return err
+			}
+			if err := dal.ApplyUserACFromSubmits(ctx, tx, neu); err != nil {
+				return err
+			}
+			return tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "submit_id"}},
+				DoNothing: true,
+			}).CreateInBatches(&neu, submitInsertBatchSize).Error
+		})
+		if err != nil {
+			return 0, err
+		}
+		inserted = int64(len(neu))
+		spidermetrics.IncRows(inserted)
 	}
 
-	// 预聚合 + 写入 submit_logs（unique submit_id + OnConflict DoNothing）
-	err = uc.data.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := dal.ApplyDailyDeltas(ctx, tx, dal.AggregateSubmitDeltas(neu)); err != nil {
-			return err
-		}
-		if err := dal.ApplyUserACFromSubmits(ctx, tx, neu); err != nil {
-			return err
-		}
-		return tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "submit_id"}},
-			DoNothing: true,
-		}).CreateInBatches(&neu, submitInsertBatchSize).Error
-	})
-	if err != nil {
-		return 0, err
+	// 赛后/评测中：本批仍有 Judging 等非终态 → 5 分钟后增量爬，直到没有为止
+	uc.maybeSchedulePendingVerdictRetry(userId, plat.Platform, tmp)
+
+	return inserted + nRefresh, nil
+}
+
+// countRecentPendingSubmits 统计 maxAge 内仍为评测中的提交数
+func countRecentPendingSubmits(logs []model.SubmitLog, maxAge time.Duration) int {
+	if len(logs) == 0 || maxAge <= 0 {
+		return 0
 	}
-	spidermetrics.IncRows(int64(len(neu)))
-	return int64(len(neu)) + nRefresh, nil
+	cutoff := time.Now().Add(-maxAge)
+	n := 0
+	for i := range logs {
+		if !model.IsPendingSubmitStatus(logs[i].Status) {
+			continue
+		}
+		// 无时间戳时保守计入（避免漏掉赛后 system test）
+		if logs[i].Time.IsZero() || logs[i].Time.After(cutoff) {
+			n++
+		}
+	}
+	return n
+}
+
+func pendingVerdictScheduleKey(userId int64, platform string) string {
+	return fmt.Sprintf("spider:pending_retry:%d:%s", userId, platform)
+}
+
+func pendingVerdictRoundKey(userId int64, platform string) string {
+	return fmt.Sprintf("spider:pending_retry_n:%d:%s", userId, platform)
+}
+
+// maybeSchedulePendingVerdictRetry 本批拉取仍有 Judging/评测中时，5 分钟后入队增量爬。
+// 再次爬到终态则不再调度；仍有 pending 则继续，直到清空或达轮次上限。
+func (uc *SpiderUseCase) maybeSchedulePendingVerdictRetry(userId int64, platform string, fetched []model.SubmitLog) {
+	if uc == nil || userId <= 0 || platform == "" {
+		return
+	}
+	n := countRecentPendingSubmits(fetched, pendingVerdictMaxAge)
+	if n == 0 {
+		// 评测已全部出结果：清连续重爬计数
+		if uc.data != nil && uc.data.RDB != nil {
+			_ = uc.data.RDB.Del(context.Background(), pendingVerdictRoundKey(userId, platform)).Err()
+		}
+		return
+	}
+	uc.schedulePendingVerdictRetry(userId, platform, n)
+}
+
+// schedulePendingVerdictRetry 用 Redis 占坑防叠 timer，延迟后 needAll=false 增量入队。
+func (uc *SpiderUseCase) schedulePendingVerdictRetry(userId int64, platform string, pendingN int) {
+	if uc.spiderTask == nil {
+		return
+	}
+	ctx := context.Background()
+	if uc.data != nil && uc.data.RDB != nil {
+		// 已有未触发的调度则跳过（同用户同平台只挂一个 timer）
+		ok, err := uc.data.RDB.SetNX(ctx, pendingVerdictScheduleKey(userId, platform), "1", pendingVerdictScheduleTTL).Result()
+		if err != nil {
+			log.Warnf("Spider: pending-verdict schedule SetNX user=%d platform=%s: %v", userId, platform, err)
+			// Redis 异常仍尝试调度，正确性优先
+		} else if !ok {
+			log.Debugf("Spider: pending-verdict retry already scheduled user=%d platform=%s pending=%d",
+				userId, platform, pendingN)
+			return
+		}
+		// 占坑成功后再计轮次（OJ 永久卡死保护）
+		rk := pendingVerdictRoundKey(userId, platform)
+		round, err := uc.data.RDB.Incr(ctx, rk).Result()
+		if err == nil {
+			_ = uc.data.RDB.Expire(ctx, rk, pendingVerdictMaxAge).Err()
+			if round > pendingVerdictMaxRounds {
+				_ = uc.data.RDB.Del(ctx, pendingVerdictScheduleKey(userId, platform)).Err()
+				log.Warnf("Spider: pending-verdict retry cap reached user=%d platform=%s rounds=%d pending=%d",
+					userId, platform, round, pendingN)
+				return
+			}
+		}
+	}
+	log.Infof("Spider: schedule pending-verdict retry user=%d platform=%s pending=%d after %v",
+		userId, platform, pendingN, pendingVerdictRetryDelay)
+	uid, plat := userId, platform
+	time.AfterFunc(pendingVerdictRetryDelay, func() {
+		if uc.data != nil && uc.data.RDB != nil {
+			_ = uc.data.RDB.Del(context.Background(), pendingVerdictScheduleKey(uid, plat)).Err()
+		}
+		// 不 ResetDedup：若正常周期爬正 inflight，让其覆盖即可
+		res := uc.spiderTask.DoPlatform(uid, plat, false)
+		log.Infof("Spider: pending-verdict retry enqueue user=%d platform=%s published=%d deduped=%d failed=%d",
+			uid, plat, res.Published, res.Deduped, res.Failed)
+	})
 }
 
 // tryPlatformWriteLock 获取 user+platform 写入锁；短轮询等待，避免重绑后新任务与旧任务交接时直接失败。

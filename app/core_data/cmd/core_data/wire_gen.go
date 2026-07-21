@@ -63,7 +63,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, ai
 	communityService := service.NewCommunityService(dataData, register)
 	problemsetService := service.NewProblemsetService(dataData, problemUseCase, register)
 	httpServer := server.NewHTTPServer(confServer, logger, dataData, submitLogService, spiderService, statisticService, contestLogService, bulletinService, problemService, emergencyService, contestCalendarService, communityService, problemsetService)
-	spiderUseCase := service2.NewSpiderUseCase(dataData, problemUseCase)
+	spiderUseCase := service2.NewSpiderUseCase(dataData, problemUseCase, spiderTask)
 	consumer := service2.NewConsumer(rabbitMQ, spiderUseCase, spiderTask)
 	problemFetchConsumer := service2.NewProblemFetchConsumer(rabbitMQ, problemUseCase)
 	problemAnalyzeConsumer := service2.NewProblemAnalyzeConsumer(rabbitMQ, problemUseCase)

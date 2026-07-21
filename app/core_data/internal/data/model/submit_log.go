@@ -42,10 +42,20 @@ func IsAcceptedStatus(status string) bool {
 	return ok
 }
 
-// IsPendingSubmitStatus 评测中 / 无终态（可被后续爬虫回写 status）
+// IsPendingSubmitStatus 评测中 / 无终态（可被后续爬虫回写 status）。
+// 覆盖 CF TESTING/IN_QUEUE、通用 Judging、牛客「正在评测/评测中」等。
 func IsPendingSubmitStatus(status string) bool {
-	switch strings.ToUpper(strings.TrimSpace(status)) {
-	case "", "TESTING", "PENDING", "JUDGING", "IN_QUEUE":
+	s := strings.TrimSpace(status)
+	if s == "" {
+		return true
+	}
+	// 中文状态不受 ToUpper 影响，先匹配常见字面量
+	switch s {
+	case "正在评测", "评测中", "等待评测", "排队中":
+		return true
+	}
+	switch strings.ToUpper(s) {
+	case "TESTING", "PENDING", "JUDGING", "IN_QUEUE", "IN QUEUE", "WAITING", "WJ", "QUEUE":
 		return true
 	default:
 		return false

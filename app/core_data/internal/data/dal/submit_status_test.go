@@ -22,6 +22,12 @@ func TestIsPendingSubmitStatus(t *testing.T) {
 	if !model.IsPendingSubmitStatus("") || !model.IsPendingSubmitStatus("TESTING") {
 		t.Fatal("empty/TESTING pending")
 	}
+	if !model.IsPendingSubmitStatus("Judging") || !model.IsPendingSubmitStatus("JUDGING") {
+		t.Fatal("Judging should be pending")
+	}
+	if !model.IsPendingSubmitStatus("正在评测") || !model.IsPendingSubmitStatus("评测中") {
+		t.Fatal("Chinese judging should be pending")
+	}
 	if model.IsPendingSubmitStatus("OK") || model.IsPendingSubmitStatus("WA") {
 		t.Fatal("final not pending")
 	}
