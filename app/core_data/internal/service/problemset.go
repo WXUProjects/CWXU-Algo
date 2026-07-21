@@ -693,10 +693,24 @@ func (s *ProblemsetService) handleAdd(ctx khttp.Context) error {
 			return nil
 		}
 	}
+	// 回填识别摘要：前端 5s 内确认弹窗「是否为某平台某题」
+	platform, title, externalID := "", "", ""
+	if problemID > 0 {
+		var p model.Problem
+		if s.db.Select("id", "platform", "title", "external_id").First(&p, problemID).Error == nil {
+			platform = p.Platform
+			title = p.Title
+			externalID = p.ExternalID
+		}
+	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "ok",
 		"data": map[string]interface{}{
-			"problemId": problemID, "fetchTriggered": fetchTriggered,
+			"problemId":      problemID,
+			"fetchTriggered": fetchTriggered,
+			"platform":       platform,
+			"title":          title,
+			"externalId":     externalID,
 		},
 	})
 	return nil

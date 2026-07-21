@@ -25,6 +25,7 @@ import (
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/streadway/amqp"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ProblemUseCase struct {
@@ -880,12 +881,51 @@ func (uc *ProblemUseCase) UpsertProblemFromParsedForUser(parsed *ParsedProblem, 
 			existing.URL = parsed.URL
 		}
 	}
+	// 牛客比赛 URL 加题：先写 contest_problems，再 ForceEnqueueFetch
+	// （scheduleUserPriorityFetch 会从映射取比赛页作主 URL）
+	uc.ensureContestProblemMapping(parsed, existing.ID)
 	if !parsed.SkipFetch {
 		if err := uc.ForceEnqueueFetch(existing.ID, actorUID); err != nil {
 			log.Warnf("ForceEnqueueFetch id=%d: %v", existing.ID, err)
 		}
 	}
 	return &existing, nil
+}
+
+// ensureContestProblemMapping 将解析结果中的比赛映射写入 contest_problems（幂等）。
+// 供加题路径：粘贴 /acm/contest/{id}/{F} 后，nowcoderContestFetchURLs 能命中回退页。
+func (uc *ProblemUseCase) ensureContestProblemMapping(parsed *ParsedProblem, problemID uint) {
+	if uc == nil || uc.data == nil || uc.data.DB == nil || parsed == nil || problemID == 0 {
+		return
+	}
+	cid := strings.TrimSpace(parsed.ContestID)
+	label := strings.TrimSpace(parsed.ContestLabel)
+	if cid == "" || label == "" || !strings.EqualFold(parsed.Platform, spider.NowCoder) {
+		return
+	}
+	contestURL := ""
+	if len(parsed.FallbackURLs) > 0 {
+		contestURL = strings.TrimSpace(parsed.FallbackURLs[0])
+	}
+	if contestURL == "" {
+		contestURL = problem_fetch.NowCoderContestProblemURL(cid, label)
+	}
+	item := model.ContestProblem{
+		Platform:   spider.NowCoder,
+		ContestID:  cid,
+		Label:      label,
+		SortOrder:  0,
+		ExternalID: parsed.ExternalID,
+		Title:      firstNonEmpty(parsed.Title, label),
+		URL:        contestURL,
+		ProblemID:  problemID,
+	}
+	_ = uc.data.DB.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "platform"}, {Name: "contest_id"}, {Name: "label"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"external_id", "title", "url", "problem_id", "updated_at",
+		}),
+	}).Create(&item).Error
 }
 
 // ProcessAnalyze 仅 AI 打标（不爬取、不送用户代码）

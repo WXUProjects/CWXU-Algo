@@ -15,6 +15,11 @@ type ParsedProblem struct {
 	URL        string
 	SkipFetch  bool // 不可爬取（若仍入库则 SKIPPED）
 	SkipBank   bool // 不进入题库
+	// FallbackURLs 抓取候选（如牛客比赛页 /acm/contest/{id}/{A}），题库页无权限时回退
+	FallbackURLs []string
+	// ContestID / ContestLabel：来自比赛题页 URL 时写入 contest_problems 映射
+	ContestID    string
+	ContestLabel string
 }
 
 var (

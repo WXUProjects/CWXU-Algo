@@ -53,6 +53,69 @@ func TestParseProblemURL_AllPlatforms(t *testing.T) {
 	}
 }
 
+func TestSanitizeProblemURLRaw_Noise(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want string // path 子串
+	}{
+		{
+			"题目：https://codeforces.com/contest/1791/problem/A?locale=en&utm=1#submit 请看",
+			"/contest/1791/problem/A",
+		},
+		{
+			"[A](https://ac.nowcoder.com/acm/contest/137561/F?from=home)",
+			"/acm/contest/137561/F",
+		},
+		{
+			"  https://www.luogu.com.cn/problem/P1001/  ",
+			"/problem/P1001",
+		},
+	}
+	for _, tc := range cases {
+		got := sanitizeProblemURLRaw(tc.raw)
+		if !strings.Contains(got, tc.want) {
+			t.Fatalf("sanitize %q → %q want contain %s", tc.raw, got, tc.want)
+		}
+		if strings.Contains(got, "?") || strings.Contains(got, "#") {
+			t.Fatalf("should strip query/fragment: %s", got)
+		}
+	}
+}
+
+func TestParseProblemURL_WithQueryNoise(t *testing.T) {
+	p, err := ParseProblemURL("请看这题 https://codeforces.com/contest/1791/problem/A?locale=en 谢谢")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ExternalID != "1791A" {
+		t.Fatalf("ext=%s", p.ExternalID)
+	}
+}
+
+// 牛客比赛题页：同步拉 problem-list 解析数字 problemId（live，需外网）。
+func TestParseProblemURL_NowCoderContestLive(t *testing.T) {
+	raw := "https://ac.nowcoder.com/acm/contest/137561/F"
+	p, err := ParseProblemURL(raw)
+	if err != nil {
+		t.Skipf("live nowcoder unavailable: %v", err)
+	}
+	if p.Platform != "NowCoder" {
+		t.Fatalf("platform=%s", p.Platform)
+	}
+	if p.ExternalID != "319875" {
+		t.Fatalf("ext=%s want 319875 (contest 137561 F)", p.ExternalID)
+	}
+	if !strings.Contains(p.URL, "/acm/problem/319875") {
+		t.Fatalf("bank url=%s", p.URL)
+	}
+	if p.ContestID != "137561" || !strings.EqualFold(p.ContestLabel, "F") {
+		t.Fatalf("contest map=%s/%s", p.ContestID, p.ContestLabel)
+	}
+	if len(p.FallbackURLs) == 0 || !strings.Contains(p.FallbackURLs[0], "/acm/contest/137561/") {
+		t.Fatalf("fallback=%v", p.FallbackURLs)
+	}
+}
+
 func TestParseProblemIdentity_AllPlatforms(t *testing.T) {
 	cases := []struct {
 		name     string
