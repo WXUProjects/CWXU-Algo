@@ -101,7 +101,8 @@ func (uc *ProblemUseCase) writeProfileCache(ctx context.Context, userID int64, s
 	_ = uc.data.RDB.Set(ctx, userProfileLatestKey(userID), b, userProfileLatestTTL).Err()
 }
 
-// EnqueueUserProfileRebuild 异步重建（爬虫成功 / 读 miss / cron）
+// EnqueueUserProfileRebuild 异步重建（绑平台/爬虫 / 空雷达补刷 / 每日 cron）
+// 走 user_profile 队列，不阻塞 HTTP。
 func (uc *ProblemUseCase) EnqueueUserProfileRebuild(userID int64) {
 	if userID <= 0 || uc.profileTask == nil {
 		return
@@ -109,29 +110,36 @@ func (uc *ProblemUseCase) EnqueueUserProfileRebuild(userID int64) {
 	_ = uc.profileTask.Do(userID)
 }
 
-// BuildAndCacheUserProfile 同步计算并写缓存（HTTP 即时 / MQ consumer）
-// 同一 user 并发只跑一遍（singleflight）。
+// BuildAndCacheUserProfile MQ consumer 用：先全量重建 user_tag_ac，再算画像写缓存。
+// 重 JOIN 只在队列里跑；key 与 HTTP 轻量路径分离，避免抢到「未重建」的空结果。
 func (uc *ProblemUseCase) BuildAndCacheUserProfile(userID int64) error {
 	if userID <= 0 {
 		return fmt.Errorf("invalid user_id")
 	}
-	_, err, _ := profileBuildSF.Do(fmt.Sprintf("up:%d", userID), func() (interface{}, error) {
+	_, err, _ := profileBuildSF.Do(fmt.Sprintf("up-rebuild:%d", userID), func() (interface{}, error) {
+		ctx := context.Background()
+		// 雷达预聚合从 user_ac_problems×problem_tags 重算，保证「做过有标签的题就一定有雷达」
+		if e := dal.RebuildUserTagACForUser(ctx, uc.data.DB, userID); e != nil {
+			log.Warnf("user_profile rebuild tag_ac user=%d: %v", userID, e)
+			// 预聚合失败仍尝试用旧表算画像，避免整任务失败无限重试卡死
+		}
 		snap, e := uc.computeUserProfile(userID)
 		if e != nil {
 			return nil, e
 		}
-		uc.writeProfileCache(context.Background(), userID, snap)
+		uc.writeProfileCache(ctx, userID, snap)
 		return snap, nil
 	})
 	return err
 }
 
-// buildUserProfileNow 即时计算；成功返回快照，失败返回 error
+// buildUserProfileNow HTTP 冷启动：只读现有预聚合，不做重 JOIN（避免拖垮接口）。
+// 若雷达为空且确有标签题，由 maybeEnqueueEmptyRadarHeal 入队后台补齐。
 func (uc *ProblemUseCase) buildUserProfileNow(userID int64) (*UserProfileSnapshot, error) {
 	if userID <= 0 {
 		return nil, fmt.Errorf("invalid user_id")
 	}
-	v, err, _ := profileBuildSF.Do(fmt.Sprintf("up:%d", userID), func() (interface{}, error) {
+	v, err, _ := profileBuildSF.Do(fmt.Sprintf("up-light:%d", userID), func() (interface{}, error) {
 		snap, e := uc.computeUserProfile(userID)
 		if e != nil {
 			return nil, e
@@ -146,7 +154,26 @@ func (uc *ProblemUseCase) buildUserProfileNow(userID int64) (*UserProfileSnapsho
 	return snap, nil
 }
 
-// UserProfile 读路径：缓存优先；从未处理过则本次请求立即计算并落缓存
+// maybeEnqueueEmptyRadarHeal 雷达为空且做过有标签的题 → 入队补刷（不挡响应）
+func (uc *ProblemUseCase) maybeEnqueueEmptyRadarHeal(userID int64, snap *UserProfileSnapshot) {
+	if userID <= 0 || snap == nil || len(snap.Radar) > 0 {
+		return
+	}
+	go func(uid int64) {
+		has, err := dal.UserHasTaggedAC(context.Background(), uc.data.DB, uid)
+		if err != nil {
+			log.Warnf("user_profile empty-radar check user=%d: %v", uid, err)
+			return
+		}
+		if !has {
+			return
+		}
+		log.Infof("user_profile empty-radar heal enqueue user=%d", uid)
+		uc.EnqueueUserProfileRebuild(uid)
+	}(userID)
+}
+
+// UserProfile 读路径：缓存优先；HTTP 永不做 tag_ac 重 JOIN；空雷达自动入队补刷
 func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	Tag     string
 	Score   float64
@@ -162,28 +189,21 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	ver := uc.profileVer(ctx, userID)
 
 	if snap, ok := uc.readProfileCache(ctx, userProfileCacheKey(userID, ver)); ok {
+		uc.maybeEnqueueEmptyRadarHeal(userID, snap)
 		return unpackProfile(snap)
 	}
-	// ver 失效：先返回 latest，并立即后台重算（不挡本次响应）
+	// ver 失效：先返回 latest，并后台入队重算（不挡本次响应）
 	if snap, ok := uc.readProfileCache(ctx, userProfileLatestKey(userID)); ok {
-		go func(uid int64) {
-			if e := uc.BuildAndCacheUserProfile(uid); e != nil {
-				log.Warnf("user_profile refresh user=%d: %v", uid, e)
-				// 失败再入队，由 MQ 重试
-				uc.EnqueueUserProfileRebuild(uid)
-			} else if uc.profileTask != nil {
-				uc.profileTask.ClearPending(uid)
-			}
-		}(userID)
+		uc.EnqueueUserProfileRebuild(userID)
+		uc.maybeEnqueueEmptyRadarHeal(userID, snap)
 		return unpackProfile(snap)
 	}
 
-	// 从未处理：有人请求就立刻算完再返回（singleflight 防打穿）
+	// 从未处理：轻量即时算（读预聚合）；重 JOIN 交给队列
 	start := time.Now()
 	snap, e := uc.buildUserProfileNow(userID)
 	if e != nil {
 		log.Errorf("user_profile on-demand user=%d: %v", userID, e)
-		// 同步失败则入队，下次可命中
 		uc.EnqueueUserProfileRebuild(userID)
 		err = e
 		return
@@ -191,6 +211,7 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	if uc.profileTask != nil {
 		uc.profileTask.ClearPending(userID)
 	}
+	uc.maybeEnqueueEmptyRadarHeal(userID, snap)
 	log.Infof("user_profile on-demand user=%d cost=%s", userID, time.Since(start).Round(time.Millisecond))
 	return unpackProfile(snap)
 }

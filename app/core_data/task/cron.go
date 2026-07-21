@@ -403,8 +403,8 @@ func (t *CronTask) runDailySummaryTick() {
 		len(userIds), len(seen), enqueued, weekly, isMonday)
 }
 
-// runUserProfilePrewarm 将有 AC 的用户入队画像预计算。
-// full=true：全量 DISTINCT user_id；false：最多 500 人（启动/补漏）。
+// runUserProfilePrewarm 将有 AC 的用户入队画像预计算（队列内会 RebuildUserTagAC）。
+// full=true：每日全量；false：仅空雷达补漏（有 AC 但 user_tag_ac 为空）。
 func (t *CronTask) runUserProfilePrewarm(full bool) {
 	if t.profile == nil || t.db == nil {
 		return
@@ -412,6 +412,8 @@ func (t *CronTask) runUserProfilePrewarm(full bool) {
 	lockKind := "user_profile"
 	if full {
 		lockKind = "user_profile_full"
+	} else {
+		lockKind = "user_profile_empty_heal"
 	}
 	ttl := 10 * time.Minute
 	if full {
@@ -421,13 +423,20 @@ func (t *CronTask) runUserProfilePrewarm(full bool) {
 		return
 	}
 	var userIDs []int64
-	q := t.db.Model(&model.UserACProblem{}).Distinct("user_id").Order("user_id")
-	if !full {
-		q = q.Limit(500)
-	}
-	if err := q.Pluck("user_id", &userIDs).Error; err != nil {
-		log.Errorf("CronTask user_profile: pluck users: %v", err)
-		return
+	if full {
+		q := t.db.Model(&model.UserACProblem{}).Distinct("user_id").Order("user_id")
+		if err := q.Pluck("user_id", &userIDs).Error; err != nil {
+			log.Errorf("CronTask user_profile: pluck users: %v", err)
+			return
+		}
+	} else {
+		// 空雷达补漏：有过题但 user_tag_ac 为空
+		ids, err := listUserIDsWithACButEmptyTagAC(t.db, 800)
+		if err != nil {
+			log.Errorf("CronTask user_profile empty-heal: %v", err)
+			return
+		}
+		userIDs = ids
 	}
 	// 过滤休眠用户：仅 SyncActive 入队画像预热
 	policies := t.fetchPolicies(userIDs)
@@ -444,6 +453,28 @@ func (t *CronTask) runUserProfilePrewarm(full bool) {
 	pub, dedup, fail := t.profile.DoBatch(active)
 	log.Infof("CronTask user_profile prewarm full=%v candidates=%d active=%d dormant_skip=%d published=%d dedup=%d failed=%d",
 		full, len(userIDs), len(active), skipped, pub, dedup, fail)
+}
+
+// listUserIDsWithACButEmptyTagAC cron 用（避免 task 包循环依赖 dal）
+func listUserIDsWithACButEmptyTagAC(db *gorm.DB, limit int) ([]int64, error) {
+	if db == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 500
+	}
+	var ids []int64
+	err := db.Raw(`
+		SELECT DISTINCT u.user_id
+		FROM user_ac_problems u
+		WHERE NOT EXISTS (
+			SELECT 1 FROM user_tag_ac t
+			WHERE t.user_id = u.user_id AND t.count > 0
+		)
+		ORDER BY u.user_id
+		LIMIT ?
+	`, limit).Scan(&ids).Error
+	return ids, err
 }
 
 // Do 启动 cron 并阻塞到 Stop，供 runForever 使用（只应有一个存活实例）。
@@ -482,7 +513,7 @@ func (t *CronTask) Do() {
 	_, _ = c.AddFunc("*/5 * * * *", func() {
 		t.runCalendarNotify()
 	})
-	// 画像预热：凌晨 3:15（低峰）+ 每 6 小时补漏
+	// 画像/雷达：每天 03:15 全量刷新一次；每 6h 只补「有 AC 但雷达空」的用户
 	_, _ = c.AddFunc("15 3 * * *", func() {
 		t.runUserProfilePrewarm(true)
 	})
@@ -499,7 +530,7 @@ func (t *CronTask) Do() {
 		}
 		t.runCalendarCrawl()
 	}()
-	// 启动约 45s 后轻量预热一批画像（不阻塞启动）
+	// 启动约 45s 后跑一轮空雷达补漏（不阻塞启动）
 	go func() {
 		time.Sleep(45 * time.Second)
 		select {
@@ -515,7 +546,7 @@ func (t *CronTask) Do() {
 	stopCh := t.stopCh
 	t.mu.Unlock()
 
-	log.Infof("CronTask started: spider/summary 5m; calendar 12h; user_profile 03:15 + 6h")
+	log.Infof("CronTask started: spider/summary 5m; calendar 12h; user_profile daily 03:15 + empty-radar heal 6h")
 
 	defer func() {
 		t.mu.Lock()

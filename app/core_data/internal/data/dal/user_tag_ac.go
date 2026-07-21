@@ -3,6 +3,7 @@ package dal
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"cwxu-algo/app/core_data/internal/data/model"
 
@@ -47,19 +48,9 @@ func AdjustUserTagACForProblemTagsChange(ctx context.Context, db *gorm.DB, probl
 		return nil
 	}
 
-	// AC 过该题的用户
-	var userIDs []int64
-	if err := db.WithContext(ctx).Model(&model.UserProblemStatus{}).
-		Where("problem_id = ? AND status = ?", problemID, model.UserProblemStatusAC).
-		Pluck("user_id", &userIDs).Error; err != nil {
+	userIDs, err := listUsersACProblem(ctx, db, problemID)
+	if err != nil {
 		return err
-	}
-	if len(userIDs) == 0 {
-		// 回退：从 user_ac_problems p:id
-		key := fmt.Sprintf("p:%d", problemID)
-		_ = db.WithContext(ctx).Model(&model.UserACProblem{}).
-			Where("problem_key = ?", key).
-			Pluck("user_id", &userIDs).Error
 	}
 	if len(userIDs) == 0 {
 		return nil
@@ -82,6 +73,50 @@ func AdjustUserTagACForProblemTagsChange(ctx context.Context, db *gorm.DB, probl
 		}
 	}
 	return nil
+}
+
+// listUsersACProblem 找出 AC 过该题的用户：status 表 + user_ac_problems 的 p: 与 e: 键
+func listUsersACProblem(ctx context.Context, db *gorm.DB, problemID uint) ([]int64, error) {
+	seen := map[int64]struct{}{}
+	var out []int64
+	add := func(ids []int64) {
+		for _, id := range ids {
+			if id <= 0 {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+
+	var fromStatus []int64
+	if err := db.WithContext(ctx).Model(&model.UserProblemStatus{}).
+		Where("problem_id = ? AND status = ?", problemID, model.UserProblemStatusAC).
+		Pluck("user_id", &fromStatus).Error; err != nil {
+		return nil, err
+	}
+	add(fromStatus)
+
+	keys := []string{fmt.Sprintf("p:%d", problemID)}
+	var p model.Problem
+	if err := db.WithContext(ctx).Select("id", "platform", "external_id").First(&p, problemID).Error; err == nil {
+		ext := strings.TrimSpace(p.ExternalID)
+		plat := strings.TrimSpace(p.Platform)
+		if ext != "" && plat != "" {
+			keys = append(keys, fmt.Sprintf("e:%s:%s", plat, ext))
+		}
+	}
+	var fromAC []int64
+	if err := db.WithContext(ctx).Model(&model.UserACProblem{}).
+		Where("problem_key IN ?", keys).
+		Pluck("user_id", &fromAC).Error; err != nil {
+		return out, err
+	}
+	add(fromAC)
+	return out, nil
 }
 
 func diffStringSets(old, neu []string) (removed, added []string) {
@@ -153,6 +188,100 @@ func ListUserTagAC(ctx context.Context, db *gorm.DB, userID int64, limit int) ([
 		}{r.Tag, r.Count})
 	}
 	return out, err
+}
+
+// CountUserTagAC 用户雷达标签行数（count>0）
+func CountUserTagAC(ctx context.Context, db *gorm.DB, userID int64) (int64, error) {
+	if db == nil || userID <= 0 {
+		return 0, nil
+	}
+	var n int64
+	err := db.WithContext(ctx).Model(&model.UserTagAC{}).
+		Where("user_id = ? AND count > 0", userID).
+		Count(&n).Error
+	return n, err
+}
+
+// UserHasTaggedAC 用户是否有「已 AC 且题库有标签」的题（用于判断雷达是否应非空）
+func UserHasTaggedAC(ctx context.Context, db *gorm.DB, userID int64) (bool, error) {
+	if db == nil || userID <= 0 {
+		return false, nil
+	}
+	var exists bool
+	err := db.WithContext(ctx).Raw(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM user_ac_problems u
+			JOIN problems p ON (
+				u.problem_key = 'p:' || p.id::text
+				OR (
+					p.external_id IS NOT NULL AND btrim(p.external_id) <> ''
+					AND u.problem_key = 'e:' || p.platform || ':' || p.external_id
+				)
+			)
+			JOIN problem_tags pt ON pt.problem_id = p.id
+			WHERE u.user_id = ?
+			LIMIT 1
+		)
+	`, userID).Scan(&exists).Error
+	return exists, err
+}
+
+// ListUserIDsWithACButEmptyTagAC 有过题但雷达预聚合为空的用户（补刷候选，限 limit）
+func ListUserIDsWithACButEmptyTagAC(ctx context.Context, db *gorm.DB, limit int) ([]int64, error) {
+	if db == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 500
+	}
+	var ids []int64
+	err := db.WithContext(ctx).Raw(`
+		SELECT DISTINCT u.user_id
+		FROM user_ac_problems u
+		WHERE NOT EXISTS (
+			SELECT 1 FROM user_tag_ac t
+			WHERE t.user_id = u.user_id AND t.count > 0
+		)
+		ORDER BY u.user_id
+		LIMIT ?
+	`, limit).Scan(&ids).Error
+	return ids, err
+}
+
+// RebuildUserTagACForUser 按 user_ac_problems × problem_tags 全量重建该用户雷达预聚合。
+// 修复：爬虫写 AC 时 problem_id 多为空 → 未走 IncUserTagAC；绑题后也未补写；
+// 题已有标签时不会触发标签差分，导致雷达长期为空。本函数可在 MQ 画像任务中安全调用。
+func RebuildUserTagACForUser(ctx context.Context, db *gorm.DB, userID int64) error {
+	if db == nil || userID <= 0 {
+		return nil
+	}
+	if !db.Migrator().HasTable(&model.UserTagAC{}) || !db.Migrator().HasTable(&model.ProblemTag{}) {
+		return nil
+	}
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ?", userID).Delete(&model.UserTagAC{}).Error; err != nil {
+			return err
+		}
+		// 不强制 COMPLETED：人工打标/部分完成态只要 problem_tags 有行即计入
+		res := tx.Exec(`
+			INSERT INTO user_tag_ac (user_id, tag, count)
+			SELECT u.user_id, pt.tag, COUNT(DISTINCT p.id)::bigint
+			FROM user_ac_problems u
+			JOIN problems p ON (
+				u.problem_key = 'p:' || p.id::text
+				OR (
+					p.external_id IS NOT NULL AND btrim(p.external_id) <> ''
+					AND u.problem_key = 'e:' || p.platform || ':' || p.external_id
+				)
+			)
+			JOIN problem_tags pt ON pt.problem_id = p.id
+			WHERE u.user_id = ?
+			  AND pt.tag IS NOT NULL AND btrim(pt.tag) <> ''
+			GROUP BY u.user_id, pt.tag
+		`, userID)
+		return res.Error
+	})
 }
 
 
