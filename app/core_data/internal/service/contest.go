@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -694,8 +695,8 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		} else if memberIDs != nil {
 			scope = fmt.Sprintf("org%d:n%d", resolvedOrg, len(memberIDs))
 		}
-		// v3：直接从 submit_logs 推导补题及纯补题用户
-		boardCacheKey = fmt.Sprintf("core:contest:board:v3:%s:%s:%s:v%s",
+		// v4：仅补题用户展示序按补题 AC 数 / 最后补题时间
+		boardCacheKey = fmt.Sprintf("core:contest:board:v4:%s:%s:%s:v%s",
 			seed.Platform, seed.ContestId, scope, ver)
 		if b, e := c.rdb.Get(reqCtx, boardCacheKey).Bytes(); e == nil && len(b) > 0 {
 			var cached map[string]interface{}
@@ -810,6 +811,9 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		hasDetail    bool
 		cellMaps     []map[string]interface{}
 		isContestant bool
+		// 仅用于「纯补题」展示排序：补题 AC 数、最后一次补题通过时间（unix）
+		upsolveSolved int
+		upsolveLastAt int64
 	}
 	// 全场是否有任意逐题明细（含补题；无则前端只展示 AC 题数，不画空格子）
 	boardHasDetail := false
@@ -844,6 +848,8 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		solved := 0
 		penalty := 0
 		score := 0
+		upsolveSolved := 0
+		var upsolveLastAt int64
 		if scoring == "leetcode" {
 			score = l.AcCount // 力扣 ac_count 存 score
 		}
@@ -860,6 +866,14 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 								penalty += *cell.RelativeSec + cell.Attempts*penaltyPerWrong
 							} else {
 								penalty += cell.Attempts * penaltyPerWrong
+							}
+						}
+					}
+					if cell.Status == model.ContestCellUpsolve {
+						upsolveSolved++
+						if cell.FirstACAt != nil {
+							if t := cell.FirstACAt.Unix(); t > upsolveLastAt {
+								upsolveLastAt = t
 							}
 						}
 					}
@@ -900,6 +914,26 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 							score += cell.ScoreDelta
 						}
 					}
+					if cell.Status == model.ContestCellUpsolve {
+						upsolveSolved++
+						if cell.FirstACAt != nil {
+							if t := cell.FirstACAt.Unix(); t > upsolveLastAt {
+								upsolveLastAt = t
+							}
+						}
+					}
+				}
+			}
+		} else {
+			// 无题列铺格时仍统计补题 AC，供纯补题用户展示排序
+			for _, cell := range userCells {
+				if cell.Status == model.ContestCellUpsolve {
+					upsolveSolved++
+					if cell.FirstACAt != nil {
+						if t := cell.FirstACAt.Unix(); t > upsolveLastAt {
+							upsolveLastAt = t
+						}
+					}
 				}
 			}
 		}
@@ -912,28 +946,68 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		drafts = append(drafts, rowDraft{
 			log: l, solved: solved, penalty: penalty, score: score,
 			hasDetail: rowHasDetail, cellMaps: cellMaps, isContestant: contestantIDs[l.UserID],
+			upsolveSolved: upsolveSolved, upsolveLastAt: upsolveLastAt,
 		})
 	}
 
 	if allZero && scoring == "icpc" {
-		// 按 solved desc, penalty asc
-		for i := 0; i < len(drafts); i++ {
-			for j := i + 1; j < len(drafts); j++ {
-				if drafts[j].solved > drafts[i].solved ||
-					(drafts[j].solved == drafts[i].solved && drafts[j].penalty < drafts[i].penalty) {
-					drafts[i], drafts[j] = drafts[j], drafts[i]
-				}
+		// 赛时本地序：按 solved desc, penalty asc（仅赛时选手之间）
+		sort.SliceStable(drafts, func(i, j int) bool {
+			a, b := drafts[i], drafts[j]
+			if a.isContestant != b.isContestant {
+				return a.isContestant
 			}
-		}
+			if !a.isContestant {
+				return false
+			}
+			if a.solved != b.solved {
+				return a.solved > b.solved
+			}
+			return a.penalty < b.penalty
+		})
 	}
 
+	// 展示序（非名次）：赛时选手保持上方原序；仅补题用户按补题 AC 数 desc，
+	// 相同则谁最后一次补题通过更早谁在前（无时间的排后）。
+	sort.SliceStable(drafts, func(i, j int) bool {
+		a, b := drafts[i], drafts[j]
+		if a.isContestant != b.isContestant {
+			return a.isContestant
+		}
+		if a.isContestant {
+			return false // 稳定保持赛时序
+		}
+		if a.upsolveSolved != b.upsolveSolved {
+			return a.upsolveSolved > b.upsolveSolved
+		}
+		if a.upsolveLastAt != b.upsolveLastAt {
+			if a.upsolveLastAt == 0 {
+				return false
+			}
+			if b.upsolveLastAt == 0 {
+				return true
+			}
+			return a.upsolveLastAt < b.upsolveLastAt
+		}
+		return a.log.UserID < b.log.UserID
+	})
+
 	rows := make([]map[string]interface{}, 0, len(drafts))
-	for i, d := range drafts {
+	// 名次：赛时选手仍用官方 rank / 本地 1..n；仅补题用户不赋展示名次（前端显示 —）
+	contestantOrd := 0
+	for _, d := range drafts {
 		u := nameMap[d.log.UserID]
 		rankOff := d.log.Rank
 		rankLocal := rankOff
-		if rankLocal <= 0 {
-			rankLocal = i + 1
+		if d.isContestant {
+			contestantOrd++
+			if rankLocal <= 0 {
+				rankLocal = contestantOrd
+			}
+		} else {
+			// 纯补题：不参与名次编号
+			rankOff = 0
+			rankLocal = 0
 		}
 		// 无明细时不铺空格子，避免「AC 了 6 题但格子全空」的错觉
 		cells := d.cellMaps
