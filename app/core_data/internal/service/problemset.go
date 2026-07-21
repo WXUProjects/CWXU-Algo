@@ -66,6 +66,7 @@ func RegisterProblemsetRoutes(srv *khttp.Server, s *ProblemsetService) {
 	r.POST("/v1/core/problemset/add", s.handleAdd)
 	r.POST("/v1/core/problemset/add-manual", s.handleAddManual)
 	r.POST("/v1/core/problemset/remove", s.handleRemove)
+	r.POST("/v1/core/problemset/reorder", s.handleReorder)
 	r.POST("/v1/core/problemset/like", s.handleLike)
 	r.POST("/v1/core/problemset/favorite", s.handleFavorite)
 	r.GET("/v1/core/problemset/favorites", s.handleFavorites)
@@ -834,6 +835,86 @@ func (s *ProblemsetService) handleRemove(ctx khttp.Context) error {
 		_ = s.db.Model(&model.Problemset{}).
 			Where("id = ? AND item_count > 0", ps.ID).
 			UpdateColumn("item_count", gorm.Expr("item_count - 1")).Error
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "ok"})
+	return nil
+}
+
+// handleReorder 拖拽排序：按 ids（题单项 id）顺序重写 sort_order 为 0,1,2…
+func (s *ProblemsetService) handleReorder(ctx khttp.Context) error {
+	uid := s.viewerID(ctx)
+	if uid == 0 {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
+		return nil
+	}
+	var req struct {
+		ProblemsetID uint   `json:"problemsetId"`
+		IDs          []uint `json:"ids"`
+	}
+	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ProblemsetID == 0 || len(req.IDs) == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
+		return nil
+	}
+	// 去重保序
+	seen := make(map[uint]struct{}, len(req.IDs))
+	ids := make([]uint, 0, len(req.IDs))
+	for _, id := range req.IDs {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "顺序列表不能为空"})
+		return nil
+	}
+	var ps model.Problemset
+	if err := s.db.First(&ps, req.ProblemsetID).Error; err != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题单不存在"})
+		return nil
+	}
+	if ps.OwnerID != uid {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能修改自己的题单"})
+		return nil
+	}
+	// 校验 ids 均属该题单，且覆盖当前全部题单项（防止半量乱序）
+	var existing []model.ProblemsetItem
+	if err := s.db.Where("problemset_id = ?", ps.ID).Find(&existing).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "读取题单项失败"})
+		return nil
+	}
+	existSet := make(map[uint]struct{}, len(existing))
+	for _, it := range existing {
+		existSet[it.ID] = struct{}{}
+	}
+	if len(ids) != len(existSet) {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "顺序列表与题单项不一致"})
+		return nil
+	}
+	for _, id := range ids {
+		if _, ok := existSet[id]; !ok {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "存在不属于该题单的项"})
+			return nil
+		}
+	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		for i, id := range ids {
+			if err := tx.Model(&model.ProblemsetItem{}).
+				Where("id = ? AND problemset_id = ?", id, ps.ID).
+				Update("sort_order", i).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&model.Problemset{}).Where("id = ?", ps.ID).
+			UpdateColumn("updated_at", time.Now()).Error
+	})
+	if err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "排序保存失败"})
+		return nil
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "ok"})
 	return nil

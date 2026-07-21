@@ -241,6 +241,68 @@ func TestProblemsetCreateVisibilityAndLike(t *testing.T) {
 	_ = s // keep service used
 }
 
+func TestProblemsetItemReorder(t *testing.T) {
+	_, db := setupProblemsetTest(t)
+	ps := model.Problemset{
+		OwnerID: 1, Title: "排序", Kind: model.ProblemsetKindCustom,
+		Visibility: model.ProblemsetVisPrivate, ItemCount: 3,
+	}
+	if err := db.Create(&ps).Error; err != nil {
+		t.Fatal(err)
+	}
+	probs := []model.Problem{
+		{Platform: "LuoGu", ExternalID: "P1", Title: "A", Status: "COMPLETED"},
+		{Platform: "LuoGu", ExternalID: "P2", Title: "B", Status: "COMPLETED"},
+		{Platform: "LuoGu", ExternalID: "P3", Title: "C", Status: "COMPLETED"},
+	}
+	for i := range probs {
+		if err := db.Create(&probs[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	items := []model.ProblemsetItem{
+		{ProblemsetID: ps.ID, ProblemID: probs[0].ID, SortOrder: 0},
+		{ProblemsetID: ps.ID, ProblemID: probs[1].ID, SortOrder: 1},
+		{ProblemsetID: ps.ID, ProblemID: probs[2].ID, SortOrder: 2},
+	}
+	for i := range items {
+		if err := db.Create(&items[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 新顺序：C, A, B
+	order := []uint{items[2].ID, items[0].ID, items[1].ID}
+	err := db.Transaction(func(tx *gorm.DB) error {
+		for i, id := range order {
+			if err := tx.Model(&model.ProblemsetItem{}).
+				Where("id = ? AND problemset_id = ?", id, ps.ID).
+				Update("sort_order", i).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []model.ProblemsetItem
+	if err := db.Where("problemset_id = ?", ps.ID).Order("sort_order ASC, id ASC").Find(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len=%d", len(got))
+	}
+	wantPIDs := []uint{probs[2].ID, probs[0].ID, probs[1].ID}
+	for i, it := range got {
+		if it.SortOrder != i {
+			t.Fatalf("idx %d sortOrder=%d", i, it.SortOrder)
+		}
+		if it.ProblemID != wantPIDs[i] {
+			t.Fatalf("idx %d problemId=%d want %d", i, it.ProblemID, wantPIDs[i])
+		}
+	}
+}
+
 func TestApplyUserProblemStatusAC_RemovesTodo(t *testing.T) {
 	_, db := setupProblemsetTest(t)
 	uid := int64(9)
