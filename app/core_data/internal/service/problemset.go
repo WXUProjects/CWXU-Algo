@@ -319,6 +319,12 @@ func (s *ProblemsetService) handleGet(ctx khttp.Context) error {
 			row["url"] = p.URL
 			row["difficulty"] = p.Difficulty
 			row["status"] = p.Status
+			// 标签：题库有则带上，供题单页展示/开关
+			if len(p.Tags) > 0 {
+				row["tags"] = []string(p.Tags)
+			} else {
+				row["tags"] = []string{}
+			}
 		}
 		if st, ok := statusMap[it.ProblemID]; ok {
 			row["userStatus"] = st

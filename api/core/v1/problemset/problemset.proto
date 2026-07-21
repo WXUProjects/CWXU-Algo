@@ -61,6 +61,8 @@ message ProblemsetItem {
   string difficulty = 9;
   string status = 10;
   string userStatus = 11;
+  // 题库标签（无则空数组）；题单详情展示用
+  repeated string tags = 12;
 }
 
 message ProblemsetInfo {
