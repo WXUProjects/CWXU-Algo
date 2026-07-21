@@ -1,6 +1,10 @@
 # GoAlgo SEO — 首版策略：公开分享页一律 SEO HTML（不靠 UA）
 # Requires backend: GET /v1/user/seo/html（X-Original-URI）+ /v1/user/seo/sitemap.xml
 # Replace 127.0.0.1:8080 with your API gateway.
+#
+# nginx 规则：正则 location（~ / ~*）里 proxy_pass 不能带 URI 路径，
+# 必须 rewrite 到目标路径 + proxy_pass 仅 host:port。
+# 精确匹配（location =）可以写完整 URI。
 
 location = /robots.txt {
   try_files /robots.txt =404;
@@ -24,7 +28,8 @@ location ~ ^/problemset/[^/]+/add-problem {
 
 # 一律 SEO（path 用 X-Original-URI，勿塞进 ?path= 以免 query 被截断）
 location ~ ^/blog/ {
-  proxy_pass http://127.0.0.1:8080/v1/user/seo/html;
+  rewrite ^ /v1/user/seo/html break;
+  proxy_pass http://127.0.0.1:8080;
   proxy_set_header Host $host;
   proxy_set_header X-Forwarded-Proto https;
   proxy_set_header X-Forwarded-Host $host;
@@ -32,7 +37,8 @@ location ~ ^/blog/ {
 }
 
 location ~ ^/question-bank/detail/ {
-  proxy_pass http://127.0.0.1:8080/v1/user/seo/html;
+  rewrite ^ /v1/user/seo/html break;
+  proxy_pass http://127.0.0.1:8080;
   proxy_set_header Host $host;
   proxy_set_header X-Forwarded-Proto https;
   proxy_set_header X-Forwarded-Host $host;
@@ -40,7 +46,8 @@ location ~ ^/question-bank/detail/ {
 }
 
 location ~ ^/problemset {
-  proxy_pass http://127.0.0.1:8080/v1/user/seo/html;
+  rewrite ^ /v1/user/seo/html break;
+  proxy_pass http://127.0.0.1:8080;
   proxy_set_header Host $host;
   proxy_set_header X-Forwarded-Proto https;
   proxy_set_header X-Forwarded-Host $host;
@@ -48,7 +55,8 @@ location ~ ^/problemset {
 }
 
 location ~ ^/profile {
-  proxy_pass http://127.0.0.1:8080/v1/user/seo/html;
+  rewrite ^ /v1/user/seo/html break;
+  proxy_pass http://127.0.0.1:8080;
   proxy_set_header Host $host;
   proxy_set_header X-Forwarded-Proto https;
   proxy_set_header X-Forwarded-Host $host;
@@ -64,7 +72,8 @@ location = /blog-plaza {
 }
 
 location ~ ^/p/[A-Za-z0-9]+$ {
-  proxy_pass http://127.0.0.1:8080/v1/user/seo/html;
+  rewrite ^ /v1/user/seo/html break;
+  proxy_pass http://127.0.0.1:8080;
   proxy_set_header Host $host;
   proxy_set_header X-Forwarded-Proto https;
   proxy_set_header X-Forwarded-Host $host;
