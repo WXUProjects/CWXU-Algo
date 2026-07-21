@@ -403,8 +403,11 @@ func (x *UpdateReply) GetSuccess() bool {
 }
 
 type GetRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	// 成员分页；缺省 page=1、pageSize=20（最大 100）
+	Page          int64 `protobuf:"varint,2,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize      int64 `protobuf:"varint,3,opt,name=pageSize,proto3" json:"pageSize,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -446,12 +449,29 @@ func (x *GetRequest) GetId() int64 {
 	return 0
 }
 
+func (x *GetRequest) GetPage() int64 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *GetRequest) GetPageSize() int64 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
 type GetReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Describe      string                 `protobuf:"bytes,3,opt,name=describe,proto3" json:"describe,omitempty"`
 	Users         []*User                `protobuf:"bytes,4,rep,name=users,proto3" json:"users,omitempty"`
+	Total         int64                  `protobuf:"varint,5,opt,name=total,proto3" json:"total,omitempty"`
+	Page          int64                  `protobuf:"varint,6,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize      int64                  `protobuf:"varint,7,opt,name=pageSize,proto3" json:"pageSize,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -512,6 +532,27 @@ func (x *GetReply) GetUsers() []*User {
 		return x.Users
 	}
 	return nil
+}
+
+func (x *GetReply) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *GetReply) GetPage() int64 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *GetReply) GetPageSize() int64 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
 }
 
 type ListRequest struct {
@@ -647,15 +688,20 @@ const file_user_v1_group_group_proto_rawDesc = "" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
 	"\bdescribe\x18\x03 \x01(\tR\bdescribe\"'\n" +
 	"\vUpdateReply\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x1c\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"L\n" +
 	"\n" +
 	"GetRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\x03R\x02id\"v\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x12\n" +
+	"\x04page\x18\x02 \x01(\x03R\x04page\x12\x1a\n" +
+	"\bpageSize\x18\x03 \x01(\x03R\bpageSize\"\xbc\x01\n" +
 	"\bGetReply\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
 	"\bdescribe\x18\x03 \x01(\tR\bdescribe\x12*\n" +
-	"\x05users\x18\x04 \x03(\v2\x14.api.user.group.UserR\x05users\"5\n" +
+	"\x05users\x18\x04 \x03(\v2\x14.api.user.group.UserR\x05users\x12\x14\n" +
+	"\x05total\x18\x05 \x01(\x03R\x05total\x12\x12\n" +
+	"\x04page\x18\x06 \x01(\x03R\x04page\x12\x1a\n" +
+	"\bpageSize\x18\a \x01(\x03R\bpageSize\"5\n" +
 	"\vListRequest\x12\x12\n" +
 	"\x04page\x18\x01 \x01(\x03R\x04page\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x03R\x04size\"O\n" +

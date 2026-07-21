@@ -76,6 +76,9 @@ message UpdateReply {
 
 message GetRequest {
   int64 id = 1;
+  // 成员分页；缺省 page=1、pageSize=20（最大 100）
+  int64 page = 2;
+  int64 pageSize = 3;
 }
 
 message GetReply {
@@ -83,6 +86,9 @@ message GetReply {
   string name =     2;
   string describe = 3;
   repeated User users = 4;
+  int64 total = 5;
+  int64 page = 6;
+  int64 pageSize = 7;
 }
 
 message ListRequest {

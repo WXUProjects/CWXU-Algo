@@ -132,24 +132,41 @@ func (d *GroupDal) OrgDisplayNames(ctx context.Context, orgID uint, userIDs []ui
 	return out
 }
 
-func (d *GroupDal) GetWithUsers(ctx context.Context, id int64) (*model.Group, []model.User, error) {
+// GetWithUsers 分组详情 + 成员分页（page 从 1；pageSize 默认由调用方约束）
+func (d *GroupDal) GetWithUsers(ctx context.Context, id, page, pageSize int64) (*model.Group, []model.User, int64, error) {
 	var group model.Group
 	err := d.db.WithContext(ctx).First(&group, id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil, fmt.Errorf("组不存在")
+		return nil, nil, 0, fmt.Errorf("组不存在")
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("查询组失败: %w", err)
+		return nil, nil, 0, fmt.Errorf("查询组失败: %w", err)
 	}
+	var total int64
+	if err := d.db.WithContext(ctx).Model(&model.OrgMember{}).
+		Where("org_id = ? AND group_id = ?", group.OrgID, id).
+		Count(&total).Error; err != nil {
+		return nil, nil, 0, fmt.Errorf("查询组成员总数失败: %w", err)
+	}
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
 	var users []model.User
 	if err := d.db.WithContext(ctx).Table("users AS u").
 		Select("u.id, u.username, u.name, u.avatar, COALESCE(m.group_id, 0) AS group_id").
 		Joins("JOIN org_members AS m ON m.user_id = u.id").
 		Where("m.org_id = ? AND m.group_id = ?", group.OrgID, id).
-		Order("u.id").Find(&users).Error; err != nil {
-		return nil, nil, fmt.Errorf("查询组成员失败: %w", err)
+		Order("u.id").
+		Limit(int(pageSize)).
+		Offset(int(offset)).
+		Find(&users).Error; err != nil {
+		return nil, nil, 0, fmt.Errorf("查询组成员失败: %w", err)
 	}
-	return &group, users, nil
+	return &group, users, total, nil
 }
 
 func (d *GroupDal) List(ctx context.Context, page, size int64, orgID uint) ([]model.Group, int64, error) {

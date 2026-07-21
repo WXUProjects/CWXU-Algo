@@ -85,7 +85,18 @@ func (g *GroupService) Get(ctx context.Context, request *group.GetRequest) (*gro
 	if err := g.assertGroupInCurrentOrg(ctx, request.Id); err != nil {
 		return nil, err
 	}
-	groupModel, users, err := g.groupUseCase.GetWithUsers(ctx, request.Id)
+	page := request.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := request.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	groupModel, users, total, err := g.groupUseCase.GetWithUsers(ctx, request.Id, page, pageSize)
 	if err != nil {
 		return nil, errors.InternalServer("查询失败", "服务暂时不可用")
 	}
@@ -100,6 +111,9 @@ func (g *GroupService) Get(ctx context.Context, request *group.GetRequest) (*gro
 		Name:     name,
 		Describe: groupModel.Describe,
 		Users:    make([]*group.User, 0),
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
 	}
 
 	if len(users) > 0 {

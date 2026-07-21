@@ -1599,6 +1599,15 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: page
+                  in: query
+                  description: 成员分页；缺省 page=1、pageSize=20（最大 100）
+                  schema:
+                    type: string
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -3970,6 +3979,12 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/api.user.group.User'
+                total:
+                    type: string
+                page:
+                    type: string
+                pageSize:
+                    type: string
         api.user.group.ListReply:
             type: object
             properties:

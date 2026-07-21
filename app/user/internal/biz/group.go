@@ -28,8 +28,8 @@ func (uc *GroupUseCase) Get(ctx context.Context, id int64) (*model.Group, error)
 	return uc.groupDal.Get(ctx, id)
 }
 
-func (uc *GroupUseCase) GetWithUsers(ctx context.Context, id int64) (*model.Group, []model.User, error) {
-	return uc.groupDal.GetWithUsers(ctx, id)
+func (uc *GroupUseCase) GetWithUsers(ctx context.Context, id, page, pageSize int64) (*model.Group, []model.User, int64, error) {
+	return uc.groupDal.GetWithUsers(ctx, id, page, pageSize)
 }
 
 func (uc *GroupUseCase) List(ctx context.Context, page, size int64, orgID uint) ([]model.Group, int64, error) {
