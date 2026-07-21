@@ -1256,7 +1256,14 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 	_ = countQ.Count(&total).Error
 
 	var rows []row
-	_ = base.Order("m.role DESC, m.id ASC").
+	// 角色等级：团队管理员 > 教练 > 队长 > 成员（不可用 role 字符串字典序）
+	_ = base.Order(`CASE m.role
+		WHEN 'org_admin' THEN 1
+		WHEN 'coach' THEN 2
+		WHEN 'captain' THEN 3
+		WHEN 'member' THEN 4
+		ELSE 5
+	END ASC, m.id ASC`).
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Scan(&rows).Error
