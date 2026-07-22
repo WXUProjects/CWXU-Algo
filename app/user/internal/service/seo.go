@@ -865,7 +865,7 @@ html,body{margin:0;min-height:100%;background:#f8fafc;color:#0f172a;
 .seo-hint{margin:0;font-size:.75rem;color:#94a3b8}
 .seo-actions{margin-top:1.25rem;display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap}
 .seo-btn{display:inline-flex;align-items:center;justify-content:center;padding:.5rem 1rem;border-radius:.5rem;
-  font-size:.875rem;font-weight:500;text-decoration:none;border:1px solid #e2e8f0;color:#0f172a;background:#fff}
+  font-size:.875rem;font-weight:500;font-family:inherit;text-decoration:none;border:1px solid #e2e8f0;color:#0f172a;background:#fff;cursor:pointer}
 .seo-btn-primary{background:#0f172a;color:#fff;border-color:#0f172a}
 .seo-noscript{max-width:40rem;margin:2rem auto;padding:0 1rem}
 .seo-noscript h1{font-size:1.25rem;margin:0 0 .75rem}
@@ -882,47 +882,87 @@ html,body{margin:0;min-height:100%;background:#f8fafc;color:#0f172a;
 }
 </style>
 `)
-	// Boot SPA ASAP; if boot fails, show manual entry (no plain dump)
+	// Boot SPA ASAP; if boot fails, show retry (外链入口：必须正确解析 /assets 绝对路径)
 	b.WriteString(`<script>
 (function(){
-  var booted=false,failT=null;
-  function showFail(){
+  var booted=false,failT=null,entryLoaded=false;
+  function showFail(msg){
     var el=document.getElementById("seo-fail");
     if(el)el.hidden=false;
     var h=document.getElementById("seo-hint");
-    if(h)h.textContent="加载较慢，可点击下方进入完整页面";
+    if(h)h.textContent=msg||"页面加载不顺利，请点下方重试";
+  }
+  function absUrl(u){
+    if(!u)return "";
+    if(/^https?:\/\//i.test(u)||u.indexOf("//")===0)return u;
+    if(u.charAt(0)==="/")return location.origin+u;
+    try{return new URL(u,location.href).href;}catch(e){return u;}
+  }
+  function clearFailTimer(){
+    if(failT){clearTimeout(failT);failT=null;}
   }
   function boot(){
     if(booted)return;
     booted=true;
-    failT=setTimeout(showFail,8000);
+    failT=setTimeout(function(){if(!entryLoaded)showFail("加载较慢，可点击下方重试");},10000);
     fetch("/index.html",{credentials:"same-origin",cache:"no-store"})
-      .then(function(r){if(!r.ok)throw new Error("index");return r.text()})
+      .then(function(r){if(!r.ok)throw new Error("index "+r.status);return r.text()})
       .then(function(html){
         var doc=new DOMParser().parseFromString(html,"text/html");
         var head=document.head;
+        // 样式与 modulepreload：用 getAttribute 再绝对化，避免 DOMParser 下 .href 解析异常
         doc.querySelectorAll('link[rel="stylesheet"],link[rel="modulepreload"]').forEach(function(n){
           var href=n.getAttribute("href");
-          if(href&&!document.querySelector('link[href="'+href+'"]')){
-            head.appendChild(n.cloneNode(true));
-          }
+          if(!href)return;
+          var abs=absUrl(href);
+          if(document.querySelector('link[data-seo-boot="1"][href="'+abs+'"]'))return;
+          var link=document.createElement("link");
+          link.setAttribute("data-seo-boot","1");
+          link.rel=n.getAttribute("rel")||"stylesheet";
+          var asv=n.getAttribute("as");
+          if(asv)link.as=asv;
+          if(n.hasAttribute("crossorigin"))link.crossOrigin=n.getAttribute("crossorigin")||"";
+          link.href=abs;
+          head.appendChild(link);
         });
         var scripts=Array.prototype.slice.call(doc.querySelectorAll("script[src]"));
+        if(!scripts.length){showFail();return;}
         function next(i){
           if(i>=scripts.length)return;
           var s=scripts[i];
+          var src=absUrl(s.getAttribute("src"));
+          if(!src){next(i+1);return;}
           var el=document.createElement("script");
-          if(s.type)el.type=s.type;
-          if(s.hasAttribute("crossorigin"))el.crossOrigin=s.crossOrigin||"";
-          el.src=s.src;
-          el.onload=function(){next(i+1)};
-          el.onerror=function(){next(i+1)};
+          var typ=s.getAttribute("type");
+          if(typ)el.type=typ;
+          if(s.hasAttribute("crossorigin"))el.crossOrigin=s.getAttribute("crossorigin")||"";
+          el.src=src;
+          el.onload=function(){
+            entryLoaded=true;
+            clearFailTimer();
+            next(i+1);
+          };
+          el.onerror=function(){
+            showFail("前端资源加载失败，请重试");
+          };
           head.appendChild(el);
         }
         next(0);
       })
-      .catch(function(){showFail()});
+      .catch(function(){showFail("无法获取页面入口，请重试");});
   }
+  window.__goalgoSeoRetry=function(){
+    booted=false;
+    entryLoaded=false;
+    clearFailTimer();
+    var fail=document.getElementById("seo-fail");
+    if(fail)fail.hidden=true;
+    var h=document.getElementById("seo-hint");
+    if(h)h.textContent="正在进入完整页面…";
+    // 去掉可能半加载的 boot 脚本/样式后重来
+    document.querySelectorAll('[data-seo-boot="1"]').forEach(function(n){n.parentNode&&n.parentNode.removeChild(n);});
+    boot();
+  };
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot);
   else boot();
 })();
@@ -957,10 +997,9 @@ html,body{margin:0;min-height:100%;background:#f8fafc;color:#0f172a;
 		b.WriteString("</p>\n")
 	}
 	b.WriteString("<p class=\"seo-hint\" id=\"seo-hint\">正在进入完整页面…</p>\n")
+	// 失败时重试 boot（勿链回同一 SEO URL 造成空转）
 	b.WriteString("<div class=\"seo-actions\" id=\"seo-fail\" hidden>\n")
-	b.WriteString("<a class=\"seo-btn seo-btn-primary\" href=\"")
-	b.WriteString(pageURL)
-	b.WriteString("\">进入完整页面</a>\n")
+	b.WriteString("<button type=\"button\" class=\"seo-btn seo-btn-primary\" onclick=\"window.__goalgoSeoRetry&&window.__goalgoSeoRetry()\">重试加载</button>\n")
 	b.WriteString("<a class=\"seo-btn\" href=\"/\">返回首页</a>\n")
 	b.WriteString("</div>\n")
 	b.WriteString("</div>\n</div>\n")
