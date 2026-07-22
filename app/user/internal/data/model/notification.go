@@ -12,6 +12,7 @@ const (
 	NotifTypeBlogArticleLike     = "blog_article_like"
 	NotifTypeBlogComment         = "blog_comment"
 	NotifTypeBlogCommentReply    = "blog_comment_reply"
+	NotifTypeBlogCommentLike     = "blog_comment_like"
 	NotifTypeSolutionLike        = "solution_like"
 	NotifTypeCommentLike         = "comment_like"
 	NotifTypeBlogReport          = "blog_report"

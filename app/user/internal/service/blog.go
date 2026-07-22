@@ -33,8 +33,9 @@ const (
 	maxBlogContent = 512 << 10 // 512KB
 	maxBlogCover   = 1024
 	maxBlogSlug    = 96
-	maxCommentLen  = 4000
-	blogUnlockTTL  = 12 * time.Hour
+	maxCommentLen   = 4000
+	maxBlogCmtDepth = 3 // 顶层 depth=0，最多再嵌套 2 层回复
+	blogUnlockTTL   = 12 * time.Hour
 )
 
 // BlogService personal blog articles, comments, likes, categories, theme flags.
@@ -75,6 +76,7 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 
 	r.POST("/v1/user/blog/comment/create", bs.handleCommentCreate)
 	r.POST("/v1/user/blog/comment/delete", bs.handleCommentDelete)
+	r.POST("/v1/user/blog/comment/like", bs.handleCommentLikeToggle)
 	r.POST("/v1/user/blog/like", bs.handleLikeToggle)
 
 	// Owner theme config (themeId + social links)
@@ -949,6 +951,12 @@ func (s *BlogService) handleDelete(ctx khttp.Context) error {
 	}
 	_ = s.db.Transaction(func(tx *gorm.DB) error {
 		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleOrg{}).Error
+		// 先清评论点赞再删评论
+		var cmtIDs []uint
+		_ = tx.Model(&model.BlogComment{}).Where("article_id = ?", a.ID).Pluck("id", &cmtIDs).Error
+		if len(cmtIDs) > 0 {
+			_ = tx.Where("comment_id IN ?", cmtIDs).Delete(&model.BlogCommentLike{}).Error
+		}
 		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogComment{}).Error
 		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogLike{}).Error
 		return tx.Delete(&a).Error
@@ -1487,13 +1495,77 @@ func (s *BlogService) handleListComments(ctx khttp.Context) error {
 		return nil
 	}
 	page, pageSize := parsePage(ctx.Request())
+
+	// 仅分页顶层；子回复嵌套在 replies 中返回（与题解评论一致）
 	var total int64
-	s.db.Model(&model.BlogComment{}).Where("article_id = ?", articleID).Count(&total)
-	var list []model.BlogComment
-	_ = s.db.Where("article_id = ?", articleID).Order("id ASC").
-		Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
+	s.db.Model(&model.BlogComment{}).
+		Where("article_id = ? AND parent_id = 0", articleID).Count(&total)
+
+	var all []model.BlogComment
+	_ = s.db.Where("article_id = ?", articleID).Order("id ASC").Find(&all).Error
+
+	// 分页顶层 id 集合
+	rootIDs := make([]uint, 0)
+	for _, c := range all {
+		if c.ParentID == 0 {
+			rootIDs = append(rootIDs, c.ID)
+		}
+	}
+	start := (page - 1) * pageSize
+	if start > len(rootIDs) {
+		start = len(rootIDs)
+	}
+	end := start + pageSize
+	if end > len(rootIDs) {
+		end = len(rootIDs)
+	}
+	pageRootSet := map[uint]struct{}{}
+	for _, id := range rootIDs[start:end] {
+		pageRootSet[id] = struct{}{}
+	}
+
+	// 本页顶层 + 其整棵子树
+	byID := map[uint]model.BlogComment{}
+	children := map[uint][]uint{}
+	for _, c := range all {
+		byID[c.ID] = c
+		if c.ParentID > 0 {
+			children[c.ParentID] = append(children[c.ParentID], c.ID)
+		}
+	}
+	// 找 root：沿 parent 走到顶
+	rootOf := map[uint]uint{}
+	var findRoot func(id uint) uint
+	findRoot = func(id uint) uint {
+		if r, ok := rootOf[id]; ok {
+			return r
+		}
+		c, ok := byID[id]
+		if !ok || c.ParentID == 0 {
+			rootOf[id] = id
+			return id
+		}
+		r := findRoot(c.ParentID)
+		rootOf[id] = r
+		return r
+	}
+	for id := range byID {
+		findRoot(id)
+	}
+
+	// 收集本页用到的全部节点 id
+	pageIDs := make([]uint, 0)
+	for id, c := range byID {
+		r := rootOf[id]
+		if _, ok := pageRootSet[r]; ok {
+			pageIDs = append(pageIDs, id)
+			_ = c
+		}
+	}
+
 	uids := map[uint]struct{}{}
-	for _, c := range list {
+	for _, id := range pageIDs {
+		c := byID[id]
 		uids[c.UserID] = struct{}{}
 	}
 	idList := make([]uint, 0, len(uids))
@@ -1508,17 +1580,49 @@ func (s *BlogService) handleListComments(ctx khttp.Context) error {
 			users[u.ID] = u
 		}
 	}
-	out := make([]map[string]interface{}, 0, len(list))
-	for _, c := range list {
+
+	// 当前用户已赞集合
+	likedSet := map[uint]bool{}
+	if viewer > 0 && len(pageIDs) > 0 {
+		var likes []model.BlogCommentLike
+		_ = s.db.Where("user_id = ? AND comment_id IN ?", viewer, pageIDs).Find(&likes).Error
+		for _, l := range likes {
+			likedSet[l.CommentID] = true
+		}
+	}
+
+	var buildNode func(id uint) map[string]interface{}
+	buildNode = func(id uint) map[string]interface{} {
+		c := byID[id]
 		u := users[c.UserID]
-		out = append(out, map[string]interface{}{
+		m := map[string]interface{}{
 			"id": c.ID, "articleId": c.ArticleID, "parentId": c.ParentID,
 			"content": c.Content, "createdAt": c.CreatedAt.Unix(),
-			"userId": c.UserID,
+			"userId": c.UserID, "likeCount": c.LikeCount, "liked": likedSet[c.ID],
 			"author": map[string]interface{}{
 				"id": u.ID, "username": u.Username, "name": u.Name, "avatar": u.Avatar,
 			},
-		})
+		}
+		if c.ParentID > 0 {
+			if p, ok := byID[c.ParentID]; ok {
+				pu := users[p.UserID]
+				m["replyToUserId"] = p.UserID
+				m["replyToUsername"] = pu.Username
+				m["replyToName"] = pu.Name
+			}
+		}
+		reps := children[id]
+		outReps := make([]map[string]interface{}, 0, len(reps))
+		for _, rid := range reps {
+			outReps = append(outReps, buildNode(rid))
+		}
+		m["replies"] = outReps
+		return m
+	}
+
+	out := make([]map[string]interface{}, 0, end-start)
+	for _, id := range rootIDs[start:end] {
+		out = append(out, buildNode(id))
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "success",
@@ -1571,6 +1675,21 @@ func (s *BlogService) handleCommentCreate(ctx khttp.Context) error {
 		var parent model.BlogComment
 		if err := s.db.Where("id = ? AND article_id = ?", body.ParentID, body.ArticleID).First(&parent).Error; err != nil {
 			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "父评论不存在"})
+			return nil
+		}
+		// 限制嵌套深度（与题解评论一致：最多 3 层）
+		depth := 1
+		pid := parent.ParentID
+		for pid > 0 && depth < 16 {
+			var p model.BlogComment
+			if err := s.db.Select("id", "parent_id").First(&p, pid).Error; err != nil {
+				break
+			}
+			depth++
+			pid = p.ParentID
+		}
+		if depth >= maxBlogCmtDepth {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "回复层级已达上限"})
 			return nil
 		}
 	}
@@ -1662,17 +1781,135 @@ func (s *BlogService) handleCommentDelete(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "无权删除"})
 		return nil
 	}
-	if err := s.db.Delete(&c).Error; err != nil {
+	// 级联删除子树 + 点赞
+	ids := s.collectBlogCommentSubtree(c.ID, c.ArticleID)
+	if len(ids) == 0 {
+		ids = []uint{c.ID}
+	}
+	_ = s.db.Where("comment_id IN ?", ids).Delete(&model.BlogCommentLike{}).Error
+	if err := s.db.Where("id IN ?", ids).Delete(&model.BlogComment{}).Error; err != nil {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "删除失败"})
 		return nil
 	}
-	_ = s.db.Model(&model.BlogArticle{}).Where("id = ? AND comment_count > 0", c.ArticleID).
-		UpdateColumn("comment_count", gorm.Expr("comment_count - 1")).Error
+	n := len(ids)
+	_ = s.db.Model(&model.BlogArticle{}).
+		Where("id = ? AND comment_count >= ?", c.ArticleID, n).
+		UpdateColumn("comment_count", gorm.Expr("comment_count - ?", n)).Error
+	// 防止负数
+	_ = s.db.Model(&model.BlogArticle{}).
+		Where("id = ? AND comment_count < 0", c.ArticleID).
+		UpdateColumn("comment_count", 0).Error
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除"})
 	return nil
 }
 
+// collectBlogCommentSubtree returns id + all descendants under the same article.
+func (s *BlogService) collectBlogCommentSubtree(rootID, articleID uint) []uint {
+	var all []model.BlogComment
+	_ = s.db.Select("id", "parent_id").Where("article_id = ?", articleID).Find(&all).Error
+	children := map[uint][]uint{}
+	for _, c := range all {
+		if c.ParentID > 0 {
+			children[c.ParentID] = append(children[c.ParentID], c.ID)
+		}
+	}
+	out := make([]uint, 0)
+	var walk func(id uint)
+	walk = func(id uint) {
+		out = append(out, id)
+		for _, cid := range children[id] {
+			walk(cid)
+		}
+	}
+	walk(rootID)
+	return out
+}
+
 // ---------- likes ----------
+
+// handleCommentLikeToggle 博客评论点赞 toggle。
+func (s *BlogService) handleCommentLikeToggle(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
+		return nil
+	}
+	var body struct {
+		CommentID uint `json:"commentId"`
+	}
+	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.CommentID == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
+		return nil
+	}
+	var c model.BlogComment
+	if err := s.db.First(&c, body.CommentID).Error; err != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "评论不存在"})
+		return nil
+	}
+	var a model.BlogArticle
+	if err := s.db.First(&a, c.ArticleID).Error; err != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
+		return nil
+	}
+	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
+		Visibility: a.Visibility, OwnerID: a.UserID, HasPassword: a.PasswordHash != "",
+	}, pd.UserID, false)
+	if !d.CanSeeMeta {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "评论不存在"})
+		return nil
+	}
+
+	var existing model.BlogCommentLike
+	err := s.db.Where("comment_id = ? AND user_id = ?", body.CommentID, pd.UserID).First(&existing).Error
+	liked := false
+	if err == nil {
+		_ = s.db.Delete(&existing).Error
+		_ = s.db.Model(&model.BlogComment{}).Where("id = ? AND like_count > 0", body.CommentID).
+			UpdateColumn("like_count", gorm.Expr("like_count - 1")).Error
+		liked = false
+	} else {
+		if err := s.db.Create(&model.BlogCommentLike{CommentID: body.CommentID, UserID: pd.UserID}).Error; err != nil {
+			// 并发唯一冲突：视为已赞
+			liked = true
+		} else {
+			_ = s.db.Model(&model.BlogComment{}).Where("id = ?", body.CommentID).
+				UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error
+			liked = true
+			// 通知评论作者（取消不通知、不通知自己）
+			if c.UserID > 0 && c.UserID != pd.UserID {
+				actorName := pd.Name
+				if actorName == "" {
+					actorName = pd.Username
+				}
+				var authorU model.User
+				_ = s.db.Select("username").First(&authorU, a.UserID).Error
+				_ = CreateNotification(s.db, model.Notification{
+					UserID:  c.UserID,
+					Type:    model.NotifTypeBlogCommentLike,
+					Title:   "有人赞了你的博客评论",
+					Body:    actorName + " 赞了你在《" + a.Title + "》下的评论",
+					ActorID: pd.UserID,
+					RefType: "blog_comment",
+					RefID:   c.ID,
+					Payload: mustJSON(map[string]interface{}{
+						"blogUsername": authorU.Username,
+						"blogSlug":     a.Slug,
+						"articleId":    a.ID,
+						"articleTitle": a.Title,
+						"commentId":    c.ID,
+					}),
+				})
+			}
+		}
+	}
+	var likeCount int
+	_ = s.db.Model(&model.BlogComment{}).Select("like_count").Where("id = ?", body.CommentID).Scan(&likeCount).Error
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "success",
+		"data": map[string]interface{}{"liked": liked, "likeCount": likeCount, "commentId": body.CommentID},
+	})
+	return nil
+}
 
 func (s *BlogService) handleLikeToggle(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)

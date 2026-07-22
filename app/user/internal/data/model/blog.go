@@ -83,17 +83,30 @@ type BlogArticleOrg struct {
 func (BlogArticleOrg) TableName() string { return "blog_article_orgs" }
 
 // BlogComment is a top-level or reply comment on an article.
+// ParentID=0 为顶层；回复挂在父评论下（最大深度 3：0/1/2）。
 type BlogComment struct {
 	ID        uint `gorm:"primaryKey"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	ArticleID uint   `gorm:"not null;index:idx_blog_cmt_art,priority:1;comment:文章"`
 	UserID    uint   `gorm:"not null;index;comment:作者"`
-	ParentID  uint   `gorm:"not null;default:0;comment:父评论"`
+	ParentID  uint   `gorm:"not null;default:0;index;comment:父评论"`
 	Content   string `gorm:"type:text;not null;comment:内容"`
+	// LikeCount 冗余计数，与 blog_comment_likes 同步。
+	LikeCount int `gorm:"not null;default:0;comment:点赞数"`
 }
 
 func (BlogComment) TableName() string { return "blog_comments" }
+
+// BlogCommentLike is one like per user per blog comment.
+type BlogCommentLike struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	CommentID uint `gorm:"not null;uniqueIndex:idx_blog_cmt_like_cmt_user,priority:1;comment:评论"`
+	UserID    uint `gorm:"not null;uniqueIndex:idx_blog_cmt_like_cmt_user,priority:2;comment:用户"`
+}
+
+func (BlogCommentLike) TableName() string { return "blog_comment_likes" }
 
 // BlogLike is one like per user per article.
 type BlogLike struct {
