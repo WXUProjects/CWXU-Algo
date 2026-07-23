@@ -389,7 +389,7 @@ func (s *SiteService) TestEmail(ctx context.Context, req *site.TestEmailReq) (*s
 <p style="margin:0 0 12px;">你好，</p>
 <p style="margin:0 0 12px;">这是一封来自 <strong>%s</strong> 的测试邮件。</p>
 <p style="margin:0 0 12px;">若你收到此信，说明 SMTP 配置可用，邮件 HTML 布局正常。</p>
-<p style="margin:0;font-size:12px;color:#64748b;">发送时间：%s</p>
+<p style="margin:0;font-size:12px;color:#737373;">发送时间：%s</p>
 `, mail.Escape(title), time.Now().Format("2006-01-02 15:04:05"))
 	body := mail.Wrap(mail.LayoutOpts{Brand: title, Title: "邮件配置测试", Preheader: "SMTP 测试邮件"}, inner)
 	if err := sender.Send(to, subject, body); err != nil {

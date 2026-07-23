@@ -14,6 +14,7 @@ func dailySystemPrompt(name string) string {
    - 回复必须且只能是 HTML（推荐以 <!DOCTYPE html> 或 <html 或 <table 开头）。
    - 禁止 Markdown、代码围栏、前言后记、「现在我…」等任何 HTML 之外的文字。
    - 版式：table 布局 + 元素 style="..." 内联样式；禁止 CSS Grid/Flex；外层 max-width:640px。
+   - 视觉对齐 shadcn：页面 #fafafa、卡片白底、主色 #171717（按钮/顶栏）、正文 #0a0a0a、次要 #737373、边框 #e5e5e5、圆角 10px；禁止 indigo/蓝紫。
 3. 只能使用用户消息中提供的真实数据与工具返回，禁止编造提交次数、题目、标签、比赛名次或日期。
 4. 可用工具：
    - problem_tags：用户标签画像(user_profile)、按 problemId 取标签(by_ids)、全站标签表(list)

@@ -1226,13 +1226,13 @@ func (s *CommunityService) notifyAdminsCommunityReport(pd *auth.JwtPayload, tt s
 	inner := fmt.Sprintf(`
 <p style="margin:0 0 12px;">收到一条社区内容举报，请尽快处理。</p>
 <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;">
-<tr><td style="padding:6px 12px 6px 0;color:#64748b;width:88px;">举报人</td><td style="padding:6px 0;">%s</td></tr>
-<tr><td style="padding:6px 12px 6px 0;color:#64748b;">类型</td><td style="padding:6px 0;">%s</td></tr>
-<tr><td style="padding:6px 12px 6px 0;color:#64748b;">目标 ID</td><td style="padding:6px 0;">%d</td></tr>
-<tr><td style="padding:6px 12px 6px 0;color:#64748b;">题目 ID</td><td style="padding:6px 0;">%d</td></tr>
-<tr><td style="padding:6px 12px 6px 0;color:#64748b;vertical-align:top;">原因</td><td style="padding:6px 0;">%s</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#737373;width:88px;">举报人</td><td style="padding:6px 0;">%s</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#737373;">类型</td><td style="padding:6px 0;">%s</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#737373;">目标 ID</td><td style="padding:6px 0;">%d</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#737373;">题目 ID</td><td style="padding:6px 0;">%d</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#737373;vertical-align:top;">原因</td><td style="padding:6px 0;">%s</td></tr>
 </table>
-<p style="margin:14px 0 0;font-size:13px;color:#64748b;">请登录站点管理端查看举报并处理。</p>
+<p style="margin:14px 0 0;font-size:13px;color:#737373;">请登录站点管理端查看举报并处理。</p>
 `, mail.Escape(actorName), mail.Escape(label), targetID, problemID, mail.Escape(reason))
 	html := mail.Wrap(mail.LayoutOpts{Brand: mail.DefaultBrand, Title: "社区内容举报", Preheader: body}, inner)
 	notify.NotifySiteAdminsWithEmail(s.udb, notify.AdminNotif{

@@ -211,8 +211,8 @@ func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
 		subject := fmt.Sprintf("【%s 周报】%s-%s", uc.brandTitle(ctx), formatCNDate(weekStart.Format(dateLayout)), formatCNDate(weekEnd.Format(dateLayout)))
 		if jobID != "" {
 			footer := fmt.Sprintf(
-				`<div style="padding:12px 14px;font-size:12px;color:#666;border-top:1px solid #e5e7eb;">本周报即上周训练报告（简版），任务 %s，可在组织管理下载 HTML（24 小时内）。</div>`,
-				jobID,
+				`<div style="padding:12px 16px;font-size:12px;color:%s;border-top:1px solid %s;background:%s;">本周报即上周训练报告（简版），任务 %s，可在组织管理下载 HTML（24 小时内）。</div>`,
+				mail.ColorMutedFg, mail.ColorBorder, mail.ColorCard, jobID,
 			)
 			html = mail.InjectBeforeBodyClose(html, footer)
 		}

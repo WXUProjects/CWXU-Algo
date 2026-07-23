@@ -354,11 +354,11 @@ func (s *ContestCalendarService) sendSubscribeConfirmMail(
 <p style="margin:0 0 12px;">你好，</p>
 <p style="margin:0 0 14px;">你已成功订阅比赛邮件提醒（%s）。</p>
 <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;">
-<tr><td style="padding:6px 12px 6px 0;color:#64748b;width:72px;">类型</td><td style="padding:6px 0;">%s</td></tr>
-<tr><td style="padding:6px 12px 6px 0;color:#64748b;">内容</td><td style="padding:6px 0;">%s</td></tr>
-<tr><td style="padding:6px 12px 6px 0;color:#64748b;">提前量</td><td style="padding:6px 0;">开赛前 <strong>%s</strong></td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#737373;width:72px;">类型</td><td style="padding:6px 0;">%s</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#737373;">内容</td><td style="padding:6px 0;">%s</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#737373;">提前量</td><td style="padding:6px 0;">开赛前 <strong>%s</strong></td></tr>
 </table>
-<p style="margin:16px 0 0;color:#94a3b8;font-size:12px;">管理订阅：登录 %s → 比赛 → 比赛日历。若不再需要提醒，可在页面中取消订阅。</p>
+<p style="margin:16px 0 0;color:#737373;font-size:12px;">管理订阅：登录 %s → 比赛 → 比赛日历。若不再需要提醒，可在页面中取消订阅。</p>
 `, html.EscapeString(scopeLabel), html.EscapeString(scopeLabel), detail, html.EscapeString(advLabel), html.EscapeString(siteTitle))
 	body := mailpkg.Wrap(mailpkg.LayoutOpts{
 		Brand:     siteTitle,

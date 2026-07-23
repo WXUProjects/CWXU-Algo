@@ -6,13 +6,6 @@ import (
 	"strings"
 )
 
-// Brand color aligned with training report / GoAlgo indigo.
-const (
-	BrandColor   = "#4f46e5"
-	SiteHomeURL  = "https://algo.zhiyuansofts.cn"
-	DefaultBrand = "GoAlgo"
-)
-
 // LayoutOpts controls the shared email shell.
 type LayoutOpts struct {
 	// Brand site title (default GoAlgo)
@@ -45,14 +38,16 @@ func Paragraphs(plain string) string {
 		}
 		p = html.EscapeString(p)
 		p = strings.ReplaceAll(p, "\n", "<br>")
-		b.WriteString(`<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#222;">`)
+		b.WriteString(`<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:`)
+		b.WriteString(ColorForeground)
+		b.WriteString(`;">`)
 		b.WriteString(p)
 		b.WriteString(`</p>`)
 	}
 	return b.String()
 }
 
-// Wrap builds a full HTML email document with branded header/footer around innerHTML.
+// Wrap builds a full HTML email document with shadcn-like card shell around innerHTML.
 // innerHTML must already be safe HTML (caller escapes user content).
 func Wrap(opts LayoutOpts, innerHTML string) string {
 	brand := strings.TrimSpace(opts.Brand)
@@ -75,45 +70,61 @@ func Wrap(opts LayoutOpts, innerHTML string) string {
 		b.WriteString(`</title>`)
 	}
 	b.WriteString(`</head>`)
-	b.WriteString(`<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.5;color:#222;">`)
+	b.WriteString(`<body style="`)
+	b.WriteString(StyleBody)
+	b.WriteString(`">`)
 	if pre != "" {
-		// Hidden preheader for inbox preview
 		b.WriteString(`<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">`)
 		b.WriteString(html.EscapeString(pre))
 		b.WriteString(`</div>`)
 	}
-	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f2f5;"><tr><td align="center" style="padding:16px 8px;">`)
-	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;">`)
+	// Page + Card (shadcn Card: white, border, radius)
+	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="`)
+	b.WriteString(StylePage)
+	b.WriteString(`"><tr><td align="center" style="padding:24px 12px;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="`)
+	b.WriteString(StyleCard)
+	b.WriteString(`">`)
 
-	// Header
+	// Header — primary surface (matches shadcn Button default / site chrome)
 	b.WriteString(`<tr><td style="background:`)
-	b.WriteString(BrandColor)
-	b.WriteString(`;color:#ffffff;padding:16px 18px;">`)
-	b.WriteString(`<div style="font-size:12px;opacity:0.9;letter-spacing:0.02em;">`)
+	b.WriteString(ColorPrimary)
+	b.WriteString(`;color:`)
+	b.WriteString(ColorPrimaryFg)
+	b.WriteString(`;padding:20px 18px;">`)
+	b.WriteString(`<div style="font-size:12px;font-weight:500;opacity:0.85;letter-spacing:0.02em;">`)
 	b.WriteString(html.EscapeString(brand))
 	b.WriteString(`</div>`)
 	if title != "" {
-		b.WriteString(`<div style="font-size:18px;font-weight:bold;margin-top:6px;">`)
+		b.WriteString(`<div style="font-size:18px;font-weight:600;letter-spacing:-0.02em;margin-top:6px;line-height:1.3;">`)
 		b.WriteString(html.EscapeString(title))
 		b.WriteString(`</div>`)
 	}
 	b.WriteString(`</td></tr>`)
 
-	// Body
-	b.WriteString(`<tr><td style="padding:18px 16px 8px;">`)
+	// Body (CardContent)
+	b.WriteString(`<tr><td style="padding:20px 18px 12px;background:`)
+	b.WriteString(ColorCard)
+	b.WriteString(`;">`)
 	b.WriteString(innerHTML)
 	b.WriteString(`</td></tr>`)
 
-	// Footer
-	b.WriteString(`<tr><td style="padding:8px 16px 20px;border-top:1px solid #e5e7eb;">`)
-	b.WriteString(`<p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.5;">本邮件由 `)
+	// Footer (CardFooter muted)
+	b.WriteString(`<tr><td style="padding:12px 18px 18px;background:`)
+	b.WriteString(ColorCard)
+	b.WriteString(`;border-top:1px solid `)
+	b.WriteString(ColorBorder)
+	b.WriteString(`;">`)
+	b.WriteString(`<p style="margin:0;font-size:12px;color:`)
+	b.WriteString(ColorMutedFg)
+	b.WriteString(`;line-height:1.5;">本邮件由 `)
 	b.WriteString(html.EscapeString(brand))
 	b.WriteString(` 自动发送，请勿直接回复。`)
 	b.WriteString(` · <a href="`)
 	b.WriteString(html.EscapeString(home))
 	b.WriteString(`" style="color:`)
-	b.WriteString(BrandColor)
-	b.WriteString(`;text-decoration:none;">打开主站</a></p>`)
+	b.WriteString(ColorPrimary)
+	b.WriteString(`;text-decoration:underline;text-underline-offset:2px;">打开主站</a></p>`)
 	b.WriteString(`</td></tr>`)
 
 	b.WriteString(`</table></td></tr></table></body></html>`)
@@ -127,7 +138,6 @@ func IsFullHTMLDocument(s string) bool {
 }
 
 // InjectBeforeBodyClose inserts snippet just before </body>, or before </html>, or appends if neither found.
-// Used for report footers so content is never outside the document.
 func InjectBeforeBodyClose(doc, snippet string) string {
 	doc = strings.TrimSpace(doc)
 	snippet = strings.TrimSpace(snippet)
@@ -158,7 +168,6 @@ var (
 func PlainFromHTML(htmlBody string) string {
 	s := htmlBody
 	s = reHTMLComment.ReplaceAllString(s, "")
-	// block-ish tags → newlines
 	for _, tag := range []string{"br", "p", "div", "tr", "li", "h1", "h2", "h3", "h4", "hr", "table"} {
 		re := regexp.MustCompile(`(?i)</?` + tag + `[^>]*>`)
 		s = re.ReplaceAllString(s, "\n")
@@ -166,7 +175,6 @@ func PlainFromHTML(htmlBody string) string {
 	s = reHTMLTag.ReplaceAllString(s, "")
 	s = html.UnescapeString(s)
 	s = reMultiSpace.ReplaceAllString(s, " ")
-	// normalize lines
 	lines := strings.Split(s, "\n")
 	var out []string
 	for _, line := range lines {
@@ -190,6 +198,5 @@ func EnsureDocument(fragment string) string {
 		return s
 	}
 	return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>` +
-		`<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.5;color:#222;">` +
-		s + `</body></html>`
+		`<body style="` + StyleBody + `">` + s + `</body></html>`
 }

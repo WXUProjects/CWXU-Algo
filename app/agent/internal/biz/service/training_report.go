@@ -298,7 +298,8 @@ func BuildNotifyEmail(job *TrainingReportJob, brand, htmlDoc string) (subject, b
 		expStr = time.Unix(expiresAt, 0).Format("2006-01-02 15:04")
 	}
 	footer := fmt.Sprintf(
-		`<div style="padding:12px 14px;font-size:12px;color:#666;border-top:1px solid #e5e7eb;">任务 %s · 下载有效期至 %s（24 小时）· 产物为 HTML 报告（邮件正文与附件均为同一份）</div>`,
+		`<div style="padding:12px 16px;font-size:12px;color:%s;border-top:1px solid %s;background:%s;">任务 %s · 下载有效期至 %s（24 小时）· 产物为 HTML 报告（邮件正文与附件均为同一份）</div>`,
+		mail.ColorMutedFg, mail.ColorBorder, mail.ColorCard,
 		html.EscapeString(id), html.EscapeString(expStr),
 	)
 
@@ -308,7 +309,7 @@ func BuildNotifyEmail(job *TrainingReportJob, brand, htmlDoc string) (subject, b
 		inner := fmt.Sprintf(
 			`<p style="margin:0 0 12px;">您好，您发起的训练报告（%s ~ %s）已生成完成。</p>
 <p style="margin:0 0 12px;">下载有效期 24 小时，请尽快在组织管理页下载 HTML，或查看本邮件附件。</p>
-<p style="margin:0;font-size:12px;color:#64748b;">任务 ID：%s</p>`,
+<p style="margin:0;font-size:12px;color:#737373;">任务 ID：%s</p>`,
 			html.EscapeString(start), html.EscapeString(end), html.EscapeString(id),
 		)
 		body = mail.Wrap(mail.LayoutOpts{Brand: brand, Title: "训练报告已生成"}, inner)

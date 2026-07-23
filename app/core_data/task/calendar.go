@@ -208,25 +208,33 @@ func buildCalendarMail(siteTitle string, c *model.ContestCalendar, advanceMin in
 	if plat == "" {
 		plat = html.EscapeString(c.Platform)
 	}
-	url := html.EscapeString(c.URL)
 	subject = fmt.Sprintf("[%s] 比赛提醒：%s 将于 %s 开始", siteTitle, c.Name, start)
-	inner := fmt.Sprintf(`
-<p style="margin:0 0 12px;">你好，</p>
-<p style="margin:0 0 14px;">你订阅的比赛即将开始（提前 <strong>%s</strong> 提醒）：</p>
-<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;">
-<tr><td style="padding:6px 12px 6px 0;color:#64748b;width:72px;">平台</td><td style="padding:6px 0;">%s</td></tr>
-<tr><td style="padding:6px 12px 6px 0;color:#64748b;">比赛</td><td style="padding:6px 0;"><strong>%s</strong></td></tr>
-<tr><td style="padding:6px 12px 6px 0;color:#64748b;">开始</td><td style="padding:6px 0;">%s（北京时间）</td></tr>
-<tr><td style="padding:6px 12px 6px 0;color:#64748b;">结束</td><td style="padding:6px 0;">%s（北京时间）</td></tr>
-</table>
-<p style="margin:18px 0 8px;"><a href="%s" style="display:inline-block;padding:10px 18px;background:#4f46e5;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold;">前往比赛页面</a></p>
-<p style="margin:16px 0 0;color:#94a3b8;font-size:12px;">管理订阅：登录 %s → 比赛 → 比赛日历。若不再需要提醒，可在页面中取消订阅。</p>
-`, html.EscapeString(advLabel), plat, name, start, end, url, html.EscapeString(siteTitle))
+	var inner strings.Builder
+	inner.WriteString(mailpkg.P("你好，"))
+	inner.WriteString(fmt.Sprintf(
+		`<p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:%s;">你订阅的比赛即将开始（提前 <strong>%s</strong> 提醒）：</p>`,
+		mailpkg.ColorForeground, html.EscapeString(advLabel),
+	))
+	inner.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;">`)
+	inner.WriteString(mailpkg.RowKV("平台", plat))
+	inner.WriteString(mailpkg.RowKV("比赛", "<strong>"+name+"</strong>"))
+	inner.WriteString(mailpkg.RowKV("开始", start+"（北京时间）"))
+	inner.WriteString(mailpkg.RowKV("结束", end+"（北京时间）"))
+	inner.WriteString(`</table>`)
+	inner.WriteString(`<p style="margin:18px 0 8px;">`)
+	if c.URL != "" {
+		inner.WriteString(mailpkg.BtnPrimary(c.URL, "前往比赛页面"))
+	}
+	inner.WriteString(`</p>`)
+	inner.WriteString(fmt.Sprintf(
+		`<p style="margin:16px 0 0;color:%s;font-size:12px;">管理订阅：登录 %s → 比赛 → 比赛日历。若不再需要提醒，可在页面中取消订阅。</p>`,
+		mailpkg.ColorMutedFg, html.EscapeString(siteTitle),
+	))
 	body = mailpkg.Wrap(mailpkg.LayoutOpts{
 		Brand:     siteTitle,
 		Title:     "比赛提醒",
 		Preheader: fmt.Sprintf("%s 将于 %s 开始", c.Name, start),
-	}, inner)
+	}, inner.String())
 	return subject, body
 }
 

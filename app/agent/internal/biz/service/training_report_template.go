@@ -59,31 +59,31 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8">`)
 	b.WriteString(`<meta name="viewport" content="width=device-width,initial-scale=1">`)
 	fmt.Fprintf(&b, `<title>%s %s</title></head>`, html.EscapeString(brand), html.EscapeString(title))
-	b.WriteString(`<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.5;color:#222;">`)
-	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f2f5;"><tr><td align="center" style="padding:12px 8px;">`)
-	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;">`)
+	b.WriteString(`<body style="margin:0;padding:0;background:#fafafa;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue","PingFang SC","Microsoft YaHei",Arial,sans-serif;font-size:14px;line-height:1.5;color:#0a0a0a;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fafafa;"><tr><td align="center" style="padding:12px 8px;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;width:100%;background:#ffffff;border:1px solid #e5e5e5;border-radius:10px;overflow:hidden;">`)
 
-	// Header
-	b.WriteString(`<tr><td style="background:#4f46e5;color:#ffffff;padding:16px 14px;">`)
-	fmt.Fprintf(&b, `<div style="font-size:12px;opacity:0.9;">%s · %s</div>`, html.EscapeString(brand), html.EscapeString(badge))
-	fmt.Fprintf(&b, `<div style="font-size:20px;font-weight:bold;margin:6px 0 4px;">%s %s</div>`, html.EscapeString(title), statusEmoji)
-	fmt.Fprintf(&b, `<div style="font-size:12px;opacity:0.92;">%s ~ %s · %s · 成员%d · 活跃%d · AC率%.1f%%</div>`,
+	// Header — shadcn primary
+	b.WriteString(`<tr><td style="background:#171717;color:#fafafa;padding:20px 18px;">`)
+	fmt.Fprintf(&b, `<div style="font-size:12px;font-weight:500;opacity:0.85;">%s · %s</div>`, html.EscapeString(brand), html.EscapeString(badge))
+	fmt.Fprintf(&b, `<div style="font-size:20px;font-weight:600;letter-spacing:-0.02em;margin:6px 0 4px;">%s %s</div>`, html.EscapeString(title), statusEmoji)
+	fmt.Fprintf(&b, `<div style="font-size:12px;opacity:0.8;">%s ~ %s · %s · 成员%d · 活跃%d · AC率%.1f%%</div>`,
 		html.EscapeString(data.StartDate), html.EscapeString(data.EndDate), html.EscapeString(data.ScopeLabel),
 		data.MemberCount, data.ActiveMembers, acRate)
-	fmt.Fprintf(&b, `<div style="font-size:11px;margin-top:8px;"><a href="%s" style="color:#e0e7ff;">打开主站</a></div>`, moreHome)
+	fmt.Fprintf(&b, `<div style="font-size:11px;margin-top:10px;"><a href="%s" style="color:#fafafa;text-decoration:underline;text-underline-offset:2px;">打开主站</a></div>`, moreHome)
 	b.WriteString(`</td></tr>`)
 
 	// KPI 2x2 table（table 布局，QQ 友好）
-	b.WriteString(`<tr><td style="padding:12px 10px 4px;">`)
+	b.WriteString(`<tr><td style="padding:16px 14px 4px;background:#ffffff;">`)
 	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="6" border="0"><tr>`)
-	fmt.Fprintf(&b, `<td width="50%%" valign="top" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px 10px;"><div style="font-size:22px;font-weight:bold;color:#1e1b4b;">%d</div><div style="font-size:12px;color:#64748b;">总提交</div><div style="font-size:11px;color:#64748b;margin-top:4px;">环比 %s %s</div></td>`,
-		data.TotalSubmits, html.EscapeString(deltaStr), html.EscapeString(trendLabel))
-	fmt.Fprintf(&b, `<td width="50%%" valign="top" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px 10px;"><div style="font-size:22px;font-weight:bold;color:#1e1b4b;">%d</div><div style="font-size:12px;color:#64748b;">AC 次数</div><div style="font-size:11px;color:#64748b;margin-top:4px;">AC率 %.1f%%</div></td>`,
+	fmt.Fprintf(&b, `<td width="50%%" valign="top" style="background:#f5f5f5;border:1px solid #e5e5e5;border-radius:10px;padding:12px 10px;"><div style="font-size:22px;font-weight:600;color:#0a0a0a;">%d</div><div style="font-size:12px;color:#737373;">总提交</div><div style="font-size:11px;color:#737373;margin-top:4px;">环比 %s %s · 上期 %d</div></td>`,
+		data.TotalSubmits, html.EscapeString(deltaStr), html.EscapeString(trendLabel), data.PrevTotalSubmits)
+	fmt.Fprintf(&b, `<td width="50%%" valign="top" style="background:#f5f5f5;border:1px solid #e5e5e5;border-radius:10px;padding:12px 10px;"><div style="font-size:22px;font-weight:600;color:#0a0a0a;">%d</div><div style="font-size:12px;color:#737373;">AC 次数</div><div style="font-size:11px;color:#737373;margin-top:4px;">AC率 %.1f%%</div></td>`,
 		data.TotalAC, acRate)
 	b.WriteString(`</tr><tr>`)
-	fmt.Fprintf(&b, `<td width="50%%" valign="top" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px 10px;"><div style="font-size:22px;font-weight:bold;color:#1e1b4b;">%d<span style="font-size:12px;color:#94a3b8;">/%d</span></div><div style="font-size:12px;color:#64748b;">活跃成员</div><div style="font-size:11px;color:#64748b;margin-top:4px;">活跃率 %.0f%%</div></td>`,
+	fmt.Fprintf(&b, `<td width="50%%" valign="top" style="background:#f5f5f5;border:1px solid #e5e5e5;border-radius:10px;padding:12px 10px;"><div style="font-size:22px;font-weight:600;color:#0a0a0a;">%d<span style="font-size:12px;color:#737373;">/%d</span></div><div style="font-size:12px;color:#737373;">活跃成员</div><div style="font-size:11px;color:#737373;margin-top:4px;">活跃率 %.0f%%</div></td>`,
 		data.ActiveMembers, data.MemberCount, activeRatio)
-	fmt.Fprintf(&b, `<td width="50%%" valign="top" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px 10px;"><div style="font-size:22px;font-weight:bold;color:#1e1b4b;">%d</div><div style="font-size:12px;color:#64748b;">未提交</div><div style="font-size:11px;color:#64748b;margin-top:4px;">已剔除出活跃榜</div></td>`,
+	fmt.Fprintf(&b, `<td width="50%%" valign="top" style="background:#f5f5f5;border:1px solid #e5e5e5;border-radius:10px;padding:12px 10px;"><div style="font-size:22px;font-weight:600;color:#0a0a0a;">%d</div><div style="font-size:12px;color:#737373;">未提交</div><div style="font-size:11px;color:#737373;margin-top:4px;">已剔除出活跃榜</div></td>`,
 		len(data.InactiveMembers))
 	b.WriteString(`</tr></table></td></tr>`)
 
@@ -93,13 +93,13 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 		emptyRow(&b, "暂无日走势")
 	} else {
 		b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:13px;">`)
-		b.WriteString(`<tr style="background:#f8fafc;"><th align="left" style="border-bottom:1px solid #e5e7eb;">日期</th><th align="right" style="border-bottom:1px solid #e5e7eb;">提交</th><th align="right" style="border-bottom:1px solid #e5e7eb;">AC</th></tr>`)
+		b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">日期</th><th align="right" style="border-bottom:1px solid #e5e5e5;">提交</th><th align="right" style="border-bottom:1px solid #e5e5e5;">AC</th></tr>`)
 		for i, d := range data.DailyTrend {
 			ac := int64(0)
 			if i < len(data.DailyACTrend) {
 				ac = data.DailyACTrend[i].Count
 			}
-			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #f1f5f9;">%s</td><td align="right" style="border-bottom:1px solid #f1f5f9;">%d</td><td align="right" style="border-bottom:1px solid #f1f5f9;">%d</td></tr>`,
+			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td></tr>`,
 				html.EscapeString(d.Date), d.Count, ac)
 		}
 		b.WriteString(`</table>`)
@@ -108,7 +108,7 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 
 	// 2 活跃榜
 	sectionStart(&b, "2. 活跃成员排行榜")
-	b.WriteString(`<p style="margin:0 0 8px;font-size:12px;color:#64748b;">仅含区间有提交成员；教练与 0 提交已剔除。点姓名看资料。</p>`)
+	b.WriteString(`<p style="margin:0 0 8px;font-size:12px;color:#737373;">仅含区间有提交成员；教练与 0 提交已剔除。点姓名看资料。</p>`)
 	ranking := data.ActiveRanking
 	if len(ranking) == 0 {
 		for _, r := range data.TopSubmit {
@@ -119,20 +119,20 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 		emptyRow(&b, "本区间无人提交")
 	} else {
 		b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:13px;">`)
-		b.WriteString(`<tr style="background:#f8fafc;"><th align="left" style="border-bottom:1px solid #e5e7eb;">#</th><th align="left" style="border-bottom:1px solid #e5e7eb;">成员</th><th align="right" style="border-bottom:1px solid #e5e7eb;">提交</th><th align="right" style="border-bottom:1px solid #e5e7eb;">AC</th><th align="right" style="border-bottom:1px solid #e5e7eb;">AC率</th></tr>`)
+		b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">#</th><th align="left" style="border-bottom:1px solid #e5e5e5;">成员</th><th align="right" style="border-bottom:1px solid #e5e5e5;">提交</th><th align="right" style="border-bottom:1px solid #e5e5e5;">AC</th><th align="right" style="border-bottom:1px solid #e5e5e5;">AC率</th></tr>`)
 		shown := 0
 		for _, m := range ranking {
 			if shown >= rankCap {
-				fmt.Fprintf(&b, `<tr><td colspan="5" style="padding:8px;color:#64748b;font-size:12px;">…共 %d 人活跃 · <a href="%s" style="color:#4f46e5;">主站查看更多</a></td></tr>`, len(ranking), moreAct)
+				fmt.Fprintf(&b, `<tr><td colspan="5" style="padding:8px;color:#737373;font-size:12px;">…共 %d 人活跃 · <a href="%s" style="color:#171717;">主站查看更多</a></td></tr>`, len(ranking), moreAct)
 				break
 			}
 			nameHTML := nameLink(m.Name, m.Username, m.UserID, m.ProfileURL)
-			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #f1f5f9;">%d</td><td style="border-bottom:1px solid #f1f5f9;">%s</td><td align="right" style="border-bottom:1px solid #f1f5f9;">%d</td><td align="right" style="border-bottom:1px solid #f1f5f9;">%d</td><td align="right" style="border-bottom:1px solid #f1f5f9;">%.1f%%</td></tr>`,
+			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%d</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%.1f%%</td></tr>`,
 				m.Rank, nameHTML, m.Submits, m.AC, m.ACRate)
 			shown++
 		}
 		if shown >= len(ranking) && len(ranking) > 0 {
-			fmt.Fprintf(&b, `<tr><td colspan="5" style="padding:8px;font-size:12px;"><a href="%s" style="color:#4f46e5;">主站动态 / 更多数据 →</a></td></tr>`, moreAct)
+			fmt.Fprintf(&b, `<tr><td colspan="5" style="padding:8px;font-size:12px;"><a href="%s" style="color:#171717;">主站动态 / 更多数据 →</a></td></tr>`, moreAct)
 		}
 		b.WriteString(`</table>`)
 	}
@@ -152,11 +152,11 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 			if i >= tagN {
 				break
 			}
-			fmt.Fprintf(&b, `<span style="display:inline-block;background:#eef2ff;color:#3730a3;border-radius:12px;padding:3px 10px;margin:2px 4px 2px 0;font-size:12px;">%s <b>%d</b></span>`,
+			fmt.Fprintf(&b, `<span style="display:inline-block;background:#f5f5f5;color:#0a0a0a;border-radius:9999px;padding:3px 10px;margin:2px 4px 2px 0;font-size:12px;">%s <b>%d</b></span>`,
 				html.EscapeString(t.Tag), t.Count)
 		}
 		b.WriteString(`</p>`)
-		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#4f46e5;">题库 / 主站 →</a></p>`, SiteBaseURL+"/question-bank")
+		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">题库 / 主站 →</a></p>`, SiteBaseURL+"/question-bank")
 	}
 	sectionEnd(&b)
 
@@ -167,9 +167,9 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 		probs = aggregateProblemOverview(data.OrgSubmitSample, probN)
 	}
 	if len(probs) > 0 {
-		b.WriteString(`<p style="margin:0 0 6px;font-size:13px;font-weight:bold;color:#334155;">热门题目（谁在交）</p>`)
+		b.WriteString(`<p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#0a0a0a;">热门题目（谁在交）</p>`)
 		b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:12px;">`)
-		b.WriteString(`<tr style="background:#f8fafc;"><th align="left" style="border-bottom:1px solid #e5e7eb;">题目</th><th align="right" style="border-bottom:1px solid #e5e7eb;">尝试</th><th align="right" style="border-bottom:1px solid #e5e7eb;">AC</th><th align="left" style="border-bottom:1px solid #e5e7eb;">AC成员</th></tr>`)
+		b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">题目</th><th align="right" style="border-bottom:1px solid #e5e5e5;">尝试</th><th align="right" style="border-bottom:1px solid #e5e5e5;">AC</th><th align="left" style="border-bottom:1px solid #e5e5e5;">AC成员</th></tr>`)
 		for i, p := range probs {
 			if i >= probN {
 				break
@@ -178,7 +178,7 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 			if acUsers == "" {
 				acUsers = "—"
 			}
-			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #f1f5f9;word-break:break-all;">%s</td><td align="right" style="border-bottom:1px solid #f1f5f9;">%d</td><td align="right" style="border-bottom:1px solid #f1f5f9;">%d</td><td style="border-bottom:1px solid #f1f5f9;font-size:11px;color:#475569;">%s</td></tr>`,
+			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;word-break:break-all;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td><td style="border-bottom:1px solid #e5e5e5;font-size:11px;color:#737373;">%s</td></tr>`,
 				html.EscapeString(p.Problem), p.Submitters, p.ACCount, html.EscapeString(acUsers))
 		}
 		b.WriteString(`</table>`)
@@ -186,12 +186,12 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 		emptyRow(&b, "暂无做题抽样。")
 	}
 
-	b.WriteString(`<p style="margin:12px 0 6px;font-size:13px;font-weight:bold;color:#334155;">近期提交动态</p>`)
+	b.WriteString(`<p style="margin:12px 0 6px;font-size:13px;font-weight:600;color:#0a0a0a;">近期提交动态</p>`)
 	if len(data.OrgSubmitSample) == 0 {
 		emptyRow(&b, "暂无动态抽样。")
 	} else {
 		b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:12px;">`)
-		b.WriteString(`<tr style="background:#f8fafc;"><th align="left" style="border-bottom:1px solid #e5e7eb;">时间</th><th align="left" style="border-bottom:1px solid #e5e7eb;">成员</th><th align="left" style="border-bottom:1px solid #e5e7eb;">题目</th><th align="left" style="border-bottom:1px solid #e5e7eb;">状态</th></tr>`)
+		b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">时间</th><th align="left" style="border-bottom:1px solid #e5e5e5;">成员</th><th align="left" style="border-bottom:1px solid #e5e5e5;">题目</th><th align="left" style="border-bottom:1px solid #e5e5e5;">状态</th></tr>`)
 		n := 0
 		for _, f := range data.OrgSubmitSample {
 			if n >= feedN {
@@ -205,19 +205,19 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 			if prob == "" {
 				prob = f.Problem
 			}
-			stColor := "#64748b"
+			stColor := "#737373"
 			us := strings.ToUpper(f.Status)
 			if strings.Contains(us, "AC") || us == "OK" {
-				stColor = "#059669"
+				stColor = "#15803d"
 			} else if strings.Contains(us, "WA") {
 				stColor = "#dc2626"
 			}
-			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #f1f5f9;white-space:nowrap;">%s</td><td style="border-bottom:1px solid #f1f5f9;">%s</td><td style="border-bottom:1px solid #f1f5f9;word-break:break-all;">%s</td><td style="border-bottom:1px solid #f1f5f9;color:%s;font-weight:bold;">%s</td></tr>`,
+			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;white-space:nowrap;">%s</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td style="border-bottom:1px solid #e5e5e5;word-break:break-all;">%s</td><td style="border-bottom:1px solid #e5e5e5;color:%s;font-weight:600;">%s</td></tr>`,
 				html.EscapeString(f.Time), html.EscapeString(name), html.EscapeString(prob), stColor, html.EscapeString(f.Status))
 			n++
 		}
 		b.WriteString(`</table>`)
-		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#4f46e5;">查看全部动态 →</a></p>`, moreAct)
+		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">查看全部动态 →</a></p>`, moreAct)
 	}
 	sectionEnd(&b)
 
@@ -225,10 +225,10 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 	sectionStart(&b, "5. 比赛表现")
 	if len(data.Contests) == 0 {
 		emptyRow(&b, "区间内未匹配到比赛记录。")
-		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#4f46e5;">打开主站比赛页核对 →</a></p>`, moreContest)
+		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">打开主站比赛页核对 →</a></p>`, moreContest)
 	} else {
 		b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:12px;">`)
-		b.WriteString(`<tr style="background:#f8fafc;"><th align="left" style="border-bottom:1px solid #e5e7eb;">比赛</th><th align="left" style="border-bottom:1px solid #e5e7eb;">平台</th><th align="right" style="border-bottom:1px solid #e5e7eb;">过题</th><th align="left" style="border-bottom:1px solid #e5e7eb;">日期</th></tr>`)
+		b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">比赛</th><th align="left" style="border-bottom:1px solid #e5e5e5;">平台</th><th align="right" style="border-bottom:1px solid #e5e5e5;">过题</th><th align="left" style="border-bottom:1px solid #e5e5e5;">日期</th></tr>`)
 		n := 0
 		for _, c := range data.Contests {
 			if n >= contestN {
@@ -236,9 +236,9 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 			}
 			name := html.EscapeString(c.ContestName)
 			if c.ID > 0 {
-				name = fmt.Sprintf(`<a href="%s/contest/%d" style="color:#4f46e5;text-decoration:none;">%s</a>`, SiteBaseURL, c.ID, name)
+				name = fmt.Sprintf(`<a href="%s/contest/%d" style="color:#171717;text-decoration:none;">%s</a>`, SiteBaseURL, c.ID, name)
 			}
-			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #f1f5f9;">%s</td><td style="border-bottom:1px solid #f1f5f9;">%s</td><td align="right" style="border-bottom:1px solid #f1f5f9;">%d/%d</td><td style="border-bottom:1px solid #f1f5f9;">%s</td></tr>`,
+			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%s</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d/%d</td><td style="border-bottom:1px solid #e5e5e5;">%s</td></tr>`,
 				name, html.EscapeString(c.Platform), c.ACCount, c.TotalCount, html.EscapeString(c.Time))
 			n++
 		}
@@ -250,10 +250,10 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 			if i >= 4 {
 				break
 			}
-			fmt.Fprintf(&b, `<p style="margin:12px 0 6px;font-size:13px;font-weight:bold;">%s · 组织榜（%d人）</p>`,
+			fmt.Fprintf(&b, `<p style="margin:12px 0 6px;font-size:13px;font-weight:600;">%s · 组织榜（%d人）</p>`,
 				html.EscapeString(snap.ContestName), snap.Total)
 			b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:12px;">`)
-			b.WriteString(`<tr style="background:#f8fafc;"><th align="left" style="border-bottom:1px solid #e5e7eb;">#</th><th align="left" style="border-bottom:1px solid #e5e7eb;">成员</th><th align="right" style="border-bottom:1px solid #e5e7eb;">过题</th><th align="right" style="border-bottom:1px solid #e5e7eb;">分</th></tr>`)
+			b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">#</th><th align="left" style="border-bottom:1px solid #e5e5e5;">成员</th><th align="right" style="border-bottom:1px solid #e5e5e5;">过题</th><th align="right" style="border-bottom:1px solid #e5e5e5;">分</th></tr>`)
 			rowN := 10
 			if compact {
 				rowN = 5
@@ -262,12 +262,12 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 				if j >= rowN {
 					break
 				}
-				fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #f1f5f9;">%d</td><td style="border-bottom:1px solid #f1f5f9;">%s</td><td align="right" style="border-bottom:1px solid #f1f5f9;">%d/%d</td><td align="right" style="border-bottom:1px solid #f1f5f9;">%d</td></tr>`,
+				fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%d</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d/%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td></tr>`,
 					r.Rank, html.EscapeString(r.Name), r.ACCount, r.TotalCount, r.Score)
 			}
 			b.WriteString(`</table>`)
 		}
-		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#4f46e5;">主站比赛列表 →</a></p>`, moreContest)
+		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">主站比赛列表 →</a></p>`, moreContest)
 	}
 	sectionEnd(&b)
 
@@ -275,39 +275,39 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 	sectionStart(&b, "6. 知识沉淀（博客）")
 	if len(data.RecentBlogs) == 0 {
 		emptyRow(&b, "暂无组织公开博客。")
-		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#4f46e5;">博客广场 →</a></p>`, moreBlog)
+		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">博客广场 →</a></p>`, moreBlog)
 	} else {
 		n := 0
 		for _, bl := range data.RecentBlogs {
 			if n >= blogN {
 				break
 			}
-			fmt.Fprintf(&b, `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:8px;background:#fafbff;">`)
-			fmt.Fprintf(&b, `<div style="font-weight:bold;font-size:14px;">%s</div>`, html.EscapeString(bl.Title))
-			fmt.Fprintf(&b, `<div style="font-size:12px;color:#64748b;margin:4px 0;">%s</div>`, html.EscapeString(bl.Author))
+			fmt.Fprintf(&b, `<div style="border:1px solid #e5e5e5;border-radius:10px;padding:10px;margin-bottom:8px;background:#fafbff;">`)
+			fmt.Fprintf(&b, `<div style="font-weight:600;font-size:14px;">%s</div>`, html.EscapeString(bl.Title))
+			fmt.Fprintf(&b, `<div style="font-size:12px;color:#737373;margin:4px 0;">%s</div>`, html.EscapeString(bl.Author))
 			if bl.Summary != "" {
-				fmt.Fprintf(&b, `<div style="font-size:12px;color:#475569;">%s</div>`, html.EscapeString(bl.Summary))
+				fmt.Fprintf(&b, `<div style="font-size:12px;color:#737373;">%s</div>`, html.EscapeString(bl.Summary))
 			}
 			b.WriteString(`</div>`)
 			n++
 		}
-		fmt.Fprintf(&b, `<p style="margin:4px 0 0;font-size:12px;"><a href="%s" style="color:#4f46e5;">更多博客 →</a></p>`, moreBlog)
+		fmt.Fprintf(&b, `<p style="margin:4px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">更多博客 →</a></p>`, moreBlog)
 	}
 	sectionEnd(&b)
 
 	// 7 不活跃
 	sectionStart(&b, "7. 不活跃成员（已从排行榜剔除）")
 	if len(data.InactiveMembers) == 0 {
-		b.WriteString(`<p style="margin:0;color:#059669;font-weight:bold;">全员都有提交，给力！</p>`)
+		b.WriteString(`<p style="margin:0;color:#15803d;font-weight:600;">全员都有提交，给力！</p>`)
 	} else {
 		b.WriteString(`<p style="margin:0;line-height:1.9;">`)
 		n := 0
 		for _, name := range data.InactiveMembers {
 			if n >= inactiveN {
-				fmt.Fprintf(&b, `<span style="display:inline-block;background:#fef3c7;color:#92400e;border-radius:12px;padding:3px 10px;margin:2px 4px 2px 0;font-size:12px;">…共%d人</span>`, len(data.InactiveMembers))
+				fmt.Fprintf(&b, `<span style="display:inline-block;background:#fef2f2;color:#dc2626;border-radius:9999px;padding:3px 10px;margin:2px 4px 2px 0;font-size:12px;">…共%d人</span>`, len(data.InactiveMembers))
 				break
 			}
-			fmt.Fprintf(&b, `<span style="display:inline-block;background:#fef3c7;color:#92400e;border-radius:12px;padding:3px 10px;margin:2px 4px 2px 0;font-size:12px;">%s</span>`, html.EscapeString(name))
+			fmt.Fprintf(&b, `<span style="display:inline-block;background:#fef2f2;color:#dc2626;border-radius:9999px;padding:3px 10px;margin:2px 4px 2px 0;font-size:12px;">%s</span>`, html.EscapeString(name))
 			n++
 		}
 		b.WriteString(`</p>`)
@@ -317,10 +317,10 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 	// 8 评价
 	sectionStart(&b, "8. 综合维度评价")
 	for _, line := range dimLines {
-		fmt.Fprintf(&b, `<div style="font-size:13px;color:#334155;margin:2px 0;">%s</div>`, html.EscapeString(line))
+		fmt.Fprintf(&b, `<div style="font-size:13px;color:#0a0a0a;margin:2px 0;">%s</div>`, html.EscapeString(line))
 	}
-	fmt.Fprintf(&b, `<div style="margin-top:10px;font-size:15px;font-weight:bold;color:#312e81;">总评 %s</div>`, statusEmoji)
-	b.WriteString(`<ul style="margin:8px 0 0;padding-left:18px;color:#475569;font-size:13px;">`)
+	fmt.Fprintf(&b, `<div style="margin-top:10px;font-size:15px;font-weight:600;color:#0a0a0a;">总评 %s</div>`, statusEmoji)
+	b.WriteString(`<ul style="margin:8px 0 0;padding-left:18px;color:#737373;font-size:13px;">`)
 	for _, a := range advice {
 		fmt.Fprintf(&b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(a))
 	}
@@ -328,7 +328,7 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 	sectionEnd(&b)
 
 	// Footer
-	fmt.Fprintf(&b, `<tr><td style="padding:12px 14px 18px;text-align:center;font-size:11px;color:#94a3b8;border-top:1px solid #f1f5f9;">由 %s 规则模板生成 · 教练不计入统计 · <a href="%s" style="color:#4f46e5;">主站</a></td></tr>`,
+	fmt.Fprintf(&b, `<tr><td style="padding:12px 14px 18px;text-align:center;font-size:11px;color:#737373;border-top:1px solid #e5e5e5;">由 %s 规则模板生成 · 教练不计入统计 · <a href="%s" style="color:#171717;">主站</a></td></tr>`,
 		html.EscapeString(brand), moreHome)
 
 	b.WriteString(`</table></td></tr></table></body></html>`)
@@ -336,9 +336,9 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 }
 
 func sectionStart(b *strings.Builder, title string) {
-	b.WriteString(`<tr><td style="padding:4px 10px 12px;">`)
-	b.WriteString(`<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;padding:12px 10px;">`)
-	fmt.Fprintf(b, `<div style="font-size:15px;font-weight:bold;color:#1e293b;margin:0 0 10px;padding-left:8px;border-left:3px solid #6366f1;">%s</div>`, html.EscapeString(title))
+	b.WriteString(`<tr><td style="padding:4px 14px 12px;background:#ffffff;">`)
+	b.WriteString(`<div style="background:#ffffff;border:1px solid #e5e5e5;border-radius:10px;padding:14px 12px;">`)
+	fmt.Fprintf(b, `<div style="font-size:14px;font-weight:600;color:#0a0a0a;margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid #e5e5e5;">%s</div>`, html.EscapeString(title))
 }
 
 func sectionEnd(b *strings.Builder) {
@@ -346,7 +346,7 @@ func sectionEnd(b *strings.Builder) {
 }
 
 func emptyRow(b *strings.Builder, msg string) {
-	fmt.Fprintf(b, `<p style="margin:0;font-size:13px;color:#94a3b8;">%s</p>`, html.EscapeString(msg))
+	fmt.Fprintf(b, `<p style="margin:0;font-size:13px;color:#737373;">%s</p>`, html.EscapeString(msg))
 }
 
 func nameLink(name, username string, userID int64, profileURL string) string {
@@ -358,7 +358,7 @@ func nameLink(name, username string, userID int64, profileURL string) string {
 	if href == "" {
 		return n
 	}
-	return fmt.Sprintf(`<a href="%s" style="color:#4f46e5;text-decoration:none;font-weight:bold;">%s</a>`, html.EscapeString(href), n)
+	return fmt.Sprintf(`<a href="%s" style="color:#171717;text-decoration:underline;text-underline-offset:2px;font-weight:600;">%s</a>`, html.EscapeString(href), n)
 }
 
 func profileURLFn(username string, userID int64) string {
@@ -448,10 +448,13 @@ func trainingReportSystemPromptStrict(mode string) string {
 3. 禁止输出：思考过程、分析说明、工具调用说明、「现在我已获取…」、Markdown、`+"```"+` 代码围栏、任何 HTML 之外的文字。
 4. 禁止输出半截标签、未闭合的主要结构；必须以 </html> 结束（若以片段输出则至少含完整 table 结构与 8 个章节标题）。
 
-【版式 — QQ/邮件兼容】
+【版式 — shadcn/ui 浅色主题 + QQ/邮件兼容】
 - table 布局 + 元素上写 style="..." 内联样式
 - 禁止 CSS Grid / Flex / clamp / 复杂 @media
 - 外层 max-width:640px；字号用 px
+- 配色（必须）：页面背景 #fafafa；卡片 #ffffff；主色/按钮 #171717；主色文字 #fafafa；正文 #0a0a0a；次要文字 #737373；边框 #e5e5e5；muted 面 #f5f5f5
+- 卡片：1px 边框 + border-radius:10px；按钮：背景 #171717、白字、radius 8px
+- 禁止 indigo/蓝紫系（如 #4f46e5、#6366f1）
 
 【数据 — 只用用户消息里的 JSON】
 - activeRanking：活跃榜（已剔除教练与 0 提交），禁止只写 Top5 假装全员
@@ -568,7 +571,7 @@ func SanitizeAndValidateReportHTML(raw string) (htmlOut string, ok bool, reason 
 	}
 	// 若无 html 外壳，包一层保证邮件可读
 	if !hasHTML {
-		s = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f0f2f5;">` +
+		s = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#fafafa;font-family:ui-sans-serif,system-ui,sans-serif;font-size:14px;line-height:1.5;color:#0a0a0a;">` +
 			s + `</body></html>`
 	}
 	return s, true, ""

@@ -18,7 +18,7 @@ func TestRenderDailyRuleHTML_HasLayout(t *testing.T) {
 		YesterdayTagHits: map[string]int{"DP": 2},
 	}
 	html := RenderDailyRuleHTML(data, "GoAlgo")
-	for _, want := range []string{"<!DOCTYPE html>", "小明", "昨日提交", "近 7 日", "A+B", "DP", "4f46e5", "</html>"} {
+	for _, want := range []string{"<!DOCTYPE html>", "小明", "昨日提交", "近 7 日", "A+B", "DP", "171717", "fafafa", "</html>"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing %q", want)
 		}

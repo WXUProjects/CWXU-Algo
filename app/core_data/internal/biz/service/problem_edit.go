@@ -544,11 +544,11 @@ func problemEditPendingEmailHTML(problemTitle string, problemID, editID uint, ap
 	b.WriteString(`<p style="margin:0 0 14px;">有用户提交了题目修改，请尽快审核。</p>`)
 	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;">`)
 	for _, r := range rows {
-		fmt.Fprintf(&b, `<tr><td style="padding:6px 12px 6px 0;color:#64748b;vertical-align:top;width:88px;">%s</td><td style="padding:6px 0;color:#222;">%s</td></tr>`,
+		fmt.Fprintf(&b, `<tr><td style="padding:6px 12px 6px 0;color:#737373;vertical-align:top;width:88px;">%s</td><td style="padding:6px 0;color:#0a0a0a;">%s</td></tr>`,
 			mail.Escape(r.k), mail.Escape(r.v))
 	}
 	b.WriteString(`</table>`)
-	b.WriteString(`<p style="margin:16px 0 0;font-size:13px;color:#334155;">请登录站点 → 打开管理端「内容审核 / 题库」处理该申请。通过后修改将立即生效；驳回不会给用户发邮件。</p>`)
+	b.WriteString(`<p style="margin:16px 0 0;font-size:13px;color:#0a0a0a;">请登录站点 → 打开管理端「内容审核 / 题库」处理该申请。通过后修改将立即生效；驳回不会给用户发邮件。</p>`)
 	return mail.Wrap(mail.LayoutOpts{
 		Brand:     mail.DefaultBrand,
 		Title:     "内容待审核",
@@ -572,29 +572,30 @@ func problemEditThankYouEmailHTML(db *gorm.DB, req *model.ProblemEditRequest, re
 	} else {
 		b.WriteString(`<p style="margin:0 0 12px;">你的内容贡献<strong>已通过审核并生效</strong>。</p>`)
 	}
-	b.WriteString(`<p style="margin:0 0 8px;color:#64748b;font-size:13px;">本次生效内容：</p><ul style="margin:0 0 14px;padding-left:20px;color:#222;">`)
+	b.WriteString(`<p style="margin:0 0 8px;color:#737373;font-size:13px;">本次生效内容：</p><ul style="margin:0 0 14px;padding-left:20px;color:#0a0a0a;">`)
 	for _, it := range items {
 		fmt.Fprintf(&b, `<li style="margin:4px 0;">%s</li>`, mail.Escape(it))
 	}
 	b.WriteString(`</ul>`)
 	if req != nil {
 		if t := strings.TrimSpace(req.ProposedTitle); t != "" {
-			fmt.Fprintf(&b, `<p style="margin:0 0 8px;font-size:13px;"><span style="color:#64748b;">新标题：</span>%s</p>`, mail.Escape(t))
+			fmt.Fprintf(&b, `<p style="margin:0 0 8px;font-size:13px;"><span style="color:#737373;">新标题：</span>%s</p>`, mail.Escape(t))
 		}
 		if req.HasTags {
 			tags := nonEmptyTags(req.ProposedTags)
 			if len(tags) > 0 {
-				fmt.Fprintf(&b, `<p style="margin:0 0 8px;font-size:13px;"><span style="color:#64748b;">标签：</span>%s</p>`, mail.Escape(strings.Join(tags, "、")))
+				fmt.Fprintf(&b, `<p style="margin:0 0 8px;font-size:13px;"><span style="color:#737373;">标签：</span>%s</p>`, mail.Escape(strings.Join(tags, "、")))
 			}
 		}
 	}
 	if reviewNote != "" {
-		fmt.Fprintf(&b, `<p style="margin:12px 0 8px;font-size:13px;"><span style="color:#64748b;">审核备注：</span>%s</p>`, mail.Escape(reviewNote))
+		fmt.Fprintf(&b, `<p style="margin:12px 0 8px;font-size:13px;"><span style="color:#737373;">审核备注：</span>%s</p>`, mail.Escape(reviewNote))
 	}
 	b.WriteString(`<p style="margin:16px 0 0;">感谢你为 GoAlgo 作出贡献！站内通知中也有同一条消息。</p>`)
 	if problemID > 0 {
-		fmt.Fprintf(&b, `<p style="margin:14px 0 0;"><a href="%s/question-bank/detail/%d" style="display:inline-block;padding:10px 18px;background:%s;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold;">查看题目</a></p>`,
-			mail.SiteHomeURL, problemID, mail.BrandColor)
+		b.WriteString(`<p style="margin:14px 0 0;">`)
+		b.WriteString(mail.BtnPrimary(fmt.Sprintf("%s/question-bank/detail/%d", mail.SiteHomeURL, problemID), "查看题目"))
+		b.WriteString(`</p>`)
 	}
 	return mail.Wrap(mail.LayoutOpts{
 		Brand:     mail.DefaultBrand,

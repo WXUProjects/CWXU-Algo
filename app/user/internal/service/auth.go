@@ -684,12 +684,10 @@ func codeMailContent(purpose, code, brand string) (subject, body string) {
 		title = "注册验证码"
 		action = fmt.Sprintf("你正在注册 %s 账号", brand)
 	}
-	inner := fmt.Sprintf(`
-<p style="margin:0 0 12px;">你好，</p>
-<p style="margin:0 0 12px;">%s，验证码为：</p>
-<p style="margin:16px 0;font-size:28px;font-weight:bold;letter-spacing:6px;color:#1e1b4b;text-align:center;">%s</p>
-<p style="margin:0 0 8px;">验证码 <strong>%d</strong> 分钟内有效。如非本人操作，请忽略本邮件。</p>
-`, mail.Escape(action), mail.Escape(code), mins)
+	inner := mail.P("你好，") +
+		fmt.Sprintf(`<p style="margin:0 0 4px;font-size:14px;line-height:1.6;color:%s;">%s，验证码为：</p>`, mail.ColorForeground, mail.Escape(action)) +
+		mail.CodeBlock(code) +
+		fmt.Sprintf(`<p style="margin:0 0 8px;font-size:14px;line-height:1.6;color:%s;">验证码 <strong>%d</strong> 分钟内有效。如非本人操作，请忽略本邮件。</p>`, mail.ColorForeground, mins)
 	body = mail.Wrap(mail.LayoutOpts{
 		Brand:     brand,
 		Title:     title,

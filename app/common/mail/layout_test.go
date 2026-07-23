@@ -16,8 +16,12 @@ func TestWrap_HasBrandShell(t *testing.T) {
 		"本邮件由",
 		"打开主站",
 		BrandColor,
+		ColorPrimary,
+		ColorBackground,
+		ColorBorder,
 		"</html>",
 	} {
+
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing %q in:\n%s", want, html[:min(200, len(html))])
 		}
