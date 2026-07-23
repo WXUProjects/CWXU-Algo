@@ -1,13 +1,14 @@
 package utils
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 
+	"cwxu-algo/app/common/conf"
+	"cwxu-algo/app/common/mail"
+
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
-	"gopkg.in/gomail.v2"
 )
 
 // SendEmailParams 邮件发送参数
@@ -17,23 +18,21 @@ type SendEmailParams struct {
 	Body    string `json:"body"`    // 邮件内容(支持HTML)
 }
 
-// SendEmail 邮件发送工具
+// SendEmail 邮件发送工具（委托 common/mail，与全站 SMTP 行为一致）
 type SendEmail struct {
-	smtpHost     string
-	smtpPort     int
-	smtpUsername string
-	smtpPassword string
-	smtpFrom     string
+	sender *mail.Sender
 }
 
 // NewSendEmail 创建邮件发送工具实例
 func NewSendEmail(host string, port int, username, password, from string) *SendEmail {
 	return &SendEmail{
-		smtpHost:     host,
-		smtpPort:     port,
-		smtpUsername: username,
-		smtpPassword: password,
-		smtpFrom:     from,
+		sender: mail.NewSender(&conf.SMTP{
+			Host:     host,
+			Port:     int32(port),
+			Username: username,
+			Password: password,
+			From:     from,
+		}),
 	}
 }
 
@@ -93,22 +92,12 @@ func (e *SendEmail) AiInterface(jsonStr string) string {
 
 // Handle 执行邮件发送
 func (e *SendEmail) Handle(to, subject, body string) error {
-	if e.smtpHost == "" {
+	if e == nil || e.sender == nil || !e.sender.Configured() {
 		return fmt.Errorf("SMTP服务器未配置")
 	}
-
-	m := gomail.NewMessage()
-	m.SetHeader("From", e.smtpFrom)
-	m.SetHeader("To", to)
-	m.SetHeader("Subject", subject)
-	m.SetBody("text/html", body)
-
-	d := gomail.NewDialer(e.smtpHost, e.smtpPort, e.smtpUsername, e.smtpPassword)
-	d.TLSConfig = &tls.Config{InsecureSkipVerify: true}
-
-	if err := d.DialAndSend(m); err != nil {
-		return fmt.Errorf("发送邮件失败: %w", err)
+	// 片段则套统一品牌壳，完整报告文档原样发送
+	if !mail.IsFullHTMLDocument(body) {
+		body = mail.Wrap(mail.LayoutOpts{Brand: mail.DefaultBrand, Title: subject}, body)
 	}
-
-	return nil
+	return e.sender.Send(to, subject, body)
 }

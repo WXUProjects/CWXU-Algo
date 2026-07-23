@@ -385,12 +385,13 @@ func (s *SiteService) TestEmail(ctx context.Context, req *site.TestEmailReq) (*s
 		title = "GoAlgo"
 	}
 	subject := fmt.Sprintf("【%s】邮件配置测试", title)
-	body := fmt.Sprintf(`<div style="font-family:sans-serif;line-height:1.6">
-<p>你好，</p>
-<p>这是一封来自 <b>%s</b> 的测试邮件。</p>
-<p>若你收到此信，说明 SMTP 配置可用。</p>
-<p style="color:#888">发送时间：%s</p>
-</div>`, title, time.Now().Format("2006-01-02 15:04:05"))
+	inner := fmt.Sprintf(`
+<p style="margin:0 0 12px;">你好，</p>
+<p style="margin:0 0 12px;">这是一封来自 <strong>%s</strong> 的测试邮件。</p>
+<p style="margin:0 0 12px;">若你收到此信，说明 SMTP 配置可用，邮件 HTML 布局正常。</p>
+<p style="margin:0;font-size:12px;color:#64748b;">发送时间：%s</p>
+`, mail.Escape(title), time.Now().Format("2006-01-02 15:04:05"))
+	body := mail.Wrap(mail.LayoutOpts{Brand: title, Title: "邮件配置测试", Preheader: "SMTP 测试邮件"}, inner)
 	if err := sender.Send(to, subject, body); err != nil {
 		log.Errorf("test email: %v", err)
 		return &site.TestEmailRes{Code: 1, Message: "发送失败：" + err.Error(), Success: false}, nil

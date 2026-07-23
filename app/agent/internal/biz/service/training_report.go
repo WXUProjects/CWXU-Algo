@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"strings"
@@ -275,8 +276,9 @@ func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *Tr
 	return html2, nil
 }
 
-// BuildNotifyEmail 纯函数：构造通知邮件主题/正文/附件名（可单测，不依赖 SMTP）
-func BuildNotifyEmail(job *TrainingReportJob, brand, html string) (subject, body, attachName string) {
+// BuildNotifyEmail 纯函数：构造通知邮件主题/正文/附件名（可单测，不依赖 SMTP）。
+// 正文为完整报告 HTML；页脚注入在 </body> 前，禁止拼到 </html> 外。
+func BuildNotifyEmail(job *TrainingReportJob, brand, htmlDoc string) (subject, body, attachName string) {
 	if brand == "" {
 		brand = "GoAlgo"
 	}
@@ -291,18 +293,33 @@ func BuildNotifyEmail(job *TrainingReportJob, brand, html string) (subject, body
 		attachName = "training-report.html"
 	}
 	subject = fmt.Sprintf("【%s 训练报告】%s ~ %s 已生成", brand, start, end)
-	body = html
-	if strings.TrimSpace(body) == "" {
-		body = fmt.Sprintf(`<p>您好，您发起的训练报告（%s ~ %s）已生成完成。</p>
-<p>下载有效期 24 小时，请尽快在组织管理页下载 HTML。</p>
-<p>任务 ID：%s</p>`, start, end, id)
-	}
 	expStr := "—"
 	if expiresAt > 0 {
 		expStr = time.Unix(expiresAt, 0).Format("2006-01-02 15:04")
 	}
-	body += fmt.Sprintf(`<hr><p style="font-size:12px;color:#666">任务 %s · 下载有效期至 %s（24 小时）· 产物为 HTML 报告</p>`,
-		id, expStr)
+	footer := fmt.Sprintf(
+		`<div style="padding:12px 14px;font-size:12px;color:#666;border-top:1px solid #e5e7eb;">任务 %s · 下载有效期至 %s（24 小时）· 产物为 HTML 报告（邮件正文与附件均为同一份）</div>`,
+		html.EscapeString(id), html.EscapeString(expStr),
+	)
+
+	body = strings.TrimSpace(htmlDoc)
+	if body == "" {
+		// 无报告正文：短通知卡片
+		inner := fmt.Sprintf(
+			`<p style="margin:0 0 12px;">您好，您发起的训练报告（%s ~ %s）已生成完成。</p>
+<p style="margin:0 0 12px;">下载有效期 24 小时，请尽快在组织管理页下载 HTML，或查看本邮件附件。</p>
+<p style="margin:0;font-size:12px;color:#64748b;">任务 ID：%s</p>`,
+			html.EscapeString(start), html.EscapeString(end), html.EscapeString(id),
+		)
+		body = mail.Wrap(mail.LayoutOpts{Brand: brand, Title: "训练报告已生成"}, inner)
+		body = mail.InjectBeforeBodyClose(body, footer)
+		return subject, body, attachName
+	}
+	// 确保完整文档 + 合法注入 footer
+	if !mail.IsFullHTMLDocument(body) {
+		body = mail.EnsureDocument(body)
+	}
+	body = mail.InjectBeforeBodyClose(body, footer)
 	return subject, body, attachName
 }
 

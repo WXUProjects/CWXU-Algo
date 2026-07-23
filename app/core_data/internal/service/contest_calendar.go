@@ -10,6 +10,7 @@ import (
 	"cwxu-algo/api/core/v1/contest_calendar"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
+	mailpkg "cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data"
@@ -180,7 +181,7 @@ func (s *ContestCalendarService) UpsertSub(ctx context.Context, req *contest_cal
 	}
 	adv := int(req.GetAdvanceMinutes())
 	if adv <= 0 {
-		adv = 360 // 默认提前 6 小时
+		adv = 180 // 默认提前 3 小时
 	}
 	if !model.ValidCalendarAdvance(adv) {
 		return &contest_calendar.UpsertSubRes{Code: 3, Message: "提前时间不在允许范围内"}, nil
@@ -349,17 +350,21 @@ func (s *ContestCalendarService) sendSubscribeConfirmMail(
 		detail = fmt.Sprintf("比赛 <strong>%s</strong>（%s）", html.EscapeString(name), plat)
 	}
 	subject := fmt.Sprintf("[%s] 比赛提醒订阅成功", siteTitle)
-	body := fmt.Sprintf(`<!DOCTYPE html><html><body style="font-family:sans-serif;line-height:1.6;color:#222">
-<p>你好，</p>
-<p>你已成功订阅比赛邮件提醒（%s）。</p>
-<table style="border-collapse:collapse">
-<tr><td style="padding:4px 12px 4px 0;color:#666">类型</td><td>%s</td></tr>
-<tr><td style="padding:4px 12px 4px 0;color:#666">内容</td><td>%s</td></tr>
-<tr><td style="padding:4px 12px 4px 0;color:#666">提前量</td><td>开赛前 <strong>%s</strong></td></tr>
+	inner := fmt.Sprintf(`
+<p style="margin:0 0 12px;">你好，</p>
+<p style="margin:0 0 14px;">你已成功订阅比赛邮件提醒（%s）。</p>
+<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;">
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;width:72px;">类型</td><td style="padding:6px 0;">%s</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;">内容</td><td style="padding:6px 0;">%s</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;">提前量</td><td style="padding:6px 0;">开赛前 <strong>%s</strong></td></tr>
 </table>
-<p style="color:#888;font-size:13px;margin-top:24px">管理订阅：登录 %s → 比赛 → 比赛日历。若不再需要提醒，可在页面中取消订阅。</p>
-</body></html>`,
-		html.EscapeString(scopeLabel), html.EscapeString(scopeLabel), detail, html.EscapeString(advLabel), html.EscapeString(siteTitle))
+<p style="margin:16px 0 0;color:#94a3b8;font-size:12px;">管理订阅：登录 %s → 比赛 → 比赛日历。若不再需要提醒，可在页面中取消订阅。</p>
+`, html.EscapeString(scopeLabel), html.EscapeString(scopeLabel), detail, html.EscapeString(advLabel), html.EscapeString(siteTitle))
+	body := mailpkg.Wrap(mailpkg.LayoutOpts{
+		Brand:     siteTitle,
+		Title:     "比赛提醒订阅成功",
+		Preheader: "你已成功订阅比赛邮件提醒",
+	}, inner)
 	if err := sender.Send(to, subject, body); err != nil {
 		log.Warnf("UpsertSub confirm mail FAIL to=%s user=%d: %v", to, sub.UserID, err)
 		return

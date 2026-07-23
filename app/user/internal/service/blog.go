@@ -16,6 +16,7 @@ import (
 
 	"cwxu-algo/app/common/blogsync"
 	_const "cwxu-algo/app/common/const"
+	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/biz/blogaccess"
@@ -2066,8 +2067,19 @@ func (s *BlogService) notifyAdminsBlogReport(pd *auth.JwtPayload, a *model.BlogA
 		"reportId":       reportID,
 		"reason":         reason,
 	})
-	html := fmt.Sprintf("<p>%s</p><p>文章 id=%d slug=%s</p><p>原因：%s</p>",
-		bodyText, a.ID, a.Slug, reason)
+	inner := fmt.Sprintf(`
+<p style="margin:0 0 12px;">收到一篇博客文章举报，请尽快处理。</p>
+<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;">
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;width:88px;">举报人</td><td style="padding:6px 0;">%s</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;">文章</td><td style="padding:6px 0;">《%s》</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;">作者</td><td style="padding:6px 0;">@%s</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;">文章 ID</td><td style="padding:6px 0;">%d</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;">Slug</td><td style="padding:6px 0;">%s</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;vertical-align:top;">原因</td><td style="padding:6px 0;">%s</td></tr>
+</table>
+<p style="margin:14px 0 0;font-size:13px;color:#64748b;">请登录站点管理端查看举报并处理。</p>
+`, mail.Escape(actorName), mail.Escape(a.Title), mail.Escape(author.Username), a.ID, mail.Escape(a.Slug), mail.Escape(reason))
+	html := mail.Wrap(mail.LayoutOpts{Brand: mail.DefaultBrand, Title: "博客文章举报", Preheader: bodyText}, inner)
 	notify.NotifySiteAdminsWithEmail(s.db, notify.AdminNotif{
 		Type:       notify.TypeBlogReport,
 		Title:      title,

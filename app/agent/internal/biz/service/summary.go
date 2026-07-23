@@ -12,6 +12,7 @@ import (
 	"cwxu-algo/app/agent/internal/data"
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/sitesettings"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -92,13 +93,25 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 		toolCtx = ctx
 	}
 	tools := DailyAgentTools(uc.reg, toolCtx)
+	brand := uc.brandTitle(ctx)
 	html, err := uc.chat.Chat(ctx, msgs, tools...)
 	if err != nil {
-		return fmt.Errorf("生成日报失败: %w", err)
+		log.Warnf("用户 %d 日报 AI 失败: %v；回退规则模板", userId, err)
+		html = RenderDailyRuleHTML(data, brand)
+	} else {
+		cleaned, ok, reason := SanitizeDailyHTML(html)
+		if !ok {
+			log.Warnf("用户 %d 日报 AI 输出无效: %s；回退规则模板", userId, reason)
+			html = RenderDailyRuleHTML(data, brand)
+		} else {
+			html = cleaned
+		}
 	}
-	html = stripCodeFence(html)
+	if strings.TrimSpace(html) == "" {
+		html = RenderDailyRuleHTML(data, brand)
+	}
 
-	subject := fmt.Sprintf("【%s 日报】%s · %s", uc.brandTitle(ctx), formatCNDate(data.Yesterday), data.Name)
+	subject := fmt.Sprintf("【%s 日报】%s · %s", brand, formatCNDate(data.Yesterday), data.Name)
 	if err := uc.sendHTMLEmail(data.Email, subject, html); err != nil {
 		return fmt.Errorf("发送日报失败: %w", err)
 	}
@@ -197,7 +210,11 @@ func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
 		}
 		subject := fmt.Sprintf("【%s 周报】%s-%s", uc.brandTitle(ctx), formatCNDate(weekStart.Format(dateLayout)), formatCNDate(weekEnd.Format(dateLayout)))
 		if jobID != "" {
-			html += fmt.Sprintf(`<hr><p style="font-size:12px;color:#666">本周报即上周训练报告（简版），任务 %s，可在组织管理下载 HTML（24 小时内）。</p>`, jobID)
+			footer := fmt.Sprintf(
+				`<div style="padding:12px 14px;font-size:12px;color:#666;border-top:1px solid #e5e7eb;">本周报即上周训练报告（简版），任务 %s，可在组织管理下载 HTML（24 小时内）。</div>`,
+				jobID,
+			)
+			html = mail.InjectBeforeBodyClose(html, footer)
 		}
 		if err := uc.sendHTMLEmail(email, subject, html); err != nil {
 			lastErr = err

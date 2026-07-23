@@ -667,34 +667,33 @@ func codeMailContent(purpose, code, brand string) (subject, body string) {
 	if brand == "" {
 		brand = "GoAlgo"
 	}
+	mins := int(codeTTL.Minutes())
+	var action string
+	var title string
 	switch purpose {
 	case purposeReset:
 		subject = fmt.Sprintf("【%s】密码重置验证码", brand)
-		body = fmt.Sprintf(`<div style="font-family:sans-serif;line-height:1.6">
-<p>你好，</p>
-<p>你正在重置 %s 账号密码，验证码为：</p>
-<p style="font-size:24px;font-weight:bold;letter-spacing:4px">%s</p>
-<p>验证码 %d 分钟内有效。如非本人操作，请忽略本邮件。</p>
-<p style="color:#888">%s</p>
-</div>`, brand, code, int(codeTTL.Minutes()), brand)
+		title = "密码重置验证码"
+		action = fmt.Sprintf("你正在重置 %s 账号密码", brand)
 	case purposeChangeEmail:
 		subject = fmt.Sprintf("【%s】绑定邮箱验证码", brand)
-		body = fmt.Sprintf(`<div style="font-family:sans-serif;line-height:1.6">
-<p>你好，</p>
-<p>你正在为 %s 账号绑定或更换此邮箱，验证码为：</p>
-<p style="font-size:24px;font-weight:bold;letter-spacing:4px">%s</p>
-<p>验证码 %d 分钟内有效。如非本人操作，请忽略本邮件。</p>
-<p style="color:#888">%s</p>
-</div>`, brand, code, int(codeTTL.Minutes()), brand)
+		title = "绑定邮箱验证码"
+		action = fmt.Sprintf("你正在为 %s 账号绑定或更换此邮箱", brand)
 	default:
 		subject = fmt.Sprintf("【%s】注册验证码", brand)
-		body = fmt.Sprintf(`<div style="font-family:sans-serif;line-height:1.6">
-<p>你好，</p>
-<p>你正在注册 %s 账号，验证码为：</p>
-<p style="font-size:24px;font-weight:bold;letter-spacing:4px">%s</p>
-<p>验证码 %d 分钟内有效。如非本人操作，请忽略本邮件。</p>
-<p style="color:#888">%s</p>
-</div>`, brand, code, int(codeTTL.Minutes()), brand)
+		title = "注册验证码"
+		action = fmt.Sprintf("你正在注册 %s 账号", brand)
 	}
+	inner := fmt.Sprintf(`
+<p style="margin:0 0 12px;">你好，</p>
+<p style="margin:0 0 12px;">%s，验证码为：</p>
+<p style="margin:16px 0;font-size:28px;font-weight:bold;letter-spacing:6px;color:#1e1b4b;text-align:center;">%s</p>
+<p style="margin:0 0 8px;">验证码 <strong>%d</strong> 分钟内有效。如非本人操作，请忽略本邮件。</p>
+`, mail.Escape(action), mail.Escape(code), mins)
+	body = mail.Wrap(mail.LayoutOpts{
+		Brand:     brand,
+		Title:     title,
+		Preheader: fmt.Sprintf("验证码 %s，%d 分钟内有效", code, mins),
+	}, inner)
 	return
 }

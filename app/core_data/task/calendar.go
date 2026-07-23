@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cwxu-algo/api/user/v1/profile"
+	mailpkg "cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -209,19 +210,23 @@ func buildCalendarMail(siteTitle string, c *model.ContestCalendar, advanceMin in
 	}
 	url := html.EscapeString(c.URL)
 	subject = fmt.Sprintf("[%s] 比赛提醒：%s 将于 %s 开始", siteTitle, c.Name, start)
-	body = fmt.Sprintf(`<!DOCTYPE html><html><body style="font-family:sans-serif;line-height:1.6;color:#222">
-<p>你好，</p>
-<p>你订阅的比赛即将开始（提前 <strong>%s</strong> 提醒）：</p>
-<table style="border-collapse:collapse">
-<tr><td style="padding:4px 12px 4px 0;color:#666">平台</td><td>%s</td></tr>
-<tr><td style="padding:4px 12px 4px 0;color:#666">比赛</td><td><strong>%s</strong></td></tr>
-<tr><td style="padding:4px 12px 4px 0;color:#666">开始</td><td>%s（北京时间）</td></tr>
-<tr><td style="padding:4px 12px 4px 0;color:#666">结束</td><td>%s（北京时间）</td></tr>
+	inner := fmt.Sprintf(`
+<p style="margin:0 0 12px;">你好，</p>
+<p style="margin:0 0 14px;">你订阅的比赛即将开始（提前 <strong>%s</strong> 提醒）：</p>
+<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;">
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;width:72px;">平台</td><td style="padding:6px 0;">%s</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;">比赛</td><td style="padding:6px 0;"><strong>%s</strong></td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;">开始</td><td style="padding:6px 0;">%s（北京时间）</td></tr>
+<tr><td style="padding:6px 12px 6px 0;color:#64748b;">结束</td><td style="padding:6px 0;">%s（北京时间）</td></tr>
 </table>
-<p><a href="%s" style="display:inline-block;margin-top:12px;padding:10px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px">前往比赛页面</a></p>
-<p style="color:#888;font-size:13px;margin-top:24px">管理订阅：登录 %s → 比赛 → 比赛日历。若不再需要提醒，可在页面中取消订阅。</p>
-</body></html>`,
-		html.EscapeString(advLabel), plat, name, start, end, url, html.EscapeString(siteTitle))
+<p style="margin:18px 0 8px;"><a href="%s" style="display:inline-block;padding:10px 18px;background:#4f46e5;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold;">前往比赛页面</a></p>
+<p style="margin:16px 0 0;color:#94a3b8;font-size:12px;">管理订阅：登录 %s → 比赛 → 比赛日历。若不再需要提醒，可在页面中取消订阅。</p>
+`, html.EscapeString(advLabel), plat, name, start, end, url, html.EscapeString(siteTitle))
+	body = mailpkg.Wrap(mailpkg.LayoutOpts{
+		Brand:     siteTitle,
+		Title:     "比赛提醒",
+		Preheader: fmt.Sprintf("%s 将于 %s 开始", c.Name, start),
+	}, inner)
 	return subject, body
 }
 

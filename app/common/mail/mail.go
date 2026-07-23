@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"strings"
 
 	"cwxu-algo/app/common/conf"
 
@@ -50,7 +51,7 @@ type Attachment struct {
 	ContentType string
 }
 
-// Send 发送 HTML 邮件
+// Send 发送 HTML 邮件（自动附带 text/plain 备选）
 func (s *Sender) Send(to, subject, body string) error {
 	return s.SendWithAttachments(to, subject, body, nil)
 }
@@ -63,6 +64,11 @@ func (s *Sender) SendWithAttachments(to, subject, body string, attachments []Att
 	if to == "" {
 		return fmt.Errorf("收件人地址不能为空")
 	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return fmt.Errorf("邮件正文为空")
+	}
+
 	m := gomail.NewMessage()
 	from := s.from
 	if from == "" {
@@ -71,7 +77,15 @@ func (s *Sender) SendWithAttachments(to, subject, body string, attachments []Att
 	m.SetHeader("From", from)
 	m.SetHeader("To", to)
 	m.SetHeader("Subject", subject)
-	m.SetBody("text/html", body)
+
+	// multipart/alternative: SetBody first part, AddAlternative last (clients prefer the last part).
+	// Put plain first, HTML last so rich clients render HTML instead of plain text.
+	if plain := PlainFromHTML(body); plain != "" {
+		m.SetBody("text/plain; charset=UTF-8", plain)
+		m.AddAlternative("text/html; charset=UTF-8", body)
+	} else {
+		m.SetBody("text/html; charset=UTF-8", body)
+	}
 
 	for _, a := range attachments {
 		name := a.Filename

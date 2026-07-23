@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -240,7 +241,12 @@ func (uc *ProblemUseCase) notifyReviewPendingProblemEdit(userID, problemID, edit
 	}
 	body := problemEditPendingSummary(titleLabel, req)
 	payload := fmt.Sprintf(`{"editRequestId":%d,"problemId":%d,"problemTitle":%q}`, editID, problemID, titleLabel)
-	html := fmt.Sprintf("<p>%s</p><p>题目 id=%d · 申请 id=%d</p>", body, problemID, editID)
+	applicant := lookupUserBrief(uc.data.UserDB, userID)
+	emailSubj := "有内容待审核"
+	if titleLabel != "" {
+		emailSubj = "内容待审核 · " + titleLabel
+	}
+	html := problemEditPendingEmailHTML(titleLabel, problemID, editID, applicant, req)
 	notify.NotifySiteAdminsWithEmail(uc.data.UserDB, notify.AdminNotif{
 		Type:      notify.TypeReviewPending,
 		Title:     "有内容待审核",
@@ -250,7 +256,7 @@ func (uc *ProblemUseCase) notifyReviewPendingProblemEdit(userID, problemID, edit
 		RefID:     editID,
 		ProblemID: problemID,
 		Payload:   payload,
-	}, "有内容待审核", html)
+	}, emailSubj, html)
 }
 
 // problemEditPendingSummary 给管理员的待审通知摘要；完整正文仍在审核详情中查看。
@@ -415,37 +421,63 @@ func (uc *ProblemUseCase) notifyProblemEditResult(req *model.ProblemEditRequest,
 	if !approved || uc.data == nil || uc.data.UserDB == nil {
 		return
 	}
-	html := fmt.Sprintf(
-		`<p>%s</p><p style="color:#666;font-size:13px">你可以在 GoAlgo 站内通知中查看同一条消息。</p>`,
-		htmlEscapePlain(body),
-	)
-	if !notify.EmailUser(uc.data.UserDB, req.UserID, title, html) {
+	mailHTML := problemEditThankYouEmailHTML(uc.data.DB, req, note)
+	mailSubj := "感谢你的内容贡献 · 已生效"
+	if !notify.EmailUser(uc.data.UserDB, req.UserID, mailSubj, mailHTML) {
 		log.Warnf("notifyProblemEditResult: approval email skipped or failed user=%d", req.UserID)
 	}
 }
 
 // htmlEscapePlain 将纯文本放入 HTML 段落（换行保留为 <br>）。
 func htmlEscapePlain(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	replacer := strings.NewReplacer(
-		"&", "&amp;",
-		"<", "&lt;",
-		">", "&gt;",
-		`"`, "&quot;",
-		"\n", "<br>",
-	)
-	return replacer.Replace(s)
+	return mail.Paragraphs(s)
 }
 
-// problemEditApprovalThankYou 生成面向贡献者的审核通过感谢信，并明确本次生效内容。
-func problemEditApprovalThankYou(db *gorm.DB, req *model.ProblemEditRequest) string {
-	if req == nil {
-		return "你的内容贡献已通过审核并生效。感谢你为 GoAlgo 作出贡献！"
+type userBrief struct {
+	ID       uint
+	Username string
+	Name     string
+}
+
+func lookupUserBrief(db *gorm.DB, userID uint) userBrief {
+	out := userBrief{ID: userID}
+	if db == nil || userID == 0 {
+		return out
 	}
+	var row struct {
+		ID       uint   `gorm:"column:id"`
+		Username string `gorm:"column:username"`
+		Name     string `gorm:"column:name"`
+	}
+	if err := db.Table("users").Select("id, username, name").Where("id = ?", userID).Scan(&row).Error; err == nil {
+		out.ID = row.ID
+		out.Username = strings.TrimSpace(row.Username)
+		out.Name = strings.TrimSpace(row.Name)
+	}
+	return out
+}
+
+func (u userBrief) display() string {
+	if u.Name != "" && u.Username != "" {
+		return fmt.Sprintf("%s（@%s）", u.Name, u.Username)
+	}
+	if u.Name != "" {
+		return u.Name
+	}
+	if u.Username != "" {
+		return "@" + u.Username
+	}
+	if u.ID > 0 {
+		return fmt.Sprintf("用户 #%d", u.ID)
+	}
+	return "未知用户"
+}
+
+func problemEditApprovedItems(req *model.ProblemEditRequest) []string {
 	items := make([]string, 0, 3)
+	if req == nil {
+		return []string{"题目修改"}
+	}
 	if strings.TrimSpace(req.ProposedTitle) != "" {
 		items = append(items, "题目标题")
 	}
@@ -458,14 +490,126 @@ func problemEditApprovalThankYou(db *gorm.DB, req *model.ProblemEditRequest) str
 	if len(items) == 0 {
 		items = append(items, "题目修改")
 	}
+	return items
+}
 
-	problemTitle := ""
-	if db != nil && req.ProblemID > 0 {
-		var p model.Problem
-		if err := db.Select("title").First(&p, req.ProblemID).Error; err == nil {
-			problemTitle = strings.TrimSpace(p.Title)
+func problemTitleFromDB(db *gorm.DB, problemID uint) string {
+	if db == nil || problemID == 0 {
+		return ""
+	}
+	var p model.Problem
+	if err := db.Select("title").First(&p, problemID).Error; err != nil {
+		return ""
+	}
+	return strings.TrimSpace(p.Title)
+}
+
+// problemEditPendingEmailHTML 管理员待审邮件（品牌壳 + 结构化字段）
+func problemEditPendingEmailHTML(problemTitle string, problemID, editID uint, applicant userBrief, req *model.ProblemEditRequest) string {
+	titleShow := strings.TrimSpace(problemTitle)
+	if titleShow == "" {
+		titleShow = fmt.Sprintf("题目 #%d", problemID)
+	}
+	rows := []struct{ k, v string }{
+		{"申请人", applicant.display()},
+		{"题目", titleShow},
+		{"题目 ID", fmt.Sprintf("%d", problemID)},
+		{"申请 ID", fmt.Sprintf("%d", editID)},
+	}
+	if req != nil {
+		if t := strings.TrimSpace(req.ProposedTitle); t != "" {
+			rows = append(rows, struct{ k, v string }{"新标题", truncateNotificationText(t, 120)})
+		}
+		if req.HasContent {
+			n := len([]rune(strings.TrimSpace(req.ProposedContentMD)))
+			rows = append(rows, struct{ k, v string }{"题面", fmt.Sprintf("已修改（约 %d 字）", n)})
+			preview := truncateNotificationText(strings.TrimSpace(req.ProposedContentMD), 200)
+			if preview != "" {
+				rows = append(rows, struct{ k, v string }{"题面摘要", preview})
+			}
+		}
+		if req.HasTags {
+			tags := nonEmptyTags(req.ProposedTags)
+			if len(tags) == 0 {
+				rows = append(rows, struct{ k, v string }{"标签", "清空全部标签"})
+			} else {
+				rows = append(rows, struct{ k, v string }{"标签", strings.Join(tags, "、")})
+			}
+		}
+		if note := strings.TrimSpace(req.Note); note != "" {
+			rows = append(rows, struct{ k, v string }{"修改说明", truncateNotificationText(note, 200)})
 		}
 	}
+	var b strings.Builder
+	b.WriteString(`<p style="margin:0 0 14px;">有用户提交了题目修改，请尽快审核。</p>`)
+	b.WriteString(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:14px;">`)
+	for _, r := range rows {
+		fmt.Fprintf(&b, `<tr><td style="padding:6px 12px 6px 0;color:#64748b;vertical-align:top;width:88px;">%s</td><td style="padding:6px 0;color:#222;">%s</td></tr>`,
+			mail.Escape(r.k), mail.Escape(r.v))
+	}
+	b.WriteString(`</table>`)
+	b.WriteString(`<p style="margin:16px 0 0;font-size:13px;color:#334155;">请登录站点 → 打开管理端「内容审核 / 题库」处理该申请。通过后修改将立即生效；驳回不会给用户发邮件。</p>`)
+	return mail.Wrap(mail.LayoutOpts{
+		Brand:     mail.DefaultBrand,
+		Title:     "内容待审核",
+		Preheader: problemEditPendingSummary(problemTitle, req),
+	}, b.String())
+}
+
+// problemEditThankYouEmailHTML 贡献者审核通过感谢信
+func problemEditThankYouEmailHTML(db *gorm.DB, req *model.ProblemEditRequest, reviewNote string) string {
+	items := problemEditApprovedItems(req)
+	problemTitle := ""
+	problemID := uint(0)
+	if req != nil {
+		problemID = req.ProblemID
+		problemTitle = problemTitleFromDB(db, req.ProblemID)
+	}
+	var b strings.Builder
+	b.WriteString(`<p style="margin:0 0 12px;">你好，</p>`)
+	if problemTitle != "" {
+		fmt.Fprintf(&b, `<p style="margin:0 0 12px;">你为题目「<strong>%s</strong>」提交的内容贡献<strong>已通过审核并生效</strong>。</p>`, mail.Escape(problemTitle))
+	} else {
+		b.WriteString(`<p style="margin:0 0 12px;">你的内容贡献<strong>已通过审核并生效</strong>。</p>`)
+	}
+	b.WriteString(`<p style="margin:0 0 8px;color:#64748b;font-size:13px;">本次生效内容：</p><ul style="margin:0 0 14px;padding-left:20px;color:#222;">`)
+	for _, it := range items {
+		fmt.Fprintf(&b, `<li style="margin:4px 0;">%s</li>`, mail.Escape(it))
+	}
+	b.WriteString(`</ul>`)
+	if req != nil {
+		if t := strings.TrimSpace(req.ProposedTitle); t != "" {
+			fmt.Fprintf(&b, `<p style="margin:0 0 8px;font-size:13px;"><span style="color:#64748b;">新标题：</span>%s</p>`, mail.Escape(t))
+		}
+		if req.HasTags {
+			tags := nonEmptyTags(req.ProposedTags)
+			if len(tags) > 0 {
+				fmt.Fprintf(&b, `<p style="margin:0 0 8px;font-size:13px;"><span style="color:#64748b;">标签：</span>%s</p>`, mail.Escape(strings.Join(tags, "、")))
+			}
+		}
+	}
+	if reviewNote != "" {
+		fmt.Fprintf(&b, `<p style="margin:12px 0 8px;font-size:13px;"><span style="color:#64748b;">审核备注：</span>%s</p>`, mail.Escape(reviewNote))
+	}
+	b.WriteString(`<p style="margin:16px 0 0;">感谢你为 GoAlgo 作出贡献！站内通知中也有同一条消息。</p>`)
+	if problemID > 0 {
+		fmt.Fprintf(&b, `<p style="margin:14px 0 0;"><a href="%s/question-bank/detail/%d" style="display:inline-block;padding:10px 18px;background:%s;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold;">查看题目</a></p>`,
+			mail.SiteHomeURL, problemID, mail.BrandColor)
+	}
+	return mail.Wrap(mail.LayoutOpts{
+		Brand:     mail.DefaultBrand,
+		Title:     "感谢你的内容贡献",
+		Preheader: "你的修改已通过审核并生效",
+	}, b.String())
+}
+
+// problemEditApprovalThankYou 生成面向贡献者的审核通过站内信正文，并明确本次生效内容。
+func problemEditApprovalThankYou(db *gorm.DB, req *model.ProblemEditRequest) string {
+	if req == nil {
+		return "你的内容贡献已通过审核并生效。感谢你为 GoAlgo 作出贡献！"
+	}
+	items := problemEditApprovedItems(req)
+	problemTitle := problemTitleFromDB(db, req.ProblemID)
 	prefix := "你的内容贡献已通过审核并生效"
 	if problemTitle != "" {
 		prefix = fmt.Sprintf("你为题目「%s」提交的内容贡献已通过审核并生效", problemTitle)
